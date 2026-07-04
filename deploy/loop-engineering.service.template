@@ -1,0 +1,18 @@
+[Unit]
+Description=Loop Engineering — token-aware coding-task scheduler + board
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=__REPO__
+EnvironmentFile=-%h/.config/loop-engineering/env
+ExecStart=__NODE__ __REPO__/dist/server.js
+Restart=always
+RestartSec=3
+# keep logs in the journal
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

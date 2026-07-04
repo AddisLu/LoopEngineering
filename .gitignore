@@ -1,0 +1,14 @@
+node_modules/
+dist/
+*.log
+.env
+.DS_Store
+# runtime data
+data/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+logs/
+worktrees/
+# machine-specific preview config (points at this Mac's scratchpad)
+.claude/launch.json

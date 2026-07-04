@@ -1,0 +1,102 @@
+import Database from 'better-sqlite3';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { paths, ensureDirs, DEFAULT_SETTINGS } from '../config.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+let _db: Database.Database | null = null;
+
+export function getDb(dbPath: string = paths.db): Database.Database {
+  if (_db) return _db;
+  ensureDirs();
+  const db = new Database(dbPath);
+  db.pragma('journal_mode = WAL');
+  db.pragma('foreign_keys = ON');
+  db.pragma('busy_timeout = 5000');
+
+  const schema = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
+  db.exec(schema);
+  seedSettings(db);
+
+  _db = db;
+  return db;
+}
+
+/** For tests: open an isolated in-memory (or temp) DB, not the singleton. */
+export function openTestDb(): Database.Database {
+  ensureDirs(); // logs/worktrees dirs needed by the orchestrator
+  const db = new Database(':memory:');
+  db.pragma('foreign_keys = ON');
+  const schema = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
+  db.exec(schema);
+  seedSettings(db);
+  return db;
+}
+
+function seedSettings(db: Database.Database): void {
+  const insert = db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)');
+  const tx = db.transaction(() => {
+    for (const [k, v] of Object.entries(DEFAULT_SETTINGS)) insert.run(k, v);
+  });
+  tx();
+}
+
+// ---- settings helpers ----
+
+export function getSetting(db: Database.Database, key: string): string | undefined {
+  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as
+    | { value: string }
+    | undefined;
+  return row?.value;
+}
+
+export function setSetting(db: Database.Database, key: string, value: string): void {
+  db.prepare(
+    'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+  ).run(key, value);
+}
+
+export function getNum(db: Database.Database, key: string, fallback: number): number {
+  const v = getSetting(db, key);
+  if (v === undefined) return fallback;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+export function getBool(db: Database.Database, key: string, fallback = false): boolean {
+  const v = getSetting(db, key);
+  if (v === undefined) return fallback;
+  return v === 'true' || v === '1';
+}
+
+// ---- event log helper ----
+
+export function logEvent(
+  db: Database.Database,
+  e: {
+    task_id?: string | null;
+    run_id?: string | null;
+    kind: string;
+    from_status?: string | null;
+    to_status?: string | null;
+    detail?: string | null;
+    session_pct?: number | null;
+    weekly_pct?: number | null;
+  },
+): void {
+  db.prepare(
+    `INSERT INTO task_events (task_id, run_id, kind, from_status, to_status, detail, session_pct, weekly_pct)
+     VALUES (@task_id, @run_id, @kind, @from_status, @to_status, @detail, @session_pct, @weekly_pct)`,
+  ).run({
+    task_id: e.task_id ?? null,
+    run_id: e.run_id ?? null,
+    kind: e.kind,
+    from_status: e.from_status ?? null,
+    to_status: e.to_status ?? null,
+    detail: e.detail ?? null,
+    session_pct: e.session_pct ?? null,
+    weekly_pct: e.weekly_pct ?? null,
+  });
+}

@@ -1,0 +1,42 @@
+{
+  "name": "loop-engineering",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Token-aware scheduler + orchestrator for autonomous coding tasks (Claude Code), with kanban board and remote pause.",
+  "bin": {
+    "loop": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node scripts/copy-assets.mjs",
+    "loop": "tsx src/cli.ts",
+    "engine": "tsx src/engine.ts",
+    "serve": "tsx src/server.ts",
+    "start": "node dist/server.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@fastify/static": "^9.1.3",
+    "better-sqlite3": "^11.8.1",
+    "commander": "^12.1.0",
+    "fastify": "^5.9.0",
+    "nanoid": "^5.0.9"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.10.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "allowScripts": {
+    "better-sqlite3@11.10.0": true,
+    "esbuild@0.28.1": true,
+    "esbuild@0.21.5": true
+  }
+}

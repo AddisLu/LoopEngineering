@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="zh-Hant" data-mode="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Loop Engineering</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand"><span class="dot"></span> Loop Engineering</div>
+
+      <div class="gauges">
+        <div class="ring" id="ring-session">
+          <svg viewBox="0 0 60 60" width="52" height="52" aria-hidden="true">
+            <circle class="track" cx="30" cy="30" r="24"></circle>
+            <circle class="fill" cx="30" cy="30" r="24" transform="rotate(-90 30 30)"></circle>
+          </svg>
+          <div class="ring-label"><b id="session-pct">–</b><span>session</span></div>
+        </div>
+        <div class="ring" id="ring-weekly">
+          <svg viewBox="0 0 60 60" width="52" height="52" aria-hidden="true">
+            <circle class="track" cx="30" cy="30" r="24"></circle>
+            <circle class="fill" cx="30" cy="30" r="24" transform="rotate(-90 30 30)"></circle>
+          </svg>
+          <div class="ring-label"><b id="weekly-pct">–</b><span>weekly</span></div>
+        </div>
+        <div class="meta">
+          <div id="resets" class="muted">session 重置 –</div>
+          <div id="policy" class="pill"><i class="ti"></i><span>–</span></div>
+        </div>
+      </div>
+
+      <div class="controls">
+        <span id="sched-state" class="state"><span class="s-dot"></span><span>–</span></span>
+        <button id="pause-btn" class="btn">暫停排程</button>
+        <span id="conn" class="muted" title="SSE 連線狀態">○</span>
+      </div>
+    </header>
+
+    <main id="board" class="board"></main>
+
+    <dialog id="new-dialog">
+      <form method="dialog" id="new-form">
+        <h3>新增 task</h3>
+        <label>Title <input name="title" required /></label>
+        <label>Goal <input name="goal" required /></label>
+        <label>Plan (.md/.html 或 URL) <input name="plan_ref" placeholder="./plan.md or https://…" /></label>
+        <div class="row">
+          <label>Tool
+            <select name="coding_tool"><option>claude-code</option><option>mock</option></select>
+          </label>
+          <label>Complexity
+            <select name="complexity"><option>S</option><option selected>M</option><option>L</option></select>
+          </label>
+          <label>Priority <input name="priority" type="number" value="2" /></label>
+        </div>
+        <label>Verify steps (逗號分隔) <input name="verification_steps" placeholder="npm run lint, npm test" /></label>
+        <div class="row">
+          <label>Repo path <input name="repo_path" placeholder="/path/to/repo" /></label>
+          <label>Base branch <input name="base_branch" placeholder="main" /></label>
+        </div>
+        <label>Setup cmd <input name="setup_cmd" placeholder="npm ci" /></label>
+        <menu>
+          <button value="cancel" class="btn">取消</button>
+          <button value="create" class="btn primary" id="create-btn">建立</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <button id="fab" class="fab" title="新增 task">+</button>
+    <script src="/app.js"></script>
+  </body>
+</html>
