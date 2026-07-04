@@ -1,0 +1,11 @@
+{
+  "name": "loop-engineering-mcp",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "MCP server exposing Loop Engineering task creation/management to any MCP client (Claude Code in VS Code).",
+  "bin": { "loop-mcp": "./loop-mcp.mjs" },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  }
+}

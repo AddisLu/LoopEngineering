@@ -1,0 +1,580 @@
+<!doctype html>
+<html lang="zh-Hant" data-mode="light">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Loop Engineering — 完整操作說明</title>
+<script>
+  (function () {
+    try {
+      var m = localStorage.getItem('loopdoc_mode');
+      if (m !== 'light' && m !== 'dark')
+        m = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-mode', m);
+    } catch (e) {}
+  })();
+</script>
+<style>
+  :root {
+    --bg: #f7f4ee; --surface: #fffdf8; --surface-2: #f1ede4; --sunk: #efe9de;
+    --ink: #2a2723; --ink-2: #5f5a51; --ink-3: #8a8479;
+    --border: #e5dfd2; --hairline: #efe9dd; --rail: #cfc7b6;
+    --accent: #b25a34; --accent-ink: #fff; --accent-soft: #f6e6dc;
+    --ok: #2f7a56; --ok-soft: #e3f1e9;
+    --warn: #a9701c; --warn-soft: #f7ecd8;
+    --danger: #b23b34; --danger-soft: #f8e3e1;
+    --info: #2f6b86; --info-soft: #e0eef4;
+    --mono: ui-monospace, SFMono-Regular, Menlo, "Cascadia Mono", monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
+    --shadow: 0 1px 2px rgba(60,50,35,.05), 0 4px 16px rgba(60,50,35,.06);
+  }
+  :root[data-mode="dark"] {
+    --bg: #1a1917; --surface: #232120; --surface-2: #2b2926; --sunk: #1e1c1a;
+    --ink: #ece7de; --ink-2: #b1aa9c; --ink-3: #837c6f;
+    --border: #383430; --hairline: #302c28; --rail: #4a453d;
+    --accent: #e08b5f; --accent-ink: #1a1917; --accent-soft: #3a2a20;
+    --ok: #6bc79a; --ok-soft: #1e3a2d;
+    --warn: #e0aa53; --warn-soft: #3a2e18;
+    --danger: #e58179; --danger-soft: #3a211f;
+    --info: #7bb4cf; --info-soft: #1d3540;
+    --shadow: 0 1px 2px rgba(0,0,0,.2), 0 6px 20px rgba(0,0,0,.28);
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: var(--sans); font-size: 16px; line-height: 1.68;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  .topbar {
+    position: sticky; top: 0; z-index: 30; display: flex; align-items: center; gap: 14px;
+    padding: 12px 22px; background: color-mix(in srgb, var(--surface) 88%, transparent);
+    backdrop-filter: saturate(1.2) blur(8px); border-bottom: 1px solid var(--border);
+  }
+  .brand { display: flex; align-items: center; gap: 11px; font-weight: 650; letter-spacing: .2px; }
+  .brand .mk { width: 22px; height: 22px; border-radius: 7px; background: linear-gradient(150deg, var(--accent), color-mix(in srgb, var(--accent) 60%, #d99)); box-shadow: var(--shadow); }
+  .brand small { display: block; font-size: 10.5px; font-weight: 600; letter-spacing: 1.2px; text-transform: uppercase; color: var(--ink-3); }
+  .spacer { margin-left: auto; }
+  .tbtn { font: inherit; font-size: 14px; cursor: pointer; border: 1px solid var(--border); background: var(--surface-2); color: var(--ink); border-radius: 9px; padding: 6px 12px; }
+  .tbtn:hover { background: var(--sunk); }
+
+  .layout { display: grid; grid-template-columns: 264px minmax(0,1fr); gap: 0; max-width: 1180px; margin: 0 auto; }
+  .toc {
+    position: sticky; top: 57px; align-self: start; height: calc(100dvh - 57px); overflow-y: auto;
+    padding: 26px 16px 40px 22px; border-right: 1px solid var(--hairline); font-size: 14px;
+  }
+  .toc h4 { margin: 18px 0 7px; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; color: var(--ink-3); }
+  .toc a { display: block; color: var(--ink-2); padding: 4px 10px; border-radius: 7px; border-left: 2px solid transparent; }
+  .toc a:hover { background: var(--surface-2); color: var(--ink); text-decoration: none; }
+
+  main { padding: 34px clamp(20px, 4vw, 52px) 96px; min-width: 0; }
+  .hero { margin: 6px 0 30px; }
+  .hero h1 { font-size: clamp(26px, 4vw, 36px); line-height: 1.2; margin: 0 0 10px; letter-spacing: -.4px; }
+  .hero p { font-size: 17px; color: var(--ink-2); margin: 0; max-width: 62ch; }
+  .badges { display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0 0; }
+  .badge { font-size: 12.5px; padding: 4px 11px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); color: var(--ink-2); }
+
+  section { scroll-margin-top: 72px; padding: 26px 0; border-top: 1px solid var(--hairline); }
+  section:first-of-type { border-top: none; }
+  h2 { font-size: 23px; letter-spacing: -.2px; margin: 6px 0 14px; display: flex; align-items: baseline; gap: 11px; }
+  h2 .num { font-family: var(--mono); font-size: 14px; color: var(--accent); font-weight: 700; }
+  h3 { font-size: 17px; margin: 24px 0 8px; }
+  p, li { color: var(--ink); }
+  ul, ol { padding-left: 22px; }
+  li { margin: 4px 0; }
+  code { font-family: var(--mono); font-size: .88em; background: var(--sunk); padding: 1.5px 6px; border-radius: 5px; border: 1px solid var(--hairline); }
+  pre { background: var(--sunk); border: 1px solid var(--border); border-radius: 11px; padding: 14px 16px; overflow-x: auto; box-shadow: var(--shadow); }
+  pre code { background: none; border: none; padding: 0; font-size: 13.5px; line-height: 1.6; color: var(--ink); }
+  kbd { font-family: var(--mono); font-size: 12px; background: var(--surface); border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 6px; padding: 1px 7px; }
+
+  table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 14.5px; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--hairline); vertical-align: top; }
+  th { font-size: 12.5px; letter-spacing: .4px; text-transform: uppercase; color: var(--ink-3); font-weight: 650; }
+  td code { white-space: nowrap; }
+  .tbl-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 11px; box-shadow: var(--shadow); }
+  .tbl-wrap table { margin: 0; }
+  .tbl-wrap th, .tbl-wrap td { padding: 10px 14px; }
+  .tbl-wrap tr:last-child td { border-bottom: none; }
+  thead tr { background: var(--surface-2); }
+
+  .note { display: grid; grid-template-columns: auto 1fr; gap: 12px; align-items: start;
+    margin: 16px 0; padding: 13px 16px; border-radius: 11px; border: 1px solid var(--border);
+    background: var(--surface); box-shadow: var(--shadow); font-size: 14.5px; }
+  .note .ic { font-size: 17px; line-height: 1.5; }
+  .note span b:first-child { display: block; margin-bottom: 2px; }
+  .note.tip { border-left: 3px solid var(--ok); }
+  .note.warn { border-left: 3px solid var(--warn); }
+  .note.danger { border-left: 3px solid var(--danger); }
+  .note.info { border-left: 3px solid var(--info); }
+
+  .lifecycle { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 16px 0; font-family: var(--mono); font-size: 13px; }
+  .st { padding: 5px 11px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-2); white-space: nowrap; }
+  .st.run { border-color: var(--warn); color: var(--warn); background: var(--warn-soft); }
+  .st.rev { border-color: var(--info); color: var(--info); background: var(--info-soft); }
+  .st.fail { border-color: var(--danger); color: var(--danger); background: var(--danger-soft); }
+  .st.ok { border-color: var(--ok); color: var(--ok); background: var(--ok-soft); }
+  .arr { color: var(--ink-3); }
+
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; margin: 16px 0; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 15px 17px; box-shadow: var(--shadow); }
+  .card h3 { margin: 0 0 6px; font-size: 15.5px; }
+  .card p { margin: 0; font-size: 14px; color: var(--ink-2); }
+  .pill { display: inline-block; font-family: var(--mono); font-size: 12px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface-2); color: var(--ink-2); }
+
+  footer { max-width: 1180px; margin: 0 auto; padding: 24px 52px 60px; color: var(--ink-3); font-size: 13px; border-top: 1px solid var(--hairline); }
+
+  .menu-toggle { display: none; }
+  @media (max-width: 860px) {
+    .layout { grid-template-columns: 1fr; }
+    .toc { position: static; height: auto; border-right: none; border-bottom: 1px solid var(--hairline); padding: 14px 20px; display: none; }
+    .toc.open { display: block; }
+    .menu-toggle { display: inline-flex; }
+    main { padding: 22px 20px 80px; }
+  }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><span class="mk"></span><span>Loop Engineering<small>操作說明手冊</small></span></div>
+  <span class="spacer"></span>
+  <button class="tbtn menu-toggle" id="menu-btn" aria-label="目錄">☰ 目錄</button>
+  <button class="tbtn" id="theme-btn" aria-label="切換佈景">☾</button>
+</header>
+
+<div class="layout">
+  <nav class="toc" id="toc">
+    <h4>快速導覽</h4>
+    <a href="#intro">1 · 這是什麼</a>
+    <a href="#lifecycle">2 · 任務生命週期</a>
+    <a href="#deploy">3 · 你這台的部署現況</a>
+    <a href="#remote">4 · 遠端存取（Mac / 手機）</a>
+    <a href="#board">5 · 看板操作</a>
+    <a href="#newtask">6 · 新增任務與入場審核</a>
+    <a href="#cli">7 · CLI 指令參考</a>
+    <a href="#settings">8 · 設定與環境變數</a>
+    <a href="#budget">9 · 三層預算保護</a>
+    <a href="#service">10 · 服務管理</a>
+    <a href="#trouble">11 · 疑難排解</a>
+    <a href="#mcp">12 · MCP：編輯器一句話派工</a>
+    <a href="#appendix">13 · 附錄（API / 檔案位置）</a>
+  </nav>
+
+  <main>
+    <div class="hero" id="top">
+      <h1>Loop Engineering 完整操作說明</h1>
+      <p>一套<b>用量感知（token-aware）</b>的自主編碼任務排程器 ＋ 協作器。它把編碼任務排入佇列、以必填欄位審核把關，並在你的 Claude 用量低於日/夜門檻時，逐一派給無頭的 Claude Code 在隔離的 git worktree 中執行，跑完你的驗證步驟後停進「待結案」欄，等你收尾。設計為 24/7 常駐 Linux 主機、透過 Tailscale 遠端監看／暫停。</p>
+      <div class="badges">
+        <span class="badge">MAX 訂閱 · 以用量百分比排程</span>
+        <span class="badge">單一 Node 程序 ＋ SQLite</span>
+        <span class="badge">看板 · SSE 即時更新</span>
+        <span class="badge">M1–M4 完成</span>
+      </div>
+    </div>
+
+    <section id="intro">
+      <h2><span class="num">01</span>這是什麼</h2>
+      <p>Loop Engineering 解決一個問題：<b>你想讓 Claude Code 自動、連續地完成一批編碼任務，但又不能燒爆你的訂閱用量。</b>它是一個常駐的「調度大腦」，核心行為是：</p>
+      <ul>
+        <li><b>排入佇列</b>：把每個編碼任務（目標、計畫、驗證步驟、repo）建成一張卡片。</li>
+        <li><b>把關（gate）</b>：必填欄位不齊，任務無法進入排程。</li>
+        <li><b>用量感知調度</b>：每 60 秒一個 tick，只有在 session／weekly 用量百分比低於當前時段門檻、且有足夠 runway 時，才派工。</li>
+        <li><b>隔離執行</b>：在專屬 git worktree 中跑 Claude Code（無頭、串流 JSON），自動 commit，再跑你的驗證指令。</li>
+        <li><b>停進待結案</b>：驗證通過 → <code>review</code> 欄等你人工收尾；失敗 → <code>failed</code>。</li>
+      </ul>
+      <div class="note info"><span class="ic">ℹ️</span><span><b>為什麼用「百分比」而非「金額」？</b>本工具是為固定的 <b>MAX 方案</b>設計，排程依據是<b>用量百分比</b>（session 5 小時窗、weekly 窗），而非美金花費——訂閱制下額度才是限制。</span></div>
+      <h3>架構一句話</h3>
+      <p>單一 Node 程序 ＋ SQLite（WAL 模式）。沒有 Redis／訊息佇列——用行程內的 60 秒 tick 搭配 mutex 與 <code>max_concurrency</code>。用量透過 TokenBar 的 oauth/usage 契約讀取（session／weekly %），並有 ledger 後備。</p>
+    </section>
+
+    <section id="lifecycle">
+      <h2><span class="num">02</span>任務生命週期</h2>
+      <p>每張任務卡片會沿著這條狀態機前進：</p>
+      <div class="lifecycle">
+        <span class="st">draft</span><span class="arr">→（審核）→</span>
+        <span class="st">queued</span><span class="arr">→</span>
+        <span class="st run">running</span><span class="arr">→</span>
+        <span class="st">verifying</span><span class="arr">→</span>
+        <span class="st rev">review</span><span class="arr">→</span>
+        <span class="st ok">closed</span>
+      </div>
+      <div class="lifecycle">
+        <span class="arr">running 遇到 ⤵</span>
+        <span class="st fail">failed</span><span class="arr">（timeout／驗證失敗）</span>
+        <span class="st">blocked</span><span class="arr">（斷路器／使用者暫停 → 可自動 resume 回 running）</span>
+      </div>
+      <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>狀態</th><th>意義</th><th>看板欄位</th></tr></thead>
+        <tbody>
+          <tr><td><code>draft</code></td><td>剛建立，尚未通過入場審核</td><td>Draft · 入場審核</td></tr>
+          <tr><td><code>ready</code></td><td>審核通過、尚未加入排程</td><td>Ready</td></tr>
+          <tr><td><code>queued</code></td><td>已入列，等待調度派工</td><td>Queued</td></tr>
+          <tr><td><code>running</code></td><td>Claude Code 正在 worktree 中執行</td><td>Running</td></tr>
+          <tr><td><code>verifying</code></td><td>正在跑你的驗證步驟</td><td>Verifying</td></tr>
+          <tr><td><code>blocked</code></td><td>被斷路器或使用者中斷，保留 session 以便自動續跑</td><td>Queued（可自動 resume）</td></tr>
+          <tr><td><code>review</code></td><td>驗證通過，待你人工結案</td><td>Review · 結案</td></tr>
+          <tr><td><code>failed</code></td><td>逾時或驗證/執行失敗</td><td>Review · 結案</td></tr>
+          <tr><td><code>closed</code></td><td>你已結案，流程結束</td><td>Closed</td></tr>
+        </tbody>
+      </table>
+      </div>
+    </section>
+
+    <section id="deploy">
+      <h2><span class="num">03</span>你這台的部署現況</h2>
+      <p>你已用 <code>deploy/setup-linux.sh</code> 完成一鍵部署。目前狀態：</p>
+      <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>項目</th><th>值</th></tr></thead>
+        <tbody>
+          <tr><td>執行方式</td><td>systemd 使用者服務 <code>loop-engineering.service</code>（開機自啟）</td></tr>
+          <tr><td>主機名</td><td><code>addis-B850M-DS3H</code></td></tr>
+          <tr><td>本機埠</td><td><code>127.0.0.1:4711</code>（只綁本機）</td></tr>
+          <tr><td>對外網址</td><td><code>https://addis-b850m-ds3h.tailffdb68.ts.net/</code>（Tailscale serve，tailnet only）</td></tr>
+          <tr><td>資料目錄</td><td><code>~/.local/share/loop-engineering</code>（SQLite、logs、worktrees）</td></tr>
+          <tr><td>設定檔</td><td><code>~/.config/loop-engineering/env</code></td></tr>
+          <tr><td>API 驗證</td><td>已啟用 <code>LOOP_API_TOKEN</code>（<code>/api/*</code> 需帶 token）</td></tr>
+          <tr><td>睡眠</td><td>已遮蔽 sleep/suspend/hibernate（保持不睡）</td></tr>
+        </tbody>
+      </table>
+      </div>
+      <div class="note tip"><span class="ic">✅</span><span><b>由 systemd 常駐，不再依賴任何終端機視窗。</b>重開機也會自動起來。日誌隨看隨用：<code>journalctl --user -u loop-engineering -f</code></span></div>
+    </section>
+
+    <section id="remote">
+      <h2><span class="num">04</span>遠端存取（MacBook Air / 手機）</h2>
+      <p>看板只走你的私人 Tailscale 網路（tailnet），不對公網開放。由於已啟用 token，<b>第一次開啟必須帶 token</b>，之後瀏覽器會記住。</p>
+
+      <h3>步驟 1 — 取得帶 token 的完整網址</h3>
+      <p>在<b>主機終端機</b>執行（基於安全，token 不寫在本手冊內；此指令會印出可直接開的完整網址）：</p>
+      <pre><code>echo "https://addis-b850m-ds3h.tailffdb68.ts.net/?token=$(grep '^LOOP_API_TOKEN=' ~/.config/loop-engineering/env | cut -d= -f2)"</code></pre>
+
+      <h3>步驟 2 — MacBook Air（已在 tailnet，免安裝）</h3>
+      <ul>
+        <li>把上一步印出的網址貼進 Safari / Chrome → 看板出現。</li>
+        <li>token 會存進 localStorage，之後直接開 <code>https://addis-b850m-ds3h.tailffdb68.ts.net/</code> 即可（免 token）。可加入 Dock。</li>
+      </ul>
+
+      <h3>步驟 3 — 手機</h3>
+      <ol>
+        <li>安裝 <b>Tailscale</b> App（App Store / Play 商店）。</li>
+        <li>登入<b>同一帳號</b> <code>addislyu@</code>，打開開關。</li>
+        <li>瀏覽器開同一串帶 token 的網址 → 可「加入主畫面」變 App 圖示。</li>
+      </ol>
+
+      <div class="note warn"><span class="ic">⚠️</span><span><b>只能用 HTTPS + MagicDNS 主機名這個網址。</b>憑證綁定 <code>addis-b850m-ds3h.tailffdb68.ts.net</code>；<code>http://100.65.248.121:4711</code> 這類 IP 網址<b>不通</b>（服務只綁 127.0.0.1、對外一律經 tailscale serve）。</span></div>
+
+      <div class="note info"><span class="ic">🔓</span><span><b>想免 token？</b>私人 tailnet 本身就是邊界。要拿掉第二層驗證：<br>
+      <code>sed -i 's/^LOOP_API_TOKEN=/#LOOP_API_TOKEN=/' ~/.config/loop-engineering/env</code><br>
+      <code>systemctl --user restart loop-engineering</code><br>
+      之後所有裝置直接開網址即可。代價：tailnet 內任何裝置皆可存取、無驗證。</span></div>
+    </section>
+
+    <section id="board">
+      <h2><span class="num">05</span>看板操作</h2>
+      <p>看板服務於網址根目錄 <code>/</code>，透過 SSE 每秒推送完整狀態、即時更新，不需重整。</p>
+
+      <h3>頂欄</h3>
+      <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>元件</th><th>說明</th></tr></thead>
+        <tbody>
+          <tr><td>使用率雙環</td><td><b>session</b>／<b>weekly</b> 用量百分比；依門檻變色：&lt;70% 綠、≥70% 琥珀、≥90% 紅。</td></tr>
+          <tr><td>SESSION 重置</td><td>距 session 窗重置的倒數。</td></tr>
+          <tr><td>POLICY</td><td>目前時段（日間／夜間）與該時段 session 門檻。</td></tr>
+          <tr><td>排程狀態</td><td>「排程執行中」或「已暫停」。</td></tr>
+          <tr><td>暫停排程 / 恢復排程</td><td>切換調度暫停（暫停時不派新工，執行中的不受影響）。</td></tr>
+          <tr><td>即時連線指示</td><td>三態：連線中（琥珀）／即時連線（綠）／重新連線…（琥珀）。</td></tr>
+          <tr><td>☾ / ☀ 主題鈕</td><td>切換亮/暗佈景，記憶於 localStorage。</td></tr>
+          <tr><td>＋ 新增 task</td><td>開啟新增任務對話框。</td></tr>
+        </tbody>
+      </table>
+      </div>
+
+      <h3>卡片與動作</h3>
+      <p>每張卡片顯示標題、目標、複雜度（S/M/L）、優先序 P、工具/模型、佇列預估 <code>~n%</code>、執行中經過時間，執行中另有 log 尾巴與活動微光。左側色條標示狀態。可用動作依狀態出現：</p>
+      <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>狀態</th><th>可用動作</th></tr></thead>
+        <tbody>
+          <tr><td><code>draft</code>（且審核通過）</td><td><b>加入排程</b> → 入列</td></tr>
+          <tr><td><code>running</code> / <code>verifying</code></td><td><b>中止</b> → 中斷並標記 failed</td></tr>
+          <tr><td><code>review</code></td><td><b>看 PR</b>（若有 PR）、<b>結案</b></td></tr>
+          <tr><td><code>failed</code></td><td><b>結案</b></td></tr>
+        </tbody>
+      </table>
+      </div>
+    </section>
+
+    <section id="newtask">
+      <h2><span class="num">06</span>新增任務與入場審核</h2>
+      <p>點頂欄「＋ 新增 task」填寫欄位。<b>入場審核（gate）</b>會逐項檢查；未通過的任務無法加入排程，卡片上會標紅缺項。</p>
+      <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>欄位</th><th>必填</th><th>說明 / 審核規則</th></tr></thead>
+        <tbody>
+          <tr><td>Title</td><td>是</td><td>任務標題。</td></tr>
+          <tr><td>Goal</td><td>是</td><td>目標描述，不可空白。</td></tr>
+          <tr><td>Plan</td><td>是</td><td>計畫參照：存在的 <code>.md</code>/<code>.html</code> 檔路徑，或合法 URL。</td></tr>
+          <tr><td>Tool</td><td>是</td><td><code>claude-code</code> 或 <code>mock</code>（mock 為零 token 測試用）。</td></tr>
+          <tr><td>Verify steps</td><td>是</td><td>至少一條驗證指令（逗號分隔），例：<code>npm run lint, npm test</code>。</td></tr>
+          <tr><td>Repo path</td><td>是*</td><td>存在的 git repo 目錄。<span class="pill">mock 略過</span></td></tr>
+          <tr><td>Base branch</td><td>是*</td><td>存在的基底分支。<span class="pill">mock 略過</span></td></tr>
+          <tr><td>Complexity</td><td>—</td><td><code>S</code>/<code>M</code>/<code>L</code>（預設 M）；決定逾時、預估用量與模型路由。</td></tr>
+          <tr><td>Priority</td><td>—</td><td>整數，預設 2。</td></tr>
+          <tr><td>Setup cmd</td><td>—</td><td>派工前在 worktree 執行的準備指令（如 <code>npm ci</code>）。未填只是警告。</td></tr>
+          <tr><td>Model</td><td>—</td><td><code>sonnet</code>/<code>opus</code>/<code>default</code>（不填則依複雜度路由）。</td></tr>
+        </tbody>
+      </table>
+      </div>
+      <p style="color:var(--ink-3);font-size:14px">* Repo/branch 僅在工具為 <code>claude-code</code> 時必填；<code>mock</code> 在暫存目錄執行，故略過 repo 檢查。</p>
+    </section>
+
+    <section id="cli">
+      <h2><span class="num">07</span>CLI 指令參考</h2>
+      <p>在主機 repo 目錄執行。兩種呼叫方式：開發用 <code>npm run loop -- &lt;cmd&gt;</code>，或用建置產物 <code>node dist/cli.js &lt;cmd&gt;</code>。</p>
+      <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>指令</th><th>作用</th></tr></thead>
+        <tbody>
+          <tr><td><code>add</code></td><td>建立任務（起始 draft）。旗標：<code>--title*</code> <code>--goal*</code> <code>--plan</code> <code>--tool</code> <code>--verify</code> <code>--setup</code> <code>--repo</code> <code>--base</code> <code>--complexity</code> <code>--priority</code> <code>--model</code></td></tr>
+          <tr><td><code>gate &lt;id&gt;</code></td><td>顯示該任務的入場檢查清單。</td></tr>
+          <tr><td><code>queue &lt;id&gt;</code></td><td>審核並把 draft 加入排程。</td></tr>
+          <tr><td><code>list [--status &lt;s&gt;]</code></td><td>列出任務（可依狀態過濾）與各狀態計數。</td></tr>
+          <tr><td><code>status</code></td><td>顯示排程暫停狀態、session/weekly 用量、各狀態計數、進行中的 run。</td></tr>
+          <tr><td><code>pause [--hard]</code></td><td>暫停排程。<code>--hard</code> 會一併中斷執行中的 run（轉 blocked，可 resume）。</td></tr>
+          <tr><td><code>resume</code></td><td>恢復排程。</td></tr>
+          <tr><td><code>abort &lt;id&gt;</code></td><td>中斷該任務的 run 並標記 failed。</td></tr>
+          <tr><td><code>close &lt;id&gt;</code></td><td>把已審閱的任務標記 closed。</td></tr>
+          <tr><td><code>set-usage --session &lt;%&gt; [--weekly &lt;%&gt;]</code></td><td><b>開發用</b>：強制寫入共享用量快取（斷路器演練）。</td></tr>
+        </tbody>
+      </table>
+      </div>
+      <h3>範例</h3>
+      <pre><code>cd ~/Coding/LoopEngineering
+
+# 建立任務
+npm run loop -- add --title "修 auth bug" --goal "修正登入逾時" \
+  --plan ./plan.md --repo /path/to/repo --base main \
+  --verify "npm test" --complexity M
+
+npm run loop -- gate &lt;id&gt;      # 看審核清單
+npm run loop -- queue &lt;id&gt;     # 審核 + 入列
+npm run loop -- status         # 排程與用量總覽
+npm run loop -- list --status review</code></pre>
+    </section>
+
+    <section id="settings">
+      <h2><span class="num">08</span>設定與環境變數</h2>
+      <h3>調度設定（存於 SQLite <code>settings</code> 表）</h3>
+      <p>首次執行時由 <code>src/config.ts</code> 播種進 SQLite。門檻為 session/weekly 用量<b>百分比</b>。</p>
+      <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>鍵</th><th>預設</th><th>說明</th></tr></thead>
+        <tbody>
+          <tr><td><code>scheduler_paused</code></td><td>false</td><td>是否暫停派工。</td></tr>
+          <tr><td><code>max_concurrency</code></td><td>1</td><td>同時執行的 run 上限。</td></tr>
+          <tr><td><code>poll_interval_sec</code></td><td>60</td><td>tick 週期。</td></tr>
+          <tr><td><code>day_window</code></td><td>08:00-23:00</td><td>日間時段（本地時間）。</td></tr>
+          <tr><td><code>day_session_max</code> / <code>day_weekly_max</code></td><td>65 / 80</td><td>日間 session / weekly 門檻。</td></tr>
+          <tr><td><code>night_session_max</code> / <code>night_weekly_max</code></td><td>92 / 88</td><td>夜間 session / weekly 門檻。</td></tr>
+          <tr><td><code>hard_limit_pct</code></td><td>95</td><td>斷路器硬上限（超過即中斷執行中的 run）。</td></tr>
+          <tr><td><code>min_runway_min</code></td><td>20</td><td>派工所需的最少剩餘 runway（分）。</td></tr>
+          <tr><td><code>timeout_S / M / L</code></td><td>15 / 45 / 120</td><td>各複雜度的 watchdog 逾時（分）。</td></tr>
+          <tr><td><code>route_S / M / L</code></td><td>sonnet / default / default</td><td>各複雜度的模型路由。</td></tr>
+          <tr><td><code>est_pct_S / M / L</code></td><td>3 / 8 / 20</td><td>各複雜度的 session %-點預估（5 次真跑後自動校準）。</td></tr>
+          <tr><td><code>usage_refresh_sec</code></td><td>180</td><td>用量抓取週期。</td></tr>
+          <tr><td><code>ledger_fallback_after_min</code></td><td>10</td><td>用量快取過舊時改用 ledger 後備。</td></tr>
+          <tr><td><code>ntfy_server</code> / <code>ntfy_topic</code></td><td>（空）</td><td>ntfy 推播設定。</td></tr>
+        </tbody>
+      </table>
+      </div>
+
+      <h3>環境變數（<code>~/.config/loop-engineering/env</code>）</h3>
+      <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>變數</th><th>說明</th></tr></thead>
+        <tbody>
+          <tr><td><code>LOOP_PORT</code> / <code>LOOP_BIND</code></td><td>看板埠（4711）與綁定位址（127.0.0.1）。</td></tr>
+          <tr><td><code>LOOP_API_TOKEN</code></td><td><code>/api/*</code> 的 bearer token；看板以 <code>?token=</code> 帶入一次後存 localStorage。</td></tr>
+          <tr><td><code>LOOP_DATA_DIR</code> / <code>LOOP_DB_PATH</code></td><td>資料目錄 / SQLite 路徑。</td></tr>
+          <tr><td><code>TOKENBAR_MCP_DIR</code></td><td>TokenBar 的 <code>mcp/</code> 安裝目錄，重用 usage-core 與共享快取。</td></tr>
+          <tr><td><code>TOKENBAR_TOKEN_CACHE</code> / <code>TOKENBAR_HISTORY</code></td><td>共享 token 快取 / 歷史 ledger 路徑。</td></tr>
+          <tr><td><code>NTFY_SERVER</code> / <code>NTFY_TOPIC</code></td><td>ntfy 推播（含一鍵暫停動作）。</td></tr>
+          <tr><td><code>LOOP_PUBLIC_URL</code></td><td>ntfy 暫停動作用的公開網址。</td></tr>
+        </tbody>
+      </table>
+      </div>
+      <div class="note info"><span class="ic">♻️</span><span>改完 <code>env</code> 後執行 <code>systemctl --user restart loop-engineering</code> 生效。</span></div>
+    </section>
+
+    <section id="budget">
+      <h2><span class="num">09</span>三層預算保護</h2>
+      <p>為避免燒爆用量，派工到執行有三道獨立防線：</p>
+      <div class="grid2">
+        <div class="card"><h3>① 派工前 gate</h3><p>tick 時先看用量快照：若 session/weekly 已達當前時段門檻，或 runway 不足 <code>min_runway_min</code>，就不派工。</p></div>
+        <div class="card"><h3>② 執行中斷路器</h3><p>執行期間若用量衝破 <code>hard_limit_pct</code>（95%），立即中斷該 run（SIGINT → SIGKILL），任務轉 <code>blocked</code>（保留 session，用量降回後自動 resume）。</p></div>
+        <div class="card"><h3>③ 每run watchdog</h3><p>每個 run 有依複雜度而定的逾時（S/M/L = 15/45/120 分）；逾時即殺並標 <code>failed</code>。</p></div>
+      </div>
+      <div class="note tip"><span class="ic">🛡️</span><span>另有內層保險：PreToolUse 的 <code>budget-guard.mjs</code> hook 會在硬上限阻止工具使用——即使排程層失守，被派出的 Claude 也會被擋下。</span></div>
+    </section>
+
+    <section id="service">
+      <h2><span class="num">10</span>服務管理</h2>
+      <p>常駐為 systemd <b>使用者</b>服務，全部指令帶 <code>--user</code>：</p>
+      <pre><code># 狀態
+systemctl --user status loop-engineering
+
+# 重啟 / 停止 / 啟動
+systemctl --user restart loop-engineering
+systemctl --user stop loop-engineering
+systemctl --user start loop-engineering
+
+# 即時日誌
+journalctl --user -u loop-engineering -f
+
+# 關閉對外的 tailscale serve（若要下線）
+tailscale serve --https=443 off
+
+# 開機自啟（已啟用；如需關閉）
+systemctl --user disable loop-engineering</code></pre>
+      <div class="note info"><span class="ic">🔌</span><span>使用者服務靠 lingering 在你未登入時也能跑（setup 已執行 <code>loginctl enable-linger</code>）。重新部署／更新程式碼後：<code>npm run build</code> 再 <code>systemctl --user restart loop-engineering</code>。</span></div>
+    </section>
+
+    <section id="trouble">
+      <h2><span class="num">11</span>疑難排解</h2>
+      <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>症狀</th><th>原因 / 解法</th></tr></thead>
+        <tbody>
+          <tr><td>Mac/手機開網址一片空白、一直「重新連線」</td><td>缺 token。用<a href="#remote">步驟 1</a>的指令取得帶 <code>?token=</code> 的完整網址開啟一次即可。</td></tr>
+          <tr><td>API 回 <code>401 unauthorized</code></td><td>同上，未帶 token；或 token 不符。</td></tr>
+          <tr><td>Mac 完全連不上（連頁面都開不了）</td><td>Mac 端 Tailscale 未連線：確認選單列 Tailscale 為 <b>Connected</b>、登入 <code>addislyu@</code>。</td></tr>
+          <tr><td>手機看不到裝置</td><td>手機需裝 Tailscale App 並登入同帳號、打開開關。</td></tr>
+          <tr><td>看板打不開 / 服務掛了</td><td><code>systemctl --user status loop-engineering</code> 看狀態；<code>journalctl --user -u loop-engineering -e</code> 看錯誤。</td></tr>
+          <tr><td>任務一直不派工</td><td>可能已暫停（看頂欄），或用量已達門檻、或 runway 不足；<code>npm run loop -- status</code> 確認。</td></tr>
+          <tr><td>任務卡在 draft 無法入列</td><td>入場審核有缺項；卡片會標紅，或 <code>npm run loop -- gate &lt;id&gt;</code> 查明。</td></tr>
+          <tr><td>想零成本試整條流程</td><td>用 <code>--tool mock</code> 建任務，會用 mock 介面走完 draft→review，不花 token。</td></tr>
+          <tr><td>主機會睡著中斷</td><td>setup 已遮蔽 sleep 目標；<code>systemd-inhibit --list</code> 可查抑制器。</td></tr>
+        </tbody>
+      </table>
+      </div>
+    </section>
+
+    <section id="mcp">
+      <h2><span class="num">12</span>MCP：在編輯器一句話派工</h2>
+      <p>Loop Engineering 已包成一個 <b>MCP server</b>（<code>loop-engineering</code>），註冊在 Claude Code。你在 VS Code 的 Claude Code 對話裡，<b>只要描述「要修什麼」＋「目標」</b>，其餘欄位自動偵測、自動建立任務並排程——不必開看板、不必手打 CLI。</p>
+
+      <div class="note tip"><span class="ic">✅</span><span><b>最小輸入。</b>你只需要給「目標」。repo、base 分支、驗證步驟、setup 指令、計畫檔全部自動偵測；偵測不到的才回頭問你。</span></div>
+
+      <h3>怎麼用</h3>
+      <p>在任一 repo 的 Claude Code 對話裡直接說，例如：</p>
+      <pre><code>把登入逾時的 bug 交給 Loop Engineering：目標是修正 session 過期判斷。</code></pre>
+      <p>Claude Code 會呼叫 <code>loop_add_task</code>，自動填好並<b>預設直接排程</b>。想先在看板確認就加一句「先建 draft」（→ queue=false）。</p>
+
+      <h3>自動偵測了什麼</h3>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>欄位</th><th>自動來源</th></tr></thead>
+        <tbody>
+          <tr><td><code>repo_path</code></td><td>目前工作區 / git 根目錄（Claude Code 明確帶入最準）</td></tr>
+          <tr><td><code>base_branch</code></td><td>origin 預設分支 → 否則 main/master</td></tr>
+          <tr><td><code>verification_steps</code></td><td>package.json scripts（如 <code>npm run typecheck, npm test</code>）／go／cargo／python／Makefile</td></tr>
+          <tr><td><code>setup_cmd</code></td><td>npm ci／pnpm／yarn／pip（依 lockfile）</td></tr>
+          <tr><td><code>plan</code></td><td>由 title＋目標＋驗證步驟自動合成為 .md 存檔</td></tr>
+          <tr><td><code>title</code></td><td>由目標推導（可自訂）</td></tr>
+        </tbody>
+      </table></div>
+
+      <div class="note info"><span class="ic">⚙️</span><span><b>預設直接排程（queue=true）。</b>描述完即入列，額度允許時自動執行。要保留為 draft，說「先建 draft」；想 zero-token 試流程可要求用 <code>mock</code> 工具。</span></div>
+
+      <h3>四個工具</h3>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>工具</th><th>作用</th></tr></thead>
+        <tbody>
+          <tr><td><code>loop_add_task</code></td><td>最小輸入建立（預設直接排程）任務，回傳自動填入值與 gate 結果</td></tr>
+          <tr><td><code>loop_queue_task</code></td><td>把某個 draft 入列執行</td></tr>
+          <tr><td><code>loop_list_tasks</code></td><td>看板摘要（可依狀態過濾）</td></tr>
+          <tr><td><code>loop_status</code></td><td>排程 / 用量狀態</td></tr>
+        </tbody>
+      </table></div>
+
+      <h3>設定與維護</h3>
+      <ul>
+        <li>MCP 打<b>本機</b> <code>http://127.0.0.1:4711</code>，token 自動從 <code>~/.config/loop-engineering/env</code> 讀取——不用手動帶。</li>
+        <li>新增/更新 MCP 後需<b>重開一個 Claude Code 對話</b>（或重載視窗）才會載入工具；用 <code>/mcp</code> 確認 <code>loop-engineering</code> 為 Connected。</li>
+        <li>檔案：<code>mcp/loop-mcp.mjs</code>。註冊：<code>claude mcp add --scope user loop-engineering -- node ~/Coding/LoopEngineering/mcp/loop-mcp.mjs</code></li>
+      </ul>
+
+      <div class="note warn"><span class="ic">⚠️</span><span>因預設直接排程執行，請確認目標 repo 與驗證步驟正確——執行會實際動用 Claude Code 額度。每次的自動偵測結果都會回報，過目再放行。</span></div>
+    </section>
+
+    <section id="appendix">
+      <h2><span class="num">13</span>附錄</h2>
+      <h3>REST / SSE 端點</h3>
+      <p>除 <code>/</code> 靜態頁外，<code>/api/*</code> 需帶 bearer（<code>Authorization: Bearer &lt;token&gt;</code>）或 <code>?token=</code>。</p>
+      <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>方法</th><th>路徑</th><th>作用</th></tr></thead>
+        <tbody>
+          <tr><td>GET</td><td><code>/api/status</code></td><td>暫停狀態 + 用量摘要</td></tr>
+          <tr><td>GET</td><td><code>/api/board</code></td><td>完整看板狀態（卡片、用量、政策、計數）</td></tr>
+          <tr><td>GET</td><td><code>/api/token</code></td><td>詳細用量讀數</td></tr>
+          <tr><td>GET</td><td><code>/api/history?limit=</code></td><td>用量歷史快照</td></tr>
+          <tr><td>GET</td><td><code>/api/stream</code></td><td>SSE：每秒推送完整看板</td></tr>
+          <tr><td>POST</td><td><code>/api/tasks</code></td><td>建立任務（JSON body）</td></tr>
+          <tr><td>POST</td><td><code>/api/tasks/:id/queue</code></td><td>審核 + 入列</td></tr>
+          <tr><td>POST</td><td><code>/api/tasks/:id/abort</code></td><td>中止並標 failed</td></tr>
+          <tr><td>POST</td><td><code>/api/tasks/:id/close</code></td><td>結案</td></tr>
+          <tr><td>POST</td><td><code>/api/pause?hard=1</code></td><td>暫停排程（<code>hard</code> 一併中斷執行中）</td></tr>
+          <tr><td>POST</td><td><code>/api/resume-scheduler</code></td><td>恢復排程</td></tr>
+        </tbody>
+      </table>
+      </div>
+
+      <h3>重要檔案位置</h3>
+      <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>路徑</th><th>內容</th></tr></thead>
+        <tbody>
+          <tr><td><code>~/Coding/LoopEngineering</code></td><td>程式碼 repo（<code>src/</code>、<code>web/</code>、<code>dist/</code>、<code>deploy/</code>）</td></tr>
+          <tr><td><code>~/.local/share/loop-engineering</code></td><td>SQLite <code>loop.sqlite</code>、<code>logs/</code>、<code>worktrees/</code>、<code>reviews/</code></td></tr>
+          <tr><td><code>~/.config/loop-engineering/env</code></td><td>環境設定（token、port、TokenBar、ntfy）</td></tr>
+          <tr><td><code>~/.config/systemd/user/loop-engineering.service</code></td><td>systemd 使用者服務單元</td></tr>
+          <tr><td><code>~/.claude/.credentials.json</code></td><td>Claude Code 訂閱登入憑證（勿設 API key，否則按量計費）</td></tr>
+        </tbody>
+      </table>
+      </div>
+    </section>
+
+    <p style="margin-top:34px"><a href="#top">↑ 回到頂端</a></p>
+  </main>
+</div>
+
+<footer>
+  Loop Engineering 操作說明 · 依你的部署（<code>addis-b850m-ds3h.tailffdb68.ts.net</code>）產生 · 本檔為離線自足 HTML，可直接以瀏覽器開啟。
+</footer>
+
+<script>
+  var tbtn = document.getElementById('theme-btn');
+  function paint() {
+    var dark = document.documentElement.getAttribute('data-mode') === 'dark';
+    tbtn.textContent = dark ? '☀' : '☾';
+    tbtn.setAttribute('aria-label', dark ? '切換至淺色' : '切換至深色');
+  }
+  tbtn.onclick = function () {
+    var next = document.documentElement.getAttribute('data-mode') === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-mode', next);
+    try { localStorage.setItem('loopdoc_mode', next); } catch (e) {}
+    paint();
+  };
+  paint();
+  var mb = document.getElementById('menu-btn'), toc = document.getElementById('toc');
+  mb.onclick = function () { toc.classList.toggle('open'); };
+  toc.addEventListener('click', function (e) { if (e.target.tagName === 'A') toc.classList.remove('open'); });
+</script>
+</body>
+</html>
