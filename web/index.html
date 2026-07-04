@@ -4,48 +4,79 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Loop Engineering</title>
+    <script>
+      // Set theme before first paint to avoid a flash of the wrong mode.
+      (function () {
+        try {
+          var m = localStorage.getItem('loop_mode');
+          if (m !== 'light' && m !== 'dark') {
+            m = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+          }
+          document.documentElement.setAttribute('data-mode', m);
+        } catch (e) {}
+      })();
+    </script>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
     <header class="topbar">
-      <div class="brand"><span class="dot"></span> Loop Engineering</div>
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span class="brand-text">
+          <strong class="brand-name">Loop Engineering</strong>
+          <span class="brand-sub">coding scheduler</span>
+        </span>
+      </div>
 
       <div class="gauges">
-        <div class="ring" id="ring-session">
-          <svg viewBox="0 0 60 60" width="52" height="52" aria-hidden="true">
-            <circle class="track" cx="30" cy="30" r="24"></circle>
-            <circle class="fill" cx="30" cy="30" r="24" transform="rotate(-90 30 30)"></circle>
+        <div class="ring" id="ring-session" data-state="ok">
+          <svg viewBox="0 0 44 44" width="42" height="42" aria-hidden="true">
+            <circle class="track" cx="22" cy="22" r="18"></circle>
+            <circle class="fill" cx="22" cy="22" r="18" transform="rotate(-90 22 22)"></circle>
           </svg>
-          <div class="ring-label"><b id="session-pct">–</b><span>session</span></div>
+          <div class="ring-label"><b id="session-pct">–</b></div>
+          <span class="ring-cap">session</span>
         </div>
-        <div class="ring" id="ring-weekly">
-          <svg viewBox="0 0 60 60" width="52" height="52" aria-hidden="true">
-            <circle class="track" cx="30" cy="30" r="24"></circle>
-            <circle class="fill" cx="30" cy="30" r="24" transform="rotate(-90 30 30)"></circle>
+        <div class="ring" id="ring-weekly" data-state="ok">
+          <svg viewBox="0 0 44 44" width="42" height="42" aria-hidden="true">
+            <circle class="track" cx="22" cy="22" r="18"></circle>
+            <circle class="fill" cx="22" cy="22" r="18" transform="rotate(-90 22 22)"></circle>
           </svg>
-          <div class="ring-label"><b id="weekly-pct">–</b><span>weekly</span></div>
+          <div class="ring-label"><b id="weekly-pct">–</b></div>
+          <span class="ring-cap">weekly</span>
         </div>
-        <div class="meta">
-          <div id="resets" class="muted">session 重置 –</div>
-          <div id="policy" class="pill"><i class="ti"></i><span>–</span></div>
+
+        <div class="ticks">
+          <div class="tick" id="resets">
+            <span class="tick-k">Session 重置</span>
+            <span class="tick-v tnum">–</span>
+          </div>
+          <div class="tick" id="policy">
+            <span class="tick-k">Policy</span>
+            <span class="tick-v">–</span>
+          </div>
         </div>
       </div>
 
       <div class="controls">
-        <span id="sched-state" class="state"><span class="s-dot"></span><span>–</span></span>
-        <button id="pause-btn" class="btn">暫停排程</button>
-        <span id="conn" class="muted" title="SSE 連線狀態">○</span>
+        <span id="sched-state" class="state"><span class="s-dot"></span><span class="s-text">–</span></span>
+        <button id="pause-btn" class="btn" type="button">暫停排程</button>
+        <span id="conn" class="conn connecting" title="SSE 連線狀態" role="status">
+          <span class="conn-dot"></span><span class="conn-text">連線中</span>
+        </span>
+        <button id="theme-btn" class="btn icon-btn" type="button" title="切換佈景" aria-label="切換佈景"></button>
+        <button id="new-btn" class="btn primary" type="button">+ 新增 task</button>
       </div>
     </header>
 
-    <main id="board" class="board"></main>
+    <main id="board" class="board" aria-live="polite"></main>
 
     <dialog id="new-dialog">
       <form method="dialog" id="new-form">
         <h3>新增 task</h3>
-        <label>Title <input name="title" required /></label>
-        <label>Goal <input name="goal" required /></label>
-        <label>Plan (.md/.html 或 URL) <input name="plan_ref" placeholder="./plan.md or https://…" /></label>
+        <label>Title <span class="req">*</span><input name="title" required autocomplete="off" /></label>
+        <label>Goal <span class="req">*</span><input name="goal" required autocomplete="off" /></label>
+        <label>Plan (.md/.html 或 URL) <input name="plan_ref" placeholder="./plan.md or https://…" autocomplete="off" /></label>
         <div class="row">
           <label>Tool
             <select name="coding_tool"><option>claude-code</option><option>mock</option></select>
@@ -55,20 +86,19 @@
           </label>
           <label>Priority <input name="priority" type="number" value="2" /></label>
         </div>
-        <label>Verify steps (逗號分隔) <input name="verification_steps" placeholder="npm run lint, npm test" /></label>
+        <label>Verify steps (逗號分隔) <input name="verification_steps" placeholder="npm run lint, npm test" autocomplete="off" /></label>
         <div class="row">
-          <label>Repo path <input name="repo_path" placeholder="/path/to/repo" /></label>
-          <label>Base branch <input name="base_branch" placeholder="main" /></label>
+          <label>Repo path <input name="repo_path" placeholder="/path/to/repo" autocomplete="off" /></label>
+          <label>Base branch <input name="base_branch" placeholder="main" autocomplete="off" /></label>
         </div>
-        <label>Setup cmd <input name="setup_cmd" placeholder="npm ci" /></label>
+        <label>Setup cmd <input name="setup_cmd" placeholder="npm ci" autocomplete="off" /></label>
         <menu>
-          <button value="cancel" class="btn">取消</button>
-          <button value="create" class="btn primary" id="create-btn">建立</button>
+          <button value="cancel" class="btn" type="submit">取消</button>
+          <button value="create" class="btn primary" id="create-btn" type="submit">建立</button>
         </menu>
       </form>
     </dialog>
 
-    <button id="fab" class="fab" title="新增 task">+</button>
     <script src="/app.js"></script>
   </body>
 </html>
