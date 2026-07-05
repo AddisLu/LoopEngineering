@@ -12,9 +12,20 @@ import { paths, ENGINE_REPO_ROOT } from './config.js';
  * Rebuild + restart the engine in place, detached so it survives the engine's own
  * `systemctl --user restart`. Best-effort: a synchronous spawn failure propagates to
  * the tick's try/catch, which re-arms self_update_pending for a retry next tick.
+ *
+ * Output goes to a timestamped log (NOT stdio:'ignore') so a FAILED build — which
+ * short-circuits the `&&` before restart and would otherwise leave the engine silently
+ * on old code with no signal — is diagnosable. `systemctl restart` only runs if the
+ * build succeeded; a failed build leaves a line in the log for the operator.
  */
 function selfUpdate(): void {
-  const child = spawn('bash', ['-lc', 'sleep 2 && npm run build && systemctl --user restart loop-engineering'], {
+  const log = `${paths.logsDir}/self-update.log`;
+  const cmd =
+    `echo "=== self-update $(date -Iseconds) ===" >> ${log}; ` +
+    `sleep 2 && npm run build >> ${log} 2>&1 ` +
+    `&& { echo "build OK -> restarting" >> ${log}; systemctl --user restart loop-engineering; } ` +
+    `|| echo "SELF-UPDATE BUILD FAILED — engine still on OLD code, restart skipped (see above)" >> ${log}`;
+  const child = spawn('bash', ['-lc', cmd], {
     cwd: ENGINE_REPO_ROOT,
     detached: true,
     stdio: 'ignore',
