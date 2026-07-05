@@ -15,7 +15,8 @@ export interface UpsertNodeInput {
   weight?: number;
 }
 
-function findActiveByTitleScope(
+/** Exported for distill.ts's cross-close dedup guard (skip drafting an item that already exists). */
+export function findActiveByTitleScope(
   db: Database.Database,
   title: string,
   scope: string,

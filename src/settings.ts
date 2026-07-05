@@ -21,7 +21,7 @@ export const BOOL_KEYS = new Set([
   // self-update / dependency-release flags
   'self_update', 'dep_done_on_merge',
   // knowledge base
-  'knowledge_inject',
+  'knowledge_inject', 'knowledge_distill',
 ]);
 
 /** Keys the board settings panel reads/writes (the budget/scheduling knobs). */

@@ -161,6 +161,10 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // greedy-pack cap so the section stays small relative to Goal/Plan.
   knowledge_inject: 'true',
   knowledge_budget_chars: '2500',
+  // gated auto-learning: on task close, fire-and-forget a cheap haiku pass over the
+  // HANDOFF/gap-review/goal to draft candidate knowledge nodes (status='draft', never
+  // injected — see src/knowledge/distill.ts). Off restores the old close-only behavior.
+  knowledge_distill: 'true',
 };
 
 export const TOKEN_REFRESH_MS = 180_000; // TokenBar cadence
