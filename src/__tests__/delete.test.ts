@@ -109,15 +109,17 @@ describe('tasksForPrune — status + age guards', () => {
     const running = mk('running');
     const review = mk('review');
     const blocked = mk('blocked');
+    const attention = mk('attention');
 
     const ids = tasksForPrune(db, {
-      status: ['closed', 'running', 'review', 'blocked'],
+      status: ['closed', 'running', 'review', 'blocked', 'attention'],
     }).map((t) => t.id);
 
     expect(ids).toEqual([closed]);
     expect(ids).not.toContain(running);
     expect(ids).not.toContain(review);
     expect(ids).not.toContain(blocked);
+    expect(ids).not.toContain(attention);
   });
 
   it('respects olderThanDays on updated_at', () => {

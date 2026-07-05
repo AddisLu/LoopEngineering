@@ -89,7 +89,7 @@ describe('mock E2E (zero token)', () => {
 });
 
 describe('watchdog timeout', () => {
-  it('kills an overrunning run and marks the task failed', async () => {
+  it('kills an overrunning run and holds the task for attention', async () => {
     process.env.MOCK_SLEEP_MS = '10000'; // 10s
     process.env.LOOP_TEST_TIMEOUT_MS = '400'; // fires first
     const t = createTask(db, MOCK_TASK);
@@ -97,7 +97,7 @@ describe('watchdog timeout', () => {
 
     await runTask(db, getTask(db, t.id)!, {});
 
-    expect(getTask(db, t.id)!.status).toBe('failed');
+    expect(getTask(db, t.id)!.status).toBe('attention');
     const run = db.prepare('SELECT * FROM task_runs WHERE task_id=?').get(t.id) as any;
     expect(run.interrupted_by).toBe('timeout');
   });
@@ -135,8 +135,8 @@ describe('circuit breaker -> blocked -> auto-resume', () => {
   });
 });
 
-describe('resume budget exhaustion escalates to failed', () => {
-  it('fails (not blocks) a breaker-interrupted task once resume_count exceeds max_resumes', async () => {
+describe('resume budget exhaustion escalates to attention', () => {
+  it('holds (not blocks) a breaker-interrupted task once resume_count exceeds max_resumes', async () => {
     process.env.MOCK_SLEEP_MS = '5000';
     const t = createTask(db, MOCK_TASK);
     setStatus(db, t.id, 'queued');
@@ -152,12 +152,12 @@ describe('resume budget exhaustion escalates to failed', () => {
     await p;
 
     const done = getTask(db, t.id)!;
-    expect(done.status).toBe('failed'); // NOT a zombie 'blocked'
+    expect(done.status).toBe('attention'); // NOT a zombie 'blocked'
     expect(done.resume_count).toBe(3); // 2 -> bumped to 3, which is > max_resumes
     const run = db.prepare('SELECT * FROM task_runs WHERE task_id=? ORDER BY started_at DESC LIMIT 1').get(t.id) as any;
     expect(run.interrupted_by).toBe('breaker');
     const ev = db
-      .prepare("SELECT detail FROM task_events WHERE task_id=? AND kind='status' AND to_status='failed' ORDER BY id DESC LIMIT 1")
+      .prepare("SELECT detail FROM task_events WHERE task_id=? AND kind='status' AND to_status='attention' ORDER BY id DESC LIMIT 1")
       .get(t.id) as any;
     expect(String(ev?.detail)).toMatch(/resume limit/);
   });

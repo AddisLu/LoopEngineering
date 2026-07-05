@@ -78,7 +78,7 @@ describe('fit budget (hard-limit band + safety reserve)', () => {
 });
 
 describe('verify failure is resumable (retry with a cap)', () => {
-  it('blocks-for-resume on verify failure, then fails once the resume cap is hit', async () => {
+  it('blocks-for-resume on verify failure, then holds for attention once the resume cap is hit', async () => {
     process.env.MOCK_SLEEP_MS = '200';
     setSetting(db, 'max_resumes', '1');
     const t = createTask(db, { ...MOCK_TASK, verification_steps: ['false'] }); // verify always fails
@@ -94,10 +94,10 @@ describe('verify failure is resumable (retry with a cap)', () => {
     const run = latestRun(db, t.id)!;
     expect(fs.existsSync(path.join(run.worktree_path!, 'LOOP_RESUME_CONTEXT.md'))).toBe(true);
 
-    // 2nd attempt (resume): now at the cap (1/1) → terminal failure.
+    // 2nd attempt (resume): now at the cap (1/1) → attention (human hold, worktree kept).
     await runTask(db, getTask(db, t.id)!, { resume: true });
     cur = getTask(db, t.id)!;
-    expect(cur.status).toBe('failed');
+    expect(cur.status).toBe('attention');
   });
 });
 
