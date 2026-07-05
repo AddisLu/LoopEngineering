@@ -55,6 +55,14 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // three-layer protection
   hard_limit_pct: '95', // circuit breaker
   min_runway_min: '20',
+  // per-run fit budget is computed against the hard limit minus this reserve, so an
+  // under-estimate can't push a fresh dispatch into the breaker (see scheduler/tick.ts)
+  safety_reserve_pct: '5',
+
+  // resume budget: max times a task may be resumed (breaker / verify-fail / orphan)
+  max_resumes: '2',
+  // cap on tasks the MCP may AUTO-queue (queued+running) before it must be queued by hand
+  max_autoqueue: '3',
 
   // timeouts (minutes) per complexity
   timeout_S: '15',
