@@ -106,6 +106,48 @@ describe('knowledge REST: CRUD + validation', () => {
   });
 });
 
+// ---- 1b. environment on task creation + kind=environment filter ----
+
+describe('knowledge REST: environment on tasks + kind filter', () => {
+  it('POST /api/tasks persists environment; GET /api/tasks/:id returns it', async () => {
+    app = buildApp({ db, apiToken: null });
+
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: { title: 'env task', goal: 'do it', environment: 'company' },
+    });
+    expect(created.statusCode).toBe(200);
+    const { task } = created.json();
+    expect(task.environment).toBe('company');
+
+    const fetched = await app.inject({ method: 'GET', url: `/api/tasks/${task.id}` });
+    expect(fetched.json().task.environment).toBe('company');
+
+    const noEnv = await app.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: { title: 'no env task', goal: 'do it' },
+    });
+    expect(noEnv.json().task.environment).toBeNull();
+  });
+
+  it('GET /api/knowledge?kind=environment returns only environment-kind nodes', async () => {
+    app = buildApp({ db, apiToken: null });
+    upsertNode(db, { kind: 'environment', title: 'Company env', scope: 'env:company' });
+    upsertNode(db, { kind: 'environment', title: 'Home env', scope: 'env:home' });
+    upsertNode(db, { kind: 'constraint', title: 'Some constraint', scope: 'env:company' });
+    upsertNode(db, { kind: 'fact', title: 'Random fact', scope: 'global' });
+
+    const res = await app.inject({ method: 'GET', url: '/api/knowledge?kind=environment' });
+    expect(res.statusCode).toBe(200);
+    const { nodes } = res.json();
+    expect(nodes.length).toBe(2);
+    expect(nodes.every((n: any) => n.kind === 'environment')).toBe(true);
+    expect(nodes.map((n: any) => n.title).sort()).toEqual(['Company env', 'Home env']);
+  });
+});
+
 // ---- 2. FTS search over imported seed ----
 
 describe('knowledge REST: FTS search after seed import', () => {
