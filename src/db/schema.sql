@@ -108,3 +108,54 @@ CREATE TABLE IF NOT EXISTS token_snapshots (
 );
 
 CREATE INDEX IF NOT EXISTS idx_snap_created ON token_snapshots(created_at);
+
+-- Knowledge base: user facts/constraints (e.g. "公司只能用 Windows 11 + Python 3.8.10")
+-- that later tasks inject into prompts. This schema is persistence-only (zero behavior
+-- change elsewhere) — see src/knowledge/{types,store}.ts.
+CREATE TABLE IF NOT EXISTS knowledge_nodes (
+  id         TEXT PRIMARY KEY,                 -- k_<nanoid(10)>
+  kind       TEXT NOT NULL DEFAULT 'fact',     -- environment|project|constraint|preference|tech|fact|person|repo
+  title      TEXT NOT NULL,
+  body       TEXT NOT NULL DEFAULT '',
+  tags       TEXT NOT NULL DEFAULT '[]',       -- JSON string[]
+  scope      TEXT NOT NULL DEFAULT 'global',   -- 'global' | 'repo:<realpath>' | 'env:<name>'
+  source     TEXT NOT NULL DEFAULT 'manual',   -- manual | mcp | distilled | seed
+  status     TEXT NOT NULL DEFAULT 'approved', -- approved | draft | rejected
+  weight     INTEGER NOT NULL DEFAULT 3,       -- 1..5 injection priority
+  invalid_at TEXT,                             -- bi-temporal: superseded facts are invalidated, never deleted
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_know_scope  ON knowledge_nodes(scope);
+CREATE INDEX IF NOT EXISTS idx_know_status ON knowledge_nodes(status);
+
+CREATE TABLE IF NOT EXISTS knowledge_edges (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  src        TEXT NOT NULL REFERENCES knowledge_nodes(id) ON DELETE CASCADE,
+  dst        TEXT NOT NULL REFERENCES knowledge_nodes(id) ON DELETE CASCADE,
+  relation   TEXT NOT NULL DEFAULT 'related',  -- runs-on|constrains|deployed-at|uses|part-of|related
+  note       TEXT,
+  invalid_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(src, dst, relation)
+);
+
+-- MUST use the trigram tokenizer: default unicode61 cannot segment Chinese
+-- ("只能" would never match "公司只能用"). Requires SQLite >= 3.34 (better-sqlite3
+-- 11.x bundles >= 3.45), verified with a runtime probe in knowledge.store.test.ts.
+CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_fts USING fts5(
+  title, body, tags, content='knowledge_nodes', content_rowid='rowid', tokenize='trigram'
+);
+
+-- external-content sync: keep knowledge_fts in lockstep with knowledge_nodes
+-- ('delete' + insert is the documented pattern for external-content FTS5 tables).
+CREATE TRIGGER IF NOT EXISTS knowledge_ai AFTER INSERT ON knowledge_nodes BEGIN
+  INSERT INTO knowledge_fts(rowid, title, body, tags) VALUES (new.rowid, new.title, new.body, new.tags);
+END;
+CREATE TRIGGER IF NOT EXISTS knowledge_ad AFTER DELETE ON knowledge_nodes BEGIN
+  INSERT INTO knowledge_fts(knowledge_fts, rowid, title, body, tags) VALUES ('delete', old.rowid, old.title, old.body, old.tags);
+END;
+CREATE TRIGGER IF NOT EXISTS knowledge_au AFTER UPDATE ON knowledge_nodes BEGIN
+  INSERT INTO knowledge_fts(knowledge_fts, rowid, title, body, tags) VALUES ('delete', old.rowid, old.title, old.body, old.tags);
+  INSERT INTO knowledge_fts(rowid, title, body, tags) VALUES (new.rowid, new.title, new.body, new.tags);
+END;
