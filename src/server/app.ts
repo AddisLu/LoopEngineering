@@ -40,6 +40,7 @@ interface CreateTaskBody {
   priority?: number;
   model?: string | null;
   depends_on?: string | null;
+  environment?: string | null;
 }
 
 export function buildApp(opts: AppOptions = {}): FastifyInstance {
@@ -106,6 +107,7 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
       priority: b.priority ?? 2,
       model: b.model ?? null,
       depends_on: b.depends_on ?? null,
+      environment: b.environment ?? null,
     });
     return { task: t, gate: validateTask(t) };
   });

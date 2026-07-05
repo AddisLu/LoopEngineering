@@ -42,6 +42,7 @@ program
   .option('--priority <n>', 'integer priority', (v) => parseInt(v, 10), 2)
   .option('--model <model>', 'sonnet|opus|default')
   .option('--depends-on <taskId>', 'hold this task until that task is closed (serial chain)')
+  .option('--env <name>', 'environment label (e.g. company, home) — scopes knowledge injection to matching env:<name> nodes')
   .action((o) => {
     const db = getDb();
     const kind = o.plan
@@ -65,6 +66,7 @@ program
       priority: o.priority,
       model: o.model ?? null,
       depends_on: o.dependsOn ?? null,
+      environment: o.env ?? null,
     });
     const gate = validateTask(getTask(db, t.id)!);
     console.log(`created ${t.id} (${t.status})`);
