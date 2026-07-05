@@ -272,5 +272,49 @@ server.registerTool('loop_status', {
   return { content: [{ type: 'text', text: `paused: ${s.paused}\nsession: ${s.usage?.session}%  weekly: ${s.usage?.weekly}%  (source=${s.usage?.source})` }] };
 });
 
+server.registerTool('loop_delete_task', {
+  title: 'Delete a Loop task',
+  description:
+    'Permanently DELETE a Loop Engineering task and its on-disk artifacts (its worktree + branch, the synthesized plan file, and run logs). ' +
+    'This is IRREVERSIBLE — there is no soft-delete or undo. ' +
+    'Active tasks (running / verifying / queued) are refused unless force=true, which aborts the run first. ' +
+    'For removing many old tasks at once, prefer loop_cleanup.',
+  inputSchema: {
+    id: z.string().describe('Task id, e.g. t_XXXXXXXX'),
+    force: z.boolean().optional().describe('delete even if the task is active (aborts its run first). Default false.'),
+  },
+}, async ({ id, force }) => {
+  try {
+    const r = await api(`/api/tasks/${id}${force ? '?force=1' : ''}`, { method: 'DELETE' });
+    return { content: [{ type: 'text', text: `Deleted ${r.deleted ?? id}. Its worktree/branch, plan file and run logs were cleaned up.` }] };
+  } catch (e) {
+    return { content: [{ type: 'text', text: `Could not delete ${id}: ${e.message}` }] };
+  }
+});
+
+server.registerTool('loop_cleanup', {
+  title: 'Batch-clean old Loop tasks',
+  description:
+    'Batch-DELETE terminal Loop tasks (default: closed + failed) together with their disk artifacts. ' +
+    'This NEVER touches active/blocked/review tasks — those are always excluded, even if requested. ' +
+    'Optionally narrow by status and/or age (olderThanDays = only tasks not updated in the last N days). ' +
+    'Deletion is IRREVERSIBLE. STRONGLY prefer a first call with dryRun=true to review the exact list, then repeat without dryRun to actually delete.',
+  inputSchema: {
+    status: z.array(z.string()).optional().describe('statuses to prune (default ["closed","failed"]). active/blocked/review are always excluded.'),
+    olderThanDays: z.number().optional().describe('only prune tasks not updated in the last N days.'),
+    dryRun: z.boolean().optional().describe('if true, only report what WOULD be deleted — deletes nothing. Recommended for a first pass.'),
+  },
+}, async ({ status, olderThanDays, dryRun }) => {
+  try {
+    const r = await api('/api/tasks/prune', { method: 'POST', body: { status, olderThanDays, dryRun } });
+    const head = dryRun ? `Would delete ${r.count} task(s)` : `Deleted ${r.count} task(s)`;
+    const list = r.ids && r.ids.length ? ':\n' + r.ids.join('\n') : '.';
+    const hint = dryRun && r.count ? '\n\nRe-run with dryRun=false to actually delete these.' : '';
+    return { content: [{ type: 'text', text: head + list + hint }] };
+  } catch (e) {
+    return { content: [{ type: 'text', text: `Cleanup failed: ${e.message}` }] };
+  }
+});
+
 const transport = new StdioServerTransport();
 await server.connect(transport);
