@@ -18,9 +18,18 @@ timeouts, the circuit breaker, and crash recovery are all testable at **zero tok
 ```
 draft ──(gate)──> queued ──> running ──> verifying ──> review ──> closed
                                 │
-                                ├─ breaker/user ─> blocked ─(auto-resume)─> running
-                                └─ timeout ──────> failed
+                                ├─ breaker/pause ─> blocked ─(auto-resume)─> running
+                                │                       └─ 轉待確認 (hold) ─> attention
+                                └─ adapter/setup_cmd failure, timeout, verify exhausted
+                                                        ─> attention ─(續跑/重來/放棄)─> …
 ```
+
+`attention` is a human-triage hold: worktree/session/HANDOFF are preserved and the
+board offers 續跑 (resume the session) / 重來 (fresh from base) / 放棄 (abandon). A
+`setup_cmd` failure fails fast to `attention` with a captured output tail — the adapter
+is never dispatched into a broken workspace, so the run costs zero tokens. A `blocked`
+task auto-resumes on every eligible tick; `轉待確認` on its board card stops that by
+moving it to `attention` instead.
 
 - **M1** engine — scheduler, orchestrator, three-layer budget protection, recovery.
 - **M2** remote — Fastify REST + SSE, optional bearer, ntfy (with pause action),
