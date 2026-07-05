@@ -10,6 +10,9 @@ export default defineConfig({
   test: {
     env: {
       LOOP_DATA_DIR: TEST_DATA,
+      // Neutralize any ambient API token so buildApp({ apiToken: null }) really
+      // means "no auth" — keeps the REST tests hermetic across dev shells.
+      LOOP_API_TOKEN: '',
     },
     testTimeout: 20_000,
     hookTimeout: 20_000,
