@@ -161,7 +161,8 @@
     <a href="#trouble">11 · 疑難排解</a>
     <a href="#mcp">12 · MCP：編輯器一句話派工</a>
     <a href="#autoflow">13 · 自動化：Git 收尾與任務鏈</a>
-    <a href="#appendix">14 · 附錄（API / 檔案位置）</a>
+    <a href="#knowledge">14 · 知識庫：越跑越聰明</a>
+    <a href="#appendix">15 · 附錄（API / 檔案位置）</a>
   </nav>
 
   <main>
@@ -608,8 +609,27 @@ npm run loop -- add --title "B" --goal "…" --plan ./B.md \
       </table></div>
     </section>
 
+    <section id="knowledge">
+      <h2><span class="num">14</span>知識庫：越跑越聰明</h2>
+      <p>看板頂欄的「知識庫」開啟 <code>/brain.html</code>：這裡存放你的<b>長期環境／偏好／限制知識</b>（節點＋關聯），任務派工時自動注入 prompt，讓每個任務都遵守你的環境約束（例如「公司只能用 Windows 11 + Python 3.8.10」）。</p>
+      <h3>知識怎麼進來</h3>
+      <ul>
+        <li><b>MCP 一句話</b>：任何 Claude Code 對話說「記住：公司只能用 Python 3.8.10」→ <code>loop_remember</code> 入庫；<code>loop_recall</code> 搜尋、<code>loop_link</code> 建關聯。</li>
+        <li><b>知識庫頁</b>：搜尋（中文 FTS）／kind 篩選／新增編輯／建關聯／「關聯」鈕看一跳鄰居圖。</li>
+        <li><b>自動蒸餾</b>：任務結案時用 haiku 從 HANDOFF 萃取候選知識 →<b>草稿</b>（琥珀徽章），你在知識庫頁<b>核可後才會注入</b>（<code>knowledge_distill</code> 可關）。</li>
+        <li><b>CLI</b>：<code>loop knowledge &lt;list|search|add|import|export&gt;</code>。</li>
+      </ul>
+      <h3>知識怎麼被用</h3>
+      <ul>
+        <li><b>自動注入</b>：派工時依 scope（global／repo:路徑／env:名稱＋一跳關聯）選節點，environment/constraint 優先，塞進 <code>knowledge_budget_chars</code>(2500) 預算，寫入 LOOP_TASK.md 的「Knowledge / Environment」段（空知識庫＝完全不出現；<code>knowledge_inject</code> 可關）。</li>
+        <li><b>任務可指定環境</b>：新增任務的 Model 旁有 environment 欄（如 <code>company</code>／<code>home</code>）→ 該環境的知識隨之注入。</li>
+        <li><b>CLAUDE.md 匯出</b>：<code>loop knowledge export --repo &lt;路徑&gt;</code> 把環境約束寫進該 repo 的 CLAUDE.md（標記區塊、冪等）——公司電腦上的 Claude/Cursor 也共享同一份知識。</li>
+      </ul>
+      <div class="note tip"><span class="ic">🧠</span><span><b>已預載你的環境</b>：公司（Win11＋Python 3.8.10、3.8 語法約束）、家用開發機（Linux＋RTX 2080 CUDA）、數位轉型辦公自動化專案、在家開發帶去公司部署的流程偏好。之後建任務時 environment 填 <code>company</code>，產出的程式碼就會自動遵守 3.8 相容。</span></div>
+    </section>
+
     <section id="appendix">
-      <h2><span class="num">14</span>附錄</h2>
+      <h2><span class="num">15</span>附錄</h2>
       <h3>REST / SSE 端點</h3>
       <p>除 <code>/</code> 靜態頁外，<code>/api/*</code> 需帶 bearer（<code>Authorization: Bearer &lt;token&gt;</code>）或 <code>?token=</code>。</p>
       <div class="tbl-wrap">
