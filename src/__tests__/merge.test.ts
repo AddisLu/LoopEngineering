@@ -147,6 +147,20 @@ describe('syncWithBase', () => {
     expect(git(user, ['status', '--porcelain']).trim()).toBe('');
     expect(fs.readFileSync(path.join(user, 'base.txt'), 'utf8')).toBe('branch-change\n');
   });
+
+  it('refused (not conflict) when dirty tracked files block the merge from starting', () => {
+    const { origin, user } = makeOriginAndUser('sync-refused');
+    git(user, ['checkout', '-b', 'loop/x']);
+    writeCommit(user, 'feat.txt', 'a\n', 'feat');
+    advanceOrigin(origin, 'sync-refused', 'base.txt', 'v2\n', 'origin edits base.txt');
+    // dirty TRACKED file overlapping the incoming change -> git refuses to start the merge
+    fs.writeFileSync(path.join(user, 'base.txt'), 'uncommitted-dirt\n');
+    const r = syncWithBase(user, 'main', true);
+    expect(r.status).toBe('refused'); // NOT 'conflict' -> no spurious merge task
+    expect(r.conflictFiles).toEqual([]);
+    // the dirt is preserved untouched
+    expect(fs.readFileSync(path.join(user, 'base.txt'), 'utf8')).toBe('uncommitted-dirt\n');
+  });
 });
 
 describe('pushBranch', () => {

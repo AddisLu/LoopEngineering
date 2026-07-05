@@ -5,8 +5,11 @@ import { hasRemote } from './integrate.js';
 // so existing importers of pr.ts keep working.
 export { hasRemote };
 
+// Network-capped like integrate.ts: a hung push/gh must never block the tick loop.
+const NET_TIMEOUT = 30_000;
+
 function git(repo: string, args: string[]): string {
-  return execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8' });
+  return execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8', timeout: NET_TIMEOUT });
 }
 
 function has(cmd: string): boolean {
@@ -30,6 +33,7 @@ export function createPr(worktree: string, branch: string, title: string): strin
     const url = execFileSync('gh', ['pr', 'create', '--fill', '--title', title, '--head', branch], {
       cwd: worktree,
       encoding: 'utf8',
+      timeout: 60_000,
     }).trim();
     const m = url.match(/https?:\/\/\S+/);
     return m ? m[0] : url || null;

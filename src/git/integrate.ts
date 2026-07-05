@@ -50,7 +50,7 @@ export function baseRefFor(gitDir: string, base: string): string {
 }
 
 export interface SyncResult {
-  status: 'up-to-date' | 'merged' | 'conflict';
+  status: 'up-to-date' | 'merged' | 'conflict' | 'refused';
   baseRef: string;
   conflictFiles: string[];
 }
@@ -59,8 +59,11 @@ export interface SyncResult {
  * Bring the latest base into the worktree's branch before we integrate the other way.
  * - up-to-date: base is already an ancestor of HEAD, nothing to do.
  * - merged: a clean merge of base into the branch landed.
- * - conflict: the merge could not auto-resolve; the merge is ABORTED (worktree restored
- *   to its pre-merge state) and the conflicting file list is returned.
+ * - conflict: the merge started but could not auto-resolve; the merge is ABORTED
+ *   (worktree restored to its pre-merge state) and the conflicting file list returned.
+ * - refused: git declined to even START the merge (e.g. dirty tracked files left by a
+ *   verify step) — NOT a content conflict; callers should skip sync, not spawn a
+ *   merge-resolution task. Distinguished by the absence of MERGE_HEAD.
  */
 export function syncWithBase(worktree: string, base: string, doFetch: boolean): SyncResult {
   if (doFetch) fetchBase(worktree, base);
@@ -78,6 +81,17 @@ export function syncWithBase(worktree: string, base: string, doFetch: boolean): 
     git(worktree, ['merge', '--no-edit', baseRef]);
     return { status: 'merged', baseRef, conflictFiles: [] };
   } catch {
+    // A real content conflict leaves MERGE_HEAD behind; a refusal (dirty worktree,
+    // unmerged state, …) never starts the merge at all.
+    let midMerge = false;
+    try {
+      git(worktree, ['rev-parse', '-q', '--verify', 'MERGE_HEAD']);
+      midMerge = true;
+    } catch {
+      /* no MERGE_HEAD — merge was refused before starting */
+    }
+    if (!midMerge) return { status: 'refused', baseRef, conflictFiles: [] };
+
     let conflictFiles: string[] = [];
     try {
       conflictFiles = git(worktree, ['diff', '--name-only', '--diff-filter=U'])

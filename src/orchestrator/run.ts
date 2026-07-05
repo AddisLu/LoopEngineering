@@ -314,46 +314,55 @@ export async function runTask(
   if (!isMock && branch && task.base_branch && task.repo_path) {
     const base = task.base_branch;
     const autoPush = getBool(db, 'auto_push_branch', true);
+    const autoMerge = getBool(db, 'auto_merge', true);
 
     // 1. early backup push of the loop branch
     if (autoPush) pushBranch(worktreePath, branch);
 
-    // 2. bring the latest base into the branch
-    const sync = syncWithBase(worktreePath, base, getBool(db, 'git_fetch_base', true));
-    if (sync.status === 'merged') {
-      logEvent(db, { task_id: task.id, run_id: run.id, kind: 'merge', detail: `merged ${sync.baseRef} into ${branch}` });
-      // the branch changed — re-verify with identical failure semantics
-      setStatus(db, task.id, 'verifying', { run_id: run.id });
-      const reVres = await runVerification(task, worktreePath);
-      if (!reVres.ok) {
-        handleVerifyFailure(db, task, run.id, worktreePath, reVres);
+    // 2. bring the latest base into the branch — ONLY when we intend to integrate.
+    //    With auto_merge off the branch is left exactly as the agent committed it,
+    //    so all-flags-off truly restores the old diffstat -> gap-review -> PR flow.
+    if (autoMerge) {
+      const sync = syncWithBase(worktreePath, base, getBool(db, 'git_fetch_base', true));
+      if (sync.status === 'merged') {
+        logEvent(db, { task_id: task.id, run_id: run.id, kind: 'merge', detail: `merged ${sync.baseRef} into ${branch}` });
+        // the branch changed — re-verify with identical failure semantics
+        setStatus(db, task.id, 'verifying', { run_id: run.id });
+        const reVres = await runVerification(task, worktreePath);
+        if (!reVres.ok) {
+          handleVerifyFailure(db, task, run.id, worktreePath, reVres);
+          return;
+        }
+        if (autoPush) pushBranch(worktreePath, branch);
+      } else if (sync.status === 'refused') {
+        // Not a content conflict (e.g. dirty tracked files from a verify step) — skip
+        // sync and continue; integrate below still FFs or degrades to 'pending'.
+        logEvent(db, { task_id: task.id, run_id: run.id, kind: 'merge', detail: `sync skipped: merge refused (dirty worktree?) vs ${sync.baseRef}` });
+      } else if (sync.status === 'conflict') {
+        logEvent(db, { task_id: task.id, run_id: run.id, kind: 'merge', detail: `conflict: ${sync.conflictFiles.join(', ') || '(unknown files)'}` });
+        // Recursion guard: a task that IS a merge-resolution task (parent_task_id set)
+        // never spawns another merge task.
+        if (getBool(db, 'merge_conflict_task', true) && !task.parent_task_id) {
+          const mt = createMergeTask(db, task, sync.conflictFiles, sync.baseRef);
+          db.prepare('UPDATE tasks SET merge_status = ? WHERE id = ?').run('conflict', task.id);
+          // still attempt a backup PR for the branch, but skip integrate
+          tryCreatePr(db, task, run.id, worktreePath, branch);
+          setStatus(db, task.id, 'review', {
+            run_id: run.id,
+            detail: `verification passed; merge conflict vs ${sync.baseRef}; resolution task ${mt.id} queued`,
+          });
+        } else {
+          db.prepare('UPDATE tasks SET merge_status = ? WHERE id = ?').run('conflict', task.id);
+          tryCreatePr(db, task, run.id, worktreePath, branch);
+          setStatus(db, task.id, 'review', {
+            run_id: run.id,
+            detail: `verification passed; merge conflict vs ${sync.baseRef} — awaiting manual merge`,
+          });
+        }
         return;
       }
-      if (autoPush) pushBranch(worktreePath, branch);
-    } else if (sync.status === 'conflict') {
-      logEvent(db, { task_id: task.id, run_id: run.id, kind: 'merge', detail: `conflict: ${sync.conflictFiles.join(', ') || '(unknown files)'}` });
-      // Recursion guard: a task that IS a merge-resolution task (parent_task_id set)
-      // never spawns another merge task.
-      if (getBool(db, 'merge_conflict_task', true) && !task.parent_task_id) {
-        const mt = createMergeTask(db, task, sync.conflictFiles, sync.baseRef);
-        db.prepare('UPDATE tasks SET merge_status = ? WHERE id = ?').run('conflict', task.id);
-        // still attempt a backup PR for the branch, but skip integrate
-        tryCreatePr(db, task, run.id, worktreePath, branch);
-        setStatus(db, task.id, 'review', {
-          run_id: run.id,
-          detail: `verification passed; merge conflict vs ${sync.baseRef}; resolution task ${mt.id} queued`,
-        });
-      } else {
-        db.prepare('UPDATE tasks SET merge_status = ? WHERE id = ?').run('conflict', task.id);
-        tryCreatePr(db, task, run.id, worktreePath, branch);
-        setStatus(db, task.id, 'review', {
-          run_id: run.id,
-          detail: `verification passed; merge conflict vs ${sync.baseRef} — awaiting manual merge`,
-        });
-      }
-      return;
+      // sync.status === 'up-to-date' falls through
     }
-    // sync.status === 'up-to-date' falls through
 
     // 3. diffstat + gap-review (unchanged)
     const stat = diffstat(worktreePath, base);
@@ -371,7 +380,7 @@ export async function runTask(
 
     // 5. integrate into base
     let mergeStatus: string | null = null;
-    if (getBool(db, 'auto_merge', true)) {
+    if (autoMerge) {
       stripLoopArtifacts(worktreePath);
       if (autoPush) pushBranch(worktreePath, branch);
       const r = integrateIntoBase(task.repo_path, worktreePath, branch, base);
