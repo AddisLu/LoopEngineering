@@ -289,6 +289,7 @@
           <tr><td>排程狀態</td><td>「排程執行中」或「已暫停」。</td></tr>
           <tr><td>暫停排程 / 恢復排程</td><td>切換調度暫停（暫停時不派新工，執行中的不受影響）。</td></tr>
           <tr><td>即時連線指示</td><td>三態：連線中（琥珀）／即時連線（綠）／重新連線…（琥珀）。</td></tr>
+          <tr><td>⚙ 設定</td><td>開啟排程設定面板，直接調整日夜門檻等（見第 8 章）；儲存後下一個 tick 生效、免重啟。Mac/手機皆可改。</td></tr>
           <tr><td>☾ / ☀ 主題鈕</td><td>切換亮/暗佈景，記憶於 localStorage。</td></tr>
           <tr><td>＋ 新增 task</td><td>開啟新增任務對話框。</td></tr>
         </tbody>
@@ -350,6 +351,7 @@
           <tr><td><code>resume</code></td><td>恢復排程。</td></tr>
           <tr><td><code>abort &lt;id&gt;</code></td><td>中斷該任務的 run 並標記 failed。</td></tr>
           <tr><td><code>close &lt;id&gt;</code></td><td>把已審閱的任務標記 closed。</td></tr>
+          <tr><td><code>config [list｜get｜set] [key] [value]</code></td><td>檢視 / 即時修改排程設定（如日夜門檻）。例：<code>loop config set day_session_max 88</code>。改完下一個 tick 生效、免重啟；含防呆。</td></tr>
           <tr><td><code>set-usage --session &lt;%&gt; [--weekly &lt;%&gt;]</code></td><td><b>開發用</b>：強制寫入共享用量快取（斷路器演練）。</td></tr>
         </tbody>
       </table>
@@ -372,6 +374,10 @@ npm run loop -- list --status review</code></pre>
       <h2><span class="num">08</span>設定與環境變數</h2>
       <h3>調度設定（存於 SQLite <code>settings</code> 表）</h3>
       <p>首次執行時由 <code>src/config.ts</code> 播種進 SQLite。門檻為 session/weekly 用量<b>百分比</b>。</p>
+      <div class="note tip"><span class="ic">🎛️</span><span><b>兩種即時調整方式（免重啟）——排程器每個 tick 都重讀設定，所以最多 60 秒生效：</b><br>
+      1. <b>看板 ⚙ 面板</b>：頂欄點 ⚙ → 改日夜門檻 → 儲存（Mac/手機遠端可改）。<br>
+      2. <b>CLI</b>：<code>loop config set day_session_max 88</code>（或 <code>loop config list</code> 看全部）。<br>
+      兩者共用同一份驗證（<code>src/settings.ts</code>）。<b>卡住不派工時</b>，通常就是用量已達當前時段門檻——把該時段上限調高即可解卡。</span></div>
       <div class="tbl-wrap">
       <table>
         <thead><tr><th>鍵</th><th>預設</th><th>說明</th></tr></thead>
@@ -531,6 +537,8 @@ systemctl --user disable loop-engineering</code></pre>
           <tr><td>POST</td><td><code>/api/tasks/:id/close</code></td><td>結案</td></tr>
           <tr><td>POST</td><td><code>/api/pause?hard=1</code></td><td>暫停排程（<code>hard</code> 一併中斷執行中）</td></tr>
           <tr><td>POST</td><td><code>/api/resume-scheduler</code></td><td>恢復排程</td></tr>
+          <tr><td>GET</td><td><code>/api/settings</code></td><td>取得可調的日夜門檻等設定</td></tr>
+          <tr><td>POST</td><td><code>/api/settings</code></td><td>更新設定（含驗證，看板 ⚙ 面板使用）</td></tr>
         </tbody>
       </table>
       </div>
