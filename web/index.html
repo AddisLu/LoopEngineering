@@ -88,6 +88,15 @@
           </label>
           <label>Priority <input name="priority" type="number" value="2" /></label>
         </div>
+        <label>Model（留空＝用全域預設）
+          <select name="model">
+            <option value="">（全域預設）</option>
+            <option value="sonnet">sonnet</option>
+            <option value="haiku">haiku</option>
+            <option value="opus">opus</option>
+            <option value="fable-5">fable-5</option>
+          </select>
+        </label>
         <label>Verify steps (逗號分隔) <input name="verification_steps" placeholder="npm run lint, npm test" autocomplete="off" /></label>
         <div class="row">
           <label>Repo path <input name="repo_path" placeholder="/path/to/repo" autocomplete="off" /></label>
@@ -143,6 +152,17 @@
             <select name="merge_conflict_task"><option value="true">開</option><option value="false">關</option></select>
           </label>
         </div>
+
+        <div class="settings-group">執行模型</div>
+        <label>Coding 預設模型（未指定的任務都用它，越貴越燒 token）
+          <select name="default_model">
+            <option value="sonnet">sonnet（推薦，省 token）</option>
+            <option value="haiku">haiku（最省）</option>
+            <option value="opus">opus（更強）</option>
+            <option value="fable-5">fable-5（最強，最貴）</option>
+            <option value="default">CLI 預設</option>
+          </select>
+        </label>
 
         <p class="settings-err" id="settings-err" hidden></p>
         <menu>

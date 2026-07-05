@@ -28,7 +28,12 @@ export const TUNABLE_KEYS = [
   'hard_limit_pct', 'min_runway_min', 'max_concurrency',
   // git close-out (Git 收尾) group
   'git_fetch_base', 'auto_push_branch', 'auto_merge', 'merge_conflict_task',
+  // execution model
+  'default_model',
 ] as const;
+
+/** Accepted model aliases for coding runs ('' / 'default' = the claude CLI default). */
+export const MODEL_VALUES = new Set(['', 'default', 'sonnet', 'opus', 'haiku', 'fable', 'fable-5']);
 
 /** Light validation for the settings people actually tune; unknown keys pass through. */
 export function validateSetting(key: string, value: string): string | null {
@@ -42,6 +47,8 @@ export function validateSetting(key: string, value: string): string | null {
     if (!/^\d{2}:\d{2}-\d{2}:\d{2}$/.test(value)) return 'day_window must be HH:MM-HH:MM (e.g. 08:00-23:00)';
   } else if (BOOL_KEYS.has(key)) {
     if (value !== 'true' && value !== 'false') return `${key} must be true or false`;
+  } else if (key === 'default_model') {
+    if (!MODEL_VALUES.has(value)) return `default_model must be one of: ${[...MODEL_VALUES].filter(Boolean).join(', ')} (or empty for CLI default)`;
   }
   return null;
 }

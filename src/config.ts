@@ -108,6 +108,11 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // pass). A queued dependent is always held until its dependency closes regardless.
   dep_auto_queue: 'true',
 
+  // model for coding runs when a task doesn't set its own. Defaults to 'sonnet' so
+  // autonomous coding does NOT inherit the (costly) interactive CLI default. Per-task
+  // `model` overrides this; 'default' / '' means "use the claude CLI default".
+  default_model: 'sonnet',
+
   // usage-fetch cadence + ledger fallback
   usage_refresh_sec: '180',
   ledger_fallback_after_min: '10',

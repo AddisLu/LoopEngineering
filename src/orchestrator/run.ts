@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type Database from 'better-sqlite3';
 import { paths } from '../config.js';
-import { getNum, getBool, logEvent } from '../db/index.js';
+import { getNum, getBool, getSetting, logEvent } from '../db/index.js';
 import type { Task } from '../types.js';
 import {
   createRun,
@@ -187,7 +187,9 @@ export async function runTask(
       cwd: worktreePath,
       taskFilePath,
       logPath,
-      model: task.model,
+      // per-task model wins; else the board-wide default_model (keeps costly runs off
+      // the interactive default). Empty/'default' -> no --model (CLI default).
+      model: task.model || getSetting(db, 'default_model') || null,
       timeoutMs,
       resumeSessionId: resumeSid,
       resume: !!opts.resume,
