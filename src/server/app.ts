@@ -16,6 +16,7 @@ import { latestRun } from '../tasks.js';
 import fs from 'node:fs';
 import { boardState, taskResult } from './board.js';
 import type { Complexity } from '../config.js';
+import { registerKnowledgeRoutes } from './knowledgeRoutes.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WEB_DIR = path.resolve(__dirname, '..', '..', 'web');
@@ -352,6 +353,8 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
     const iv = setInterval(send, 1000);
     req.raw.on('close', () => clearInterval(iv));
   });
+
+  registerKnowledgeRoutes(app, db);
 
   app.register(fastifyStatic, { root: WEB_DIR, prefix: '/' });
 
