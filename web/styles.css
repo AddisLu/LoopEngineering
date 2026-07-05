@@ -33,7 +33,7 @@
   --st-ready:      #3f8f6b;
   --st-queued:     #6a86b0;
   --st-blocked:    #a9701c;
-  --st-running:    #a9701c;
+  --st-running:    #2f8f5b;
   --st-verifying:  #7d6bbf;
   --st-review:     #3f6fa8;
   --st-attention:  #9a6a10;
@@ -88,7 +88,7 @@
   --st-ready:      #5cbf93;
   --st-queued:     #8aa4d0;
   --st-blocked:    #e0a748;
-  --st-running:    #e0a24a;
+  --st-running:    #5cc98e;
   --st-verifying:  #a595e0;
   --st-review:     #7fa9dd;
   --st-attention:  #e8b558;
