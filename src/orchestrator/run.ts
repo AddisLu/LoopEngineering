@@ -15,7 +15,8 @@ import {
 } from '../tasks.js';
 import { readUsage } from '../token/usage.js';
 import { estimatePct } from '../token/accounting.js';
-import { addWorktree, isDirty, commitAll, diffstat } from '../git/worktree.js';
+import { addWorktree, isDirty, commitAll, diffstat, excludeLocal } from '../git/worktree.js';
+import { timeoutMinFor } from '../scheduler/timeout.js';
 import { writeTaskFile } from './prompt.js';
 import { writeSettingsLocal } from './settingsLocal.js';
 import { runVerification } from './verify.js';
@@ -32,9 +33,27 @@ function pickAdapter(tool: string): Adapter {
   throw new Error(`unknown coding_tool: ${tool}`);
 }
 
-function timeoutMinFor(db: Database.Database, task: Task): number {
-  if (task.timeout_min != null) return task.timeout_min;
-  return getNum(db, `timeout_${task.complexity}`, task.complexity === 'S' ? 15 : task.complexity === 'L' ? 120 : 45);
+/**
+ * Commit a WIP checkpoint for a run that was interrupted (breaker/timeout/user), so
+ * nothing uncommitted is lost and a resume has a base to build on. No-op on a clean
+ * worktree. Best-effort: a commit failure is logged, never thrown. Returns true iff
+ * a checkpoint commit was actually made.
+ */
+export function commitCheckpoint(
+  db: Database.Database,
+  task: Task,
+  runId: string | null,
+  worktreePath: string,
+  reason: string,
+): boolean {
+  try {
+    if (!isDirty(worktreePath)) return false;
+    commitAll(worktreePath, `loop(${task.id}): checkpoint (interrupted: ${reason})`);
+    return true;
+  } catch (err) {
+    logEvent(db, { task_id: task.id, run_id: runId, kind: 'note', detail: `checkpoint commit failed: ${String(err)}` });
+    return false;
+  }
 }
 
 /**
@@ -49,7 +68,10 @@ export async function runTask(
 ): Promise<void> {
   const isMock = task.coding_tool === 'mock';
   const hardLimit = getNum(db, 'hard_limit_pct', 95);
-  const before = readUsage().session.percent;
+  // Bill the run against a fresh reading at both boundaries. A cached reading (TTL
+  // 180s) can make a short run look like ~0% delta and bias the estimator toward
+  // zero. Mock runs stay on the cache (zero-token / deterministic tests).
+  const before = readUsage({ force: !isMock }).session.percent;
 
   let worktreePath: string;
   let branch: string | null = null;
@@ -87,6 +109,11 @@ export async function runTask(
   });
 
   const taskFilePath = writeTaskFile(worktreePath, task);
+  if (!isMock) {
+    // Keep engine-written artifacts out of the task branch/PR: exclude them locally
+    // before any commitAll (checkpoint or auto-commit) can `git add -A` them.
+    excludeLocal(worktreePath, ['/LOOP_TASK.md', '/.claude/settings.local.json']);
+  }
   if (!isMock && task.setup_cmd) {
     // best-effort setup; failures surface at verification
     try {
@@ -140,7 +167,9 @@ export async function runTask(
   const result = await handle.wait;
   clearTimeout(timeoutTimer);
 
-  const after = readUsage().session.percent;
+  // Force a live read at the closing boundary so the recorded delta reflects real
+  // spend (see the `before` note); the calibrator depends on this being accurate.
+  const after = readUsage({ force: !isMock }).session.percent;
   finishRun(db, run.id, {
     exit_code: result.exitCode,
     // keep the mid-stream session_id if the final event didn't carry one
@@ -152,6 +181,14 @@ export async function runTask(
 
   // How did it end? (breaker/timeout/user set interrupted_by before/while killing)
   const finished = getRun(db, run.id)!;
+
+  // Interrupted mid-flight: commit a WIP checkpoint BEFORE the early-return branches
+  // below, so uncommitted work isn't lost and a resume has something to build on.
+  // (The old auto-commit insurance sits after these returns and never ran for them.)
+  if (!isMock && finished.interrupted_by) {
+    commitCheckpoint(db, task, run.id, worktreePath, finished.interrupted_by);
+  }
+
   if (finished.interrupted_by === 'timeout') {
     setStatus(db, task.id, 'failed', { run_id: run.id, detail: 'watchdog timeout' });
     return;

@@ -42,6 +42,34 @@ export function isDirty(worktreePath: string): boolean {
   return out.trim().length > 0;
 }
 
+/**
+ * Add local-only ignore patterns to this checkout's info/exclude so `git add -A`
+ * (commitAll) never stages them. Used to keep engine-written artifacts
+ * (LOOP_TASK.md, .claude/settings.local.json) out of the task branch/PR. Best-effort:
+ * worst case the files just show up in the diff. `git rev-parse --git-path` resolves
+ * the right exclude file whether this is a plain repo or a linked worktree.
+ */
+export function excludeLocal(worktreePath: string, patterns: string[]): void {
+  try {
+    const rel = git(worktreePath, ['rev-parse', '--git-path', 'info/exclude']).trim();
+    const abs = path.isAbsolute(rel) ? rel : path.join(worktreePath, rel);
+    fs.mkdirSync(path.dirname(abs), { recursive: true });
+    let cur = '';
+    try {
+      cur = fs.readFileSync(abs, 'utf8');
+    } catch {
+      /* no exclude file yet */
+    }
+    const have = new Set(cur.split('\n').map((l) => l.trim()));
+    const add = patterns.filter((p) => !have.has(p));
+    if (add.length === 0) return;
+    const prefix = cur.length > 0 && !cur.endsWith('\n') ? '\n' : '';
+    fs.appendFileSync(abs, prefix + add.join('\n') + '\n');
+  } catch {
+    /* best effort */
+  }
+}
+
 export function commitAll(worktreePath: string, message: string): void {
   git(worktreePath, ['add', '-A']);
   git(worktreePath, ['commit', '--no-verify', '-m', message]);
