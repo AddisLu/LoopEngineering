@@ -5,10 +5,11 @@ import { fileURLToPath } from 'node:url';
 import type Database from 'better-sqlite3';
 import { getDb, getSetting, setSetting, getBool } from '../db/index.js';
 import { validateSetting, TUNABLE_KEYS } from '../settings.js';
-import { createTask, getTask, setStatus, activeRuns, deleteTask } from '../tasks.js';
+import { createTask, getTask, setStatus, activeRuns, deleteTask, tasksForPrune } from '../tasks.js';
 import { validateTask } from '../gate/validateTask.js';
 import { readUsage } from '../token/usage.js';
 import { killRun } from '../orchestrator/kill.js';
+import { pruneTaskArtifacts } from '../git/worktree.js';
 import { boardState } from './board.js';
 import type { Complexity } from '../config.js';
 
@@ -134,14 +135,35 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
 
   app.delete('/api/tasks/:id', async (req, reply) => {
     const id = (req.params as { id: string }).id;
+    const q = req.query as { force?: string };
+    const force = q?.force === '1' || q?.force === 'true';
     const t = getTask(db, id);
     if (!t) return reply.code(404).send({ error: 'not found' });
-    if (t.status === 'running' || t.status === 'verifying') {
-      return reply.code(409).send({ error: 'task is active — abort it first' });
+    const active = t.status === 'running' || t.status === 'verifying' || t.status === 'queued';
+    if (active && !force) {
+      return reply
+        .code(409)
+        .send({ error: 'task is active — abort it first or pass ?force=1', status: t.status });
     }
-    for (const r of activeRuns(db).filter((r) => r.task_id === id)) killRun(db, { id: r.id, pid: r.pid }, 'user');
+    // force on an active task: interrupt its run before we drop the rows.
+    if (active) for (const r of activeRuns(db).filter((r) => r.task_id === id)) killRun(db, { id: r.id, pid: r.pid }, 'user');
+    pruneTaskArtifacts(db, t);
     deleteTask(db, id);
     return { ok: true, deleted: id };
+  });
+
+  // Batch-prune terminal tasks + their disk artifacts. Never deletes active/blocked/review
+  // (tasksForPrune enforces that). dryRun returns the would-delete list without deleting.
+  app.post('/api/tasks/prune', async (req) => {
+    const b = (req.body ?? {}) as { status?: string[]; olderThanDays?: number; dryRun?: boolean };
+    const targets = tasksForPrune(db, { status: b.status, olderThanDays: b.olderThanDays });
+    const ids = targets.map((t) => t.id);
+    if (b.dryRun) return { count: ids.length, ids, dryRun: true };
+    for (const t of targets) {
+      pruneTaskArtifacts(db, t);
+      deleteTask(db, t.id);
+    }
+    return { count: ids.length, ids };
   });
 
   app.post('/api/pause', async (req) => {
