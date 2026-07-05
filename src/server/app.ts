@@ -37,7 +37,10 @@ interface CreateTaskBody {
 
 export function buildApp(opts: AppOptions = {}): FastifyInstance {
   const db = opts.db ?? getDb();
-  const apiToken = opts.apiToken ?? process.env.LOOP_API_TOKEN ?? null;
+  // Honor an explicitly-passed apiToken (including `null` = "no auth"); only fall back to
+  // the env var when the caller omits the key entirely. (`?? env` would treat an explicit
+  // null the same as unset, so ambient LOOP_API_TOKEN would leak into callers that opted out.)
+  const apiToken = 'apiToken' in opts ? opts.apiToken ?? null : process.env.LOOP_API_TOKEN ?? null;
   const app = Fastify({ logger: false });
 
   // --- bearer auth on /api/* (Tailscale is the primary boundary; this is layer 2) ---
