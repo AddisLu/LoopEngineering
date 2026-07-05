@@ -1,0 +1,60 @@
+{
+  "items": [
+    {
+      "id": "N1",
+      "kind": "environment",
+      "scope": "env:company",
+      "weight": 5,
+      "title": "公司環境",
+      "body": "Windows 11 + Python 3.8.10（固定，不可升級）。無 WSL。注意 Windows 路徑分隔、cp950/UTF-8 編碼問題。",
+      "source": "seed",
+      "status": "approved"
+    },
+    {
+      "id": "N2",
+      "kind": "constraint",
+      "scope": "env:company",
+      "weight": 5,
+      "title": "Python 3.8 相容性約束",
+      "body": "生成給公司用的 Python 程式碼必須 3.8 相容：禁用 match/case、PEP604 (X|Y) 型別、str.removeprefix、zoneinfo 等 3.9+ 特性；型別註記用 typing.Optional/List/Dict；依賴需有 3.8 相容版本。",
+      "source": "seed",
+      "status": "approved"
+    },
+    {
+      "id": "N3",
+      "kind": "environment",
+      "scope": "env:home",
+      "weight": 4,
+      "title": "家用開發機",
+      "body": "Linux x86 + NVIDIA RTX 2080，可開發/測試 CUDA。Loop Engineering 跑在這台。",
+      "source": "seed",
+      "status": "approved"
+    },
+    {
+      "id": "N4",
+      "kind": "project",
+      "scope": "global",
+      "weight": 4,
+      "title": "公司數位轉型／辦公室自動化",
+      "body": "公司正進行數位轉型，需開發辦公室自動化軟體（目標環境=公司，見環境約束）。",
+      "source": "seed",
+      "status": "approved"
+    },
+    {
+      "id": "N5",
+      "kind": "preference",
+      "scope": "global",
+      "weight": 3,
+      "title": "開發部署流程",
+      "body": "在家開發、帶去公司部署；交付物需可在無網路/受限的公司環境安裝執行（偏好單檔/可攜、避免需要編譯的相依）。",
+      "source": "seed",
+      "status": "approved"
+    }
+  ],
+  "edges": [
+    { "src": "N2", "dst": "N1", "relation": "constrains" },
+    { "src": "N4", "dst": "N1", "relation": "deployed-at" },
+    { "src": "N4", "dst": "N3", "relation": "uses" },
+    { "src": "N5", "dst": "N4", "relation": "related" }
+  ]
+}
