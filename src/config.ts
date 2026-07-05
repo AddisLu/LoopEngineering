@@ -16,6 +16,7 @@ export const paths = {
   db: expand(process.env.LOOP_DB_PATH ?? path.join(DATA_DIR, 'loop.sqlite')),
   logsDir: path.join(DATA_DIR, 'logs'),
   worktreesDir: path.join(DATA_DIR, 'worktrees'),
+  plansDir: path.join(DATA_DIR, 'plans'),
   reviewsDir: path.join(DATA_DIR, 'reviews'),
   // TokenBar integration (host)
   tokenbarMcpDir: process.env.TOKENBAR_MCP_DIR ? expand(process.env.TOKENBAR_MCP_DIR) : null,
@@ -30,7 +31,7 @@ export const paths = {
 } as const;
 
 export function ensureDirs(): void {
-  for (const d of [paths.dataDir, paths.logsDir, paths.worktreesDir, paths.reviewsDir]) {
+  for (const d of [paths.dataDir, paths.logsDir, paths.worktreesDir, paths.plansDir, paths.reviewsDir]) {
     fs.mkdirSync(d, { recursive: true });
   }
 }
