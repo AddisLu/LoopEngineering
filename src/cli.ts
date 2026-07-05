@@ -134,8 +134,10 @@ program
     setSetting(db, 'scheduler_paused', 'true');
     console.log('scheduler paused');
     if (o.hard) {
+      // reason 'pause' (NOT 'user'): a user abort is terminal, a hard pause must stay
+      // resumable — the interrupted task goes to blocked and auto-resumes on unpause.
       for (const r of activeRuns(db)) {
-        killRun(db, { id: r.id, pid: r.pid }, 'user');
+        killRun(db, { id: r.id, pid: r.pid }, 'pause');
         console.log(`  interrupted run ${r.id}`);
       }
     }

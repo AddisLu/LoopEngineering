@@ -6,8 +6,9 @@ import { isAlive, signalGroup } from './kill.js';
 /**
  * On engine startup, reconcile runs that were mid-flight when we crashed/restarted.
  * A run whose process group is gone is 'orphaned' -> its task goes to 'blocked'
- * (resume_count++, or 'failed' once it has been resumed too many times). A run that
- * is somehow still alive is killed and its task blocked (default: don't re-adopt).
+ * (resume_count++, or 'attention' once it has been resumed too many times — the
+ * checkpoint/HANDOFF are on disk, a human decides). A run that is somehow still
+ * alive is killed and its task blocked (default: don't re-adopt).
  *
  * maxResumes defaults to the shared `max_resumes` setting (see config.ts) so the
  * orchestrator, scheduler, and recovery all agree on the resume budget.
@@ -30,7 +31,7 @@ export function recoverOnStartup(db: Database.Database, maxResumes = getNum(db, 
 
     const resumes = bumpResume(db, task.id);
     if (resumes > maxResumes) {
-      setStatus(db, task.id, 'failed', { run_id: run.id, detail: `orphaned; resume limit (${maxResumes}) exceeded` });
+      setStatus(db, task.id, 'attention', { run_id: run.id, detail: `orphaned; resume limit (${maxResumes}) exceeded` });
     } else {
       setStatus(db, task.id, 'blocked', { run_id: run.id, detail: 'orphaned by restart; will resume' });
     }

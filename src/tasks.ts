@@ -107,7 +107,7 @@ export function deleteTask(db: Database.Database, id: string): boolean {
 }
 
 /** Statuses that batch-prune must NEVER delete — in-flight or awaiting a human. */
-export const NEVER_PRUNE: readonly string[] = ['running', 'verifying', 'queued', 'blocked', 'review'];
+export const NEVER_PRUNE: readonly string[] = ['running', 'verifying', 'queued', 'blocked', 'attention', 'review'];
 /** Default prune targets: only truly terminal tasks. */
 export const DEFAULT_PRUNE_STATUS: readonly string[] = ['closed', 'failed'];
 

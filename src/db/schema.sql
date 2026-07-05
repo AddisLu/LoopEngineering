@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS tasks (
 
   -- lifecycle
   status         TEXT NOT NULL DEFAULT 'draft',
-    -- draft|ready|queued|running|verifying|blocked|review|failed|closed
+    -- draft|ready|queued|running|verifying|blocked|attention|review|failed|closed
   resume_count   INTEGER NOT NULL DEFAULT 0,
 
   -- result snapshot
@@ -58,7 +58,7 @@ CREATE TABLE IF NOT EXISTS task_runs (
 
   exit_code      INTEGER,
   error          TEXT,
-  interrupted_by TEXT,                          -- breaker | timeout | user | orphaned | NULL
+  interrupted_by TEXT,                          -- breaker | timeout | user | pause | window | orphaned | NULL
 
   usage_json     TEXT,                          -- result-event usage (debug/future)
   session_pct_before REAL,

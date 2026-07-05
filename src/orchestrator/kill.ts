@@ -36,7 +36,7 @@ export function signalGroup(pid: number, sig: NodeJS.Signals): boolean {
 export function killRun(
   db: Database.Database,
   run: Pick<TaskRun, 'id' | 'pid'>,
-  reason: 'breaker' | 'timeout' | 'user' | 'orphaned' | 'window',
+  reason: 'breaker' | 'timeout' | 'user' | 'pause' | 'orphaned' | 'window',
   graceMs = 30_000,
 ): void {
   updateRun(db, run.id, { interrupted_by: reason });

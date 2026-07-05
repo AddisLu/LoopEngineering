@@ -9,7 +9,7 @@ import { createTask, getTask, setStatus, activeRuns, deleteTask, countByStatus, 
 import { validateTask } from '../gate/validateTask.js';
 import { readUsage } from '../token/usage.js';
 import { killRun } from '../orchestrator/kill.js';
-import { cleanupWorktree } from '../orchestrator/cleanup.js';
+import { cleanupWorktree, resetTaskWorkspace } from '../orchestrator/cleanup.js';
 import { pruneTaskArtifacts } from '../git/worktree.js';
 import { integrateIntoBase } from '../git/integrate.js';
 import { latestRun } from '../tasks.js';
@@ -119,6 +119,14 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
     const id = (req.params as any).id;
     const t = getTask(db, id);
     if (!t) return reply.code(404).send({ error: 'not found' });
+    // Only drafts enter the queue here; a troubled task (attention/failed) must go
+    // through /restart so its stale branch/worktree is reset first.
+    if (t.status !== 'draft') {
+      return reply.code(409).send({
+        error: `task is ${t.status} — only a draft can be queued; use /restart to requeue it`,
+        status: t.status,
+      });
+    }
     const gate = validateTask(t);
     if (!gate.ok) return reply.code(409).send({ error: 'gate not satisfied', gate });
     // Controlled auto-queue path (used by the MCP, which queues by default): cap how many
@@ -184,6 +192,53 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
     return r;
   });
 
+  // --- attention (待確認) triage actions ---
+
+  // 續跑: hand an attention task back to the auto-resume path. Clamping (not resetting)
+  // resume_count to max_resumes grants exactly ONE more tick-eligible attempt — the
+  // scheduler resumes blocked tasks while resume_count <= max_resumes.
+  app.post('/api/tasks/:id/resume', async (req, reply) => {
+    const id = (req.params as any).id;
+    const t = getTask(db, id);
+    if (!t) return reply.code(404).send({ error: 'not found' });
+    if (t.status !== 'attention')
+      return reply.code(409).send({ error: 'task not in attention', status: t.status });
+    const run = latestRun(db, id);
+    if (!run?.session_id) return reply.code(400).send({ error: 'no session — use restart' });
+    const maxResumes = getNum(db, 'max_resumes', 2);
+    db.prepare('UPDATE tasks SET resume_count = ? WHERE id = ?').run(Math.min(t.resume_count, maxResumes), id);
+    setStatus(db, id, 'blocked', { detail: 'manual resume from attention' });
+    return { ok: true };
+  });
+
+  // 重來: requeue from scratch. resetTaskWorkspace removes the run worktrees AND the
+  // loop/<id> branch, so the next dispatch re-cuts from (freshly fetched) base instead
+  // of silently reusing the stale branch/dir.
+  app.post('/api/tasks/:id/restart', async (req, reply) => {
+    const id = (req.params as any).id;
+    const t = getTask(db, id);
+    if (!t) return reply.code(404).send({ error: 'not found' });
+    if (t.status !== 'attention' && t.status !== 'failed')
+      return reply.code(409).send({ error: 'restart only applies to attention/failed tasks', status: t.status });
+    resetTaskWorkspace(db, t);
+    db.prepare('UPDATE tasks SET resume_count = 0, pr_url = NULL, merge_status = NULL WHERE id = ?').run(id);
+    setStatus(db, id, 'queued', { detail: 'restart: fresh from base' });
+    return { ok: true };
+  });
+
+  // 放棄: close the triage as a terminal failure; ?cleanup=1 also reclaims the worktree.
+  app.post('/api/tasks/:id/abandon', async (req, reply) => {
+    const id = (req.params as any).id;
+    const t = getTask(db, id);
+    if (!t) return reply.code(404).send({ error: 'not found' });
+    if (t.status !== 'attention')
+      return reply.code(409).send({ error: 'task not in attention', status: t.status });
+    setStatus(db, id, 'failed', { detail: 'abandoned by user' });
+    const cleanup = (req.query as any)?.cleanup === '1' || (req.query as any)?.cleanup === 'true';
+    if (cleanup) cleanupWorktree(db, t);
+    return { ok: true };
+  });
+
   app.post('/api/tasks/:id/abort', async (req, reply) => {
     const id = (req.params as any).id;
     if (!getTask(db, id)) return reply.code(404).send({ error: 'not found' });
@@ -230,7 +285,9 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
   app.post('/api/pause', async (req) => {
     setSetting(db, 'scheduler_paused', 'true');
     const hard = (req.query as any)?.hard === '1' || (req.query as any)?.hard === 'true';
-    if (hard) for (const r of activeRuns(db)) killRun(db, { id: r.id, pid: r.pid }, 'user');
+    // reason 'pause' (NOT 'user'): a user abort is terminal, a hard pause must stay
+    // resumable — the interrupted task goes to blocked and auto-resumes on unpause.
+    if (hard) for (const r of activeRuns(db)) killRun(db, { id: r.id, pid: r.pid }, 'pause');
     return { ok: true, paused: true, hard };
   });
 

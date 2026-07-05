@@ -62,7 +62,7 @@ export function commitCheckpoint(
 
 /**
  * Full lifecycle for one dispatch: prepare workspace -> spawn adapter -> await ->
- * (breaker/timeout aware) -> auto-commit -> verify -> review|failed|blocked.
+ * (breaker/timeout aware) -> auto-commit -> verify -> review|blocked|attention|failed.
  * Resolves when the task reaches a terminal-for-now status. Never throws.
  */
 export async function runTask(
@@ -256,23 +256,31 @@ export async function runTask(
   }
 
   if (finished.interrupted_by === 'timeout') {
-    setStatus(db, task.id, 'failed', { run_id: run.id, detail: 'watchdog timeout' });
+    // checkpoint commit already happened above — worktree/session preserved for triage
+    setStatus(db, task.id, 'attention', { run_id: run.id, detail: 'watchdog timeout' });
+    return;
+  }
+  if (finished.interrupted_by === 'user') {
+    // A user abort is TERMINAL: the abort endpoint/CLI already set 'failed' eagerly;
+    // agree with it here instead of overwriting to blocked (which used to auto-resume
+    // aborted tasks). pause --hard uses reason 'pause' and stays resumable below.
+    setStatus(db, task.id, 'failed', { run_id: run.id, detail: 'aborted by user' });
     return;
   }
   if (
     finished.interrupted_by === 'breaker' ||
-    finished.interrupted_by === 'user' ||
-    finished.interrupted_by === 'window'
+    finished.interrupted_by === 'window' ||
+    finished.interrupted_by === 'pause'
   ) {
     // WIP was already checkpoint-committed above (commitCheckpoint), for all interrupt
     // types including 'window' — no need to commit again here.
     const resumes = bumpResume(db, task.id);
     const maxResumes = getNum(db, 'max_resumes', 2);
     // Once the resume budget is spent the scheduler would never re-dispatch it
-    // (tick only resumes resume_count <= max_resumes), so escalate to failed
-    // instead of leaving a zombie 'blocked' task. Mirrors recovery.ts.
+    // (tick only resumes resume_count <= max_resumes), so hand it to a human as
+    // 'attention' instead of leaving a zombie 'blocked' task. Mirrors recovery.ts.
     if (resumes > maxResumes) {
-      setStatus(db, task.id, 'failed', {
+      setStatus(db, task.id, 'attention', {
         run_id: run.id,
         detail: `resume limit (${maxResumes}) exceeded; interrupted: ${finished.interrupted_by}`,
       });
@@ -282,7 +290,8 @@ export async function runTask(
     return;
   }
   if (result.error || (result.exitCode !== 0 && result.resultSubtype !== 'success')) {
-    setStatus(db, task.id, 'failed', {
+    // Adapter error: the worktree (and any streamed session) is intact — hold for triage.
+    setStatus(db, task.id, 'attention', {
       run_id: run.id,
       detail: `exit=${result.exitCode} subtype=${result.resultSubtype} ${result.error ?? ''}`.trim(),
     });
@@ -402,7 +411,8 @@ export async function runTask(
 /**
  * Shared verify-failure handling for both first-verify and post-merge re-verify, so both
  * paths get IDENTICAL semantics: recoverable (blocked -> auto-resume) while we still have
- * the session and resume budget, else terminally failed.
+ * the session and resume budget, else 'attention' (human hold — worktree and
+ * LOOP_RESUME_CONTEXT.md kept so 續跑/重來 can pick it up).
  */
 function handleVerifyFailure(
   db: Database.Database,
@@ -424,7 +434,8 @@ function handleVerifyFailure(
     });
     return;
   }
-  setStatus(db, task.id, 'failed', { run_id: runId, detail: `verify failed at: ${failedStep}\n${tail}` });
+  writeResumeContext(worktreePath, failedStep, tail); // a manual 續跑 resume still gets the context
+  setStatus(db, task.id, 'attention', { run_id: runId, detail: `verify failed at: ${failedStep}\n${tail}` });
 }
 
 /** Best-effort PR creation; records pr_url + a note on success. Returns the URL or null. */

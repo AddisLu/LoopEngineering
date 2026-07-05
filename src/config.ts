@@ -131,6 +131,9 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
 export const TOKEN_REFRESH_MS = 180_000; // TokenBar cadence
 
 export type Complexity = 'S' | 'M' | 'L';
+// Lifecycle: draft -> queued -> running -> verifying -> review -> closed, with
+// 'blocked' (auto-resumable interrupt), 'attention' (human hold: failure triage with
+// worktree/session preserved — 續跑/重來/放棄 from the board) and 'failed' (terminal).
 export type TaskStatus =
   | 'draft'
   | 'ready'
@@ -138,6 +141,7 @@ export type TaskStatus =
   | 'running'
   | 'verifying'
   | 'blocked'
+  | 'attention'
   | 'review'
   | 'failed'
   | 'closed';
