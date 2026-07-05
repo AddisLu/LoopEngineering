@@ -261,7 +261,7 @@ server.registerTool('loop_queue_task', {
 
 server.registerTool('loop_list_tasks', {
   title: 'List Loop tasks',
-  description: 'List Loop Engineering tasks (optionally filtered by status) with a board summary. Statuses: draft, ready, queued, running, verifying, blocked, review, failed, closed.',
+  description: 'List Loop Engineering tasks (optionally filtered by status) with a board summary. Statuses: draft, ready, queued, running, verifying, blocked, attention (human hold — resume/restart/abandon from the board), review, failed, closed.',
   inputSchema: { status: z.string().optional().describe('optional status to filter by') },
 }, async ({ status }) => {
   const board = await api('/api/board');
@@ -313,13 +313,14 @@ server.registerTool('loop_task_result', {
   }
 });
 
-const WAIT_TERMINAL = new Set(['review', 'failed', 'closed']);
+const WAIT_TERMINAL = new Set(['review', 'attention', 'failed', 'closed']);
 server.registerTool('loop_wait_task', {
   title: 'Wait for a Loop task to finish',
   description:
-    'Poll a Loop task until it reaches a terminal state (review / failed / closed) or the timeout elapses, then return its result ' +
+    'Poll a Loop task until it reaches a terminal state (review / attention / failed / closed) or the timeout elapses, then return its result ' +
     '(PR link / failure reason / log tail). Blocks until an autonomous run is done. A task may pause in "blocked" while the budget ' +
-    'recovers; waiting continues through blocked until it resolves or the timeout is hit.',
+    'recovers; waiting continues through blocked until it resolves or the timeout is hit. "attention" means the run hit trouble and is ' +
+    'held for a human to resume/restart/abandon on the board — treat it as done for waiting purposes.',
   inputSchema: {
     id: z.string().describe('Task id, e.g. t_XXXXXXXX'),
     timeout_sec: z.number().int().optional().describe('max seconds to wait (default 900).'),
@@ -365,11 +366,11 @@ server.registerTool('loop_cleanup', {
   title: 'Batch-clean old Loop tasks',
   description:
     'Batch-DELETE terminal Loop tasks (default: closed + failed) together with their disk artifacts. ' +
-    'This NEVER touches active/blocked/review tasks — those are always excluded, even if requested. ' +
+    'This NEVER touches active/blocked/attention/review tasks — those are always excluded, even if requested. ' +
     'Optionally narrow by status and/or age (olderThanDays = only tasks not updated in the last N days). ' +
     'Deletion is IRREVERSIBLE. STRONGLY prefer a first call with dryRun=true to review the exact list, then repeat without dryRun to actually delete.',
   inputSchema: {
-    status: z.array(z.string()).optional().describe('statuses to prune (default ["closed","failed"]). active/blocked/review are always excluded.'),
+    status: z.array(z.string()).optional().describe('statuses to prune (default ["closed","failed"]). active/blocked/attention/review are always excluded.'),
     olderThanDays: z.number().optional().describe('only prune tasks not updated in the last N days.'),
     dryRun: z.boolean().optional().describe('if true, only report what WOULD be deleted — deletes nothing. Recommended for a first pass.'),
   },
