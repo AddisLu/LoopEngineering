@@ -4,6 +4,7 @@ import path from 'node:path';
 import type Database from 'better-sqlite3';
 import { paths } from '../config.js';
 import { listRunsForTask } from '../tasks.js';
+import { fetchBase, baseRefFor } from './integrate.js';
 import type { Task } from '../types.js';
 
 function git(repo: string, args: string[]): string {
@@ -19,7 +20,12 @@ export interface Worktree {
  * Create an isolated worktree for a task on a fresh branch off baseBranch.
  * If the branch/worktree already exists (resume), reuse it.
  */
-export function addWorktree(repoPath: string, branch: string, baseBranch: string): Worktree {
+export function addWorktree(
+  repoPath: string,
+  branch: string,
+  baseBranch: string,
+  opts: { fetchBase?: boolean } = {},
+): Worktree {
   fs.mkdirSync(paths.worktreesDir, { recursive: true });
   const wtPath = path.join(paths.worktreesDir, branch.replace(/[/\\]/g, '_'));
 
@@ -34,8 +40,22 @@ export function addWorktree(repoPath: string, branch: string, baseBranch: string
     }
   })();
 
-  if (branchExists) git(repoPath, ['worktree', 'add', wtPath, branch]);
-  else git(repoPath, ['worktree', 'add', wtPath, '-b', branch, baseBranch]);
+  if (branchExists) {
+    git(repoPath, ['worktree', 'add', wtPath, branch]);
+  } else if (opts.fetchBase) {
+    // Cut the new branch from the freshly-fetched origin tip. Resolve to a SHA start point
+    // (not the ref) so the branch never picks up accidental upstream tracking.
+    fetchBase(repoPath, baseBranch);
+    let start = baseBranch;
+    try {
+      start = git(repoPath, ['rev-parse', baseRefFor(repoPath, baseBranch)]).trim();
+    } catch {
+      /* fall back to the local base branch */
+    }
+    git(repoPath, ['worktree', 'add', wtPath, '-b', branch, start]);
+  } else {
+    git(repoPath, ['worktree', 'add', wtPath, '-b', branch, baseBranch]);
+  }
 
   return { path: wtPath, branch };
 }
@@ -94,7 +114,8 @@ export function commitAll(worktreePath: string, message: string): void {
 
 export function diffstat(worktreePath: string, baseBranch: string): string {
   try {
-    return git(worktreePath, ['diff', '--stat', `${baseBranch}...HEAD`]).trim();
+    const ref = baseRefFor(worktreePath, baseBranch);
+    return git(worktreePath, ['diff', '--stat', `${ref}...HEAD`]).trim();
   } catch {
     return '';
   }

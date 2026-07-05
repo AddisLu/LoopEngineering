@@ -1,4 +1,9 @@
 import { execFileSync } from 'node:child_process';
+import { hasRemote } from './integrate.js';
+
+// hasRemote now lives in integrate.ts (shared with the whole git close-out path); re-export
+// so existing importers of pr.ts keep working.
+export { hasRemote };
 
 function git(repo: string, args: string[]): string {
   return execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8' });
@@ -8,14 +13,6 @@ function has(cmd: string): boolean {
   try {
     execFileSync('which', [cmd], { stdio: 'ignore' });
     return true;
-  } catch {
-    return false;
-  }
-}
-
-export function hasRemote(repo: string): boolean {
-  try {
-    return git(repo, ['remote']).trim().length > 0;
   } catch {
     return false;
   }

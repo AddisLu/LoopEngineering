@@ -11,6 +11,9 @@ import { readUsage } from '../token/usage.js';
 import { killRun } from '../orchestrator/kill.js';
 import { cleanupWorktree } from '../orchestrator/cleanup.js';
 import { pruneTaskArtifacts } from '../git/worktree.js';
+import { integrateIntoBase } from '../git/integrate.js';
+import { latestRun } from '../tasks.js';
+import fs from 'node:fs';
 import { boardState, taskResult } from './board.js';
 import type { Complexity } from '../config.js';
 
@@ -138,6 +141,28 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
     }
     setStatus(db, id, 'queued', { detail: auto ? 'auto-queued via api' : 'queued via api' });
     return { ok: true };
+  });
+
+  // Manual integrate for a task left at merge_status pending/conflict (e.g. no-gh host,
+  // or a conflict that has since been resolved on base). Resolves gitDir to the run
+  // worktree if it still exists, else the repo, so it works after worktree cleanup.
+  app.post('/api/tasks/:id/merge', async (req, reply) => {
+    const id = (req.params as any).id;
+    const t = getTask(db, id);
+    if (!t) return reply.code(404).send({ error: 'not found' });
+    if (t.status !== 'review')
+      return reply.code(409).send({ error: 'task not in review', status: t.status });
+    if (t.merge_status !== 'pending' && t.merge_status !== 'conflict')
+      return reply.code(409).send({ error: 'task not awaiting merge', merge_status: t.merge_status });
+    if (!t.repo_path || !t.base_branch)
+      return reply.code(409).send({ error: 'task has no repo/base' });
+    const branch = `loop/${t.id}`;
+    const run = latestRun(db, id);
+    const gitDir = run?.worktree_path && fs.existsSync(run.worktree_path) ? run.worktree_path : t.repo_path;
+    const r = integrateIntoBase(t.repo_path, gitDir, branch, t.base_branch);
+    db.prepare('UPDATE tasks SET merge_status = ? WHERE id = ?').run(r.outcome, id);
+    if (r.outcome === 'merged') cleanupWorktree(db, t);
+    return { outcome: r.outcome, detail: r.detail };
   });
 
   app.post('/api/tasks/:id/close', async (req, reply) => {

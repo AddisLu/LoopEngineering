@@ -87,7 +87,25 @@ async function pumpNotifications(
         withPauseAction: true,
       });
     } else if (e.to_status === 'review') {
-      await notify(db, { title: 'Loop: task ready for review', message: e.task_id, tags: ['white_check_mark'] });
+      // Enrich with the git close-out outcome so the push says how the merge landed.
+      const ms = (db.prepare('SELECT merge_status FROM tasks WHERE id = ?').get(e.task_id) as
+        | { merge_status: string | null }
+        | undefined)?.merge_status ?? null;
+      if (ms === 'conflict') {
+        await notify(db, {
+          title: 'Loop: task ready for review',
+          message: `${e.task_id}（合併衝突—已建解衝突任務）`,
+          priority: 'high',
+          tags: ['warning'],
+        });
+      } else {
+        const suffix = ms === 'merged' ? '（已自動併入 main）' : ms === 'pending' ? '（待合併）' : '';
+        await notify(db, {
+          title: 'Loop: task ready for review',
+          message: `${e.task_id}${suffix}`,
+          tags: ['white_check_mark'],
+        });
+      }
     } else if (e.to_status === 'failed') {
       await notify(db, { title: 'Loop: task failed', message: `${e.task_id} — ${e.detail ?? ''}`, priority: 'high', tags: ['x'] });
     }

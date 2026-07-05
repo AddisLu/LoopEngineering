@@ -176,7 +176,14 @@
     // status banners
     if (c.status === 'blocked') card.appendChild(el('div', 'banner info', '⏸ blocked · 可自動 resume'));
     if (c.status === 'failed') card.appendChild(el('div', 'banner danger', 'verify/執行失敗'));
-    if (c.status === 'review') card.appendChild(el('div', 'banner ok', '✓ verify 通過，待結案'));
+    if (c.status === 'review') {
+      card.appendChild(el('div', 'banner ok', '✓ verify 通過，待結案'));
+      // git close-out state
+      if (c.merge_status === 'merged') meta.appendChild(el('span', 'chip merged', '✓ 已合併'));
+      else if (c.merge_status === 'pending') meta.appendChild(el('span', 'chip pending', '待合併'));
+      else if (c.merge_status === 'conflict')
+        card.appendChild(el('div', 'banner danger', '⚠ 合併衝突（已建解衝突任務）'));
+    }
 
     // log tail for active runs
     if (Array.isArray(c.logTail) && c.logTail.length) {
@@ -199,6 +206,8 @@
       actions.appendChild(btn('中止', 'danger-ghost', () => act(`/api/tasks/${c.id}/abort`)));
     if (c.status === 'review') {
       if (c.pr_url) actions.appendChild(btn('看 PR', '', () => window.open(c.pr_url, '_blank', 'noopener')));
+      if (c.merge_status === 'pending' || c.merge_status === 'conflict')
+        actions.appendChild(btn('合併', '', () => act(`/api/tasks/${c.id}/merge`)));
       actions.appendChild(btn('結案', 'primary', () => act(`/api/tasks/${c.id}/close`)));
     }
     if (c.status === 'failed')
