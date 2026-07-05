@@ -8,10 +8,13 @@ import {
   setStatus,
   countByStatus,
   activeRuns,
+  deleteTask,
+  tasksForPrune,
 } from './tasks.js';
 import { validateTask } from './gate/validateTask.js';
 import { readUsage, setCachedUsage } from './token/usage.js';
 import { killRun } from './orchestrator/kill.js';
+import { pruneTaskArtifacts, type ArtifactCleanup } from './git/worktree.js';
 import { DEFAULT_SETTINGS, type Complexity } from './config.js';
 import { validateSetting } from './settings.js';
 
@@ -166,6 +169,58 @@ program
   });
 
 program
+  .command('delete <id>')
+  .description('permanently delete a task + its disk artifacts (worktree/plan/logs)')
+  .option('--force', 'delete even if the task is active (aborts its run first)')
+  .action((id, o) => {
+    const db = getDb();
+    const t = getTask(db, id);
+    if (!t) return fail(`no such task: ${id}`);
+    const active = t.status === 'running' || t.status === 'verifying' || t.status === 'queued';
+    if (active && !o.force) {
+      return fail(`${id} is ${t.status} — pass --force to delete an active task (aborts its run first)`);
+    }
+    if (active) {
+      for (const r of activeRuns(db).filter((r) => r.task_id === id)) killRun(db, { id: r.id, pid: r.pid }, 'user');
+    }
+    const cleaned = pruneTaskArtifacts(db, t);
+    deleteTask(db, id);
+    console.log(`deleted ${id}${cleanupNote(cleaned)}`);
+  });
+
+program
+  .command('prune')
+  .description('batch-delete terminal tasks + artifacts (dry-run unless --yes)')
+  .option('--status <list>', 'comma-separated statuses (default closed,failed)')
+  .option('--older-than <days>', 'only tasks not updated in the last N days', (v) => parseInt(v, 10))
+  .option('--dry-run', 'list what would be deleted, delete nothing')
+  .option('--yes', 'actually delete (otherwise dry-run)')
+  .action((o) => {
+    const db = getDb();
+    const status = o.status
+      ? String(o.status).split(',').map((s: string) => s.trim()).filter(Boolean)
+      : undefined;
+    const targets = tasksForPrune(db, { status, olderThanDays: o.olderThan });
+    if (!targets.length) {
+      console.log('nothing to prune');
+      return;
+    }
+    const doDelete = Boolean(o.yes) && !o.dryRun;
+    for (const t of targets) {
+      console.log(`  ${doDelete ? 'delete' : 'would delete'} ${t.id}  ${pad(t.status, 8)} ${t.title}`);
+    }
+    if (!doDelete) {
+      console.log(`\n${targets.length} task(s) — dry-run. Re-run with --yes to delete.`);
+      return;
+    }
+    for (const t of targets) {
+      pruneTaskArtifacts(db, t);
+      deleteTask(db, t.id);
+    }
+    console.log(`\npruned ${targets.length} task(s)`);
+  });
+
+program
   .command('set-usage')
   .description('DEV: force the shared usage cache (breaker drill)')
   .requiredOption('--session <pct>', 'session %', (v) => parseFloat(v))
@@ -220,6 +275,16 @@ function printGate(g: { ok: boolean; missing: string[]; warnings: string[] }): v
 
 function pad(s: string, n: number): string {
   return (s + ' '.repeat(n)).slice(0, n);
+}
+
+function cleanupNote(c: ArtifactCleanup): string {
+  const parts: string[] = [];
+  if (c.worktrees.length) parts.push(`${c.worktrees.length} worktree(s)`);
+  if (c.logs.length) parts.push(`${c.logs.length} log(s)`);
+  if (c.plans.length) parts.push(`${c.plans.length} plan(s)`);
+  const note = parts.length ? ` (removed ${parts.join(', ')})` : '';
+  const skipped = c.skipped.length ? ` [skipped ${c.skipped.length} path(s) outside data dir]` : '';
+  return note + skipped;
 }
 
 function fail(msg: string): void {
