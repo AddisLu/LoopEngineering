@@ -22,10 +22,25 @@ export const DEFAULT_ALLOWED_TOOLS = [
 
 const PROMPT = '請先完整閱讀 LOOP_TASK.md，依其執行任務，完成後自行跑 verification steps 並修到通過。';
 
+// Resume prompt: the run was cut off near the usage limit (or its verification failed).
+// --resume restores the Claude session; HANDOFF.md / LOOP_RESUME_CONTEXT.md in the
+// worktree restore the work state. Tell it to continue from there rather than restart.
+const RESUME_PROMPT =
+  '你在逼近使用上限時被中斷（或上次的 verification 未通過）。--resume 已還原 Claude session，' +
+  'worktree 內的 HANDOFF.md 與（若有）LOOP_RESUME_CONTEXT.md 已保留先前狀態。' +
+  '請先讀 LOOP_TASK.md、HANDOFF.md 與 LOOP_RESUME_CONTEXT.md，從未完成處接續，' +
+  '不要重頭來過；修到 verification steps 全綠，並持續更新／commit HANDOFF.md。';
+
+function promptFor(ctx: DispatchContext): string {
+  if (!ctx.resume) return PROMPT;
+  const h = ctx.handoff?.trim();
+  return h ? `${RESUME_PROMPT}\n\n先前交接摘要（節錄）：\n${h.slice(0, 1500)}` : RESUME_PROMPT;
+}
+
 export function buildClaudeArgs(ctx: DispatchContext): string[] {
   const args = [
     '-p',
-    PROMPT,
+    promptFor(ctx),
     '--output-format',
     'stream-json',
     '--verbose',

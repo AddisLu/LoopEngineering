@@ -12,6 +12,7 @@ import {
 import { validateTask } from './gate/validateTask.js';
 import { readUsage, setCachedUsage } from './token/usage.js';
 import { killRun } from './orchestrator/kill.js';
+import { cleanupWorktree } from './orchestrator/cleanup.js';
 import { DEFAULT_SETTINGS, type Complexity } from './config.js';
 import { validateSetting } from './settings.js';
 
@@ -162,6 +163,7 @@ program
     const t = getTask(db, id);
     if (!t) return fail(`no such task: ${id}`);
     setStatus(db, id, 'closed', { detail: 'closed via cli' });
+    cleanupWorktree(db, t); // work is done — reclaim the worktree's disk
     console.log(`${id} -> closed`);
   });
 
