@@ -6,6 +6,7 @@ import { readUsage } from '../token/usage.js';
 import { resolvePolicy } from '../scheduler/policy.js';
 import { validateTask } from '../gate/validateTask.js';
 import { estimatePct } from '../token/accounting.js';
+import { timeoutMinFor } from '../scheduler/timeout.js';
 import type { Task } from '../types.js';
 
 export interface BoardCard {
@@ -25,6 +26,8 @@ export interface BoardCard {
   logTail?: string[];
   branch?: string | null;
   elapsedMin?: number | null;
+  timeoutMin?: number | null;
+  elapsedPct?: number | null; // percent of the run's timeout elapsed (may exceed 100)
 }
 
 export interface BoardState {
@@ -42,21 +45,58 @@ export interface BoardState {
   cards: BoardCard[];
 }
 
-function tailLog(path: string | null, n = 6): string[] {
+/** Render one tool_use content block as a compact activity line (→ Edit src/foo.ts). */
+function formatToolUse(b: any): string {
+  const name = typeof b?.name === 'string' ? b.name : 'tool';
+  const input = b?.input ?? {};
+  if (name === 'Bash') {
+    const cmd = String(input.command ?? '').replace(/\s+/g, ' ').trim();
+    return cmd ? `→ Bash: ${cmd.slice(0, 80)}` : '→ Bash';
+  }
+  const target = input.file_path ?? input.path ?? input.notebook_path ?? input.pattern ?? '';
+  return target ? `→ ${name} ${target}` : `→ ${name}`;
+}
+
+/**
+ * Turn one stream-json event into zero or more display lines. Walks an assistant
+ * message's content blocks so tool activity (Edit/Write/Bash/…) surfaces on the board,
+ * while still handling text/result/system and the mock adapter's flat-text shape.
+ */
+export function formatEvent(e: any): string[] {
+  if (!e || typeof e !== 'object') return [];
+  if (e.type === 'result') return [`● result: ${e.subtype ?? 'done'}`];
+  if (e.type === 'system') return [`○ ${e.subtype ?? 'system'}`];
+  if (e.type === 'assistant') {
+    const content = e.message?.content;
+    if (Array.isArray(content)) {
+      const out: string[] = [];
+      for (const b of content) {
+        if (b?.type === 'tool_use') out.push(formatToolUse(b));
+        else if (b?.type === 'text' && typeof b.text === 'string' && b.text.trim()) out.push(b.text.trim().slice(0, 120));
+      }
+      return out;
+    }
+    if (typeof e.text === 'string') return [e.text.slice(0, 120)];
+    return [];
+  }
+  if (typeof e.text === 'string') return [e.text.slice(0, 120)];
+  return [`${e.type ?? 'event'}`];
+}
+
+export function tailLog(path: string | null, n = 6): string[] {
   if (!path) return [];
   try {
     const lines = fs.readFileSync(path, 'utf8').trim().split('\n');
-    return lines.slice(-n).map((l) => {
+    const out: string[] = [];
+    for (const l of lines.slice(-40)) {
+      // bound parse work; one assistant event can yield several tool lines
       try {
-        const e = JSON.parse(l);
-        if (e.type === 'result') return `● result: ${e.subtype ?? 'done'}`;
-        if (typeof e.text === 'string') return e.text.slice(0, 120);
-        if (e.type === 'system') return `○ ${e.subtype ?? 'system'}`;
-        return `${e.type ?? 'event'}`;
+        out.push(...formatEvent(JSON.parse(l)));
       } catch {
-        return l.slice(0, 120);
+        out.push(l.slice(0, 120));
       }
-    });
+    }
+    return out.slice(-n);
   } catch {
     return [];
   }
@@ -95,7 +135,13 @@ export function boardState(db: Database.Database): BoardState {
       card.logTail = tailLog(run.log_path);
       card.branch = run.branch;
       const startedMs = new Date(run.started_at.replace(' ', 'T') + 'Z').getTime();
-      card.elapsedMin = Math.max(0, Math.round((Date.now() - startedMs) / 60000));
+      const elapsedMin = Math.max(0, (Date.now() - startedMs) / 60000);
+      card.elapsedMin = Math.round(elapsedMin);
+      const timeoutMin = timeoutMinFor(db, t);
+      card.timeoutMin = timeoutMin;
+      // % of the run's timeout budget elapsed; the web renders a real progress bar
+      // only when timeoutMin is present (never fabricates progress otherwise).
+      card.elapsedPct = timeoutMin > 0 ? Math.round((elapsedMin / timeoutMin) * 100) : null;
     }
     return card;
   });

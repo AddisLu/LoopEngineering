@@ -471,6 +471,23 @@ body {
   animation: pulse 1s ease-in-out infinite;
 }
 
+/* run progress toward the timeout budget (running cards only) */
+.progress {
+  margin-top: 10px;
+  height: 4px; border-radius: 999px;
+  background: var(--surface-sunk);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+.progress .bar {
+  height: 100%;
+  background: var(--st-running);
+  border-radius: 999px;
+  transition: width .4s ease;
+}
+.progress[data-state="warn"]   .bar { background: var(--warn); }
+.progress[data-state="danger"] .bar { background: var(--danger); }
+
 /* gate checklist */
 .check {
   display: flex; flex-wrap: wrap; gap: 5px 12px;

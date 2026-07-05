@@ -126,7 +126,11 @@
     meta.appendChild(el('span', 'chip mono', `P${c.priority}`));
     meta.appendChild(el('span', 'chip tool', c.model || c.coding_tool));
     if (c.status === 'queued') meta.appendChild(el('span', 'chip mono', `~${c.est_pct}%`));
-    if (c.elapsedMin != null) meta.appendChild(el('span', 'chip mono', fmtDur(c.elapsedMin)));
+    if (c.elapsedMin != null) {
+      // show elapsed against the run's timeout budget when we know it
+      const label = c.timeoutMin != null ? `${fmtDur(c.elapsedMin)} / ${fmtDur(c.timeoutMin)}` : fmtDur(c.elapsedMin);
+      meta.appendChild(el('span', 'chip mono', label));
+    }
     if (c.status === 'running' || c.status === 'verifying') {
       const w = el('span', 'chip working');
       w.appendChild(el('span', 'spin'));
@@ -134,6 +138,22 @@
       meta.appendChild(w);
     }
     card.appendChild(meta);
+
+    // run progress toward the timeout budget — only when timeoutMin is known
+    // (never fabricate progress; queued/verifying cards have no active run)
+    if (c.timeoutMin != null && c.elapsedPct != null) {
+      const w = Math.max(0, Math.min(100, Number(c.elapsedPct) || 0));
+      const prog = el('div', 'progress');
+      prog.dataset.state = c.elapsedPct >= 90 ? 'danger' : c.elapsedPct >= 70 ? 'warn' : 'ok';
+      prog.setAttribute('role', 'progressbar');
+      prog.setAttribute('aria-valuenow', String(Math.round(c.elapsedPct)));
+      prog.setAttribute('aria-valuemin', '0');
+      prog.setAttribute('aria-valuemax', '100');
+      const bar = el('div', 'bar');
+      bar.style.width = w + '%';
+      prog.appendChild(bar);
+      card.appendChild(prog);
+    }
 
     // draft gate checklist
     if (c.status === 'draft') {
