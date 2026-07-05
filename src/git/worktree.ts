@@ -37,6 +37,20 @@ export function addWorktree(repoPath: string, branch: string, baseBranch: string
   return { path: wtPath, branch };
 }
 
+/**
+ * Resolve a path inside this worktree's PRIVATE git dir (e.g. .git/worktrees/<id>/<name>).
+ * Such files are never tracked/committed and are removed together with the worktree — the
+ * right place for loop-internal sentinels (setup-done). Falls back to a dotfile in the tree.
+ */
+export function worktreeInternalFile(worktreePath: string, name: string): string {
+  try {
+    const p = git(worktreePath, ['rev-parse', '--git-path', name]).trim();
+    return path.isAbsolute(p) ? p : path.join(worktreePath, p);
+  } catch {
+    return path.join(worktreePath, `.${name}`);
+  }
+}
+
 export function isDirty(worktreePath: string): boolean {
   const out = git(worktreePath, ['status', '--porcelain']);
   return out.trim().length > 0;
