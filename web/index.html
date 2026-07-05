@@ -64,6 +64,7 @@
         <span id="conn" class="conn connecting" title="SSE 連線狀態" role="status">
           <span class="conn-dot"></span><span class="conn-text">連線中</span>
         </span>
+        <button id="settings-btn" class="btn icon-btn" type="button" title="排程設定" aria-label="排程設定">⚙</button>
         <button id="theme-btn" class="btn icon-btn" type="button" title="切換佈景" aria-label="切換佈景"></button>
         <button id="new-btn" class="btn primary" type="button">+ 新增 task</button>
       </div>
@@ -95,6 +96,39 @@
         <menu>
           <button value="cancel" class="btn" type="submit">取消</button>
           <button value="create" class="btn primary" id="create-btn" type="submit">建立</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <dialog id="settings-dialog">
+      <form id="settings-form" method="dialog">
+        <h3>排程設定</h3>
+        <p class="dialog-hint">門檻為用量百分比。儲存後立即生效（下一個 tick，免重啟）。</p>
+
+        <div class="settings-group">日間</div>
+        <label>日間時段 (HH:MM-HH:MM)<input name="day_window" placeholder="08:00-23:00" autocomplete="off" /></label>
+        <div class="row">
+          <label>Session 上限 %<input name="day_session_max" type="number" min="0" max="100" /></label>
+          <label>Weekly 上限 %<input name="day_weekly_max" type="number" min="0" max="100" /></label>
+        </div>
+
+        <div class="settings-group">夜間</div>
+        <div class="row">
+          <label>Session 上限 %<input name="night_session_max" type="number" min="0" max="100" /></label>
+          <label>Weekly 上限 %<input name="night_weekly_max" type="number" min="0" max="100" /></label>
+        </div>
+
+        <div class="settings-group">保護與排程</div>
+        <div class="row">
+          <label>硬上限 %（斷路器）<input name="hard_limit_pct" type="number" min="0" max="100" /></label>
+          <label>最少 runway（分）<input name="min_runway_min" type="number" min="0" /></label>
+          <label>並發數<input name="max_concurrency" type="number" min="0" /></label>
+        </div>
+
+        <p class="settings-err" id="settings-err" hidden></p>
+        <menu>
+          <button value="cancel" class="btn" type="submit">取消</button>
+          <button value="save" class="btn primary" id="settings-save" type="submit">儲存</button>
         </menu>
       </form>
     </dialog>

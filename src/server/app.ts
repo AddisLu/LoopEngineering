@@ -3,7 +3,8 @@ import fastifyStatic from '@fastify/static';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type Database from 'better-sqlite3';
-import { getDb, setSetting, getBool } from '../db/index.js';
+import { getDb, getSetting, setSetting, getBool } from '../db/index.js';
+import { validateSetting, TUNABLE_KEYS } from '../settings.js';
 import { createTask, getTask, setStatus, activeRuns } from '../tasks.js';
 import { validateTask } from '../gate/validateTask.js';
 import { readUsage } from '../token/usage.js';
@@ -141,6 +142,31 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
   app.post('/api/resume-scheduler', async () => {
     setSetting(db, 'scheduler_paused', 'false');
     return { ok: true, paused: false };
+  });
+
+  // --- tunable scheduler settings (day/night thresholds etc.), read/written from the board ---
+  const readSettings = (): Record<string, string> => {
+    const out: Record<string, string> = {};
+    for (const k of TUNABLE_KEYS) out[k] = getSetting(db, k) ?? '';
+    return out;
+  };
+  app.get('/api/settings', async () => ({ settings: readSettings() }));
+  app.post('/api/settings', async (req, reply) => {
+    const b = (req.body ?? {}) as { settings?: Record<string, unknown>; key?: string; value?: unknown };
+    const entries: [string, string][] = b.settings
+      ? Object.entries(b.settings).map(([k, v]) => [k, String(v)])
+      : b.key != null && b.value != null
+        ? [[b.key, String(b.value)]]
+        : [];
+    if (!entries.length) return reply.code(400).send({ error: 'no settings provided' });
+    const errors: Record<string, string> = {};
+    for (const [k, v] of entries) {
+      const err = validateSetting(k, v);
+      if (err) errors[k] = err;
+    }
+    if (Object.keys(errors).length) return reply.code(400).send({ error: 'validation failed', errors });
+    for (const [k, v] of entries) setSetting(db, k, v);
+    return { ok: true, settings: readSettings() };
   });
 
   // --- SSE: push a full board snapshot every second (+ immediately) ---

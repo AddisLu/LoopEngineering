@@ -13,34 +13,10 @@ import { validateTask } from './gate/validateTask.js';
 import { readUsage, setCachedUsage } from './token/usage.js';
 import { killRun } from './orchestrator/kill.js';
 import { DEFAULT_SETTINGS, type Complexity } from './config.js';
+import { validateSetting } from './settings.js';
 
 const program = new Command();
 program.name('loop').description('Loop Engineering — token-aware coding-task scheduler').version('0.1.0');
-
-const PERCENT_KEYS = new Set([
-  'day_session_max', 'day_weekly_max', 'night_session_max', 'night_weekly_max',
-  'hard_limit_pct', 'est_pct_S', 'est_pct_M', 'est_pct_L',
-]);
-const NONNEG_KEYS = new Set([
-  'max_concurrency', 'poll_interval_sec', 'min_runway_min',
-  'timeout_S', 'timeout_M', 'timeout_L', 'usage_refresh_sec', 'ledger_fallback_after_min',
-]);
-
-/** Light validation for the settings people actually tune; unknown keys pass through. */
-function validateSetting(key: string, value: string): string | null {
-  if (PERCENT_KEYS.has(key)) {
-    const n = Number(value);
-    if (!Number.isFinite(n) || n < 0 || n > 100) return `${key} must be a number between 0 and 100`;
-  } else if (NONNEG_KEYS.has(key)) {
-    const n = Number(value);
-    if (!Number.isFinite(n) || n < 0) return `${key} must be a non-negative number`;
-  } else if (key === 'day_window') {
-    if (!/^\d{2}:\d{2}-\d{2}:\d{2}$/.test(value)) return 'day_window must be HH:MM-HH:MM (e.g. 08:00-23:00)';
-  } else if (key === 'scheduler_paused') {
-    if (value !== 'true' && value !== 'false') return 'scheduler_paused must be true or false';
-  }
-  return null;
-}
 
 program
   .command('add')

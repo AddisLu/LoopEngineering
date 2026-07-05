@@ -276,6 +276,50 @@
     }
   });
 
+  // ---- settings panel (day/night thresholds etc.) ----------------------
+  const settingsDialog = $('settings-dialog');
+  const settingsForm = $('settings-form');
+  const settingsErr = $('settings-err');
+  $('settings-btn').onclick = async () => {
+    settingsErr.hidden = true;
+    try {
+      const { settings } = await api('/api/settings', 'GET');
+      for (const [k, v] of Object.entries(settings || {})) {
+        const input = settingsForm.elements.namedItem(k);
+        if (input) input.value = v;
+      }
+    } catch (e) { /* open anyway; inputs just start blank */ }
+    settingsDialog.showModal();
+  };
+  settingsForm.addEventListener('submit', async (e) => {
+    if (e.submitter && e.submitter.value !== 'save') return; // cancel closes normally
+    e.preventDefault();
+    const settings = {};
+    for (const [k, v] of new FormData(settingsForm).entries()) {
+      if (String(v).trim() !== '') settings[k] = String(v).trim();
+    }
+    const saveBtn = $('settings-save');
+    saveBtn.disabled = true;
+    settingsErr.hidden = true;
+    try {
+      const r = await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders },
+        body: JSON.stringify({ settings }),
+      });
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}));
+        throw body.errors ? Object.values(body.errors).join('；') : (body.error || r.statusText);
+      }
+      settingsDialog.close();
+    } catch (err) {
+      settingsErr.textContent = '儲存失敗：' + err;
+      settingsErr.hidden = false;
+    } finally {
+      saveBtn.disabled = false;
+    }
+  });
+
   // ---- SSE with reconnect fallback -------------------------------------
   const conn = $('conn');
   function setConn(kind, text) {
