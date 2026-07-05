@@ -100,6 +100,8 @@
     state.classList.toggle('paused', !!s.paused);
     state.querySelector('.s-text').textContent = s.paused ? '已暫停' : '排程執行中';
     $('pause-btn').textContent = s.paused ? '恢復排程' : '暫停排程';
+
+    $('self-update-badge').hidden = !s.self_update_pending;
   }
 
   // ---- card rendering --------------------------------------------------

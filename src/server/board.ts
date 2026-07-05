@@ -37,6 +37,7 @@ export interface BoardCard {
 export interface BoardState {
   ts: string;
   paused: boolean;
+  self_update_pending: boolean;
   usage: {
     session: number;
     weekly: number;
@@ -196,6 +197,7 @@ export function boardState(db: Database.Database): BoardState {
   return {
     ts: new Date().toISOString(),
     paused: getBool(db, 'scheduler_paused'),
+    self_update_pending: getBool(db, 'self_update_pending'),
     usage: {
       session: Math.round(usage.session.percent),
       weekly: Math.round(usage.weekly.percent),
