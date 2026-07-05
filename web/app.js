@@ -253,6 +253,7 @@
 
   const dialog = $('new-dialog');
   $('new-btn').onclick = () => dialog.showModal();
+  $('new-cancel').onclick = () => dialog.close();
 
   $('new-form').addEventListener('submit', async (e) => {
     if (e.submitter && e.submitter.value !== 'create') return; // cancel closes normally
@@ -293,6 +294,7 @@
     } catch (e) { /* open anyway; inputs just start blank */ }
     settingsDialog.showModal();
   };
+  $('settings-cancel').onclick = () => settingsDialog.close();
   settingsForm.addEventListener('submit', async (e) => {
     if (e.submitter && e.submitter.value !== 'save') return; // cancel closes normally
     e.preventDefault();
