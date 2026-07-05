@@ -2,7 +2,8 @@ import type Database from 'better-sqlite3';
 import { getDb, getNum } from './db/index.js';
 import { createEngine } from './engine.js';
 import { buildApp } from './server/app.js';
-import { notify } from './notify.js';
+import { notify, nearLimitEdge } from './notify.js';
+import { readUsage } from './token/usage.js';
 import { paths } from './config.js';
 
 /** Production entry: runs the scheduling loop AND serves the API/board. systemd runs this. */
@@ -14,6 +15,7 @@ export async function main(): Promise<void> {
   const pollMs = getNum(db, 'poll_interval_sec', 60) * 1000;
   let lastEventId = (db.prepare('SELECT COALESCE(MAX(id),0) n FROM task_events').get() as { n: number }).n;
   let lastActive = -1;
+  let nearWarned = false;
 
   const loop = () => {
     try {
@@ -21,9 +23,10 @@ export async function main(): Promise<void> {
     } catch (err) {
       console.error('[tick] error:', err);
     }
-    void pumpNotifications(db, lastEventId, lastActive).then((r) => {
+    void pumpNotifications(db, lastEventId, lastActive, nearWarned).then((r) => {
       lastEventId = r.lastEventId;
       lastActive = r.lastActive;
+      nearWarned = r.nearWarned;
     });
   };
 
@@ -51,7 +54,8 @@ async function pumpNotifications(
   db: Database.Database,
   lastEventId: number,
   lastActive: number,
-): Promise<{ lastEventId: number; lastActive: number }> {
+  nearWarned: boolean,
+): Promise<{ lastEventId: number; lastActive: number; nearWarned: boolean }> {
   const events = db
     .prepare(
       `SELECT id, task_id, kind, to_status, detail FROM task_events
@@ -84,7 +88,32 @@ async function pumpNotifications(
   if (lastActive > 0 && active === 0) {
     await notify(db, { title: 'Loop: all clear', message: 'Queue drained — nothing running.', tags: ['sparkles'] });
   }
-  return { lastEventId, lastActive: active };
+
+  // pre-emptive near-limit warning (edge-triggered): fire once as session% climbs
+  // into the warn band while a run is live, before the breaker actually interrupts.
+  const reading = readUsage();
+  const hardLimit = getNum(db, 'hard_limit_pct', 95);
+  const warnMargin = getNum(db, 'warn_margin_pct', 5);
+  const runningNow = (
+    db.prepare("SELECT COUNT(*) n FROM tasks WHERE status IN ('running','verifying')").get() as { n: number }
+  ).n;
+  const edge = nearLimitEdge({
+    sessionPct: reading.session.percent,
+    hardLimitPct: hardLimit,
+    warnMarginPct: warnMargin,
+    hasActiveRun: runningNow > 0,
+    alreadyWarned: nearWarned,
+  });
+  if (edge.fire) {
+    await notify(db, {
+      title: 'Loop: approaching usage limit',
+      message: `session ${Math.round(reading.session.percent)}% ≥ ${hardLimit - warnMargin}% (hard limit ${hardLimit}%). Breaker will interrupt at ${hardLimit}%.`,
+      priority: 'high',
+      tags: ['warning'],
+      withPauseAction: true,
+    });
+  }
+  return { lastEventId, lastActive: active, nearWarned: edge.warned };
 }
 
 const invoked = process.argv[1] && /server\.(ts|js)$/.test(process.argv[1]);

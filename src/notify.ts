@@ -2,6 +2,29 @@ import type Database from 'better-sqlite3';
 import { getSetting } from './db/index.js';
 
 /**
+ * Edge-triggered decision for the pre-emptive "approaching usage limit" warning.
+ * Fires exactly once when session% first crosses (hard_limit_pct - warn_margin_pct)
+ * WHILE a run is active, then stays quiet until usage drops back below the threshold
+ * (which re-arms it). Being above the threshold with nothing running keeps it armed
+ * but silent, so a warning still fires the moment a run starts.
+ *
+ * `alreadyWarned` is the caller-held edge state; feed back the returned `warned`.
+ */
+export function nearLimitEdge(opts: {
+  sessionPct: number;
+  hardLimitPct: number;
+  warnMarginPct: number;
+  hasActiveRun: boolean;
+  alreadyWarned: boolean;
+}): { fire: boolean; warned: boolean } {
+  const warnAt = opts.hardLimitPct - opts.warnMarginPct;
+  if (!(opts.sessionPct >= warnAt)) return { fire: false, warned: false }; // below -> re-arm
+  if (opts.alreadyWarned) return { fire: false, warned: true }; // already fired this excursion
+  if (!opts.hasActiveRun) return { fire: false, warned: false }; // armed, waiting for a run
+  return { fire: true, warned: true };
+}
+
+/**
  * Fire-and-forget ntfy push. warning/critical notifications carry a Pause action
  * button that POSTs /api/pause (with the bearer header) so you can stop the
  * scheduler from the phone notification shade — before the board even exists.

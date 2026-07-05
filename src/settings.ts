@@ -3,7 +3,7 @@
 
 export const PERCENT_KEYS = new Set([
   'day_session_max', 'day_weekly_max', 'night_session_max', 'night_weekly_max',
-  'hard_limit_pct', 'est_pct_S', 'est_pct_M', 'est_pct_L',
+  'hard_limit_pct', 'warn_margin_pct', 'est_pct_S', 'est_pct_M', 'est_pct_L',
 ]);
 export const NONNEG_KEYS = new Set([
   'max_concurrency', 'poll_interval_sec', 'min_runway_min', 'max_resumes',

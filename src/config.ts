@@ -55,6 +55,9 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // three-layer protection
   hard_limit_pct: '95', // circuit breaker
   min_runway_min: '20',
+  // pre-emptive warning margin below hard_limit_pct (edge-triggered ntfy while a run
+  // is active), so you hear about it before the breaker actually interrupts.
+  warn_margin_pct: '5',
 
   // resume policy: max auto-resume attempts before a blocked task escalates to failed
   // (shared by the orchestrator, scheduler tick, and crash recovery)
