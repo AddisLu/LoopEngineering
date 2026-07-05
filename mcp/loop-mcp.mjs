@@ -208,8 +208,18 @@ server.registerTool('loop_add_task', {
   const wantQueue = a.queue !== false; // DEFAULT: queue
   let queued = false, note = '';
   if (wantQueue) {
-    if (gate.ok) { await api(`/api/tasks/${id}/queue`, { method: 'POST' }); queued = true; }
-    else note = 'Wanted to queue but the gate is not satisfied — left as draft. Fix the missing fields below.';
+    if (gate.ok) {
+      // auto=true routes through the controlled queue path (max_autoqueue cap) so a burst
+      // of MCP calls can't flood autonomous spend; a rejection leaves the task as a draft.
+      try {
+        await api(`/api/tasks/${id}/queue`, { method: 'POST', body: { auto: true } });
+        queued = true;
+      } catch (e) {
+        note = `Auto-queue skipped: ${e.message}\nLeft as draft — queue it from the board / loop_queue_task, or raise max_autoqueue.`;
+      }
+    } else {
+      note = 'Wanted to queue but the gate is not satisfied — left as draft. Fix the missing fields below.';
+    }
   }
   const autofill = [
     `  repo:   ${repo ?? '(none — please provide repo_path)'}`,
@@ -270,6 +280,63 @@ server.registerTool('loop_status', {
 }, async () => {
   const s = await api('/api/status');
   return { content: [{ type: 'text', text: `paused: ${s.paused}\nsession: ${s.usage?.session}%  weekly: ${s.usage?.weekly}%  (source=${s.usage?.source})` }] };
+});
+
+// ---- inspect a task's outcome without opening the board ----
+function fmtResult(r) {
+  const lines = [
+    `Task ${r.id} — status: ${r.status}`,
+    r.branch ? `branch: ${r.branch}` : null,
+    r.elapsedMin != null ? `elapsed: ${r.elapsedMin}m` : null,
+    r.pr_url ? `PR: ${r.pr_url}` : null,
+    r.fail_detail ? `failure:\n${r.fail_detail}` : null,
+    r.review_md ? `\n--- gap review ---\n${String(r.review_md).slice(0, 2000)}` : null,
+    Array.isArray(r.log_tail) && r.log_tail.length ? `\n--- log tail ---\n${r.log_tail.join('\n')}` : null,
+  ].filter(Boolean);
+  return lines.join('\n');
+}
+
+server.registerTool('loop_task_result', {
+  title: 'Get a Loop task result',
+  description:
+    'Fetch the outcome of a Loop task WITHOUT opening the board: status, PR link, gap-review, failure reason, and a tail of the run log. ' +
+    'Use after loop_add_task to see how a run ended (PR to open, or why it failed).',
+  inputSchema: { id: z.string().describe('Task id, e.g. t_XXXXXXXX') },
+}, async ({ id }) => {
+  try {
+    const r = await api(`/api/tasks/${id}/result`);
+    return { content: [{ type: 'text', text: fmtResult(r) }] };
+  } catch (e) {
+    return { content: [{ type: 'text', text: `Could not get result for ${id}: ${e.message}` }] };
+  }
+});
+
+const WAIT_TERMINAL = new Set(['review', 'failed', 'closed']);
+server.registerTool('loop_wait_task', {
+  title: 'Wait for a Loop task to finish',
+  description:
+    'Poll a Loop task until it reaches a terminal state (review / failed / closed) or the timeout elapses, then return its result ' +
+    '(PR link / failure reason / log tail). Blocks until an autonomous run is done. A task may pause in "blocked" while the budget ' +
+    'recovers; waiting continues through blocked until it resolves or the timeout is hit.',
+  inputSchema: {
+    id: z.string().describe('Task id, e.g. t_XXXXXXXX'),
+    timeout_sec: z.number().int().optional().describe('max seconds to wait (default 900).'),
+  },
+}, async ({ id, timeout_sec }) => {
+  const budget = timeout_sec ?? 900;
+  const deadline = Date.now() + budget * 1000;
+  let r;
+  for (;;) {
+    try {
+      r = await api(`/api/tasks/${id}/result`);
+    } catch (e) {
+      return { content: [{ type: 'text', text: `Could not wait on ${id}: ${e.message}` }] };
+    }
+    if (WAIT_TERMINAL.has(r.status) || Date.now() >= deadline) break;
+    await new Promise((res) => setTimeout(res, 5000));
+  }
+  const head = WAIT_TERMINAL.has(r.status) ? '' : `(timed out after ${budget}s; still ${r.status})\n`;
+  return { content: [{ type: 'text', text: head + fmtResult(r) }] };
 });
 
 const transport = new StdioServerTransport();
