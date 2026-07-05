@@ -12,10 +12,35 @@ import {
 import { validateTask } from './gate/validateTask.js';
 import { readUsage, setCachedUsage } from './token/usage.js';
 import { killRun } from './orchestrator/kill.js';
-import type { Complexity } from './config.js';
+import { DEFAULT_SETTINGS, type Complexity } from './config.js';
 
 const program = new Command();
 program.name('loop').description('Loop Engineering — token-aware coding-task scheduler').version('0.1.0');
+
+const PERCENT_KEYS = new Set([
+  'day_session_max', 'day_weekly_max', 'night_session_max', 'night_weekly_max',
+  'hard_limit_pct', 'est_pct_S', 'est_pct_M', 'est_pct_L',
+]);
+const NONNEG_KEYS = new Set([
+  'max_concurrency', 'poll_interval_sec', 'min_runway_min',
+  'timeout_S', 'timeout_M', 'timeout_L', 'usage_refresh_sec', 'ledger_fallback_after_min',
+]);
+
+/** Light validation for the settings people actually tune; unknown keys pass through. */
+function validateSetting(key: string, value: string): string | null {
+  if (PERCENT_KEYS.has(key)) {
+    const n = Number(value);
+    if (!Number.isFinite(n) || n < 0 || n > 100) return `${key} must be a number between 0 and 100`;
+  } else if (NONNEG_KEYS.has(key)) {
+    const n = Number(value);
+    if (!Number.isFinite(n) || n < 0) return `${key} must be a non-negative number`;
+  } else if (key === 'day_window') {
+    if (!/^\d{2}:\d{2}-\d{2}:\d{2}$/.test(value)) return 'day_window must be HH:MM-HH:MM (e.g. 08:00-23:00)';
+  } else if (key === 'scheduler_paused') {
+    if (value !== 'true' && value !== 'false') return 'scheduler_paused must be true or false';
+  }
+  return null;
+}
 
 program
   .command('add')
@@ -174,6 +199,41 @@ program
     console.log(`usage cache set: session=${o.session}% weekly=${o.weekly}%`);
   });
 
+program
+  .command('config')
+  .description('view or change scheduler settings live (e.g. day/night thresholds)')
+  .argument('[action]', 'list | get | set', 'list')
+  .argument('[key]', 'setting key, e.g. day_session_max')
+  .argument('[value]', 'new value (for set)')
+  .action((action: string, key: string | undefined, value: string | undefined) => {
+    const db = getDb();
+    if (action === 'list') {
+      for (const k of Object.keys(DEFAULT_SETTINGS)) {
+        const cur = getSetting(db, k);
+        const def = DEFAULT_SETTINGS[k] ?? '';
+        const changed = cur !== undefined && cur !== def ? `  (default ${def})` : '';
+        console.log(`${pad(k, 27)} ${pad(cur ?? def, 14)}${changed}`);
+      }
+      return;
+    }
+    if (action === 'get') {
+      if (!key) return fail('usage: loop config get <key>');
+      console.log(getSetting(db, key) ?? DEFAULT_SETTINGS[key] ?? '(unset)');
+      return;
+    }
+    if (action === 'set') {
+      if (!key || value === undefined) return fail('usage: loop config set <key> <value>');
+      if (!(key in DEFAULT_SETTINGS)) console.warn(`warning: '${key}' is not a known setting`);
+      const err = validateSetting(key, value);
+      if (err) return fail(err);
+      const prev = getSetting(db, key);
+      setSetting(db, key, value);
+      console.log(`${key}: ${prev ?? '(unset)'} -> ${value}  (live next tick)`);
+      return;
+    }
+    return fail(`unknown action '${action}' — use: list | get | set`);
+  });
+
 program.parseAsync();
 
 function printGate(g: { ok: boolean; missing: string[]; warnings: string[] }): void {
@@ -190,5 +250,3 @@ function fail(msg: string): void {
   console.error(msg);
   process.exitCode = 1;
 }
-
-void getSetting;
