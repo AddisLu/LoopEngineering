@@ -68,9 +68,59 @@ export function countByStatus(db: Database.Database): Record<string, number> {
   return Object.fromEntries(rows.map((r) => [r.status, r.n]));
 }
 
-/** Permanently delete a task; FK ON DELETE CASCADE removes its runs + events. */
+/**
+ * Permanently delete a task and its associated rows (task_events, task_runs) in a
+ * single transaction. `defer_foreign_keys` lets us drop the children explicitly in
+ * child→parent order without tripping the run's self-referential `resume_of` FK.
+ * Returns whether the task existed. Delete is permanent (no soft-delete, by design).
+ */
 export function deleteTask(db: Database.Database, id: string): boolean {
-  return db.prepare('DELETE FROM tasks WHERE id = ?').run(id).changes > 0;
+  const tx = db.transaction((taskId: string): boolean => {
+    db.pragma('defer_foreign_keys = ON');
+    db.prepare('DELETE FROM task_events WHERE task_id = ?').run(taskId);
+    db.prepare('DELETE FROM task_runs WHERE task_id = ?').run(taskId);
+    return db.prepare('DELETE FROM tasks WHERE id = ?').run(taskId).changes > 0;
+  });
+  return tx(id);
+}
+
+/** Statuses that batch-prune must NEVER delete — in-flight or awaiting a human. */
+export const NEVER_PRUNE: readonly string[] = ['running', 'verifying', 'queued', 'blocked', 'review'];
+/** Default prune targets: only truly terminal tasks. */
+export const DEFAULT_PRUNE_STATUS: readonly string[] = ['closed', 'failed'];
+
+export interface PruneFilter {
+  status?: string[];
+  olderThanDays?: number;
+}
+
+/**
+ * Tasks eligible for batch prune, filtered by status and age. Requested statuses
+ * are intersected with a safety guard: anything active/blocked/review is dropped,
+ * so `tasksForPrune` can never surface a task that prune is forbidden to delete.
+ * Age is measured on `updated_at` (when the task last changed, ~ entered its
+ * terminal state). Returns [] when the effective status set is empty.
+ */
+export function tasksForPrune(db: Database.Database, filter: PruneFilter = {}): Task[] {
+  const requested = filter.status?.length ? filter.status : DEFAULT_PRUNE_STATUS;
+  const statuses = [...new Set(requested)].filter((s) => !NEVER_PRUNE.includes(s));
+  if (statuses.length === 0) return [];
+  const placeholders = statuses.map(() => '?').join(', ');
+  const params: unknown[] = [...statuses];
+  let sql = `SELECT * FROM tasks WHERE status IN (${placeholders})`;
+  if (filter.olderThanDays != null && Number.isFinite(filter.olderThanDays) && filter.olderThanDays > 0) {
+    sql += " AND updated_at <= datetime('now', ?)";
+    params.push(`-${filter.olderThanDays} days`);
+  }
+  sql += ' ORDER BY updated_at ASC';
+  return db.prepare(sql).all(...params) as Task[];
+}
+
+/** All runs for a task, newest first — used to reach on-disk artifacts before delete. */
+export function listRunsForTask(db: Database.Database, taskId: string): TaskRun[] {
+  return db
+    .prepare('SELECT * FROM task_runs WHERE task_id = ? ORDER BY started_at DESC')
+    .all(taskId) as TaskRun[];
 }
 
 /**

@@ -49,6 +49,13 @@
     try { await api(path); }
     catch (e) { alert('操作失敗: ' + e); }
   }
+  // Permanent delete with a confirm gate. The SSE stream drops the card on the next tick.
+  // Returns true if the task was actually deleted.
+  async function delTask(id, title) {
+    if (!confirm(`確定永久刪除「${title}」？此動作無法復原（含 worktree／plan／logs）。`)) return false;
+    try { await api('/api/tasks/' + id, 'DELETE'); return true; }
+    catch (e) { alert('刪除失敗：' + e); return false; }
+  }
 
   // ---- theme -----------------------------------------------------------
   const themeBtn = $('theme-btn');
@@ -196,6 +203,13 @@
     }
     if (c.status === 'failed')
       actions.appendChild(btn('結案', '', () => act(`/api/tasks/${c.id}/close`)));
+    // small trash action on terminal cards (review/failed/closed) — permanent delete
+    if (c.status === 'review' || c.status === 'failed' || c.status === 'closed') {
+      const del = btn('🗑', 'del danger-ghost', () => delTask(c.id, c.title));
+      del.title = '永久刪除';
+      del.setAttribute('aria-label', '永久刪除');
+      actions.appendChild(del);
+    }
     if (actions.childElementCount) card.appendChild(actions);
   }
 
@@ -344,6 +358,62 @@
     }
   });
 
+  // ---- prune / cleanup panel -------------------------------------------
+  const pruneDialog = $('prune-dialog');
+  const pruneForm = $('prune-form');
+  const pruneResult = $('prune-result');
+  const pruneErr = $('prune-err');
+  $('prune-btn').onclick = () => {
+    pruneResult.hidden = true;
+    pruneErr.hidden = true;
+    pruneDialog.showModal();
+  };
+  $('prune-cancel').onclick = () => pruneDialog.close();
+
+  function pruneBody() {
+    const status = [...pruneForm.querySelectorAll('input[name="status"]:checked')].map((i) => i.value);
+    const older = String(pruneForm.elements.older_than.value || '').trim();
+    const body = {};
+    if (status.length) body.status = status;
+    if (older !== '') body.olderThanDays = Number(older);
+    return body;
+  }
+  async function prunePost(body) {
+    const r = await fetch('/api/tasks/prune', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...authHeaders },
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) throw await r.text().catch(() => r.statusText);
+    return r.json();
+  }
+  function showPruneList(res, verb) {
+    pruneErr.hidden = true;
+    pruneResult.textContent = res.count
+      ? `${verb} ${res.count} 個任務：${res.ids.join('、')}`
+      : '沒有符合條件的任務。';
+    pruneResult.hidden = false;
+  }
+  $('prune-preview').onclick = async () => {
+    try { showPruneList(await prunePost({ ...pruneBody(), dryRun: true }), '將刪除'); }
+    catch (e) { pruneErr.textContent = '預覽失敗：' + e; pruneErr.hidden = false; }
+  };
+  $('prune-run').onclick = async () => {
+    pruneErr.hidden = true;
+    let preview;
+    try { preview = await prunePost({ ...pruneBody(), dryRun: true }); }
+    catch (e) { pruneErr.textContent = '清理失敗：' + e; pruneErr.hidden = false; return; }
+    if (!preview.count) { showPruneList(preview, '將刪除'); return; }
+    if (!confirm(`確定永久刪除 ${preview.count} 個任務及其產物（worktree／plan／logs）？此動作無法復原。`)) return;
+    try {
+      showPruneList(await prunePost(pruneBody()), '已刪除');
+      setTimeout(() => pruneDialog.close(), 1000);
+    } catch (e) {
+      pruneErr.textContent = '清理失敗：' + e;
+      pruneErr.hidden = false;
+    }
+  };
+
   // ---- card detail modal (click a card) --------------------------------
   const detailDialog = $('detail-dialog');
   const detailBody = $('detail-body');
@@ -410,13 +480,14 @@
     detailBody.appendChild(list);
 
     const menu = el('menu');
-    if (t.status !== 'running' && t.status !== 'verifying') {
+    // Delete from the detail modal — hidden for active states (running/verifying/queued),
+    // which the API refuses without force; abort/dequeue those first.
+    if (t.status !== 'running' && t.status !== 'verifying' && t.status !== 'queued') {
       const del = el('button', 'btn danger-ghost', '刪除'); del.type = 'button';
       del.onclick = async () => {
-        if (!confirm(`確定永久刪除「${t.title}」？此動作無法復原。`)) return;
         del.disabled = true;
-        try { await api('/api/tasks/' + t.id, 'DELETE'); detailDialog.close(); }
-        catch (e) { alert('刪除失敗：' + e); del.disabled = false; }
+        if (await delTask(t.id, t.title)) detailDialog.close();
+        else del.disabled = false;
       };
       menu.appendChild(del);
     }

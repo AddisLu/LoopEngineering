@@ -65,6 +65,7 @@
           <span class="conn-dot"></span><span class="conn-text">連線中</span>
         </span>
         <button id="settings-btn" class="btn icon-btn" type="button" title="排程設定" aria-label="排程設定">⚙</button>
+        <button id="prune-btn" class="btn icon-btn" type="button" title="清理終態任務" aria-label="清理終態任務">🧹</button>
         <button id="theme-btn" class="btn icon-btn" type="button" title="切換佈景" aria-label="切換佈景"></button>
         <button id="new-btn" class="btn primary" type="button">+ 新增 task</button>
       </div>
@@ -129,6 +130,29 @@
         <menu>
           <button class="btn" type="button" id="settings-cancel">取消</button>
           <button value="save" class="btn primary" id="settings-save" type="submit">儲存</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <dialog id="prune-dialog">
+      <form id="prune-form" method="dialog">
+        <h3>清理任務</h3>
+        <p class="dialog-hint">永久刪除終態任務與其磁碟產物（worktree／plan／logs）。不會動到執行中、blocked 或待結案（review）的任務。</p>
+
+        <div class="settings-group">狀態</div>
+        <div class="chk-row">
+          <label class="chk"><input type="checkbox" name="status" value="closed" checked /> closed</label>
+          <label class="chk"><input type="checkbox" name="status" value="failed" checked /> failed</label>
+        </div>
+
+        <label>只清理 N 天前更新的（留空 = 不限）<input name="older_than" type="number" min="0" placeholder="例如 7" autocomplete="off" /></label>
+
+        <p class="prune-result" id="prune-result" hidden></p>
+        <p class="settings-err" id="prune-err" hidden></p>
+        <menu>
+          <button class="btn" type="button" id="prune-cancel">取消</button>
+          <button class="btn" type="button" id="prune-preview">預覽</button>
+          <button class="btn danger" type="button" id="prune-run">清理</button>
         </menu>
       </form>
     </dialog>
