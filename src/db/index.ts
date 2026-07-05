@@ -66,6 +66,8 @@ function migrate(db: Database.Database): void {
     ['merge_status', 'TEXT'],
     ['parent_task_id', 'TEXT'],
   ]);
+  // knowledge base: optional environment label a task's knowledge should be scoped to
+  add('tasks', [['environment', 'TEXT']]);
 }
 
 function seedSettings(db: Database.Database): void {

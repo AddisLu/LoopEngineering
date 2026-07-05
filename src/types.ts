@@ -23,6 +23,7 @@ export interface Task {
   est_session_pct: number | null;
   merge_status: string | null;
   parent_task_id: string | null;
+  environment: string | null;
   created_at: string;
   updated_at: string;
 }
