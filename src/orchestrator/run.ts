@@ -19,6 +19,7 @@ import { resolvePolicy } from '../scheduler/policy.js';
 import { addWorktree, isDirty, commitAll, diffstat, excludeLocal, worktreeInternalFile } from '../git/worktree.js';
 import { timeoutMinFor } from '../scheduler/timeout.js';
 import { writeTaskFile, writeResumeContext, collectResumeContext } from './prompt.js';
+import { knowledgeContext } from '../knowledge/context.js';
 import { writeSettingsLocal } from './settingsLocal.js';
 import { runVerification, type VerifyResult } from './verify.js';
 import { runGapReview } from '../review/gapReviewer.js';
@@ -121,7 +122,7 @@ export async function runTask(
     dispatch_window: dispatchWindow,
   });
 
-  const taskFilePath = writeTaskFile(worktreePath, task);
+  const taskFilePath = writeTaskFile(worktreePath, task, { knowledge: knowledgeContext(db, task) });
   if (!isMock) {
     // Keep engine-written artifacts out of the task branch/PR: exclude them locally
     // before any commitAll (checkpoint or auto-commit) can `git add -A` them.

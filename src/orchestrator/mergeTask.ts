@@ -72,6 +72,7 @@ ${fileList}
     complexity: 'S',
     priority: orig.priority + 1,
     model: orig.model,
+    environment: orig.environment,
   });
 
   // 2. Pre-create the branch loop/<newId> at the original work tip, so addWorktree's

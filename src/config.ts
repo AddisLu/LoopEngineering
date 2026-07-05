@@ -155,6 +155,12 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // on main) instead of waiting for a human to close it. true = zero-touch chains;
   // false (default) = human close stays the approval gate for each chain link.
   dep_done_on_merge: 'false',
+
+  // knowledge base: inject a ranked `## Knowledge / Environment` section into
+  // LOOP_TASK.md on every dispatch (see src/knowledge/context.ts). Char budget is a
+  // greedy-pack cap so the section stays small relative to Goal/Plan.
+  knowledge_inject: 'true',
+  knowledge_budget_chars: '2500',
 };
 
 export const TOKEN_REFRESH_MS = 180_000; // TokenBar cadence
