@@ -68,6 +68,11 @@ export function countByStatus(db: Database.Database): Record<string, number> {
   return Object.fromEntries(rows.map((r) => [r.status, r.n]));
 }
 
+/** Permanently delete a task; FK ON DELETE CASCADE removes its runs + events. */
+export function deleteTask(db: Database.Database, id: string): boolean {
+  return db.prepare('DELETE FROM tasks WHERE id = ?').run(id).changes > 0;
+}
+
 /**
  * Transition a task's status and record it. Guards against unknown transitions are
  * kept loose on purpose (the scheduler/orchestrator own the state machine); this is

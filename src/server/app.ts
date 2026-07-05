@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import type Database from 'better-sqlite3';
 import { getDb, getSetting, setSetting, getBool } from '../db/index.js';
 import { validateSetting, TUNABLE_KEYS } from '../settings.js';
-import { createTask, getTask, setStatus, activeRuns } from '../tasks.js';
+import { createTask, getTask, setStatus, activeRuns, deleteTask } from '../tasks.js';
 import { validateTask } from '../gate/validateTask.js';
 import { readUsage } from '../token/usage.js';
 import { killRun } from '../orchestrator/kill.js';
@@ -130,6 +130,18 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
     }
     setStatus(db, id, 'failed', { detail: 'aborted via api' });
     return { ok: true };
+  });
+
+  app.delete('/api/tasks/:id', async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    const t = getTask(db, id);
+    if (!t) return reply.code(404).send({ error: 'not found' });
+    if (t.status === 'running' || t.status === 'verifying') {
+      return reply.code(409).send({ error: 'task is active — abort it first' });
+    }
+    for (const r of activeRuns(db).filter((r) => r.task_id === id)) killRun(db, { id: r.id, pid: r.pid }, 'user');
+    deleteTask(db, id);
+    return { ok: true, deleted: id };
   });
 
   app.post('/api/pause', async (req) => {

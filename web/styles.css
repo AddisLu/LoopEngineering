@@ -374,6 +374,7 @@ body {
 /* ---- Card -------------------------------------------------- */
 .card {
   position: relative;
+  flex-shrink: 0;   /* never squish cards in the flex column — was clipping the button/banner */
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: var(--r);
@@ -587,6 +588,7 @@ dialog menu { display: flex; justify-content: flex-end; gap: 10px; margin: 18px 
 .d-v { color: var(--text); word-break: break-word; white-space: pre-wrap; }
 .d-v a { color: var(--accent); }
 .d-loading { color: var(--text-3); padding: 24px 0; text-align: center; }
+#detail-dialog menu { justify-content: space-between; }
 
 /* ---- Responsive ------------------------------------------- */
 @media (max-width: 720px) {

@@ -388,6 +388,16 @@
     detailBody.appendChild(list);
 
     const menu = el('menu');
+    if (t.status !== 'running' && t.status !== 'verifying') {
+      const del = el('button', 'btn danger-ghost', '刪除'); del.type = 'button';
+      del.onclick = async () => {
+        if (!confirm(`確定永久刪除「${t.title}」？此動作無法復原。`)) return;
+        del.disabled = true;
+        try { await api('/api/tasks/' + t.id, 'DELETE'); detailDialog.close(); }
+        catch (e) { alert('刪除失敗：' + e); del.disabled = false; }
+      };
+      menu.appendChild(del);
+    }
     const close = el('button', 'btn primary', '關閉'); close.type = 'button';
     close.onclick = () => detailDialog.close();
     menu.appendChild(close);
