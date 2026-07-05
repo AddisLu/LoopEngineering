@@ -6,7 +6,7 @@ export const PERCENT_KEYS = new Set([
   'hard_limit_pct', 'est_pct_S', 'est_pct_M', 'est_pct_L',
 ]);
 export const NONNEG_KEYS = new Set([
-  'max_concurrency', 'poll_interval_sec', 'min_runway_min',
+  'max_concurrency', 'poll_interval_sec', 'min_runway_min', 'max_resumes',
   'timeout_S', 'timeout_M', 'timeout_L', 'usage_refresh_sec', 'ledger_fallback_after_min',
 ]);
 

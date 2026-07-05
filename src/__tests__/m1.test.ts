@@ -135,6 +135,34 @@ describe('circuit breaker -> blocked -> auto-resume', () => {
   });
 });
 
+describe('resume budget exhaustion escalates to failed', () => {
+  it('fails (not blocks) a breaker-interrupted task once resume_count exceeds max_resumes', async () => {
+    process.env.MOCK_SLEEP_MS = '5000';
+    const t = createTask(db, MOCK_TASK);
+    setStatus(db, t.id, 'queued');
+    // pretend it has already been auto-resumed up to the limit (max_resumes default 2)
+    db.prepare('UPDATE tasks SET resume_count = ? WHERE id = ?').run(2, t.id);
+
+    const p = runTask(db, getTask(db, t.id)!, {});
+    await waitFor(() => !!(db.prepare('SELECT session_id FROM task_runs WHERE task_id=?').get(t.id) as any)?.session_id);
+
+    // breaker trips
+    setCachedUsage(96, 10);
+    tick(db, { inflightCount: () => 1, startRun: () => {} });
+    await p;
+
+    const done = getTask(db, t.id)!;
+    expect(done.status).toBe('failed'); // NOT a zombie 'blocked'
+    expect(done.resume_count).toBe(3); // 2 -> bumped to 3, which is > max_resumes
+    const run = db.prepare('SELECT * FROM task_runs WHERE task_id=? ORDER BY started_at DESC LIMIT 1').get(t.id) as any;
+    expect(run.interrupted_by).toBe('breaker');
+    const ev = db
+      .prepare("SELECT detail FROM task_events WHERE task_id=? AND kind='status' AND to_status='failed' ORDER BY id DESC LIMIT 1")
+      .get(t.id) as any;
+    expect(String(ev?.detail)).toMatch(/resume limit/);
+  });
+});
+
 describe('crash recovery', () => {
   it('orphans a run whose process is gone and blocks its task', () => {
     const t = createTask(db, MOCK_TASK);

@@ -105,9 +105,12 @@ interface Candidate {
 }
 
 function buildCandidates(db: Database.Database, policy: Policy): Candidate[] {
-  // resume-priority: blocked tasks with a session_id and resume budget left
+  // resume-priority: blocked tasks with a session_id and resume budget left.
+  // resume_count <= max_resumes aligns with run.ts / recovery.ts, which fail a task
+  // once its count exceeds max_resumes — so no blocked task is left un-resumable.
+  const maxResumes = getNum(db, 'max_resumes', 2);
   const resumes: Candidate[] = listTasks(db, 'blocked')
-    .filter((t) => t.resume_count < 2 && latestRun(db, t.id)?.session_id)
+    .filter((t) => t.resume_count <= maxResumes && latestRun(db, t.id)?.session_id)
     .map((t) => ({ task: t, resume: true }));
 
   const queued = listTasks(db, 'queued');

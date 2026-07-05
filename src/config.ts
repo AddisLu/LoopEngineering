@@ -56,6 +56,10 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   hard_limit_pct: '95', // circuit breaker
   min_runway_min: '20',
 
+  // resume policy: max auto-resume attempts before a blocked task escalates to failed
+  // (shared by the orchestrator, scheduler tick, and crash recovery)
+  max_resumes: '2',
+
   // timeouts (minutes) per complexity
   timeout_S: '15',
   timeout_M: '45',

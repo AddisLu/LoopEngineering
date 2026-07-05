@@ -157,8 +157,19 @@ export async function runTask(
     return;
   }
   if (finished.interrupted_by === 'breaker' || finished.interrupted_by === 'user') {
-    bumpResume(db, task.id);
-    setStatus(db, task.id, 'blocked', { run_id: run.id, detail: `interrupted: ${finished.interrupted_by}` });
+    const resumes = bumpResume(db, task.id);
+    const maxResumes = getNum(db, 'max_resumes', 2);
+    // Once the resume budget is spent the scheduler would never re-dispatch it
+    // (tick only resumes resume_count <= max_resumes), so escalate to failed
+    // instead of leaving a zombie 'blocked' task. Mirrors recovery.ts.
+    if (resumes > maxResumes) {
+      setStatus(db, task.id, 'failed', {
+        run_id: run.id,
+        detail: `resume limit (${maxResumes}) exceeded; interrupted: ${finished.interrupted_by}`,
+      });
+    } else {
+      setStatus(db, task.id, 'blocked', { run_id: run.id, detail: `interrupted: ${finished.interrupted_by}` });
+    }
     return;
   }
   if (result.error || (result.exitCode !== 0 && result.resultSubtype !== 'success')) {
