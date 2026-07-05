@@ -323,7 +323,24 @@
   };
 
   const dialog = $('new-dialog');
-  $('new-btn').onclick = () => dialog.showModal();
+  const envList = $('env-list');
+  // env:<name> scopes -> distinct names, refreshed each time the dialog opens (knowledge
+  // changes slowly; no need to keep this live).
+  async function fillEnvList() {
+    try {
+      const { nodes } = await api('/api/knowledge?kind=environment', 'GET');
+      const names = [...new Set((nodes || [])
+        .map((n) => (n.scope || '').startsWith('env:') ? n.scope.slice(4) : null)
+        .filter(Boolean))];
+      envList.replaceChildren();
+      for (const name of names) {
+        const opt = document.createElement('option');
+        opt.value = name;
+        envList.appendChild(opt);
+      }
+    } catch (e) { /* datalist just stays empty */ }
+  }
+  $('new-btn').onclick = () => { fillEnvList(); dialog.showModal(); };
   $('new-cancel').onclick = () => dialog.close();
 
   $('new-form').addEventListener('submit', async (e) => {

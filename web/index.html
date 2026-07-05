@@ -68,6 +68,7 @@
         <button id="settings-btn" class="btn icon-btn" type="button" title="排程設定" aria-label="排程設定">⚙</button>
         <button id="prune-btn" class="btn icon-btn" type="button" title="清理終態任務" aria-label="清理終態任務">🧹</button>
         <button id="theme-btn" class="btn icon-btn" type="button" title="切換佈景" aria-label="切換佈景"></button>
+        <a class="btn" href="/brain.html">知識庫</a>
         <button id="new-btn" class="btn primary" type="button">+ 新增 task</button>
       </div>
     </header>
@@ -104,6 +105,10 @@
           <label>Base branch <input name="base_branch" placeholder="main" autocomplete="off" /></label>
         </div>
         <label>Setup cmd <input name="setup_cmd" placeholder="npm ci" autocomplete="off" /></label>
+        <label>Environment（選填，套用對應 env:&lt;name&gt; 知識）
+          <input name="environment" list="env-list" placeholder="company / home" autocomplete="off" />
+          <datalist id="env-list"></datalist>
+        </label>
         <menu>
           <button class="btn" type="button" id="new-cancel">取消</button>
           <button value="create" class="btn primary" id="create-btn" type="submit">建立</button>
