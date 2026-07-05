@@ -16,7 +16,7 @@
     ['Draft · 入場審核', ['draft']],
     ['Queued', ['ready', 'queued', 'blocked']],
     ['Running', ['running', 'verifying']],
-    ['Review · 結案', ['review', 'failed']],
+    ['Review · 結案', ['review', 'failed', 'attention']],
     ['Closed', ['closed']],
   ];
 
@@ -183,6 +183,11 @@
     // status banners
     if (c.status === 'blocked') card.appendChild(el('div', 'banner info', '⏸ blocked · 可自動 resume'));
     if (c.status === 'failed') card.appendChild(el('div', 'banner danger', 'verify/執行失敗'));
+    if (c.status === 'attention') {
+      card.appendChild(el('div', 'banner attn', '⚠ 待確認'));
+      // dynamic text goes through el()/textContent — never innerHTML
+      if (c.fail_detail) card.appendChild(el('div', 'fail-detail', c.fail_detail));
+    }
     if (c.status === 'review') {
       card.appendChild(el('div', 'banner ok', '✓ verify 通過，待結案'));
       // git close-out state
@@ -219,8 +224,19 @@
     }
     if (c.status === 'failed')
       actions.appendChild(btn('結案', '', () => act(`/api/tasks/${c.id}/close`)));
-    // small trash action on terminal cards (review/failed/closed) — permanent delete
-    if (c.status === 'review' || c.status === 'failed' || c.status === 'closed') {
+    // attention triage: 續跑 (resume the session) / 重來 (fresh from base) / 放棄
+    if (c.status === 'attention') {
+      actions.appendChild(btn('續跑', 'primary', () => act(`/api/tasks/${c.id}/resume`)));
+      actions.appendChild(btn('重來', '', () => {
+        if (confirm(`確定重來「${c.title}」？將刪除現有 worktree／branch，從最新 base 重新開始。`))
+          act(`/api/tasks/${c.id}/restart`);
+      }));
+      actions.appendChild(btn('放棄', 'danger-ghost', () => {
+        if (confirm(`確定放棄「${c.title}」？任務將標記為 failed。`)) act(`/api/tasks/${c.id}/abandon`);
+      }));
+    }
+    // small trash action on terminal cards (review/failed/attention/closed) — permanent delete
+    if (c.status === 'review' || c.status === 'failed' || c.status === 'attention' || c.status === 'closed') {
       const del = btn('🗑', 'del danger-ghost', () => delTask(c.id, c.title));
       del.title = '永久刪除';
       del.setAttribute('aria-label', '永久刪除');
@@ -435,10 +451,13 @@
   const detailBody = $('detail-body');
   const STATUS_LABEL = {
     draft: 'Draft', ready: 'Ready', queued: 'Queued', running: 'Running',
-    verifying: 'Verifying', blocked: 'Blocked', review: 'Review', failed: 'Failed', closed: 'Closed',
+    verifying: 'Verifying', blocked: 'Blocked', attention: '待確認',
+    review: 'Review', failed: 'Failed', closed: 'Closed',
   };
   function statusExplain(t, gate) {
     switch (t.status) {
+      case 'attention':
+        return '執行出問題，已保留 worktree／session／交接檔，等你決定：續跑／重來／放棄。';
       case 'draft':
         return gate.ok
           ? '已通過入場審核。這是「草稿」——按卡片上的「加入排程」才會進入佇列（例如 Phase 2/3 是刻意保留的草稿）。'
@@ -496,6 +515,23 @@
     detailBody.appendChild(list);
 
     const menu = el('menu');
+    // attention triage from the modal too: 續跑 / 重來 / 放棄
+    if (t.status === 'attention') {
+      const actBtn = (label, cls, confirmMsg, path) => {
+        const b = el('button', `btn ${cls}`.trim(), label);
+        b.type = 'button';
+        b.onclick = async () => {
+          if (confirmMsg && !confirm(confirmMsg)) return;
+          b.disabled = true;
+          await act(path);
+          detailDialog.close();
+        };
+        return b;
+      };
+      menu.appendChild(actBtn('續跑', 'primary', null, `/api/tasks/${t.id}/resume`));
+      menu.appendChild(actBtn('重來', '', `確定重來「${t.title}」？將刪除現有 worktree／branch，從最新 base 重新開始。`, `/api/tasks/${t.id}/restart`));
+      menu.appendChild(actBtn('放棄', 'danger-ghost', `確定放棄「${t.title}」？任務將標記為 failed。`, `/api/tasks/${t.id}/abandon`));
+    }
     // Delete from the detail modal — hidden for active states (running/verifying/queued),
     // which the API refuses without force; abort/dequeue those first.
     if (t.status !== 'running' && t.status !== 'verifying' && t.status !== 'queued') {

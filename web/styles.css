@@ -36,6 +36,7 @@
   --st-running:    #a9701c;
   --st-verifying:  #7d6bbf;
   --st-review:     #3f6fa8;
+  --st-attention:  #9a6a10;
   --st-failed:     #b23b34;
   --st-closed:     #a79f90;
 
@@ -90,6 +91,7 @@
   --st-running:    #e0a24a;
   --st-verifying:  #a595e0;
   --st-review:     #7fa9dd;
+  --st-attention:  #e8b558;
   --st-failed:     #e08078;
   --st-closed:     #8f877a;
 
@@ -426,6 +428,7 @@ body {
 .card.s-running  { --rail: var(--st-running); }
 .card.s-verifying{ --rail: var(--st-verifying); }
 .card.s-review   { --rail: var(--st-review); }
+.card.s-attention{ --rail: var(--st-attention); }
 .card.s-failed   { --rail: var(--st-failed); }
 .card.s-closed   { --rail: var(--st-closed); }
 .card.gate-bad   { --rail: var(--st-failed); }
@@ -534,6 +537,20 @@ body {
 .banner.info   { background: var(--warn-soft);  color: var(--warn); }
 .banner.ok     { background: var(--ok-soft);     color: var(--ok); }
 .banner.danger { background: var(--danger-soft); color: var(--danger); }
+.banner.attn   { background: color-mix(in srgb, var(--st-attention) 14%, transparent); color: var(--st-attention); }
+
+/* attention triage: the failure detail shown under the ⚠ 待確認 banner */
+.fail-detail {
+  margin-top: 8px;
+  font-family: var(--mono); font-size: 11px; line-height: 1.5;
+  background: var(--surface-sunk);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 8px 10px;
+  color: var(--text-2);
+  white-space: pre-wrap; word-break: break-word;
+  max-height: 96px; overflow: hidden;
+}
 
 /* log tail */
 .logtail {
@@ -629,6 +646,10 @@ dialog menu { display: flex; justify-content: flex-end; gap: 10px; margin: 18px 
   font-size: 11px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase;
   padding: 3px 9px; border-radius: 999px;
   background: var(--surface-sunk); color: var(--text-2); border: 1px solid var(--hairline);
+}
+.d-badge.s-attention {
+  color: var(--st-attention);
+  border-color: color-mix(in srgb, var(--st-attention) 35%, transparent);
 }
 .d-explain {
   font-size: 13px; color: var(--text-2); line-height: 1.6;

@@ -24,6 +24,7 @@ export interface BoardCard {
   merge_status: string | null;
   est_pct: number;
   updated_at: string;
+  fail_detail?: string | null; // latest failure/interrupt detail (attention/failed/blocked)
   logTail?: string[];
   branch?: string | null;
   elapsedMin?: number | null;
@@ -130,6 +131,11 @@ export function boardState(db: Database.Database): BoardState {
   const policy = resolvePolicy(db);
   const runs = activeRuns(db);
   const runByTask = new Map(runs.map((r) => [r.task_id, r]));
+  const failDetailStmt = db.prepare(
+    `SELECT detail FROM task_events
+      WHERE task_id = ? AND to_status IN ('attention','failed','blocked') AND detail IS NOT NULL
+      ORDER BY id DESC LIMIT 1`,
+  );
 
   const cards: BoardCard[] = listTasks(db).map((t: Task) => {
     let verify: string[] = [];
@@ -158,6 +164,16 @@ export function boardState(db: Database.Database): BoardState {
     if (t.depends_on) {
       card.depends_on = t.depends_on;
       card.dep_state = dependencyState(db, t);
+    }
+    if (t.status === 'attention' || t.status === 'failed' || t.status === 'blocked') {
+      const ev = failDetailStmt.get(t.id) as { detail: string } | undefined;
+      card.fail_detail = ev?.detail ?? null;
+      // attention triage needs the run's last activity; its run is finished, so it is
+      // not in the activeRuns map — pull the latest run's log explicitly.
+      if (t.status === 'attention' && !run) {
+        const last = latestRun(db, t.id);
+        if (last) card.logTail = tailLog(last.log_path);
+      }
     }
     if (run) {
       card.logTail = tailLog(run.log_path);
@@ -196,7 +212,7 @@ export function boardState(db: Database.Database): BoardState {
 
 /**
  * Full outcome of a task for editors/MCP: PR link, gap-review markdown, the failure
- * reason (for failed/blocked), a tail of the run log, branch, and elapsed minutes.
+ * reason (for attention/failed/blocked), a tail of the run log, branch, and elapsed minutes.
  */
 export function taskResult(db: Database.Database, id: string): TaskResult | null {
   const t = getTask(db, id);
@@ -213,11 +229,11 @@ export function taskResult(db: Database.Database, id: string): TaskResult | null
   }
 
   let fail_detail: string | null = null;
-  if (t.status === 'failed' || t.status === 'blocked') {
+  if (t.status === 'attention' || t.status === 'failed' || t.status === 'blocked') {
     const ev = db
       .prepare(
         `SELECT detail FROM task_events
-          WHERE task_id = ? AND to_status IN ('failed','blocked') AND detail IS NOT NULL
+          WHERE task_id = ? AND to_status IN ('attention','failed','blocked') AND detail IS NOT NULL
           ORDER BY id DESC LIMIT 1`,
       )
       .get(id) as { detail: string } | undefined;
