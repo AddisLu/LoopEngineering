@@ -15,6 +15,7 @@ import {
 } from '../tasks.js';
 import { readUsage } from '../token/usage.js';
 import { estimatePct } from '../token/accounting.js';
+import { resolvePolicy } from '../scheduler/policy.js';
 import { addWorktree, isDirty, commitAll, diffstat } from '../git/worktree.js';
 import { writeTaskFile } from './prompt.js';
 import { writeSettingsLocal } from './settingsLocal.js';
@@ -49,7 +50,12 @@ export async function runTask(
 ): Promise<void> {
   const isMock = task.coding_tool === 'mock';
   const hardLimit = getNum(db, 'hard_limit_pct', 95);
-  const before = readUsage().session.percent;
+  const beforeReading = readUsage();
+  const before = beforeReading.session.percent;
+  const weeklyBefore = beforeReading.weekly.percent;
+  // Window this run is dispatched under, so the tick can checkpoint it if the
+  // day/night window flips beneath a long run (Phase 3 #1).
+  const dispatchWindow = resolvePolicy(db).window;
 
   let worktreePath: string;
   let branch: string | null = null;
@@ -84,6 +90,8 @@ export async function runTask(
     branch,
     log_path: logPath,
     session_pct_before: before,
+    weekly_pct_before: weeklyBefore,
+    dispatch_window: dispatchWindow,
   });
 
   const taskFilePath = writeTaskFile(worktreePath, task);
@@ -140,13 +148,15 @@ export async function runTask(
   const result = await handle.wait;
   clearTimeout(timeoutTimer);
 
-  const after = readUsage().session.percent;
+  const afterReading = readUsage();
+  const after = afterReading.session.percent;
   finishRun(db, run.id, {
     exit_code: result.exitCode,
     // keep the mid-stream session_id if the final event didn't carry one
     ...(result.sessionId ? { session_id: result.sessionId } : {}),
     usage_json: result.usageJson,
     session_pct_after: after,
+    weekly_pct_after: afterReading.weekly.percent,
     error: result.error ?? null,
   });
 
@@ -156,7 +166,22 @@ export async function runTask(
     setStatus(db, task.id, 'failed', { run_id: run.id, detail: 'watchdog timeout' });
     return;
   }
-  if (finished.interrupted_by === 'breaker' || finished.interrupted_by === 'user') {
+  if (
+    finished.interrupted_by === 'breaker' ||
+    finished.interrupted_by === 'user' ||
+    finished.interrupted_by === 'window'
+  ) {
+    // Checkpoint: commit any WIP before going blocked so no work is lost across the
+    // resume (session_id is kept for --resume; the worktree is reused). Best-effort.
+    if (!isMock) {
+      try {
+        if (isDirty(worktreePath)) {
+          commitAll(worktreePath, `loop(${task.id}): checkpoint WIP (${finished.interrupted_by})`);
+        }
+      } catch (err) {
+        logEvent(db, { task_id: task.id, run_id: run.id, kind: 'note', detail: `checkpoint commit failed: ${String(err)}` });
+      }
+    }
     bumpResume(db, task.id);
     setStatus(db, task.id, 'blocked', { run_id: run.id, detail: `interrupted: ${finished.interrupted_by}` });
     return;

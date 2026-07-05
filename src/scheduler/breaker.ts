@@ -28,3 +28,25 @@ export function checkBreaker(db: Database.Database, reading: UsageReading, hardL
   }
   return true;
 }
+
+/**
+ * Day/night window checkpoint (Phase 3 #1). A run dispatched under one window's budget
+ * can bleed into the other (e.g. a night task running into the tighter day budget). When
+ * the current window differs from a run's dispatch window, gracefully checkpoint it —
+ * reusing the breaker mechanism (SIGINT -> the run commits WIP and goes 'blocked',
+ * keeping its session_id) so it re-enters under the new window's budget on the next tick.
+ * Feature-flagged by `window_checkpoint`; the caller decides whether to invoke this.
+ */
+export function checkWindowSwitch(db: Database.Database, currentWindow: 'day' | 'night'): void {
+  for (const run of activeRuns(db)) {
+    if (run.interrupted_by) continue; // already being killed (breaker/timeout/user)
+    if (!run.dispatch_window || run.dispatch_window === currentWindow) continue;
+    logEvent(db, {
+      task_id: run.task_id,
+      run_id: run.id,
+      kind: 'window',
+      detail: `window ${run.dispatch_window} -> ${currentWindow}: checkpoint for re-budget`,
+    });
+    killRun(db, { id: run.id, pid: run.pid }, 'window');
+  }
+}
