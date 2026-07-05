@@ -160,7 +160,8 @@
     <a href="#service">10 · 服務管理</a>
     <a href="#trouble">11 · 疑難排解</a>
     <a href="#mcp">12 · MCP：編輯器一句話派工</a>
-    <a href="#appendix">13 · 附錄（API / 檔案位置）</a>
+    <a href="#autoflow">13 · 自動化：Git 收尾與任務鏈</a>
+    <a href="#appendix">14 · 附錄（API / 檔案位置）</a>
   </nav>
 
   <main>
@@ -202,10 +203,12 @@
         <span class="st ok">closed</span>
       </div>
       <div class="lifecycle">
-        <span class="arr">running 遇到 ⤵</span>
-        <span class="st fail">failed</span><span class="arr">（timeout／驗證失敗）</span>
-        <span class="st">blocked</span><span class="arr">（斷路器／使用者暫停 → 可自動 resume 回 running）</span>
+        <span class="arr">running 遇到問題 ⤵</span>
+        <span class="st">blocked</span><span class="arr">（斷路器／硬暫停，額度內 → 自動 resume）</span>
+        <span class="st fail">attention</span><span class="arr">（timeout／執行錯誤／續跑用盡 → 保留現場，等你決定）</span>
+        <span class="st fail">failed</span><span class="arr">（使用者中止／放棄 → 終態）</span>
       </div>
+      <div class="note tip"><span class="ic">🔀</span><span><b>verify 通過後自動收尾（第 13 章）：</b>拉最新 base 併入分支 → 重跑 verify → push 分支 → <b>自動併回 main 並 push GitHub</b>；遇衝突自動生一個「merge 任務」。所以到 <code>review</code> 時通常<b>已經在 main 上</b>了，你按<b>結案</b>只是最後放行（並放行鏈上的下一個任務）。</span></div>
       <div class="tbl-wrap">
       <table>
         <thead><tr><th>狀態</th><th>意義</th><th>看板欄位</th></tr></thead>
@@ -215,10 +218,11 @@
           <tr><td><code>queued</code></td><td>已入列，等待調度派工</td><td>Queued</td></tr>
           <tr><td><code>running</code></td><td>Claude Code 正在 worktree 中執行</td><td>Running</td></tr>
           <tr><td><code>verifying</code></td><td>正在跑你的驗證步驟</td><td>Verifying</td></tr>
-          <tr><td><code>blocked</code></td><td>被斷路器或使用者中斷，保留 session 以便自動續跑</td><td>Queued（可自動 resume）</td></tr>
-          <tr><td><code>review</code></td><td>驗證通過，待你人工結案</td><td>Review · 結案</td></tr>
-          <tr><td><code>failed</code></td><td>逾時或驗證/執行失敗</td><td>Review · 結案</td></tr>
-          <tr><td><code>closed</code></td><td>你已結案，流程結束</td><td>Closed</td></tr>
+          <tr><td><code>blocked</code></td><td>被斷路器或硬暫停中斷，額度內保留 session 自動續跑</td><td>Queued（可自動 resume）</td></tr>
+          <tr><td><code>attention</code></td><td><b>待確認</b>：執行出問題（timeout／執行錯誤／setup 失敗／續跑用盡／最終 verify 失敗），已保留 worktree／session／HANDOFF，卡片顯示失敗原因＋log，等你決定<b>續跑／重來／放棄</b></td><td>Review · 結案</td></tr>
+          <tr><td><code>review</code></td><td>驗證通過（通常已自動併回 main），待你人工結案</td><td>Review · 結案</td></tr>
+          <tr><td><code>failed</code></td><td>你中止或放棄的終態</td><td>Review · 結案</td></tr>
+          <tr><td><code>closed</code></td><td>你已結案，流程結束（並放行鏈上下一個任務）</td><td>Closed</td></tr>
         </tbody>
       </table>
       </div>
@@ -303,12 +307,15 @@
         <thead><tr><th>狀態</th><th>可用動作</th></tr></thead>
         <tbody>
           <tr><td><code>draft</code>（且審核通過）</td><td><b>加入排程</b> → 入列</td></tr>
-          <tr><td><code>running</code> / <code>verifying</code></td><td><b>中止</b> → 中斷並標記 failed</td></tr>
-          <tr><td><code>review</code></td><td><b>看 PR</b>（若有 PR）、<b>結案</b></td></tr>
-          <tr><td><code>failed</code></td><td><b>結案</b></td></tr>
+          <tr><td><code>running</code> / <code>verifying</code></td><td><b>中止</b> → 終態 failed（不會自動復跑）</td></tr>
+          <tr><td><code>blocked</code></td><td><b>轉待確認</b> → 停止自動續跑、改由你決定</td></tr>
+          <tr><td><code>attention</code>（待確認）</td><td><b>續跑</b>（沿用 session/HANDOFF）、<b>重來</b>（清 worktree/分支、從最新 base 重跑）、<b>放棄</b>（→ failed）</td></tr>
+          <tr><td><code>review</code></td><td><b>看 PR</b>（若有）、<b>結案</b>；併回狀態徽章：<code>✓ 已合併</code>／<code>待合併</code>（可按<b>合併</b>）／<code>⚠ 衝突（已建解衝突任務）</code></td></tr>
+          <tr><td><code>failed</code></td><td><b>重來</b>、<b>結案</b></td></tr>
         </tbody>
       </table>
       </div>
+      <div class="note info"><span class="ic">🔗</span><span><b>依賴徽章。</b>帶 <code>depends_on</code> 的卡片會顯示 <code>⏳ 等 t_xxx</code>（前置任務未結案，暫不派工）；前置結案的瞬間自動放行。見第 13 章「任務鏈」。</span></div>
     </section>
 
     <section id="newtask">
@@ -325,10 +332,10 @@
           <tr><td>Verify steps</td><td>是</td><td>至少一條驗證指令（逗號分隔），例：<code>npm run lint, npm test</code>。</td></tr>
           <tr><td>Repo path</td><td>是*</td><td>存在的 git repo 目錄。<span class="pill">mock 略過</span></td></tr>
           <tr><td>Base branch</td><td>是*</td><td>存在的基底分支。<span class="pill">mock 略過</span></td></tr>
-          <tr><td>Complexity</td><td>—</td><td><code>S</code>/<code>M</code>/<code>L</code>（預設 M）；決定逾時、預估用量與模型路由。</td></tr>
+          <tr><td>Complexity</td><td>—</td><td><code>S</code>/<code>M</code>/<code>L</code>（預設 M）；決定逾時與預估用量。</td></tr>
           <tr><td>Priority</td><td>—</td><td>整數，預設 2。</td></tr>
+          <tr><td>Model</td><td>—</td><td>留空＝用<b>全域預設模型</b>（<code>default_model</code>，預設 <code>sonnet</code> = Sonnet 5）。要對單一任務加碼可選 <code>opus</code>／<code>haiku</code>／<code>fable-5</code>。</td></tr>
           <tr><td>Setup cmd</td><td>—</td><td>派工前在 worktree 執行的準備指令（如 <code>npm ci</code>）。未填只是警告。</td></tr>
-          <tr><td>Model</td><td>—</td><td><code>sonnet</code>/<code>opus</code>/<code>default</code>（不填則依複雜度路由）。</td></tr>
         </tbody>
       </table>
       </div>
@@ -342,7 +349,7 @@
       <table>
         <thead><tr><th>指令</th><th>作用</th></tr></thead>
         <tbody>
-          <tr><td><code>add</code></td><td>建立任務（起始 draft）。旗標：<code>--title*</code> <code>--goal*</code> <code>--plan</code> <code>--tool</code> <code>--verify</code> <code>--setup</code> <code>--repo</code> <code>--base</code> <code>--complexity</code> <code>--priority</code> <code>--model</code></td></tr>
+          <tr><td><code>add</code></td><td>建立任務（起始 draft）。旗標：<code>--title*</code> <code>--goal*</code> <code>--plan</code> <code>--tool</code> <code>--verify</code> <code>--setup</code> <code>--repo</code> <code>--base</code> <code>--complexity</code> <code>--priority</code> <code>--model</code> <code>--depends-on &lt;taskId&gt;</code>（串行鏈：押住直到該任務結案）</td></tr>
           <tr><td><code>gate &lt;id&gt;</code></td><td>顯示該任務的入場檢查清單。</td></tr>
           <tr><td><code>queue &lt;id&gt;</code></td><td>審核並把 draft 加入排程。</td></tr>
           <tr><td><code>list [--status &lt;s&gt;]</code></td><td>列出任務（可依狀態過濾）與各狀態計數。</td></tr>
@@ -350,8 +357,10 @@
           <tr><td><code>pause [--hard]</code></td><td>暫停排程。<code>--hard</code> 會一併中斷執行中的 run（轉 blocked，可 resume）。</td></tr>
           <tr><td><code>resume</code></td><td>恢復排程。</td></tr>
           <tr><td><code>abort &lt;id&gt;</code></td><td>中斷該任務的 run 並標記 failed。</td></tr>
-          <tr><td><code>close &lt;id&gt;</code></td><td>把已審閱的任務標記 closed。</td></tr>
-          <tr><td><code>config [list｜get｜set] [key] [value]</code></td><td>檢視 / 即時修改排程設定（如日夜門檻）。例：<code>loop config set day_session_max 88</code>。改完下一個 tick 生效、免重啟；含防呆。</td></tr>
+          <tr><td><code>close &lt;id&gt;</code></td><td>把已審閱的任務標記 closed（並放行鏈上下一個任務）。</td></tr>
+          <tr><td><code>delete &lt;id&gt; [--force]</code></td><td>永久刪除任務＋磁碟產物（worktree／plan／logs）。</td></tr>
+          <tr><td><code>prune [--status &lt;list&gt;] [--older-than &lt;days&gt;] [--yes]</code></td><td>批次清理終態任務＋產物（預設 dry-run，加 <code>--yes</code> 才真刪）。</td></tr>
+          <tr><td><code>config [list｜get｜set] [key] [value]</code></td><td>檢視 / 即時修改排程設定（門檻、模型、Git 收尾旗標）。例：<code>loop config set default_model sonnet</code>。改完下一個 tick 生效、免重啟；含防呆。</td></tr>
           <tr><td><code>set-usage --session &lt;%&gt; [--weekly &lt;%&gt;]</code></td><td><b>開發用</b>：強制寫入共享用量快取（斷路器演練）。</td></tr>
         </tbody>
       </table>
@@ -391,14 +400,40 @@ npm run loop -- list --status review</code></pre>
           <tr><td><code>hard_limit_pct</code></td><td>95</td><td>斷路器硬上限（超過即中斷執行中的 run）。</td></tr>
           <tr><td><code>min_runway_min</code></td><td>20</td><td>派工所需的最少剩餘 runway（分）。</td></tr>
           <tr><td><code>timeout_S / M / L</code></td><td>15 / 45 / 120</td><td>各複雜度的 watchdog 逾時（分）。</td></tr>
-          <tr><td><code>route_S / M / L</code></td><td>sonnet / default / default</td><td>各複雜度的模型路由。</td></tr>
           <tr><td><code>est_pct_S / M / L</code></td><td>3 / 8 / 20</td><td>各複雜度的 session %-點預估（5 次真跑後自動校準）。</td></tr>
+          <tr><td><code>max_resumes</code></td><td>2</td><td>一個任務可自動續跑的次數上限；用盡後轉 <code>attention</code>。</td></tr>
           <tr><td><code>usage_refresh_sec</code></td><td>180</td><td>用量抓取週期。</td></tr>
-          <tr><td><code>ledger_fallback_after_min</code></td><td>10</td><td>用量快取過舊時改用 ledger 後備。</td></tr>
           <tr><td><code>ntfy_server</code> / <code>ntfy_topic</code></td><td>（空）</td><td>ntfy 推播設定。</td></tr>
         </tbody>
       </table>
       </div>
+
+      <h3>執行模型</h3>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>鍵</th><th>預設</th><th>說明</th></tr></thead>
+        <tbody>
+          <tr><td><code>default_model</code></td><td><code>sonnet</code></td><td><b>全域預設模型</b>：任務未指定 model 時就用它。<code>sonnet</code>＝Sonnet 5，自主 coding 用它就夠、又省 token；避免繼承你互動用的 Fable 5。可選 <code>haiku</code>／<code>opus</code>／<code>fable-5</code>／<code>default</code>（CLI 預設）。單一任務可在新增表單覆寫。</td></tr>
+        </tbody>
+      </table></div>
+
+      <h3>Git 自動收尾（全部預設<b>開</b>；全關＝回到舊行為）</h3>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>鍵</th><th>預設</th><th>說明</th></tr></thead>
+        <tbody>
+          <tr><td><code>git_fetch_base</code></td><td>true</td><td>切 worktree 與同步前先 <code>fetch origin/&lt;base&gt;</code>，從最新 base 起跑。</td></tr>
+          <tr><td><code>auto_push_branch</code></td><td>true</td><td>把 <code>loop/&lt;id&gt;</code> 分支 push 到 origin 備份（無 remote 時 no-op）。</td></tr>
+          <tr><td><code>auto_merge</code></td><td>true</td><td>verify 過後自動把分支<b>併回 base 並 push</b>（FF-only；髒工作區則降級為「待合併」，絕不動你的工作區）。</td></tr>
+          <tr><td><code>merge_conflict_task</code></td><td>true</td><td>併回遇衝突時，自動建一個「merge 任務」交給 Claude Code 解衝突。</td></tr>
+        </tbody>
+      </table></div>
+
+      <h3>任務鏈</h3>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>鍵</th><th>預設</th><th>說明</th></tr></thead>
+        <tbody>
+          <tr><td><code>dep_auto_queue</code></td><td>true</td><td>帶 <code>depends_on</code> 的 draft，在其前置任務結案時自動入列（gate 需通過）。</td></tr>
+        </tbody>
+      </table></div>
 
       <h3>環境變數（<code>~/.config/loop-engineering/env</code>）</h3>
       <div class="tbl-wrap">
@@ -497,16 +532,21 @@ systemctl --user disable loop-engineering</code></pre>
 
       <div class="note info"><span class="ic">⚙️</span><span><b>預設直接排程（queue=true）。</b>描述完即入列，額度允許時自動執行。要保留為 draft，說「先建 draft」；想 zero-token 試流程可要求用 <code>mock</code> 工具。</span></div>
 
-      <h3>四個工具</h3>
+      <h3>工具</h3>
       <div class="tbl-wrap"><table>
         <thead><tr><th>工具</th><th>作用</th></tr></thead>
         <tbody>
-          <tr><td><code>loop_add_task</code></td><td>最小輸入建立（預設直接排程）任務，回傳自動填入值與 gate 結果</td></tr>
+          <tr><td><code>loop_add_task</code></td><td>最小輸入建立（預設直接排程）任務，回傳自動填入值與 gate 結果。可帶 <code>depends_on</code>（串行鏈）、<code>model</code>（覆寫全域預設）。</td></tr>
           <tr><td><code>loop_queue_task</code></td><td>把某個 draft 入列執行</td></tr>
           <tr><td><code>loop_list_tasks</code></td><td>看板摘要（可依狀態過濾）</td></tr>
           <tr><td><code>loop_status</code></td><td>排程 / 用量狀態</td></tr>
+          <tr><td><code>loop_task_result</code></td><td>取某任務的結果：PR 連結、gap-review、失敗原因、log 尾巴</td></tr>
+          <tr><td><code>loop_wait_task</code></td><td>輪詢等待任務到終態（review／attention／failed／closed）後回傳</td></tr>
+          <tr><td><code>loop_delete_task</code></td><td>永久刪除任務＋磁碟產物</td></tr>
+          <tr><td><code>loop_cleanup</code></td><td>批次清理終態任務（含 dryRun 預覽）</td></tr>
         </tbody>
       </table></div>
+      <div class="note info"><span class="ic">🔗</span><span><b>用 MCP 串成鏈：</b>先建任務 A，再建 B 時說「依賴 A」（帶 <code>depends_on</code>）——A 結案後 B 自動放行，避免多個任務同時從舊 base 切分支而互相衝突。</span></div>
 
       <h3>設定與維護</h3>
       <ul>
@@ -518,8 +558,58 @@ systemctl --user disable loop-engineering</code></pre>
       <div class="note warn"><span class="ic">⚠️</span><span>因預設直接排程執行，請確認目標 repo 與驗證步驟正確——執行會實際動用 Claude Code 額度。每次的自動偵測結果都會回報，過目再放行。</span></div>
     </section>
 
+    <section id="autoflow">
+      <h2><span class="num">13</span>自動化：Git 收尾與任務鏈</h2>
+      <p>這一章講三件讓 Loop Engineering 能<b>自己一路做下去</b>的機制，以及人與引擎的分工。</p>
+
+      <h3>1 · running 的標準流程（Git 自動收尾）</h3>
+      <p>每個 <code>claude-code</code> 任務跑完後，引擎自動走這條收尾（全部可用第 8 章的旗標關閉）：</p>
+      <ol>
+        <li>派工時從 <b>fetch 過的最新 <code>origin/&lt;base&gt;</code></b> 切 <code>loop/&lt;id&gt;</code> 分支（不再從過期本地 main）。</li>
+        <li>Claude Code 修改 → 自動 commit → 跑你的 verify 步驟。</li>
+        <li>把最新 base 併進分支；若有變動<b>重跑一次 verify</b>。</li>
+        <li>push 分支備份 → <b>FF-only 自動併回 <code>main</code> 並 push 到 GitHub</b>。</li>
+        <li>卡片進 <code>review</code>，徽章顯示 <code>✓ 已合併</code>。</li>
+      </ol>
+      <div class="note warn"><span class="ic">🛡️</span><span><b>安全保證：</b>所有網路 git 操作都有 30 秒逾時、失敗不會卡住引擎；併回一律 <b>fast-forward-only</b>，<b>絕不改動你的髒工作區、絕不強推</b>。無法乾淨 FF（例如你的 base 有未推的本地 commit）就降級為 <code>待合併</code>，卡片上按<b>合併</b>再試。</span></div>
+      <div class="note info"><span class="ic">🧩</span><span><b>遇衝突自動解：</b>併回若衝突，引擎自動建一個 <b>merge 任務</b>（標題 <code>[merge] …</code>），交給 Claude Code 拉最新 base、解衝突、跑 verify，再自己走一次收尾。你不用手動處理。</span></div>
+
+      <h3>2 · attention（待確認）：出問題時保留現場交回人工</h3>
+      <p>過去出問題只有「自動續跑」或「直接 failed」兩種。現在多了一個<b>待確認</b>狀態：watchdog 逾時、執行錯誤、setup 失敗、續跑用盡、最終 verify 失敗，都會落到 <code>attention</code>（顯示在 Review 欄），<b>保留 worktree／session／HANDOFF</b>，卡片列出失敗原因與 log。你有三個動作：</p>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>動作</th><th>作用</th></tr></thead>
+        <tbody>
+          <tr><td><b>續跑</b></td><td>沿用原 session 與 HANDOFF，從中斷處接續（給一次額度）。</td></tr>
+          <tr><td><b>重來</b></td><td>清掉 worktree 與 <code>loop/&lt;id&gt;</code> 分支、歸零續跑計數，從最新 base 重新開始。</td></tr>
+          <tr><td><b>放棄</b></td><td>標記 <code>failed</code> 終態（可選一併清 worktree）。</td></tr>
+        </tbody>
+      </table></div>
+      <div class="note tip"><span class="ic">🧷</span><span><b>使用者「中止」是終態</b>：按中止（或 <code>abort</code>）的任務直接 <code>failed</code>、不會偷偷自動復跑。想暫停但保留可續跑，用<b>硬暫停</b>（<code>pause --hard</code>）→ 轉 <code>blocked</code>。</span></div>
+
+      <h3>3 · 任務鏈（depends_on）：嚴格 A → B → C</h3>
+      <p>要讓任務<b>一個做完才做下一個</b>（例如彼此會改到同一批檔、或後者依賴前者的成果），用依賴鏈，避免多個任務同時從舊 base 切分支互相衝突：</p>
+      <pre><code># CLI：B 依賴 A
+npm run loop -- add --title "B" --goal "…" --plan ./B.md \
+  --repo /path --base main --verify "npm test" --depends-on &lt;A的id&gt;</code></pre>
+      <ul>
+        <li>帶 <code>depends_on</code> 的任務會被<b>押住不派工</b>，卡片顯示 <code>⏳ 等 t_xxx</code>。</li>
+        <li>前置任務<b>結案</b>的那一刻，引擎自動放行下一棒（<code>dep_auto_queue</code>）。</li>
+        <li>前置若 <code>failed</code> 或被刪除，後者<b>押住等你處理</b>，絕不誤跑。</li>
+        <li>MCP 也支援：建 B 時說「依賴 A」。</li>
+      </ul>
+
+      <h3>人與引擎的分工</h3>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>誰</th><th>做什麼</th></tr></thead>
+        <tbody>
+          <tr><td><b>引擎自動</b></td><td>排隊 / 派工 / 執行 / verify / push / 自動併回 main / 衝突建 merge 任務 / 鏈條放行 / 出問題轉 attention 保留現場</td></tr>
+          <tr><td><b>你（人工閘門）</b></td><td>每個任務 <code>review</code> → <b>結案</b>＝核可並放行下一棒；<code>attention</code> 卡片決定續跑／重來／放棄</td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
     <section id="appendix">
-      <h2><span class="num">13</span>附錄</h2>
+      <h2><span class="num">14</span>附錄</h2>
       <h3>REST / SSE 端點</h3>
       <p>除 <code>/</code> 靜態頁外，<code>/api/*</code> 需帶 bearer（<code>Authorization: Bearer &lt;token&gt;</code>）或 <code>?token=</code>。</p>
       <div class="tbl-wrap">
@@ -533,8 +623,16 @@ systemctl --user disable loop-engineering</code></pre>
           <tr><td>GET</td><td><code>/api/stream</code></td><td>SSE：每秒推送完整看板</td></tr>
           <tr><td>POST</td><td><code>/api/tasks</code></td><td>建立任務（JSON body）</td></tr>
           <tr><td>POST</td><td><code>/api/tasks/:id/queue</code></td><td>審核 + 入列</td></tr>
-          <tr><td>POST</td><td><code>/api/tasks/:id/abort</code></td><td>中止並標 failed</td></tr>
-          <tr><td>POST</td><td><code>/api/tasks/:id/close</code></td><td>結案</td></tr>
+          <tr><td>POST</td><td><code>/api/tasks/:id/abort</code></td><td>中止並標 failed（終態）</td></tr>
+          <tr><td>POST</td><td><code>/api/tasks/:id/close</code></td><td>結案（放行鏈上下一個任務）</td></tr>
+          <tr><td>POST</td><td><code>/api/tasks/:id/resume</code></td><td>attention → 續跑（沿用 session）</td></tr>
+          <tr><td>POST</td><td><code>/api/tasks/:id/restart</code></td><td>attention/failed → 重來（清 worktree/分支，從最新 base）</td></tr>
+          <tr><td>POST</td><td><code>/api/tasks/:id/abandon</code></td><td>attention → 放棄（<code>?cleanup=1</code> 一併清 worktree）</td></tr>
+          <tr><td>POST</td><td><code>/api/tasks/:id/hold</code></td><td>blocked → 轉待確認（停止自動續跑）</td></tr>
+          <tr><td>POST</td><td><code>/api/tasks/:id/merge</code></td><td>review 待合併/衝突 → 一鍵併回 base</td></tr>
+          <tr><td>GET</td><td><code>/api/tasks/:id/result</code></td><td>PR 連結、gap-review、失敗原因、log 尾巴</td></tr>
+          <tr><td>DELETE</td><td><code>/api/tasks/:id</code></td><td>永久刪除任務＋磁碟產物（<code>?force=1</code>）</td></tr>
+          <tr><td>POST</td><td><code>/api/tasks/prune</code></td><td>批次清理終態任務（<code>dryRun</code> 預覽）</td></tr>
           <tr><td>POST</td><td><code>/api/pause?hard=1</code></td><td>暫停排程（<code>hard</code> 一併中斷執行中）</td></tr>
           <tr><td>POST</td><td><code>/api/resume-scheduler</code></td><td>恢復排程</td></tr>
           <tr><td>GET</td><td><code>/api/settings</code></td><td>取得可調的日夜門檻等設定</td></tr>
