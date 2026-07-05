@@ -1,10 +1,25 @@
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 function expand(p: string): string {
   if (p.startsWith('~')) return path.join(os.homedir(), p.slice(1));
   return p;
+}
+
+// This file sits directly under the repo root's `src/` (vitest/tsx) or `dist/`
+// (built) — one level up is the engine's own repo root in both layouts.
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+export const ENGINE_REPO_ROOT = path.join(__dirname, '..');
+
+/** True when `repoPath` IS the engine's own repo (a self-improvement task). */
+export function isEngineRepo(repoPath: string): boolean {
+  try {
+    return fs.realpathSync(repoPath) === fs.realpathSync(ENGINE_REPO_ROOT);
+  } catch {
+    return false;
+  }
 }
 
 const DATA_DIR = expand(
@@ -131,6 +146,15 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // notifications (M2)
   ntfy_server: '',
   ntfy_topic: '',
+
+  // self-update: when a task targeting the engine's OWN repo auto-merges into main,
+  // set a pending marker; the scheduler tick rebuilds+restarts the engine once idle
+  // (see src/scheduler/tick.ts). Off restores the old "human rebuilds manually" flow.
+  self_update: 'true',
+  // dependency chains release on the dep reaching review+merged (its work is already
+  // on main) instead of waiting for a human to close it. true = zero-touch chains;
+  // false (default) = human close stays the approval gate for each chain link.
+  dep_done_on_merge: 'false',
 };
 
 export const TOKEN_REFRESH_MS = 180_000; // TokenBar cadence

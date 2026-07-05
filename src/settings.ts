@@ -18,6 +18,8 @@ export const BOOL_KEYS = new Set([
   'dep_auto_queue',
   // git close-out flags
   'git_fetch_base', 'auto_push_branch', 'auto_merge', 'merge_conflict_task',
+  // self-update / dependency-release flags
+  'self_update', 'dep_done_on_merge',
 ]);
 
 /** Keys the board settings panel reads/writes (the budget/scheduling knobs). */
