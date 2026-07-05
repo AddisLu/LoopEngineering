@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 import { nanoid } from 'nanoid';
-import { logEvent } from './db/index.js';
+import { logEvent, getBool } from './db/index.js';
 import type { Task, TaskRun } from './types.js';
 import type { TaskStatus, Complexity } from './config.js';
 
@@ -65,6 +65,11 @@ export function dependencyState(db: Database.Database, t: Task): DependencyState
   const dep = getTask(db, t.depends_on);
   if (!dep) return 'dep-missing';
   if (dep.status === 'closed') return 'satisfied';
+  // dep_done_on_merge (default off): the dep's work is already on main once it's in
+  // review with a merged PR — release the chain without waiting for a human close.
+  if (dep.status === 'review' && dep.merge_status === 'merged' && getBool(db, 'dep_done_on_merge', false)) {
+    return 'satisfied';
+  }
   if (dep.status === 'failed') return 'dep-failed';
   return 'waiting';
 }
