@@ -15,6 +15,7 @@ import {
 } from '../tasks.js';
 import { readUsage } from '../token/usage.js';
 import { estimatePct } from '../token/accounting.js';
+import { resolvePolicy } from '../scheduler/policy.js';
 import { addWorktree, isDirty, commitAll, diffstat, excludeLocal, worktreeInternalFile } from '../git/worktree.js';
 import { timeoutMinFor } from '../scheduler/timeout.js';
 import { writeTaskFile, writeResumeContext, collectResumeContext } from './prompt.js';
@@ -72,7 +73,12 @@ export async function runTask(
   // Bill the run against a fresh reading at both boundaries. A cached reading (TTL
   // 180s) can make a short run look like ~0% delta and bias the estimator toward
   // zero. Mock runs stay on the cache (zero-token / deterministic tests).
-  const before = readUsage({ force: !isMock }).session.percent;
+  const beforeReading = readUsage({ force: !isMock });
+  const before = beforeReading.session.percent;
+  const weeklyBefore = beforeReading.weekly.percent;
+  // Window this run is dispatched under, so the tick can checkpoint it if the
+  // day/night window flips beneath a long run (Phase 3 #1).
+  const dispatchWindow = resolvePolicy(db).window;
 
   let worktreePath: string;
   let branch: string | null = null;
@@ -107,6 +113,8 @@ export async function runTask(
     branch,
     log_path: logPath,
     session_pct_before: before,
+    weekly_pct_before: weeklyBefore,
+    dispatch_window: dispatchWindow,
   });
 
   const taskFilePath = writeTaskFile(worktreePath, task);
@@ -221,13 +229,15 @@ export async function runTask(
 
   // Force a live read at the closing boundary so the recorded delta reflects real
   // spend (see the `before` note); the calibrator depends on this being accurate.
-  const after = readUsage({ force: !isMock }).session.percent;
+  const afterReading = readUsage({ force: !isMock });
+  const after = afterReading.session.percent;
   finishRun(db, run.id, {
     exit_code: result.exitCode,
     // keep the mid-stream session_id if the final event didn't carry one
     ...(result.sessionId ? { session_id: result.sessionId } : {}),
     usage_json: result.usageJson,
     session_pct_after: after,
+    weekly_pct_after: afterReading.weekly.percent,
     error: result.error ?? null,
   });
 
@@ -245,7 +255,13 @@ export async function runTask(
     setStatus(db, task.id, 'failed', { run_id: run.id, detail: 'watchdog timeout' });
     return;
   }
-  if (finished.interrupted_by === 'breaker' || finished.interrupted_by === 'user') {
+  if (
+    finished.interrupted_by === 'breaker' ||
+    finished.interrupted_by === 'user' ||
+    finished.interrupted_by === 'window'
+  ) {
+    // WIP was already checkpoint-committed above (commitCheckpoint), for all interrupt
+    // types including 'window' — no need to commit again here.
     const resumes = bumpResume(db, task.id);
     const maxResumes = getNum(db, 'max_resumes', 2);
     // Once the resume budget is spent the scheduler would never re-dispatch it

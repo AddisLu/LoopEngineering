@@ -117,12 +117,16 @@ export function createRun(
     branch?: string | null;
     log_path?: string | null;
     session_pct_before?: number | null;
+    weekly_pct_before?: number | null;
+    dispatch_window?: string | null;
   },
 ): TaskRun {
   const id = `r_${nanoid(10)}`;
   db.prepare(
-    `INSERT INTO task_runs (id, task_id, resume_of, attempt, worktree_path, branch, log_path, session_pct_before)
-     VALUES (@id, @task_id, @resume_of, @attempt, @worktree_path, @branch, @log_path, @session_pct_before)`,
+    `INSERT INTO task_runs (id, task_id, resume_of, attempt, worktree_path, branch, log_path,
+       session_pct_before, weekly_pct_before, dispatch_window)
+     VALUES (@id, @task_id, @resume_of, @attempt, @worktree_path, @branch, @log_path,
+       @session_pct_before, @weekly_pct_before, @dispatch_window)`,
   ).run({
     id,
     task_id: args.task_id,
@@ -132,6 +136,8 @@ export function createRun(
     branch: args.branch ?? null,
     log_path: args.log_path ?? null,
     session_pct_before: args.session_pct_before ?? null,
+    weekly_pct_before: args.weekly_pct_before ?? null,
+    dispatch_window: args.dispatch_window ?? null,
   });
   return getRun(db, id)!;
 }
@@ -159,6 +165,28 @@ export function activeRuns(db: Database.Database): TaskRun[] {
   return db
     .prepare('SELECT * FROM task_runs WHERE finished_at IS NULL ORDER BY started_at ASC')
     .all() as TaskRun[];
+}
+
+/**
+ * In-flight runs joined with their task complexity — for concurrency headroom
+ * reservation (Phase 3 #3). Each row carries the budget% at dispatch so the tick can
+ * reserve the run's *unspent* estimated cost before packing more work.
+ */
+export interface ActiveRunCost {
+  complexity: Complexity;
+  session_pct_before: number | null;
+  weekly_pct_before: number | null;
+}
+export function activeRunCosts(db: Database.Database): ActiveRunCost[] {
+  return db
+    .prepare(
+      `SELECT t.complexity AS complexity,
+              r.session_pct_before AS session_pct_before,
+              r.weekly_pct_before  AS weekly_pct_before
+         FROM task_runs r JOIN tasks t ON t.id = r.task_id
+        WHERE r.finished_at IS NULL`,
+    )
+    .all() as ActiveRunCost[];
 }
 
 /** Latest run for a task (for resume: reuse session_id). */

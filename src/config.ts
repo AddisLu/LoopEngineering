@@ -83,6 +83,27 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   est_pct_M: '8',
   est_pct_L: '20',
 
+  // --- Phase 3: core scheduling semantics (all feature-flagged) ---
+  // #1 checkpoint an in-flight run when the day/night window flips under it, so it
+  //    re-enters under the new window's budget (SIGINT -> commit WIP -> blocked -> resume).
+  //    Off by default: it interrupts live work, so it is opt-in.
+  window_checkpoint: 'false',
+  // #2 fit/pack against the weekly budget too (not just session). Strictly more
+  //    conservative, so on by default. weekly %-point estimate seeds (auto-calibrated).
+  weekly_packing: 'true',
+  est_weekly_pct_S: '1',
+  est_weekly_pct_M: '3',
+  est_weekly_pct_L: '6',
+  // #3 reserve each in-flight run's unspent estimated cost before packing, so raising
+  //    max_concurrency cannot over-commit the budget. No effect at max_concurrency=1.
+  concurrency_reserve: 'true',
+  // #4 priority aging + starvation reserve. Off by default (changes dispatch ordering).
+  //    effective priority += floor(waitMinutes / age_step_min); a top task waiting longer
+  //    than starve_min reserves headroom (cheaper low-priority work stops jumping ahead).
+  priority_aging: 'false',
+  age_step_min: '30',
+  starve_min: '60',
+
   // usage-fetch cadence + ledger fallback
   usage_refresh_sec: '180',
   ledger_fallback_after_min: '10',
