@@ -14,16 +14,32 @@ beforeEach(() => {
 });
 afterEach(() => db.close());
 
-/** insert a finished run with a measured session %-point delta for a task's complexity */
-function seedRun(taskId: string, before: number, after: number): void {
+/** insert a clean, fully-completed first run with a measured session %-point delta; returns run id */
+function seedRun(
+  taskId: string,
+  before: number,
+  after: number,
+  opts: { exitCode?: number | null; interruptedBy?: string | null; resumeOf?: string | null } = {},
+): string {
+  const id = `r_${nanoid(8)}`;
   db.prepare(
-    `INSERT INTO task_runs (id, task_id, attempt, session_pct_before, session_pct_after, finished_at)
-     VALUES (?, ?, 1, ?, ?, datetime('now'))`,
-  ).run(`r_${nanoid(8)}`, taskId, before, after);
+    `INSERT INTO task_runs
+       (id, task_id, attempt, session_pct_before, session_pct_after, exit_code, interrupted_by, resume_of, finished_at)
+     VALUES (?, ?, 1, ?, ?, ?, ?, ?, datetime('now'))`,
+  ).run(
+    id,
+    taskId,
+    before,
+    after,
+    opts.exitCode === undefined ? 0 : opts.exitCode,
+    opts.interruptedBy ?? null,
+    opts.resumeOf ?? null,
+  );
+  return id;
 }
 
 describe('estimate calibration', () => {
-  it('uses the seed default until 5 samples, then the measured median', () => {
+  it('uses the seed default until 5 clean samples, then a high-percentile estimate', () => {
     const t = createTask(db, {
       title: 'x',
       goal: 'g',
@@ -35,7 +51,7 @@ describe('estimate calibration', () => {
     expect(estimatePct(db, 'M')).toBe(seed);
     expect(isCalibrated(db, 'M')).toBe(false);
 
-    // 5 runs with deltas 4,5,6,7,8 -> median 6
+    // 5 clean runs with deltas 4,5,6,7,8 -> p75 = 7 (safety margin over median 6)
     for (const [b, a] of [
       [10, 14],
       [20, 25],
@@ -46,7 +62,27 @@ describe('estimate calibration', () => {
       seedRun(t.id, b, a);
     }
     expect(isCalibrated(db, 'M')).toBe(true);
-    expect(estimatePct(db, 'M')).toBe(6);
+    expect(estimatePct(db, 'M')).toBe(7);
+  });
+
+  it('ignores interrupted / non-zero-exit / resume-leg samples', () => {
+    const t = createTask(db, {
+      title: 'x',
+      goal: 'g',
+      coding_tool: 'mock',
+      verification_steps: ['true'],
+      complexity: 'M',
+    });
+    const seed = getNum(db, 'est_pct_M', 8);
+    // truncated / dirty samples must NOT count toward calibration
+    seedRun(t.id, 10, 11, { interruptedBy: 'breaker' });
+    seedRun(t.id, 10, 11, { interruptedBy: 'timeout' });
+    seedRun(t.id, 10, 11, { exitCode: 1 });
+    seedRun(t.id, 10, 11, { exitCode: null });
+    const parent = seedRun(t.id, 10, 11, { interruptedBy: 'breaker' });
+    seedRun(t.id, 10, 11, { resumeOf: parent }); // resume leg: clean but must be skipped
+    expect(isCalibrated(db, 'M')).toBe(false);
+    expect(estimatePct(db, 'M')).toBe(seed);
   });
 });
 
