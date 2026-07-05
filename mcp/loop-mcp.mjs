@@ -175,6 +175,7 @@ server.registerTool('loop_add_task', {
     model: z.string().optional().describe('sonnet | opus | default (optional).'),
     queue: z.boolean().optional().describe('default TRUE — queue for execution if the gate passes. false = leave as draft.'),
     depends_on: z.string().optional().describe('Task id this one waits for (serial chain): held until that task is CLOSED, then auto-queued. Use to run tasks strictly one after another.'),
+    environment: z.string().optional().describe('Environment label (e.g. "company", "home") this task should be scoped to — pulls in matching env:<name> knowledge nodes when the task runs.'),
   },
 }, async (a) => {
   const isMock = a.coding_tool === 'mock';
@@ -203,6 +204,7 @@ server.registerTool('loop_add_task', {
       priority: a.priority ?? 2,
       model: a.model ?? null,
       depends_on: a.depends_on ?? null,
+      environment: a.environment ?? null,
     },
   });
   const id = created.task?.id;
@@ -244,6 +246,99 @@ server.registerTool('loop_add_task', {
         : 'Ask the user only for the MISSING field(s) that could not be auto-detected, then call loop_add_task again.'),
   ];
   return { content: [{ type: 'text', text: lines.join('\n') + '\n\n' + JSON.stringify({ id, status: queued ? 'queued' : created.task?.status, gate, autofilled: { repo, base, steps, setup } }) }] };
+});
+
+// ---- knowledge base: 記住/回想/連結 from any chat, thin REST clients ----
+
+server.registerTool('loop_remember', {
+  title: 'Remember a fact into the Loop knowledge base',
+  description:
+    '記住一件事 — save a durable fact/preference/constraint/environment note so future Loop tasks and chats can recall it. ' +
+    'Use this whenever the user says something like 「記住：...」or states a lasting preference, constraint, or environment detail ' +
+    '(not a one-off, in-conversation detail). Pick `kind` from environment|project|constraint|preference|tech|fact (default "fact") ' +
+    'based on what the text describes, and `scope` from context: "global" (default, applies everywhere), "repo:<absolute path>" ' +
+    '(specific to one repo — use the current workspace root), or "env:<name>" (specific to a named environment, e.g. "env:company"). ' +
+    'Dedup key is (title, scope): remembering the same title again updates the existing node instead of duplicating it.',
+  inputSchema: {
+    text: z.string().describe('REQUIRED. The fact/body text to remember, verbatim or lightly cleaned up.'),
+    title: z.string().optional().describe('Short title; if omitted, derived from the first line/sentence of text.'),
+    kind: z.string().optional().describe('environment | project | constraint | preference | tech | fact | person | repo (default "fact").'),
+    tags: z.union([z.array(z.string()), z.string()]).optional().describe('optional tags (array or comma-separated string).'),
+    scope: z.string().optional().describe('"global" (default) | "repo:<absolute path>" | "env:<name>".'),
+  },
+}, async (a) => {
+  const title = (a.title && a.title.trim()) ? a.title.trim().slice(0, 80) : firstLine(a.text);
+  const tags = normSteps(a.tags);
+  try {
+    const created = await api('/api/knowledge', {
+      method: 'POST',
+      body: {
+        title,
+        body: a.text,
+        kind: a.kind ?? 'fact',
+        tags,
+        scope: a.scope ?? 'global',
+        source: 'mcp',
+      },
+    });
+    const n = created.node ?? {};
+    return { content: [{ type: 'text', text: `Remembered ${n.id} — [${n.kind}] ${n.title} (scope: ${n.scope})` }] };
+  } catch (e) {
+    return { content: [{ type: 'text', text: `Could not remember: ${e.message}` }] };
+  }
+});
+
+server.registerTool('loop_recall', {
+  title: 'Recall facts from the Loop knowledge base',
+  description:
+    '回想 — full-text search the Loop knowledge base for facts/preferences/constraints/environment notes relevant to the current ' +
+    'task or conversation. Use before starting work that might be affected by a known constraint or environment detail.',
+  inputSchema: {
+    q: z.string().describe('REQUIRED. Search query (keywords or phrase).'),
+    kind: z.string().optional().describe('optional kind filter: environment|project|constraint|preference|tech|fact|person|repo.'),
+    limit: z.number().int().optional().describe('max results (default 10).'),
+  },
+}, async (a) => {
+  try {
+    const qs = new URLSearchParams({ q: a.q });
+    if (a.kind) qs.set('kind', a.kind);
+    const res = await api(`/api/knowledge?${qs.toString()}`);
+    let nodes = Array.isArray(res.nodes) ? res.nodes : [];
+    const limit = a.limit ?? 10;
+    nodes = nodes.slice(0, limit);
+    if (!nodes.length) return { content: [{ type: 'text', text: `(no knowledge nodes match "${a.q}")` }] };
+    const lines = nodes.map((n) => {
+      const body = String(n.body ?? '').replace(/\s+/g, ' ').trim().slice(0, 160);
+      return `${n.id}  [${n.kind}] ${n.scope}  ${n.title}${body ? ' — ' + body : ''}`;
+    });
+    return { content: [{ type: 'text', text: lines.join('\n') }] };
+  } catch (e) {
+    return { content: [{ type: 'text', text: `Could not recall: ${e.message}` }] };
+  }
+});
+
+server.registerTool('loop_link', {
+  title: 'Link two Loop knowledge nodes',
+  description:
+    '將兩個知識節點連結起來 — record a relation between two existing knowledge nodes (e.g. "this constraint applies to that environment"). ' +
+    'Both src and dst must already exist (use loop_recall to find their ids first).',
+  inputSchema: {
+    src: z.string().describe('REQUIRED. Source node id (e.g. k_XXXXXXXX).'),
+    dst: z.string().describe('REQUIRED. Destination node id.'),
+    relation: z.string().optional().describe('runs-on | constrains | deployed-at | uses | part-of | related (default "related").'),
+    note: z.string().optional().describe('optional free-text note about the relation.'),
+  },
+}, async (a) => {
+  try {
+    const created = await api('/api/knowledge/edges', {
+      method: 'POST',
+      body: { src: a.src, dst: a.dst, relation: a.relation, note: a.note ?? null },
+    });
+    const edge = created.edge ?? {};
+    return { content: [{ type: 'text', text: `Linked ${edge.src} -[${edge.relation}]-> ${edge.dst}` }] };
+  } catch (e) {
+    return { content: [{ type: 'text', text: `Could not link: ${e.message}` }] };
+  }
 });
 
 server.registerTool('loop_queue_task', {
