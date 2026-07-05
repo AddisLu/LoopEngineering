@@ -36,6 +36,7 @@ program
   .option('--complexity <SML>', 'S|M|L', 'M')
   .option('--priority <n>', 'integer priority', (v) => parseInt(v, 10), 2)
   .option('--model <model>', 'sonnet|opus|default')
+  .option('--depends-on <taskId>', 'hold this task until that task is closed (serial chain)')
   .action((o) => {
     const db = getDb();
     const kind = o.plan
@@ -58,6 +59,7 @@ program
       complexity: o.complexity as Complexity,
       priority: o.priority,
       model: o.model ?? null,
+      depends_on: o.dependsOn ?? null,
     });
     const gate = validateTask(getTask(db, t.id)!);
     console.log(`created ${t.id} (${t.status})`);

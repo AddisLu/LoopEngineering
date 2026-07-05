@@ -59,6 +59,8 @@ function migrate(db: Database.Database): void {
     ['weekly_pct_after', 'REAL'],
     ['dispatch_window', 'TEXT'],
   ]);
+  // serial task chains: hold a task until the task it depends on is closed
+  add('tasks', [['depends_on', 'TEXT']]);
 }
 
 function seedSettings(db: Database.Database): void {

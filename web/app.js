@@ -133,6 +133,13 @@
     meta.appendChild(el('span', 'chip mono', `P${c.priority}`));
     meta.appendChild(el('span', 'chip tool', c.model || c.coding_tool));
     if (c.status === 'queued') meta.appendChild(el('span', 'chip mono', `~${c.est_pct}%`));
+    // serial-chain dependency chip (draft/queued cards waiting on another task)
+    if (c.depends_on && c.dep_state && c.dep_state !== 'satisfied') {
+      const depLabel = c.dep_state === 'waiting' ? `⏳ 等 ${c.depends_on}`
+        : c.dep_state === 'dep-failed' ? `⚠ 依賴失敗 ${c.depends_on}`
+        : `⚠ 依賴不存在 ${c.depends_on}`;
+      meta.appendChild(el('span', 'chip mono dep', depLabel));
+    }
     if (c.elapsedMin != null) {
       // show elapsed against the run's timeout budget when we know it
       const label = c.timeoutMin != null ? `${fmtDur(c.elapsedMin)} / ${fmtDur(c.timeoutMin)}` : fmtDur(c.elapsedMin);

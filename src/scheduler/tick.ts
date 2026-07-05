@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3';
-import { getBool, getNum } from '../db/index.js';
-import { countByStatus, listTasks, latestRun, activeRunCosts } from '../tasks.js';
+import { getBool, getNum, logEvent } from '../db/index.js';
+import { countByStatus, listTasks, latestRun, activeRunCosts, dependencyState, setStatus } from '../tasks.js';
+import { validateTask } from '../gate/validateTask.js';
 import { readUsage } from '../token/usage.js';
 import { estimatePct, estimateWeeklyPct } from '../token/accounting.js';
 import type { Task, UsageReading } from '../types.js';
@@ -69,6 +70,20 @@ export function tick(db: Database.Database, deps: TickDeps): TickInfo {
   // 4. pause only blocks NEW dispatch
   if (getBool(db, 'scheduler_paused')) return info(true, 'paused');
   if (breakerTripped) return info(false, 'breaker tripped');
+
+  // 4b. serial chains: a DRAFT created with `depends_on` is intent to run after its
+  // dependency — auto-queue it the moment the dependency is closed (gate must pass).
+  // Cheap and idempotent; runs before the capacity check so a chain link releases
+  // even on ticks that can't dispatch anything.
+  if (getBool(db, 'dep_auto_queue', true)) {
+    for (const t of listTasks(db, 'draft')) {
+      if (!t.depends_on) continue;
+      if (dependencyState(db, t) !== 'satisfied') continue;
+      if (!validateTask(t).ok) continue; // stays draft; gate errors are visible on the board
+      setStatus(db, t.id, 'queued', { detail: `auto-queued: dependency ${t.depends_on} closed` });
+      logEvent(db, { task_id: t.id, kind: 'note', detail: 'released by dependency chain' });
+    }
+  }
 
   // 5. capacity
   let cap = getNum(db, 'max_concurrency', 1) - deps.inflightCount();
@@ -165,7 +180,12 @@ function buildCandidates(db: Database.Database, policy: Policy, now: Date, ageSt
     .filter((t) => t.resume_count <= maxResumes && latestRun(db, t.id)?.session_id)
     .map((t) => ({ task: t, resume: true, waitedMin: 0 }));
 
-  const queued = listTasks(db, 'queued');
+  // Dependency hold: a queued task whose chain link isn't satisfied never dispatches
+  // (covers manual queueing of a dependent task — visible as a chip on its board card).
+  const queued = listTasks(db, 'queued').filter((t) => {
+    const dep = dependencyState(db, t);
+    return dep === 'none' || dep === 'satisfied';
+  });
   const waited = new Map<string, number>(queued.map((t) => [t.id, minutesSince(t.updated_at, now)]));
   const effPriority = (t: Task): number =>
     ageStepMin > 0 ? t.priority + Math.floor((waited.get(t.id) ?? 0) / ageStepMin) : t.priority;

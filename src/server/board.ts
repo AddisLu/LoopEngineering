@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import type Database from 'better-sqlite3';
 import { getBool } from '../db/index.js';
-import { listTasks, countByStatus, activeRuns, getTask, latestRun } from '../tasks.js';
+import { listTasks, countByStatus, activeRuns, getTask, latestRun, dependencyState } from '../tasks.js';
 import { readUsage } from '../token/usage.js';
 import { resolvePolicy } from '../scheduler/policy.js';
 import { validateTask } from '../gate/validateTask.js';
@@ -28,6 +28,8 @@ export interface BoardCard {
   elapsedMin?: number | null;
   timeoutMin?: number | null;
   elapsedPct?: number | null; // percent of the run's timeout elapsed (may exceed 100)
+  depends_on?: string | null;
+  dep_state?: string; // waiting | satisfied | dep-failed | dep-missing (absent when no dep)
 }
 
 export interface BoardState {
@@ -150,6 +152,10 @@ export function boardState(db: Database.Database): BoardState {
       est_pct: estimatePct(db, t.complexity),
       updated_at: t.updated_at,
     };
+    if (t.depends_on) {
+      card.depends_on = t.depends_on;
+      card.dep_state = dependencyState(db, t);
+    }
     if (run) {
       card.logTail = tailLog(run.log_path);
       card.branch = run.branch;

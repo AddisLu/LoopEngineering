@@ -22,6 +22,8 @@ CREATE TABLE IF NOT EXISTS tasks (
   priority       INTEGER NOT NULL DEFAULT 2,
   model          TEXT,                        -- sonnet | opus | default(NULL)
   timeout_min    INTEGER,                     -- NULL -> derived from complexity
+  depends_on     TEXT,                        -- task id this one waits for (serial chains);
+                                              -- held until that task is closed. Soft ref (no FK).
 
   -- lifecycle
   status         TEXT NOT NULL DEFAULT 'draft',

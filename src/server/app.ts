@@ -35,6 +35,7 @@ interface CreateTaskBody {
   complexity?: string;
   priority?: number;
   model?: string | null;
+  depends_on?: string | null;
 }
 
 export function buildApp(opts: AppOptions = {}): FastifyInstance {
@@ -100,6 +101,7 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
       complexity: (b.complexity as Complexity) ?? 'M',
       priority: b.priority ?? 2,
       model: b.model ?? null,
+      depends_on: b.depends_on ?? null,
     });
     return { task: t, gate: validateTask(t) };
   });

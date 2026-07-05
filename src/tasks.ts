@@ -18,15 +18,16 @@ export interface NewTaskInput {
   priority?: number;
   model?: string | null;
   timeout_min?: number | null;
+  depends_on?: string | null;
 }
 
 export function createTask(db: Database.Database, input: NewTaskInput): Task {
   const id = `t_${nanoid(10)}`;
   db.prepare(
     `INSERT INTO tasks (id, title, goal, plan_ref, plan_kind, coding_tool, verification_steps,
-       setup_cmd, repo_path, base_branch, complexity, priority, model, timeout_min, status)
+       setup_cmd, repo_path, base_branch, complexity, priority, model, timeout_min, depends_on, status)
      VALUES (@id, @title, @goal, @plan_ref, @plan_kind, @coding_tool, @verification_steps,
-       @setup_cmd, @repo_path, @base_branch, @complexity, @priority, @model, @timeout_min, 'draft')`,
+       @setup_cmd, @repo_path, @base_branch, @complexity, @priority, @model, @timeout_min, @depends_on, 'draft')`,
   ).run({
     id,
     title: input.title,
@@ -42,9 +43,30 @@ export function createTask(db: Database.Database, input: NewTaskInput): Task {
     priority: input.priority ?? 2,
     model: input.model ?? null,
     timeout_min: input.timeout_min ?? null,
+    depends_on: input.depends_on ?? null,
   });
   logEvent(db, { task_id: id, kind: 'status', to_status: 'draft', detail: 'created' });
   return getTask(db, id)!;
+}
+
+/**
+ * Where a task stands relative to its `depends_on` chain link.
+ * - 'none'        no dependency declared
+ * - 'satisfied'   the dependency is closed — the task may run
+ * - 'waiting'     the dependency exists but is not closed yet (any live status)
+ * - 'dep-failed'  the dependency terminally failed — human must resolve (restart dep,
+ *                 or clear/delete this task); the scheduler never runs it automatically
+ * - 'dep-missing' the dependency id no longer exists (deleted) — held for the same reason
+ */
+export type DependencyState = 'none' | 'satisfied' | 'waiting' | 'dep-failed' | 'dep-missing';
+
+export function dependencyState(db: Database.Database, t: Task): DependencyState {
+  if (!t.depends_on) return 'none';
+  const dep = getTask(db, t.depends_on);
+  if (!dep) return 'dep-missing';
+  if (dep.status === 'closed') return 'satisfied';
+  if (dep.status === 'failed') return 'dep-failed';
+  return 'waiting';
 }
 
 export function getTask(db: Database.Database, id: string): Task | undefined {

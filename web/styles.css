@@ -485,6 +485,7 @@ body {
 .chip.cx { font-weight: 600; color: var(--text); }
 .chip.tool { max-width: 150px; }
 .chip.working { color: var(--st-running); border-color: color-mix(in srgb, var(--st-running) 30%, transparent); }
+.chip.dep { color: var(--st-blocked); border-color: color-mix(in srgb, var(--st-blocked) 35%, transparent); max-width: 200px; }
 .chip .spin {
   width: 7px; height: 7px; border-radius: 50%;
   background: currentColor;

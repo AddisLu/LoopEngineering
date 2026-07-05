@@ -15,6 +15,7 @@ export const NONNEG_KEYS = new Set([
 export const BOOL_KEYS = new Set([
   'scheduler_paused',
   'window_checkpoint', 'weekly_packing', 'concurrency_reserve', 'priority_aging',
+  'dep_auto_queue',
 ]);
 
 /** Keys the board settings panel reads/writes (the budget/scheduling knobs). */

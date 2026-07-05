@@ -104,6 +104,9 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   priority_aging: 'false',
   age_step_min: '30',
   starve_min: '60',
+  // serial task chains: auto-queue a DRAFT whose `depends_on` task is closed (gate must
+  // pass). A queued dependent is always held until its dependency closes regardless.
+  dep_auto_queue: 'true',
 
   // usage-fetch cadence + ledger fallback
   usage_refresh_sec: '180',

@@ -15,6 +15,7 @@ export interface Task {
   priority: number;
   model: string | null;
   timeout_min: number | null;
+  depends_on: string | null;
   status: TaskStatus;
   resume_count: number;
   pr_url: string | null;

@@ -174,6 +174,7 @@ server.registerTool('loop_add_task', {
     priority: z.number().int().optional().describe('integer priority (default 2; lower runs first).'),
     model: z.string().optional().describe('sonnet | opus | default (optional).'),
     queue: z.boolean().optional().describe('default TRUE — queue for execution if the gate passes. false = leave as draft.'),
+    depends_on: z.string().optional().describe('Task id this one waits for (serial chain): held until that task is CLOSED, then auto-queued. Use to run tasks strictly one after another.'),
   },
 }, async (a) => {
   const isMock = a.coding_tool === 'mock';
@@ -201,6 +202,7 @@ server.registerTool('loop_add_task', {
       complexity: a.complexity ?? 'M',
       priority: a.priority ?? 2,
       model: a.model ?? null,
+      depends_on: a.depends_on ?? null,
     },
   });
   const id = created.task?.id;
