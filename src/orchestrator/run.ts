@@ -1,8 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type Database from 'better-sqlite3';
-import { paths } from '../config.js';
-import { getNum, getBool, getSetting, logEvent } from '../db/index.js';
+import { paths, isEngineRepo } from '../config.js';
+import { getNum, getBool, getSetting, setSetting, logEvent } from '../db/index.js';
 import type { Task } from '../types.js';
 import {
   createRun,
@@ -396,6 +396,12 @@ export async function runTask(
       reviewDetail = r.outcome === 'merged'
         ? `verification passed; merged into ${base}`
         : `verification passed; awaiting merge into ${base} (${r.detail})`;
+      // the engine just changed its own repo on main — flag a rebuild+restart so later
+      // chain tasks run the new code (idle-gated pickup in scheduler/tick.ts).
+      if (r.outcome === 'merged' && getBool(db, 'self_update', true) && isEngineRepo(task.repo_path)) {
+        setSetting(db, 'self_update_pending', 'true');
+        logEvent(db, { task_id: task.id, run_id: run.id, kind: 'note', detail: 'self-update pending: engine repo changed on main' });
+      }
     }
 
     // 6. reclaim the worktree once work is externalized (merged OR a PR link exists);
