@@ -316,8 +316,8 @@ body {
 .board::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 999px; border: 2px solid var(--bg); }
 
 .col {
-  flex: 1 0 268px;
-  min-width: 268px;
+  flex: 1 1 240px;
+  min-width: 240px;
   display: flex; flex-direction: column;
   scroll-snap-align: start;
   min-height: 0;
@@ -563,6 +563,30 @@ dialog menu { display: flex; justify-content: flex-end; gap: 10px; margin: 18px 
   padding-bottom: 5px; border-bottom: 1px solid var(--hairline);
 }
 .settings-err { margin: 12px 0 0; font-size: 12.5px; color: var(--danger); }
+
+/* ---- card detail modal ------------------------------------ */
+.card { cursor: pointer; }
+#detail-dialog { width: min(560px, 94vw); }
+.d-head { display: flex; align-items: center; gap: 10px; margin-bottom: 2px; }
+.d-head h3 { margin: 0; font-size: 18px; font-weight: 600; }
+.d-badge {
+  font-size: 11px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase;
+  padding: 3px 9px; border-radius: 999px;
+  background: var(--surface-sunk); color: var(--text-2); border: 1px solid var(--hairline);
+}
+.d-explain {
+  font-size: 13px; color: var(--text-2); line-height: 1.6;
+  background: var(--surface-sunk); border-radius: var(--r-sm); padding: 10px 12px; margin: 10px 0 14px;
+}
+.d-row {
+  display: grid; grid-template-columns: 128px 1fr; gap: 12px;
+  padding: 8px 0; border-top: 1px solid var(--hairline); font-size: 13px;
+}
+.d-row:first-child { border-top: none; }
+.d-k { color: var(--text-3); font-size: 12px; }
+.d-v { color: var(--text); word-break: break-word; white-space: pre-wrap; }
+.d-v a { color: var(--accent); }
+.d-loading { color: var(--text-3); padding: 24px 0; text-align: center; }
 
 /* ---- Responsive ------------------------------------------- */
 @media (max-width: 720px) {

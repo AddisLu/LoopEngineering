@@ -9,12 +9,13 @@
 
   const RING_C = 2 * Math.PI * 18; // ring circumference (r=18)
 
+  // 5 columns: 'ready' is never produced by the pipeline (folded into Queued),
+  // and 'verifying' is a sub-state of an active run (folded into Running) — so the
+  // whole lifecycle fits one screen without horizontal scroll.
   const COLUMNS = [
     ['Draft · 入場審核', ['draft']],
-    ['Ready', ['ready']],
-    ['Queued', ['queued', 'blocked']],
-    ['Running', ['running']],
-    ['Verifying', ['verifying']],
+    ['Queued', ['ready', 'queued', 'blocked']],
+    ['Running', ['running', 'verifying']],
     ['Review · 結案', ['review', 'failed']],
     ['Closed', ['closed']],
   ];
@@ -108,6 +109,7 @@
     card.className = `card s-${c.status}` +
       (c.status === 'draft' && !c.gate.ok ? ' gate-bad' : '') +
       (c.status === 'running' || c.status === 'verifying' ? ' is-working' : '');
+    card.dataset.id = c.id; // for the click-to-open detail modal
 
     // head: title + status dot
     const head = el('div', 'card-head');
@@ -318,6 +320,83 @@
     } finally {
       saveBtn.disabled = false;
     }
+  });
+
+  // ---- card detail modal (click a card) --------------------------------
+  const detailDialog = $('detail-dialog');
+  const detailBody = $('detail-body');
+  const STATUS_LABEL = {
+    draft: 'Draft', ready: 'Ready', queued: 'Queued', running: 'Running',
+    verifying: 'Verifying', blocked: 'Blocked', review: 'Review', failed: 'Failed', closed: 'Closed',
+  };
+  function statusExplain(t, gate) {
+    switch (t.status) {
+      case 'draft':
+        return gate.ok
+          ? '已通過入場審核。這是「草稿」——按卡片上的「加入排程」才會進入佇列（例如 Phase 2/3 是刻意保留的草稿）。'
+          : '缺少必填項：' + (gate.missing || []).join('、') + '。補齊後才能加入排程。';
+      case 'queued':
+        return '已排隊，等排程器派工。需 session/weekly 用量低於「當前時段門檻」、剩餘 runway 足夠、且此任務預估用量放得下時才會開始。';
+      case 'blocked': return '執行中被中斷（斷路器/暫停），保留 session，用量降回後會自動 resume。';
+      case 'running': return '正在執行中。';
+      case 'verifying': return '正在跑驗證步驟。';
+      case 'review': return '驗證通過，等你結案（或看 PR）。';
+      case 'failed': return '逾時或驗證/執行失敗。';
+      case 'closed': return '已結案。';
+      default: return '';
+    }
+  }
+  function dRow(k, v) {
+    const r = el('div', 'd-row');
+    r.appendChild(el('span', 'd-k', k));
+    const val = el('span', 'd-v');
+    if (v instanceof Node) val.appendChild(v); else val.textContent = v == null || v === '' ? '–' : v;
+    r.appendChild(val);
+    return r;
+  }
+  async function openDetail(id) {
+    detailBody.replaceChildren(el('div', 'd-loading', '載入中…'));
+    detailDialog.showModal();
+    let data;
+    try { data = await api('/api/tasks/' + id, 'GET'); }
+    catch (e) { detailBody.replaceChildren(el('div', 'banner danger', '讀取失敗：' + e)); return; }
+    const t = data.task || {};
+    const gate = data.gate || { ok: false, missing: [] };
+    let steps = [];
+    try { steps = JSON.parse(t.verification_steps || '[]'); } catch (e) {}
+
+    detailBody.replaceChildren();
+    const head = el('div', 'd-head');
+    head.appendChild(el('h3', null, t.title || t.id));
+    head.appendChild(el('span', `d-badge s-${t.status}`, STATUS_LABEL[t.status] || t.status));
+    detailBody.appendChild(head);
+    detailBody.appendChild(el('div', 'd-explain', statusExplain(t, gate)));
+
+    const list = el('div', 'd-list');
+    list.appendChild(dRow('Goal', t.goal));
+    list.appendChild(dRow('Plan', t.plan_ref));
+    list.appendChild(dRow('Verify', steps.length ? steps.join('　•　') : '–'));
+    list.appendChild(dRow('Repo', t.repo_path ? `${t.repo_path}${t.base_branch ? '  @ ' + t.base_branch : ''}` : '–'));
+    if (t.setup_cmd) list.appendChild(dRow('Setup', t.setup_cmd));
+    list.appendChild(dRow('Tool / Model', `${t.coding_tool || '–'}${t.model ? ' · ' + t.model : ''}`));
+    list.appendChild(dRow('Complexity / Priority', `${t.complexity} · P${t.priority}`));
+    if (t.pr_url) {
+      const a = el('a', null, t.pr_url); a.href = t.pr_url; a.target = '_blank'; a.rel = 'noopener';
+      list.appendChild(dRow('PR', a));
+    }
+    list.appendChild(dRow('建立 / 更新', `${t.created_at || '–'}  /  ${t.updated_at || '–'}`));
+    detailBody.appendChild(list);
+
+    const menu = el('menu');
+    const close = el('button', 'btn primary', '關閉'); close.type = 'button';
+    close.onclick = () => detailDialog.close();
+    menu.appendChild(close);
+    detailBody.appendChild(menu);
+  }
+  boardEl.addEventListener('click', (e) => {
+    if (e.target.closest('button, a')) return; // let card action buttons work
+    const card = e.target.closest('.card');
+    if (card && card.dataset.id) openDetail(card.dataset.id);
   });
 
   // ---- SSE with reconnect fallback -------------------------------------
