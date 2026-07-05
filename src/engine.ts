@@ -1,11 +1,26 @@
 import type Database from 'better-sqlite3';
+import { spawn } from 'node:child_process';
 import { getDb, getNum } from './db/index.js';
 import type { Task } from './types.js';
 import { runTask } from './orchestrator/run.js';
 import { recoverOnStartup } from './orchestrator/recovery.js';
 import { tick, type TickInfo } from './scheduler/tick.js';
 import { releasePower } from './scheduler/power.js';
-import { paths } from './config.js';
+import { paths, ENGINE_REPO_ROOT } from './config.js';
+
+/**
+ * Rebuild + restart the engine in place, detached so it survives the engine's own
+ * `systemctl --user restart`. Best-effort: a synchronous spawn failure propagates to
+ * the tick's try/catch, which re-arms self_update_pending for a retry next tick.
+ */
+function selfUpdate(): void {
+  const child = spawn('bash', ['-lc', 'sleep 2 && npm run build && systemctl --user restart loop-engineering'], {
+    cwd: ENGINE_REPO_ROOT,
+    detached: true,
+    stdio: 'ignore',
+  });
+  child.unref();
+}
 
 export interface Engine {
   db: Database.Database;
@@ -41,6 +56,7 @@ export function createEngine(db: Database.Database = getDb()): Engine {
   const deps = {
     inflightCount: () => inflight.size,
     startRun,
+    selfUpdate,
   };
 
   recoverOnStartup(db);

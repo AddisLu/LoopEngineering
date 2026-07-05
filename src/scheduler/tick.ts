@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3';
-import { getBool, getNum, logEvent } from '../db/index.js';
+import { getBool, getNum, setSetting, logEvent } from '../db/index.js';
 import { countByStatus, listTasks, latestRun, activeRunCosts, dependencyState, setStatus } from '../tasks.js';
 import { validateTask } from '../gate/validateTask.js';
 import { readUsage } from '../token/usage.js';
@@ -14,6 +14,9 @@ import type { Complexity } from '../config.js';
 export interface TickDeps {
   inflightCount(): number;
   startRun(task: Task, opts: { resume?: boolean }): void;
+  // Rebuild+restart the engine (real impl spawns a detached process; tests inject a
+  // spy). Invoked by the tick when self_update_pending is set and the engine is idle.
+  selfUpdate?(): void;
   now?: Date;
 }
 
@@ -70,6 +73,24 @@ export function tick(db: Database.Database, deps: TickDeps): TickInfo {
   // 4. pause only blocks NEW dispatch
   if (getBool(db, 'scheduler_paused')) return info(true, 'paused');
   if (breakerTripped) return info(false, 'breaker tripped');
+
+  // 4a. self-update: a task targeting the engine's OWN repo merged into main — rebuild
+  // + restart once idle, so later chain tasks run the new code. An in-flight run keeps
+  // the marker armed (checked again next tick); idle clears it, hands off to
+  // selfUpdate(), and skips dispatch entirely this tick (a rebuild racing a live run
+  // would restart out from under it).
+  if (getBool(db, 'self_update_pending') && deps.inflightCount() === 0) {
+    setSetting(db, 'self_update_pending', 'false');
+    logEvent(db, { kind: 'note', detail: 'self-update: rebuilding + restarting engine' });
+    try {
+      deps.selfUpdate?.();
+    } catch (err) {
+      // spawn failed (or the injected spy threw) — re-arm so the next tick retries.
+      setSetting(db, 'self_update_pending', 'true');
+      logEvent(db, { kind: 'note', detail: `self-update failed: ${String(err)}` });
+    }
+    return info(false, 'self-updating');
+  }
 
   // 4b. serial chains: a DRAFT created with `depends_on` is intent to run after its
   // dependency — auto-queue it the moment the dependency is closed (gate must pass).
