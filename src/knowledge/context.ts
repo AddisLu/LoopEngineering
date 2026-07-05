@@ -17,7 +17,7 @@ const KIND_RANK: Record<Kind, number> = {
 };
 
 /** Single-line + minimal markdown escape so a node's free-text body can't break the list layout. */
-function mdInline(s: string): string {
+export function mdInline(s: string): string {
   return s
     .replace(/\r?\n+/g, ' ')
     .replace(/[*_`~[\]]/g, (c) => `\\${c}`)

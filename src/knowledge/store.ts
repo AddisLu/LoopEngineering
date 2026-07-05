@@ -222,16 +222,50 @@ export function graph(db: Database.Database): { nodes: KnowledgeNode[]; edges: K
   return { nodes, edges };
 }
 
-/** Idempotent bulk load via upsertNode; reports how many rows were new vs merged. */
-export function importNodes(db: Database.Database, items: UpsertNodeInput[]): { created: number; updated: number } {
+export interface ImportNodeInput extends UpsertNodeInput {
+  /** Local id (e.g. "N1") for referencing this item from `edges` in the same import batch — never persisted. */
+  id?: string;
+}
+
+export interface ImportEdgeInput {
+  /** Either a local `id` from this batch's `items`, or an existing node id. */
+  src: string;
+  dst: string;
+  relation?: string;
+  note?: string | null;
+}
+
+/**
+ * Idempotent bulk load via upsertNode (dedup by title+scope) plus addEdge (dedup by
+ * src+dst+relation). `edges` may reference items by their batch-local `id` (resolved
+ * to the real node id here) or by an existing node id already in the database.
+ */
+export function importNodes(
+  db: Database.Database,
+  items: ImportNodeInput[],
+  edges: ImportEdgeInput[] = [],
+): { created: number; updated: number; edges: number } {
   let created = 0;
   let updated = 0;
+  const localIds = new Map<string, string>();
   for (const item of items) {
     const scope = item.scope ?? 'global';
     const existed = findActiveByTitleScope(db, item.title, scope) !== undefined;
-    upsertNode(db, item);
+    const node = upsertNode(db, item);
+    if (item.id) localIds.set(item.id, node.id);
     if (existed) updated++;
     else created++;
   }
-  return { created, updated };
+  let edgeCount = 0;
+  for (const e of edges) {
+    const src = localIds.get(e.src) ?? e.src;
+    const dst = localIds.get(e.dst) ?? e.dst;
+    const relation = e.relation ?? 'related';
+    const existed = db
+      .prepare(`SELECT 1 FROM knowledge_edges WHERE src = ? AND dst = ? AND relation = ?`)
+      .get(src, dst, relation);
+    addEdge(db, { src, dst, relation, note: e.note });
+    if (!existed) edgeCount++;
+  }
+  return { created, updated, edges: edgeCount };
 }
