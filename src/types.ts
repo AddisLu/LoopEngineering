@@ -21,6 +21,8 @@ export interface Task {
   pr_url: string | null;
   review_md_path: string | null;
   est_session_pct: number | null;
+  merge_status: string | null;
+  parent_task_id: string | null;
   created_at: string;
   updated_at: string;
 }

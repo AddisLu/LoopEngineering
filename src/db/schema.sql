@@ -34,6 +34,8 @@ CREATE TABLE IF NOT EXISTS tasks (
   pr_url         TEXT,
   review_md_path TEXT,
   est_session_pct REAL,                       -- estimate used at dispatch time
+  merge_status   TEXT,                         -- merged | pending | conflict | NULL (git close-out)
+  parent_task_id TEXT,                          -- set on auto-created merge-conflict resolution tasks
 
   created_at     TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at     TEXT NOT NULL DEFAULT (datetime('now'))

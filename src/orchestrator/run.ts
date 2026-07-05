@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type Database from 'better-sqlite3';
 import { paths } from '../config.js';
-import { getNum, logEvent } from '../db/index.js';
+import { getNum, getBool, logEvent } from '../db/index.js';
 import type { Task } from '../types.js';
 import {
   createRun,
@@ -20,9 +20,11 @@ import { addWorktree, isDirty, commitAll, diffstat, excludeLocal, worktreeIntern
 import { timeoutMinFor } from '../scheduler/timeout.js';
 import { writeTaskFile, writeResumeContext, collectResumeContext } from './prompt.js';
 import { writeSettingsLocal } from './settingsLocal.js';
-import { runVerification } from './verify.js';
+import { runVerification, type VerifyResult } from './verify.js';
 import { runGapReview } from '../review/gapReviewer.js';
 import { createPr } from '../git/pr.js';
+import { syncWithBase, pushBranch, stripLoopArtifacts, integrateIntoBase } from '../git/integrate.js';
+import { createMergeTask } from './mergeTask.js';
 import { cleanupWorktree } from './cleanup.js';
 import { killRun } from './kill.js';
 import { mockAdapter } from './adapters/mock.js';
@@ -96,7 +98,9 @@ export async function runTask(
       worktreePath = fs.mkdtempSync(path.join(paths.worktreesDir, `mock-${task.id}-`));
     } else {
       branch = `loop/${task.id}`;
-      const wt = addWorktree(task.repo_path!, branch, task.base_branch!);
+      const wt = addWorktree(task.repo_path!, branch, task.base_branch!, {
+        fetchBase: getBool(db, 'git_fetch_base', true),
+      });
       worktreePath = wt.path;
     }
   } catch (err) {
@@ -298,29 +302,61 @@ export async function runTask(
   setStatus(db, task.id, 'verifying', { run_id: run.id });
   const vres = await runVerification(task, worktreePath);
   if (!vres.ok) {
-    const tail = vres.results.at(-1)?.output.slice(-1500) ?? '';
-    const failedStep = vres.failedStep ?? '(unknown step)';
-    // Verify failure is recoverable: if we still have the Claude session and resume
-    // budget, hand the failure back to the same session to fix (blocked -> auto-resume)
-    // instead of burning the task as terminally failed. Bounded by max_resumes.
-    const maxResumes = getNum(db, 'max_resumes', 2);
-    const finishedRun = getRun(db, run.id)!;
-    if (finishedRun.session_id && task.resume_count < maxResumes) {
-      writeResumeContext(worktreePath, failedStep, tail);
-      bumpResume(db, task.id);
-      setStatus(db, task.id, 'blocked', {
-        run_id: run.id,
-        detail: `verify failed (resumable ${task.resume_count + 1}/${maxResumes}) at: ${failedStep}`,
-      });
-      return;
-    }
-    setStatus(db, task.id, 'failed', { run_id: run.id, detail: `verify failed at: ${failedStep}\n${tail}` });
+    handleVerifyFailure(db, task, run.id, worktreePath, vres);
     return;
   }
 
-  // post-verify: diffstat, gap-review, PR (all guarded/best-effort, host-only)
+  // post-verify git close-out: push branch (backup) -> merge latest base into branch
+  // -> (re-verify on merge) -> diffstat/gap-review/PR -> integrate into base. All
+  // host-only and best-effort; with every git_* setting off this reduces to the old
+  // diffstat -> gap-review -> PR flow.
+  let reviewDetail = 'verification passed';
   if (!isMock && branch && task.base_branch && task.repo_path) {
-    const stat = diffstat(worktreePath, task.base_branch);
+    const base = task.base_branch;
+    const autoPush = getBool(db, 'auto_push_branch', true);
+
+    // 1. early backup push of the loop branch
+    if (autoPush) pushBranch(worktreePath, branch);
+
+    // 2. bring the latest base into the branch
+    const sync = syncWithBase(worktreePath, base, getBool(db, 'git_fetch_base', true));
+    if (sync.status === 'merged') {
+      logEvent(db, { task_id: task.id, run_id: run.id, kind: 'merge', detail: `merged ${sync.baseRef} into ${branch}` });
+      // the branch changed — re-verify with identical failure semantics
+      setStatus(db, task.id, 'verifying', { run_id: run.id });
+      const reVres = await runVerification(task, worktreePath);
+      if (!reVres.ok) {
+        handleVerifyFailure(db, task, run.id, worktreePath, reVres);
+        return;
+      }
+      if (autoPush) pushBranch(worktreePath, branch);
+    } else if (sync.status === 'conflict') {
+      logEvent(db, { task_id: task.id, run_id: run.id, kind: 'merge', detail: `conflict: ${sync.conflictFiles.join(', ') || '(unknown files)'}` });
+      // Recursion guard: a task that IS a merge-resolution task (parent_task_id set)
+      // never spawns another merge task.
+      if (getBool(db, 'merge_conflict_task', true) && !task.parent_task_id) {
+        const mt = createMergeTask(db, task, sync.conflictFiles, sync.baseRef);
+        db.prepare('UPDATE tasks SET merge_status = ? WHERE id = ?').run('conflict', task.id);
+        // still attempt a backup PR for the branch, but skip integrate
+        tryCreatePr(db, task, run.id, worktreePath, branch);
+        setStatus(db, task.id, 'review', {
+          run_id: run.id,
+          detail: `verification passed; merge conflict vs ${sync.baseRef}; resolution task ${mt.id} queued`,
+        });
+      } else {
+        db.prepare('UPDATE tasks SET merge_status = ? WHERE id = ?').run('conflict', task.id);
+        tryCreatePr(db, task, run.id, worktreePath, branch);
+        setStatus(db, task.id, 'review', {
+          run_id: run.id,
+          detail: `verification passed; merge conflict vs ${sync.baseRef} — awaiting manual merge`,
+        });
+      }
+      return;
+    }
+    // sync.status === 'up-to-date' falls through
+
+    // 3. diffstat + gap-review (unchanged)
+    const stat = diffstat(worktreePath, base);
     if (stat) logEvent(db, { task_id: task.id, run_id: run.id, kind: 'note', detail: `diffstat:\n${stat}` });
 
     try {
@@ -330,20 +366,77 @@ export async function runTask(
       logEvent(db, { task_id: task.id, run_id: run.id, kind: 'note', detail: `gap-review skipped: ${String(err)}` });
     }
 
-    try {
-      const prUrl = createPr(worktreePath, branch, task.title);
-      if (prUrl) {
-        db.prepare('UPDATE tasks SET pr_url = ? WHERE id = ?').run(prUrl, task.id);
-        logEvent(db, { task_id: task.id, run_id: run.id, kind: 'note', detail: `PR: ${prUrl}` });
-        // Work is now externalized to the PR — reclaim the worktree's disk. (No PR =>
-        // keep it so the local diff stays reachable for review.)
-        cleanupWorktree(db, task);
-      }
-    } catch (err) {
-      logEvent(db, { task_id: task.id, run_id: run.id, kind: 'note', detail: `PR skipped: ${String(err)}` });
+    // 4. PR (its internal push is now a cheap re-push)
+    const prUrl = tryCreatePr(db, task, run.id, worktreePath, branch);
+
+    // 5. integrate into base
+    let mergeStatus: string | null = null;
+    if (getBool(db, 'auto_merge', true)) {
+      stripLoopArtifacts(worktreePath);
+      if (autoPush) pushBranch(worktreePath, branch);
+      const r = integrateIntoBase(task.repo_path, worktreePath, branch, base);
+      mergeStatus = r.outcome;
+      db.prepare('UPDATE tasks SET merge_status = ? WHERE id = ?').run(r.outcome, task.id);
+      logEvent(db, { task_id: task.id, run_id: run.id, kind: 'merge', detail: r.detail });
+      reviewDetail = r.outcome === 'merged'
+        ? `verification passed; merged into ${base}`
+        : `verification passed; awaiting merge into ${base} (${r.detail})`;
     }
+
+    // 6. reclaim the worktree once work is externalized (merged OR a PR link exists);
+    //    keep it for pending/conflict-without-PR so the local diff stays reachable.
+    if (mergeStatus === 'merged' || prUrl) cleanupWorktree(db, task);
   }
-  setStatus(db, task.id, 'review', { run_id: run.id, detail: 'verification passed' });
+  setStatus(db, task.id, 'review', { run_id: run.id, detail: reviewDetail });
+}
+
+/**
+ * Shared verify-failure handling for both first-verify and post-merge re-verify, so both
+ * paths get IDENTICAL semantics: recoverable (blocked -> auto-resume) while we still have
+ * the session and resume budget, else terminally failed.
+ */
+function handleVerifyFailure(
+  db: Database.Database,
+  task: Task,
+  runId: string,
+  worktreePath: string,
+  vres: VerifyResult,
+): void {
+  const tail = vres.results.at(-1)?.output.slice(-1500) ?? '';
+  const failedStep = vres.failedStep ?? '(unknown step)';
+  const maxResumes = getNum(db, 'max_resumes', 2);
+  const finishedRun = getRun(db, runId)!;
+  if (finishedRun.session_id && task.resume_count < maxResumes) {
+    writeResumeContext(worktreePath, failedStep, tail);
+    bumpResume(db, task.id);
+    setStatus(db, task.id, 'blocked', {
+      run_id: runId,
+      detail: `verify failed (resumable ${task.resume_count + 1}/${maxResumes}) at: ${failedStep}`,
+    });
+    return;
+  }
+  setStatus(db, task.id, 'failed', { run_id: runId, detail: `verify failed at: ${failedStep}\n${tail}` });
+}
+
+/** Best-effort PR creation; records pr_url + a note on success. Returns the URL or null. */
+function tryCreatePr(
+  db: Database.Database,
+  task: Task,
+  runId: string,
+  worktreePath: string,
+  branch: string,
+): string | null {
+  try {
+    const prUrl = createPr(worktreePath, branch, task.title);
+    if (prUrl) {
+      db.prepare('UPDATE tasks SET pr_url = ? WHERE id = ?').run(prUrl, task.id);
+      logEvent(db, { task_id: task.id, run_id: runId, kind: 'note', detail: `PR: ${prUrl}` });
+    }
+    return prUrl;
+  } catch (err) {
+    logEvent(db, { task_id: task.id, run_id: runId, kind: 'note', detail: `PR skipped: ${String(err)}` });
+    return null;
+  }
 }
 
 /** A dispatch that failed to produce a successful result (no clean exit / errored). */

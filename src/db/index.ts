@@ -61,6 +61,11 @@ function migrate(db: Database.Database): void {
   ]);
   // serial task chains: hold a task until the task it depends on is closed
   add('tasks', [['depends_on', 'TEXT']]);
+  // Git close-out: merge outcome + merge-conflict resolution task lineage
+  add('tasks', [
+    ['merge_status', 'TEXT'],
+    ['parent_task_id', 'TEXT'],
+  ]);
 }
 
 function seedSettings(db: Database.Database): void {

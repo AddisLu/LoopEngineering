@@ -112,6 +112,17 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   usage_refresh_sec: '180',
   ledger_fallback_after_min: '10',
 
+  // --- Git close-out (all default ON; all-off restores the pre-close-out behavior) ---
+  // fetch origin/<base> before cutting a worktree and before syncing, so work starts from
+  // and integrates against the freshest base.
+  git_fetch_base: 'true',
+  // push the loop branch to origin as a backup after verify passes.
+  auto_push_branch: 'true',
+  // after verify, merge latest base into the branch then fast-forward-integrate into base.
+  auto_merge: 'true',
+  // on a merge conflict, auto-create a queued resolution task (guarded against recursion).
+  merge_conflict_task: 'true',
+
   // notifications (M2)
   ntfy_server: '',
   ntfy_topic: '',

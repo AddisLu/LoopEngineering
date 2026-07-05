@@ -16,6 +16,8 @@ export const BOOL_KEYS = new Set([
   'scheduler_paused',
   'window_checkpoint', 'weekly_packing', 'concurrency_reserve', 'priority_aging',
   'dep_auto_queue',
+  // git close-out flags
+  'git_fetch_base', 'auto_push_branch', 'auto_merge', 'merge_conflict_task',
 ]);
 
 /** Keys the board settings panel reads/writes (the budget/scheduling knobs). */
@@ -24,6 +26,8 @@ export const TUNABLE_KEYS = [
   'day_session_max', 'day_weekly_max',
   'night_session_max', 'night_weekly_max',
   'hard_limit_pct', 'min_runway_min', 'max_concurrency',
+  // git close-out (Git 收尾) group
+  'git_fetch_base', 'auto_push_branch', 'auto_merge', 'merge_conflict_task',
 ] as const;
 
 /** Light validation for the settings people actually tune; unknown keys pass through. */

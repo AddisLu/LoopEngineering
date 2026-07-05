@@ -21,6 +21,7 @@ export interface BoardCard {
   verify_count: number;
   gate: { ok: boolean; missing: string[]; warnings: string[] };
   pr_url: string | null;
+  merge_status: string | null;
   est_pct: number;
   updated_at: string;
   logTail?: string[];
@@ -92,6 +93,7 @@ export interface TaskResult {
   id: string;
   status: string;
   pr_url: string | null;
+  merge_status: string | null;
   review_md: string | null;
   fail_detail: string | null;
   log_tail: string[];
@@ -149,6 +151,7 @@ export function boardState(db: Database.Database): BoardState {
       verify_count: Array.isArray(verify) ? verify.length : 0,
       gate: validateTask(t),
       pr_url: t.pr_url,
+      merge_status: t.merge_status,
       est_pct: estimatePct(db, t.complexity),
       updated_at: t.updated_at,
     };
@@ -231,6 +234,7 @@ export function taskResult(db: Database.Database, id: string): TaskResult | null
     id: t.id,
     status: t.status,
     pr_url: t.pr_url,
+    merge_status: t.merge_status,
     review_md,
     fail_detail,
     log_tail: run ? tailLog(run.log_path, 12) : [],
