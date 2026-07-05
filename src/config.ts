@@ -58,10 +58,15 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // pre-emptive warning margin below hard_limit_pct (edge-triggered ntfy while a run
   // is active), so you hear about it before the breaker actually interrupts.
   warn_margin_pct: '5',
+  // per-run fit budget is computed against the hard limit minus this reserve, so an
+  // under-estimate can't push a fresh dispatch into the breaker (see scheduler/tick.ts)
+  safety_reserve_pct: '5',
 
   // resume policy: max auto-resume attempts before a blocked task escalates to failed
   // (shared by the orchestrator, scheduler tick, and crash recovery)
   max_resumes: '2',
+  // cap on tasks the MCP may AUTO-queue (queued+running) before it must be queued by hand
+  max_autoqueue: '3',
 
   // timeouts (minutes) per complexity
   timeout_S: '15',

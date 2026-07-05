@@ -12,3 +12,8 @@ logs/
 worktrees/
 # machine-specific preview config (points at this Mac's scratchpad)
 .claude/launch.json
+
+# loop scratch/handoff artifacts (never commit)
+LOOP_TASK.md
+HANDOFF.md
+LOOP_RESUME_CONTEXT.md

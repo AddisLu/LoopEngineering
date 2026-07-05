@@ -9,6 +9,8 @@ export interface DispatchContext {
   model: string | null;
   timeoutMs: number;
   resumeSessionId?: string | null;
+  resume?: boolean; // true when continuing an interrupted/verify-failed run (picks the resume prompt)
+  handoff?: string | null; // restored HANDOFF.md / verify-failure context to prime the resume prompt
   onEvent?: (evt: any) => void; // live stream (SSE later)
 }
 

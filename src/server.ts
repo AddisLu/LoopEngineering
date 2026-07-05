@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3';
-import { getDb, getNum } from './db/index.js';
+import { getDb, getNum, logEvent } from './db/index.js';
 import { createEngine } from './engine.js';
 import { buildApp } from './server/app.js';
 import { notify, nearLimitEdge } from './notify.js';
@@ -16,10 +16,22 @@ export async function main(): Promise<void> {
   let lastEventId = (db.prepare('SELECT COALESCE(MAX(id),0) n FROM task_events').get() as { n: number }).n;
   let lastActive = -1;
   let nearWarned = false;
+  let lastReason: string | null = null;
 
   const loop = () => {
     try {
-      engine.tickOnce();
+      const info = engine.tickOnce();
+      // Persist the scheduler's "why" only when it CHANGES, so the board can show a live
+      // "holding: session 82% >= 65%" and the history stays a compact change-log.
+      if (info.reason !== lastReason) {
+        lastReason = info.reason;
+        logEvent(db, {
+          kind: 'scheduler',
+          detail: info.reason,
+          session_pct: info.reading.session.percent,
+          weekly_pct: info.reading.weekly.percent,
+        });
+      }
     } catch (err) {
       console.error('[tick] error:', err);
     }

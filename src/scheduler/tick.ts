@@ -83,16 +83,23 @@ export function tick(db: Database.Database, deps: TickDeps): TickInfo {
   }
 
   // 7. candidates: resume blocked first, then queued (ordered)
-  let headroom = policy.sessionMax - reading.session.percent;
+  //
+  // Two separate concepts (do not conflate — safety depends on it):
+  //   - `sessionMax` (step 6) is the soft START gate: don't begin work once usage is high.
+  //   - the per-run FIT BUDGET below packs against the HARD limit, so we can actually use
+  //     the sessionMax->hard_limit band, minus `safety_reserve_pct` of margin so an
+  //     under-estimate cannot shove a fresh dispatch past the breaker.
+  const safetyReserve = getNum(db, 'safety_reserve_pct', 5);
+  let fitBudget = hardLimit - safetyReserve - reading.session.percent;
   const candidates = buildCandidates(db, policy);
 
   for (const c of candidates) {
     if (cap <= 0) break;
     const est = estimatePct(db, c.task.complexity);
-    if (est > headroom) continue; // won't fit; try a cheaper one
+    if (est > fitBudget) continue; // won't fit in the safe band; try a cheaper one
     deps.startRun(c.task, { resume: c.resume });
     dispatched.push({ taskId: c.task.id, resume: c.resume });
-    headroom -= est;
+    fitBudget -= est;
     cap -= 1;
   }
 
