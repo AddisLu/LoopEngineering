@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="zh-Hant" data-mode="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>知識庫 · Loop Engineering</title>
+    <script>
+      // Set theme before first paint to avoid a flash of the wrong mode.
+      (function () {
+        try {
+          var m = localStorage.getItem('loop_mode');
+          if (m !== 'light' && m !== 'dark') {
+            m = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+          }
+          document.documentElement.setAttribute('data-mode', m);
+        } catch (e) {}
+      })();
+    </script>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span class="brand-text">
+          <strong class="brand-name">Loop Engineering</strong>
+          <span class="brand-sub">知識庫</span>
+        </span>
+      </div>
+
+      <div class="controls">
+        <a class="btn" href="/">← 看板</a>
+        <button id="theme-btn" class="btn icon-btn" type="button" title="切換佈景" aria-label="切換佈景"></button>
+        <button id="new-node-btn" class="btn primary" type="button">＋ 新增</button>
+      </div>
+    </header>
+
+    <main class="brain" aria-live="polite">
+      <div class="brain-toolbar">
+        <input id="search-input" class="brain-search" type="search" placeholder="搜尋知識…" autocomplete="off" />
+        <div id="kind-chips" class="chip-row" role="group" aria-label="kind 篩選"></div>
+        <div id="status-chips" class="chip-row" role="group" aria-label="狀態篩選"></div>
+      </div>
+
+      <div id="node-list" class="node-list"></div>
+    </main>
+
+    <dialog id="node-dialog">
+      <form id="node-form" method="dialog">
+        <h3 id="node-dialog-title">新增知識</h3>
+        <input type="hidden" name="id" />
+        <label>Title <span class="req">*</span><input name="title" required autocomplete="off" /></label>
+        <label>Body <textarea name="body" rows="4"></textarea></label>
+        <div class="row">
+          <label>Kind
+            <select name="kind">
+              <option value="environment">environment</option>
+              <option value="project">project</option>
+              <option value="constraint">constraint</option>
+              <option value="preference">preference</option>
+              <option value="tech">tech</option>
+              <option value="fact" selected>fact</option>
+              <option value="person">person</option>
+              <option value="repo">repo</option>
+            </select>
+          </label>
+          <label>Weight <input name="weight" type="number" min="1" max="5" value="3" /></label>
+        </div>
+        <label>Scope（global / repo:&lt;path&gt; / env:&lt;name&gt;）
+          <input name="scope" placeholder="global" autocomplete="off" />
+        </label>
+        <label>Tags（逗號分隔） <input name="tags" autocomplete="off" /></label>
+
+        <div id="edge-section" class="edge-section" hidden>
+          <div class="settings-group">相關連結</div>
+          <div id="edge-list" class="edge-list"></div>
+          <div class="row edge-add-row">
+            <label>連到
+              <input name="edge_dst" list="node-title-list" autocomplete="off" />
+              <datalist id="node-title-list"></datalist>
+            </label>
+            <label>關係
+              <select name="edge_relation">
+                <option value="related" selected>related</option>
+                <option value="runs-on">runs-on</option>
+                <option value="constrains">constrains</option>
+                <option value="deployed-at">deployed-at</option>
+                <option value="uses">uses</option>
+                <option value="part-of">part-of</option>
+              </select>
+            </label>
+            <button type="button" id="edge-add-btn" class="btn sm">加連結</button>
+          </div>
+        </div>
+
+        <p class="settings-err" id="node-err" hidden></p>
+        <menu>
+          <button class="btn" type="button" id="node-cancel">取消</button>
+          <button value="save" class="btn primary" id="node-save" type="submit">儲存</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <script src="/brain.js"></script>
+  </body>
+</html>
