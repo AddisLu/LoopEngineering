@@ -2,7 +2,7 @@ import type Database from 'better-sqlite3';
 import { getDb, getNum, logEvent } from './db/index.js';
 import { createEngine } from './engine.js';
 import { buildApp } from './server/app.js';
-import { notify, nearLimitEdge } from './notify.js';
+import { notify, nearLimitEdge, routeStatusEvent } from './notify.js';
 import { readUsage } from './token/usage.js';
 import { paths } from './config.js';
 
@@ -71,7 +71,7 @@ async function pumpNotifications(
   const events = db
     .prepare(
       `SELECT id, task_id, kind, to_status, detail FROM task_events
-        WHERE id > ? AND (kind = 'breaker' OR (kind = 'status' AND to_status IN ('review','failed','blocked')))
+        WHERE id > ? AND (kind = 'breaker' OR (kind = 'status' AND to_status IN ('review','failed','blocked','attention')))
         ORDER BY id ASC`,
     )
     .all(lastEventId) as { id: number; task_id: string; kind: string; to_status: string | null; detail: string | null }[];
@@ -86,29 +86,18 @@ async function pumpNotifications(
         tags: ['warning'],
         withPauseAction: true,
       });
-    } else if (e.to_status === 'review') {
-      // Enrich with the git close-out outcome so the push says how the merge landed.
-      const ms = (db.prepare('SELECT merge_status FROM tasks WHERE id = ?').get(e.task_id) as
-        | { merge_status: string | null }
-        | undefined)?.merge_status ?? null;
-      if (ms === 'conflict') {
-        await notify(db, {
-          title: 'Loop: task ready for review',
-          message: `${e.task_id}（合併衝突—已建解衝突任務）`,
-          priority: 'high',
-          tags: ['warning'],
-        });
-      } else {
-        const suffix = ms === 'merged' ? '（已自動併入 main）' : ms === 'pending' ? '（待合併）' : '';
-        await notify(db, {
-          title: 'Loop: task ready for review',
-          message: `${e.task_id}${suffix}`,
-          tags: ['white_check_mark'],
-        });
-      }
-    } else if (e.to_status === 'failed') {
-      await notify(db, { title: 'Loop: task failed', message: `${e.task_id} — ${e.detail ?? ''}`, priority: 'high', tags: ['x'] });
+      continue;
     }
+    // Enrich review events with the git close-out outcome so the push says how the
+    // merge landed; the mapping itself is pure (routeStatusEvent, unit-tested).
+    const merge_status =
+      e.to_status === 'review'
+        ? ((db.prepare('SELECT merge_status FROM tasks WHERE id = ?').get(e.task_id) as
+            | { merge_status: string | null }
+            | undefined)?.merge_status ?? null)
+        : null;
+    const push = routeStatusEvent({ task_id: e.task_id, to_status: e.to_status, detail: e.detail, merge_status });
+    if (push) await notify(db, push);
   }
 
   // queue-drained notification (edge-triggered)

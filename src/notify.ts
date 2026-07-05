@@ -24,6 +24,70 @@ export function nearLimitEdge(opts: {
   return { fire: true, warned: true };
 }
 
+export interface StatusNotification {
+  title: string;
+  message: string;
+  priority: 'min' | 'low' | 'default' | 'high' | 'urgent';
+  tags?: string[];
+}
+
+/**
+ * Pure status-event → push mapping for the server's notification pump (unit-testable).
+ * `merge_status` is looked up by the caller for review events, so this stays DB-free.
+ * Returns null for statuses that don't notify.
+ */
+export function routeStatusEvent(e: {
+  task_id: string;
+  to_status: string | null;
+  detail: string | null;
+  merge_status?: string | null;
+}): StatusNotification | null {
+  switch (e.to_status) {
+    case 'attention':
+      // human hold — worktree/session/HANDOFF preserved, someone must decide
+      return {
+        title: 'Loop: 任務待確認',
+        message: `${e.task_id} — ${e.detail ?? '執行出問題，已保留現場'}`,
+        priority: 'high',
+        tags: ['warning'],
+      };
+    case 'blocked':
+      // was dead code: the old pump SQL selected blocked events but never handled them
+      return {
+        title: 'Loop: task interrupted',
+        message: `${e.task_id} — interrupted; will auto-resume${e.detail ? ` (${e.detail})` : ''}`,
+        priority: 'default',
+      };
+    case 'review': {
+      if (e.merge_status === 'conflict') {
+        return {
+          title: 'Loop: task ready for review',
+          message: `${e.task_id}（合併衝突—已建解衝突任務）`,
+          priority: 'high',
+          tags: ['warning'],
+        };
+      }
+      const suffix =
+        e.merge_status === 'merged' ? '（已自動併入 main）' : e.merge_status === 'pending' ? '（待合併）' : '';
+      return {
+        title: 'Loop: task ready for review',
+        message: `${e.task_id}${suffix}`,
+        priority: 'default',
+        tags: ['white_check_mark'],
+      };
+    }
+    case 'failed':
+      return {
+        title: 'Loop: task failed',
+        message: `${e.task_id} — ${e.detail ?? ''}`,
+        priority: 'high',
+        tags: ['x'],
+      };
+    default:
+      return null;
+  }
+}
+
 /**
  * Fire-and-forget ntfy push. warning/critical notifications carry a Pause action
  * button that POSTs /api/pause (with the bearer header) so you can stop the
