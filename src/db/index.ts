@@ -18,6 +18,7 @@ export function getDb(dbPath: string = paths.db): Database.Database {
 
   const schema = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
   db.exec(schema);
+  migrate(db);
   seedSettings(db);
 
   _db = db;
@@ -31,8 +32,33 @@ export function openTestDb(): Database.Database {
   db.pragma('foreign_keys = ON');
   const schema = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
   db.exec(schema);
+  migrate(db);
   seedSettings(db);
   return db;
+}
+
+/**
+ * Idempotent column migrations for DBs created before a `schema.sql` change.
+ * `CREATE TABLE IF NOT EXISTS` never adds columns to an existing table, so new
+ * columns are added here (guarded by PRAGMA table_info). Safe to run every startup.
+ */
+function migrate(db: Database.Database): void {
+  const cols = (table: string): Set<string> =>
+    new Set(
+      (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name),
+    );
+  const add = (table: string, defs: [string, string][]): void => {
+    const have = cols(table);
+    for (const [name, ddl] of defs) {
+      if (!have.has(name)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${ddl}`);
+    }
+  };
+  // Phase 3: weekly-budget packing (#2) + day/night window checkpoint (#1)
+  add('task_runs', [
+    ['weekly_pct_before', 'REAL'],
+    ['weekly_pct_after', 'REAL'],
+    ['dispatch_window', 'TEXT'],
+  ]);
 }
 
 function seedSettings(db: Database.Database): void {

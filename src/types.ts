@@ -40,6 +40,9 @@ export interface TaskRun {
   usage_json: string | null;
   session_pct_before: number | null;
   session_pct_after: number | null;
+  weekly_pct_before: number | null;
+  weekly_pct_after: number | null;
+  dispatch_window: string | null;
   started_at: string;
   finished_at: string | null;
 }

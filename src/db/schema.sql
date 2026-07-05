@@ -59,6 +59,9 @@ CREATE TABLE IF NOT EXISTS task_runs (
   usage_json     TEXT,                          -- result-event usage (debug/future)
   session_pct_before REAL,
   session_pct_after  REAL,
+  weekly_pct_before  REAL,                       -- Phase 3 #2: weekly budget packing/calibration
+  weekly_pct_after   REAL,
+  dispatch_window    TEXT,                        -- Phase 3 #1: 'day' | 'night' at dispatch time
 
   started_at     TEXT NOT NULL DEFAULT (datetime('now')),
   finished_at    TEXT
