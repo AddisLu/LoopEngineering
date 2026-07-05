@@ -9,12 +9,11 @@
 
   const RING_C = 2 * Math.PI * 18; // ring circumference (r=18)
 
-  // 5 columns: 'ready' is never produced by the pipeline (folded into Queued),
-  // and 'verifying' is a sub-state of an active run (folded into Running) — so the
-  // whole lifecycle fits one screen without horizontal scroll.
+  // 5 columns: 'verifying' is a sub-state of an active run (folded into Running) — so
+  // the whole lifecycle fits one screen without horizontal scroll.
   const COLUMNS = [
     ['Draft · 入場審核', ['draft']],
-    ['Queued', ['ready', 'queued', 'blocked']],
+    ['Queued', ['queued', 'blocked']],
     ['Running', ['running', 'verifying']],
     ['Review · 結案', ['review', 'failed', 'attention']],
     ['Closed', ['closed']],
@@ -216,6 +215,10 @@
       actions.appendChild(btn('加入排程', 'primary', () => act(`/api/tasks/${c.id}/queue`)));
     if (c.status === 'running' || c.status === 'verifying')
       actions.appendChild(btn('中止', 'danger-ghost', () => act(`/api/tasks/${c.id}/abort`)));
+    // blocked auto-resumes on every eligible tick with no other stop button — let the
+    // user pull it into 待確認 (attention) triage instead of burning resume budget.
+    if (c.status === 'blocked')
+      actions.appendChild(btn('轉待確認', '', () => act(`/api/tasks/${c.id}/hold`)));
     if (c.status === 'review') {
       if (c.pr_url) actions.appendChild(btn('看 PR', '', () => window.open(c.pr_url, '_blank', 'noopener')));
       if (c.merge_status === 'pending' || c.merge_status === 'conflict')
@@ -450,7 +453,7 @@
   const detailDialog = $('detail-dialog');
   const detailBody = $('detail-body');
   const STATUS_LABEL = {
-    draft: 'Draft', ready: 'Ready', queued: 'Queued', running: 'Running',
+    draft: 'Draft', queued: 'Queued', running: 'Running',
     verifying: 'Verifying', blocked: 'Blocked', attention: '待確認',
     review: 'Review', failed: 'Failed', closed: 'Closed',
   };

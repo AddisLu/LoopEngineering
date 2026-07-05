@@ -239,6 +239,19 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
     return { ok: true };
   });
 
+  // 轉待確認: a blocked task auto-resumes on every eligible tick with no way to stop it —
+  // hand it to attention instead, since the tick only scans 'blocked'. Note: a hold
+  // racing an in-flight tick may still allow one more resume (one-poll window, acceptable).
+  app.post('/api/tasks/:id/hold', async (req, reply) => {
+    const id = (req.params as any).id;
+    const t = getTask(db, id);
+    if (!t) return reply.code(404).send({ error: 'not found' });
+    if (t.status !== 'blocked')
+      return reply.code(409).send({ error: 'task not blocked', status: t.status });
+    setStatus(db, id, 'attention', { detail: 'held by user (auto-resume stopped)' });
+    return { ok: true };
+  });
+
   app.post('/api/tasks/:id/abort', async (req, reply) => {
     const id = (req.params as any).id;
     if (!getTask(db, id)) return reply.code(404).send({ error: 'not found' });

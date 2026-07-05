@@ -15,6 +15,7 @@ const RUNNER = `
 const sleepMs = Number(process.env.MOCK_SLEEP_MS || '800');
 const writeFile = process.env.MOCK_WRITE_FILE || '';
 const exitCode = Number(process.env.MOCK_EXIT || '0');
+const subtypeOverride = process.env.MOCK_RESULT_SUBTYPE || '';
 const sid = process.env.MOCK_SESSION_ID || ('mock-' + process.pid);
 const w = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
 let stopped = false;
@@ -28,7 +29,7 @@ const start = Date.now();
   if (Date.now() - start >= sleepMs) {
     if (writeFile) { try { require('node:fs').appendFileSync(writeFile, 'mock did work\\n'); } catch {} }
     w({ type: 'assistant', text: 'done' });
-    w({ type: 'result', subtype: exitCode === 0 ? 'success' : 'error', session_id: sid, usage: { input_tokens: 0, output_tokens: 0 }, total_cost_usd: 0 });
+    w({ type: 'result', subtype: subtypeOverride || (exitCode === 0 ? 'success' : 'error'), session_id: sid, usage: { input_tokens: 0, output_tokens: 0 }, total_cost_usd: 0 });
     process.exit(exitCode);
   }
   w({ type: 'assistant', text: 'working...' });

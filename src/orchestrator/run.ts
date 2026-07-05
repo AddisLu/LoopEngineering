@@ -127,31 +127,26 @@ export async function runTask(
     // before any commitAll (checkpoint or auto-commit) can `git add -A` them.
     excludeLocal(worktreePath, ['/LOOP_TASK.md', '/.claude/settings.local.json']);
   }
-  if (!isMock && task.setup_cmd) {
+  if (task.setup_cmd) {
     // Resume reuses the worktree, so setup (npm install, ...) only needs to run once.
     // A sentinel in the worktree's private git dir records the setup_cmd it ran for;
-    // skip while unchanged, re-run when the command itself changes.
-    const sentinel = worktreeInternalFile(worktreePath, 'loop-setup-done');
-    let alreadyDone = false;
-    try {
-      alreadyDone = fs.readFileSync(sentinel, 'utf8') === task.setup_cmd;
-    } catch {
-      /* no sentinel yet */
-    }
-    if (alreadyDone) {
+    // skip while unchanged, re-run when the command itself changes. Mock scratch dirs
+    // run setup too (harmlessly — no adapter token spend either way), which is what
+    // makes the fail-fast path below testable with zero tokens.
+    const outcome = await runTaskSetup(task, worktreePath, logPath);
+    if (outcome.kind === 'skipped') {
       logEvent(db, { task_id: task.id, run_id: run.id, kind: 'note', detail: 'setup skipped (unchanged, already installed)' });
-    } else {
-      // best-effort setup; failures surface at verification
-      try {
-        await runSetup(task.setup_cmd, worktreePath, logPath);
-        try {
-          fs.writeFileSync(sentinel, task.setup_cmd);
-        } catch {
-          /* sentinel is an optimization; ignore write failure */
-        }
-      } catch {
-        /* ignore; verification will catch real breakage */
-      }
+    } else if (outcome.kind === 'failed') {
+      // Fail fast: don't spawn the adapter into a broken workspace and burn a whole
+      // token budget only to have verify catch it later. Do NOT write the sentinel —
+      // a /restart re-runs setup. finishRun BEFORE the adapter's dispatch logEvent,
+      // so a triaged run carries no misleading 'dispatch' event.
+      finishRun(db, run.id, { error: 'setup failed' });
+      setStatus(db, task.id, 'attention', {
+        run_id: run.id,
+        detail: `setup_cmd failed (exit=${outcome.exitCode}): ${outcome.tail}`,
+      });
+      return;
     }
   }
   if (!isMock) writeSettingsLocal(worktreePath, hardLimit);
@@ -227,7 +222,7 @@ export async function runTask(
     opts.resume &&
     resumeSessionId &&
     !getRun(db, run.id)?.interrupted_by &&
-    isStartupFailure(result)
+    dispatchFailed(result)
   ) {
     logEvent(db, { task_id: task.id, run_id: run.id, kind: 'note', detail: 'resume failed; cold-start fallback (no --resume)' });
     result = await dispatchOnce(null);
@@ -291,7 +286,7 @@ export async function runTask(
     }
     return;
   }
-  if (result.error || (result.exitCode !== 0 && result.resultSubtype !== 'success')) {
+  if (dispatchFailed(result)) {
     // Adapter error: the worktree (and any streamed session) is intact — hold for triage.
     setStatus(db, task.id, 'attention', {
       run_id: run.id,
@@ -461,32 +456,65 @@ function tryCreatePr(
   }
 }
 
-/** A dispatch that failed to produce a successful result (no clean exit / errored). */
-function isStartupFailure(result: DispatchResult): boolean {
-  return !!result.error || (result.exitCode !== 0 && result.resultSubtype !== 'success');
+/**
+ * A dispatch that must NOT reach verify: an adapter error, any non-zero exit
+ * (regardless of subtype — closes the exit!=0-with-subtype-'success' hole), or an
+ * explicit non-success subtype on a clean exit (closes the exit=0-with-subtype-'error'
+ * hole). exit=0 with subtype null (final event never flushed but the process exited
+ * clean) still passes — auto-commit + verify backstop it. Shared by the failure branch
+ * and the cold-start-resume fallback below, so both read the SAME hole-closed signal.
+ */
+function dispatchFailed(r: DispatchResult): boolean {
+  return !!r.error || r.exitCode !== 0 || (r.resultSubtype !== null && r.resultSubtype !== 'success');
 }
 
-function runSetup(cmd: string, cwd: string, logPath: string): Promise<void> {
+type SetupOutcome = { kind: 'skipped' } | { kind: 'ok' } | { kind: 'failed'; exitCode: number | null; tail: string };
+
+/** Run a task's setup_cmd, honoring the per-worktree sentinel. Caller has already checked task.setup_cmd. */
+async function runTaskSetup(task: Task, worktreePath: string, logPath: string): Promise<SetupOutcome> {
+  const sentinel = worktreeInternalFile(worktreePath, 'loop-setup-done');
+  let alreadyDone = false;
+  try {
+    alreadyDone = fs.readFileSync(sentinel, 'utf8') === task.setup_cmd;
+  } catch {
+    /* no sentinel yet */
+  }
+  if (alreadyDone) return { kind: 'skipped' };
+  const { exitCode, tail } = await runSetup(task.setup_cmd!, worktreePath, logPath);
+  if (exitCode !== 0) return { kind: 'failed', exitCode, tail };
+  try {
+    fs.writeFileSync(sentinel, task.setup_cmd!);
+  } catch {
+    /* sentinel is an optimization; ignore write failure */
+  }
+  return { kind: 'ok' };
+}
+
+function runSetup(cmd: string, cwd: string, logPath: string): Promise<{ exitCode: number | null; tail: string }> {
   return new Promise((resolve) => {
     import('node:child_process').then(({ spawn }) => {
       const child = spawn('bash', ['-lc', cmd], { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
       const fd = fs.openSync(logPath, 'a');
-      const w = (d: Buffer) => fs.writeSync(fd, d);
+      let tail = '';
+      const w = (d: Buffer) => {
+        fs.writeSync(fd, d);
+        tail = (tail + d.toString('utf8')).slice(-1500);
+      };
       child.stdout.on('data', w);
       child.stderr.on('data', w);
       const timer = setTimeout(() => child.kill('SIGKILL'), 10 * 60_000);
-      child.on('close', () => {
+      child.on('close', (code) => {
         clearTimeout(timer);
         try {
           fs.closeSync(fd);
         } catch {
           /* ignore */
         }
-        resolve();
+        resolve({ exitCode: code, tail });
       });
       child.on('error', () => {
         clearTimeout(timer);
-        resolve();
+        resolve({ exitCode: null, tail });
       });
     });
   });

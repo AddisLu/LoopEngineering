@@ -261,7 +261,7 @@ server.registerTool('loop_queue_task', {
 
 server.registerTool('loop_list_tasks', {
   title: 'List Loop tasks',
-  description: 'List Loop Engineering tasks (optionally filtered by status) with a board summary. Statuses: draft, ready, queued, running, verifying, blocked, attention (human hold — resume/restart/abandon from the board), review, failed, closed.',
+  description: 'List Loop Engineering tasks (optionally filtered by status) with a board summary. Statuses: draft, queued, running, verifying, blocked, attention (human hold — resume/restart/abandon from the board), review, failed, closed.',
   inputSchema: { status: z.string().optional().describe('optional status to filter by') },
 }, async ({ status }) => {
   const board = await api('/api/board');
