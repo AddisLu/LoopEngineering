@@ -468,10 +468,10 @@ function dispatchFailed(r: DispatchResult): boolean {
   return !!r.error || r.exitCode !== 0 || (r.resultSubtype !== null && r.resultSubtype !== 'success');
 }
 
-type SetupOutcome = { kind: 'skipped' } | { kind: 'ok' } | { kind: 'failed'; exitCode: number | null; tail: string };
+export type SetupOutcome = { kind: 'skipped' } | { kind: 'ok' } | { kind: 'failed'; exitCode: number | null; tail: string };
 
 /** Run a task's setup_cmd, honoring the per-worktree sentinel. Caller has already checked task.setup_cmd. */
-async function runTaskSetup(task: Task, worktreePath: string, logPath: string): Promise<SetupOutcome> {
+export async function runTaskSetup(task: Task, worktreePath: string, logPath: string): Promise<SetupOutcome> {
   const sentinel = worktreeInternalFile(worktreePath, 'loop-setup-done');
   let alreadyDone = false;
   try {
