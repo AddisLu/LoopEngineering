@@ -18,15 +18,21 @@ function planContent(task: Task): string {
 /**
  * Write LOOP_TASK.md into the worktree. The dispatch prompt only tells the agent to
  * read this file, so all task context lives here (goal, plan, verification, rules).
+ * `extras.knowledge` (when non-null) is inserted as a `## Knowledge / Environment`
+ * section between Goal and Plan; omitted entirely when null/absent, so an empty
+ * knowledge base produces byte-identical output to before this option existed.
  */
-export function writeTaskFile(cwd: string, task: Task): string {
+export function writeTaskFile(cwd: string, task: Task, extras?: { knowledge?: string | null }): string {
   const steps = parseSteps(task);
   const file = path.join(cwd, 'LOOP_TASK.md');
+  const knowledgeBlock = extras?.knowledge
+    ? `\n## Knowledge / Environment\n（以下為使用者的長期環境／偏好／限制知識，執行本任務時必須遵守；若與 Plan 衝突，以 Plan 為準）\n${extras.knowledge}\n`
+    : '';
   const body = `# Loop task: ${task.title}
 
 ## Goal
 ${task.goal}
-
+${knowledgeBlock}
 ## Plan
 ${planContent(task)}
 
