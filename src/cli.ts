@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
+import fs from 'node:fs';
+import path from 'node:path';
 import { getDb, getSetting, setSetting, getBool } from './db/index.js';
 import {
   createTask,
@@ -16,8 +18,11 @@ import { readUsage, setCachedUsage } from './token/usage.js';
 import { killRun } from './orchestrator/kill.js';
 import { cleanupWorktree } from './orchestrator/cleanup.js';
 import { pruneTaskArtifacts, type ArtifactCleanup } from './git/worktree.js';
-import { DEFAULT_SETTINGS, type Complexity } from './config.js';
+import { DEFAULT_SETTINGS, ENGINE_REPO_ROOT, type Complexity } from './config.js';
 import { validateSetting } from './settings.js';
+import { upsertNode, listNodes, searchNodes, importNodes, type ImportNodeInput, type ImportEdgeInput } from './knowledge/store.js';
+import { exportClaudeMd } from './knowledge/export.js';
+import type { KnowledgeNode, Kind, Status } from './knowledge/types.js';
 
 const program = new Command();
 program.name('loop').description('Loop Engineering — token-aware coding-task scheduler').version('0.1.0');
@@ -271,6 +276,70 @@ program
     return fail(`unknown action '${action}' — use: list | get | set`);
   });
 
+const knowledge = program.command('knowledge').description('manage the knowledge base');
+
+knowledge
+  .command('list')
+  .description('list knowledge nodes')
+  .option('--kind <kind>')
+  .option('--scope <scope>')
+  .option('--status <status>')
+  .action((o) => {
+    const db = getDb();
+    printNodes(listNodes(db, { kind: o.kind as Kind, scope: o.scope, status: o.status as Status }));
+  });
+
+knowledge
+  .command('search <query>')
+  .description('full-text search knowledge nodes')
+  .action((query) => {
+    printNodes(searchNodes(getDb(), query));
+  });
+
+knowledge
+  .command('add')
+  .description('create or update a knowledge node (dedup by title+scope)')
+  .requiredOption('--title <title>')
+  .option('--body <body>')
+  .option('--kind <kind>', 'environment|project|constraint|preference|tech|fact|person|repo')
+  .option('--scope <scope>', 'global | repo:<path> | env:<name>')
+  .option('--weight <n>', 'integer 1-5', (v) => parseInt(v, 10))
+  .action((o) => {
+    const node = upsertNode(getDb(), {
+      title: o.title,
+      body: o.body,
+      kind: o.kind as Kind | undefined,
+      scope: o.scope,
+      weight: o.weight,
+    });
+    console.log(`${node.id}  [${node.kind}] ${node.title}`);
+  });
+
+knowledge
+  .command('import [file]')
+  .description('bulk-import nodes+edges from a JSON file (defaults to the bundled seed)')
+  .action((file: string | undefined) => {
+    const target = file ?? path.join(ENGINE_REPO_ROOT, 'seed', 'knowledge-seed.json');
+    const data = JSON.parse(fs.readFileSync(target, 'utf8')) as {
+      items?: ImportNodeInput[];
+      edges?: ImportEdgeInput[];
+    };
+    const result = importNodes(getDb(), data.items ?? [], data.edges ?? []);
+    console.log(
+      `import ${target}: created=${result.created} updated=${result.updated} edges=${result.edges}`,
+    );
+  });
+
+knowledge
+  .command('export')
+  .description("render environment/constraint/preference knowledge into a target repo's CLAUDE.md")
+  .requiredOption('--repo <path>', 'target repo path')
+  .action((o) => {
+    const result = exportClaudeMd(getDb(), o.repo);
+    if (!result.ok) return fail(result.error ?? 'export failed');
+    console.log(`exported ${result.nodeCount} node(s) -> ${result.path}`);
+  });
+
 program.parseAsync();
 
 function printGate(g: { ok: boolean; missing: string[]; warnings: string[] }): void {
@@ -296,4 +365,14 @@ function cleanupNote(c: ArtifactCleanup): string {
 function fail(msg: string): void {
   console.error(msg);
   process.exitCode = 1;
+}
+
+function printNodes(nodes: KnowledgeNode[]): void {
+  if (!nodes.length) {
+    console.log('(no matching nodes)');
+    return;
+  }
+  for (const n of nodes) {
+    console.log(`${n.id}  ${pad(n.kind, 12)} w${n.weight}  ${pad(n.scope, 20)} ${n.title}`);
+  }
 }
