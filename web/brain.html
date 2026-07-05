@@ -42,6 +42,15 @@
         <div id="status-chips" class="chip-row" role="group" aria-label="狀態篩選"></div>
       </div>
 
+      <section id="relation-panel" class="relation-panel" hidden>
+        <div class="relation-header">
+          <span id="relation-title" class="relation-title"></span>
+          <button id="relation-close" class="btn sm" type="button">關閉</button>
+        </div>
+        <div id="relation-empty" class="empty" hidden>此節點尚無關聯</div>
+        <svg id="relation-svg" class="relation-svg" viewBox="0 0 480 480" xmlns="http://www.w3.org/2000/svg"></svg>
+      </section>
+
       <div id="node-list" class="node-list"></div>
     </main>
 

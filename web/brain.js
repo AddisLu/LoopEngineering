@@ -126,6 +126,7 @@
       actions.appendChild(btn('核可', 'primary', () => act(`/api/knowledge/${n.id}/approve`)));
       actions.appendChild(btn('退回', 'danger-ghost', () => act(`/api/knowledge/${n.id}/reject`)));
     }
+    actions.appendChild(btn('關聯', '', () => openRelationView(n.id)));
     actions.appendChild(btn('編輯', '', () => openNodeDialog(n)));
     actions.appendChild(btn('刪除', 'danger-ghost', () => delNode(n.id, n.title)));
     row.appendChild(actions);
@@ -169,6 +170,94 @@
       if (currentStatus !== 'all') nodes = nodes.filter((n) => n.status === currentStatus);
     }
     renderNodes(nodes);
+  }
+
+  // ---- relation view (lightweight SVG, one-hop neighbors, no physics) ----
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+  const relationPanel = $('relation-panel');
+  const relationTitle = $('relation-title');
+  const relationEmpty = $('relation-empty');
+  const relationSvg = $('relation-svg');
+  $('relation-close').onclick = () => { relationPanel.hidden = true; };
+
+  function svgEl(tag, attrs) {
+    const e = document.createElementNS(SVG_NS, tag);
+    if (attrs) for (const k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  }
+
+  async function openRelationView(nodeId) {
+    relationPanel.hidden = false;
+    relationSvg.replaceChildren();
+    relationEmpty.hidden = true;
+
+    let g;
+    try { g = await api('/api/knowledge/graph', 'GET'); }
+    catch (e) {
+      relationTitle.textContent = '';
+      relationEmpty.hidden = false;
+      relationEmpty.textContent = '載入關聯失敗：' + e;
+      return;
+    }
+    const nodes = g.nodes || [];
+    const edges = g.edges || [];
+    const byId = new Map(nodes.map((n) => [n.id, n]));
+    const center = byId.get(nodeId);
+    if (!center) {
+      relationTitle.textContent = '';
+      relationEmpty.hidden = false;
+      relationEmpty.textContent = '此節點尚無關聯';
+      return;
+    }
+    relationTitle.textContent = center.title;
+
+    const neighbors = [];
+    for (const e of edges) {
+      if (e.src === nodeId && byId.has(e.dst)) neighbors.push({ node: byId.get(e.dst), relation: e.relation });
+      else if (e.dst === nodeId && byId.has(e.src)) neighbors.push({ node: byId.get(e.src), relation: e.relation });
+    }
+    if (!neighbors.length) {
+      relationEmpty.hidden = false;
+      relationEmpty.textContent = '此節點尚無關聯';
+      return;
+    }
+
+    // static circle layout — no physics/drag: neighbors spaced evenly around the center
+    const W = 480, H = 480, cx = W / 2, cy = H / 2, r = 170;
+    const n = neighbors.length;
+    const positions = neighbors.map((nb, i) => {
+      const angle = (2 * Math.PI * i) / n - Math.PI / 2;
+      return { node: nb.node, relation: nb.relation, x: cx + r * Math.cos(angle), y: cy + r * Math.sin(angle) };
+    });
+
+    // lines + relation labels first, so node circles paint on top
+    for (const p of positions) {
+      relationSvg.appendChild(svgEl('line', { x1: cx, y1: cy, x2: p.x, y2: p.y, class: 'relation-line' }));
+      const label = svgEl('text', {
+        x: (cx + p.x) / 2, y: (cy + p.y) / 2 - 4, class: 'relation-label', 'text-anchor': 'middle',
+      });
+      label.textContent = p.relation;
+      relationSvg.appendChild(label);
+    }
+
+    // center node
+    const centerGroup = svgEl('g', { class: 'relation-node-group' });
+    centerGroup.appendChild(svgEl('circle', { cx, cy, r: 30, class: `relation-node k-${center.kind}` }));
+    const centerLabel = svgEl('text', { x: cx, y: cy + 46, class: 'relation-node-label', 'text-anchor': 'middle' });
+    centerLabel.textContent = center.title;
+    centerGroup.appendChild(centerLabel);
+    relationSvg.appendChild(centerGroup);
+
+    // neighbor nodes — click to recenter
+    for (const p of positions) {
+      const group = svgEl('g', { class: 'relation-node-group', role: 'button', tabindex: '0' });
+      group.appendChild(svgEl('circle', { cx: p.x, cy: p.y, r: 22, class: `relation-node k-${p.node.kind}` }));
+      const label = svgEl('text', { x: p.x, y: p.y + 36, class: 'relation-node-label', 'text-anchor': 'middle' });
+      label.textContent = p.node.title;
+      group.appendChild(label);
+      group.addEventListener('click', () => openRelationView(p.node.id));
+      relationSvg.appendChild(group);
+    }
   }
 
   // ---- add/edit dialog ---------------------------------------------------

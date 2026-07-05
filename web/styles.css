@@ -830,6 +830,37 @@ dialog menu { display: flex; justify-content: flex-end; gap: 10px; margin: 18px 
 .edge-add-row { align-items: flex-end; }
 .edge-add-row .btn { flex: 0 0 auto; }
 
+/* relation view (lightweight SVG one-hop neighbor graph, no physics) */
+.relation-panel {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  padding: 14px 16px;
+  box-shadow: var(--shadow-1);
+  flex: 0 0 auto;
+}
+.relation-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.relation-title { font-size: 14.5px; font-weight: 600; color: var(--text); }
+.relation-svg { width: 100%; max-width: 480px; height: auto; display: block; margin: 0 auto; }
+.relation-line { stroke: var(--border-2); stroke-width: 1.5; }
+.relation-label { font-size: 10px; fill: var(--text-3); }
+.relation-node { stroke: var(--surface-2); stroke-width: 2; }
+.relation-node.k-environment { fill: var(--k-environment); }
+.relation-node.k-project     { fill: var(--k-project); }
+.relation-node.k-constraint  { fill: var(--k-constraint); }
+.relation-node.k-preference  { fill: var(--k-preference); }
+.relation-node.k-tech        { fill: var(--k-tech); }
+.relation-node.k-fact        { fill: var(--k-fact); }
+.relation-node.k-person      { fill: var(--k-person); }
+.relation-node.k-repo        { fill: var(--k-repo); }
+.relation-node-label { font-size: 11px; fill: var(--text-2); }
+.relation-node-group { cursor: pointer; }
+
 @media (max-width: 720px) {
   .brain { padding: 16px; }
 }

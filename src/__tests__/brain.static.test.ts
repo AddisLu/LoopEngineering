@@ -17,6 +17,11 @@ describe('brain page: static assets', () => {
     expect(js).not.toMatch(/innerHTML/);
   });
 
+  it('brain.js builds the relation view with createElementNS (SVG, no innerHTML)', () => {
+    const js = fs.readFileSync(path.join(WEB_DIR, 'brain.js'), 'utf8');
+    expect(js).toMatch(/createElementNS/);
+  });
+
   it('brain.html references /styles.css and /brain.js, and has its own <main class="brain">', () => {
     const html = fs.readFileSync(path.join(WEB_DIR, 'brain.html'), 'utf8');
     expect(html).toContain('/styles.css');
