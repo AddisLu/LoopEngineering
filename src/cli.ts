@@ -23,6 +23,7 @@ import { validateSetting } from './settings.js';
 import { upsertNode, listNodes, searchNodes, importNodes, type ImportNodeInput, type ImportEdgeInput } from './knowledge/store.js';
 import { exportClaudeMd } from './knowledge/export.js';
 import type { KnowledgeNode, Kind, Status } from './knowledge/types.js';
+import { collectDistillMaterial, runDistiller } from './knowledge/distill.js';
 
 const program = new Command();
 program.name('loop').description('Loop Engineering — token-aware coding-task scheduler').version('0.1.0');
@@ -176,8 +177,12 @@ program
     const db = getDb();
     const t = getTask(db, id);
     if (!t) return fail(`no such task: ${id}`);
+    // collect BEFORE cleanupWorktree destroys the worktree HANDOFF.md lives in
+    const material = collectDistillMaterial(db, t);
     setStatus(db, id, 'closed', { detail: 'closed via cli' });
     cleanupWorktree(db, t); // work is done — reclaim the worktree's disk
+    // fire-and-forget: never delays this command returning (see knowledge/distill.ts)
+    void runDistiller(db, t, material).catch(() => {});
     console.log(`${id} -> closed`);
   });
 

@@ -17,6 +17,7 @@ import fs from 'node:fs';
 import { boardState, taskResult } from './board.js';
 import type { Complexity } from '../config.js';
 import { registerKnowledgeRoutes } from './knowledgeRoutes.js';
+import { collectDistillMaterial, runDistiller, type DistillExec } from '../knowledge/distill.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WEB_DIR = path.resolve(__dirname, '..', '..', 'web');
@@ -24,6 +25,8 @@ const WEB_DIR = path.resolve(__dirname, '..', '..', 'web');
 export interface AppOptions {
   db?: Database.Database;
   apiToken?: string | null;
+  /** Test-only injection point for the close route's fire-and-forget distiller call. */
+  distillExec?: DistillExec;
 }
 
 interface CreateTaskBody {
@@ -182,8 +185,12 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
     const id = (req.params as any).id;
     const t = getTask(db, id);
     if (!t) return reply.code(404).send({ error: 'not found' });
+    // collect BEFORE cleanupWorktree destroys the worktree HANDOFF.md lives in
+    const material = collectDistillMaterial(db, t);
     setStatus(db, id, 'closed', { detail: 'closed via api' });
     cleanupWorktree(db, t); // work is done — reclaim the worktree's disk
+    // fire-and-forget: never delays this response (see knowledge/distill.ts)
+    void runDistiller(db, t, material, opts.distillExec).catch(() => {});
     return { ok: true };
   });
 
