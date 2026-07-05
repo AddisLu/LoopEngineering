@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import type Database from 'better-sqlite3';
 import { getBool } from '../db/index.js';
-import { listTasks, countByStatus, activeRuns } from '../tasks.js';
+import { listTasks, countByStatus, activeRuns, getTask, latestRun } from '../tasks.js';
 import { readUsage } from '../token/usage.js';
 import { resolvePolicy } from '../scheduler/policy.js';
 import { validateTask } from '../gate/validateTask.js';
@@ -38,8 +38,27 @@ export interface BoardState {
     source: string;
   };
   policy: { window: string; sessionMax: number; weeklyMax: number };
+  // Why the scheduler last held / dispatched (e.g. "session 82% >= 65%"), so the board
+  // can answer "why is nothing running?". Persisted by the server loop on each change.
+  reason: string | null;
   counts: Record<string, number>;
   cards: BoardCard[];
+}
+
+export interface TaskResult {
+  id: string;
+  status: string;
+  pr_url: string | null;
+  review_md: string | null;
+  fail_detail: string | null;
+  log_tail: string[];
+  branch: string | null;
+  elapsedMin: number | null;
+}
+
+/** Parse a stored timestamp (ISO from finishRun, or sqlite "YYYY-MM-DD HH:MM:SS" UTC). */
+function tsToMs(s: string): number {
+  return new Date(s.includes('T') ? s : s.replace(' ', 'T') + 'Z').getTime();
 }
 
 function tailLog(path: string | null, n = 6): string[] {
@@ -94,11 +113,14 @@ export function boardState(db: Database.Database): BoardState {
     if (run) {
       card.logTail = tailLog(run.log_path);
       card.branch = run.branch;
-      const startedMs = new Date(run.started_at.replace(' ', 'T') + 'Z').getTime();
-      card.elapsedMin = Math.max(0, Math.round((Date.now() - startedMs) / 60000));
+      card.elapsedMin = Math.max(0, Math.round((Date.now() - tsToMs(run.started_at)) / 60000));
     }
     return card;
   });
+
+  const schedRow = db
+    .prepare(`SELECT detail FROM task_events WHERE kind = 'scheduler' ORDER BY id DESC LIMIT 1`)
+    .get() as { detail: string | null } | undefined;
 
   return {
     ts: new Date().toISOString(),
@@ -111,7 +133,56 @@ export function boardState(db: Database.Database): BoardState {
       source: usage.source,
     },
     policy: { window: policy.window, sessionMax: policy.sessionMax, weeklyMax: policy.weeklyMax },
+    reason: schedRow?.detail ?? null,
     counts: countByStatus(db),
     cards,
+  };
+}
+
+/**
+ * Full outcome of a task for editors/MCP: PR link, gap-review markdown, the failure
+ * reason (for failed/blocked), a tail of the run log, branch, and elapsed minutes.
+ */
+export function taskResult(db: Database.Database, id: string): TaskResult | null {
+  const t = getTask(db, id);
+  if (!t) return null;
+  const run = latestRun(db, id);
+
+  let review_md: string | null = null;
+  if (t.review_md_path) {
+    try {
+      review_md = fs.readFileSync(t.review_md_path, 'utf8');
+    } catch {
+      /* review file missing — leave null */
+    }
+  }
+
+  let fail_detail: string | null = null;
+  if (t.status === 'failed' || t.status === 'blocked') {
+    const ev = db
+      .prepare(
+        `SELECT detail FROM task_events
+          WHERE task_id = ? AND to_status IN ('failed','blocked') AND detail IS NOT NULL
+          ORDER BY id DESC LIMIT 1`,
+      )
+      .get(id) as { detail: string } | undefined;
+    fail_detail = ev?.detail ?? run?.error ?? null;
+  }
+
+  let elapsedMin: number | null = null;
+  if (run) {
+    const endMs = run.finished_at ? tsToMs(run.finished_at) : Date.now();
+    elapsedMin = Math.max(0, Math.round((endMs - tsToMs(run.started_at)) / 60000));
+  }
+
+  return {
+    id: t.id,
+    status: t.status,
+    pr_url: t.pr_url,
+    review_md,
+    fail_detail,
+    log_tail: run ? tailLog(run.log_path, 12) : [],
+    branch: run?.branch ?? null,
+    elapsedMin,
   };
 }

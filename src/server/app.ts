@@ -3,13 +3,14 @@ import fastifyStatic from '@fastify/static';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type Database from 'better-sqlite3';
-import { getDb, getSetting, setSetting, getBool } from '../db/index.js';
+import { getDb, getSetting, setSetting, getBool, getNum } from '../db/index.js';
 import { validateSetting, TUNABLE_KEYS } from '../settings.js';
-import { createTask, getTask, setStatus, activeRuns, deleteTask } from '../tasks.js';
+import { createTask, getTask, setStatus, activeRuns, deleteTask, countByStatus } from '../tasks.js';
 import { validateTask } from '../gate/validateTask.js';
 import { readUsage } from '../token/usage.js';
 import { killRun } from '../orchestrator/kill.js';
-import { boardState } from './board.js';
+import { cleanupWorktree } from '../orchestrator/cleanup.js';
+import { boardState, taskResult } from './board.js';
 import type { Complexity } from '../config.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -37,7 +38,9 @@ interface CreateTaskBody {
 
 export function buildApp(opts: AppOptions = {}): FastifyInstance {
   const db = opts.db ?? getDb();
-  const apiToken = opts.apiToken ?? process.env.LOOP_API_TOKEN ?? null;
+  // An explicit apiToken (incl. null) wins over the env var, so callers that pass
+  // `apiToken: null` truly disable auth even when LOOP_API_TOKEN is set in the env.
+  const apiToken = 'apiToken' in opts ? (opts.apiToken ?? null) : (process.env.LOOP_API_TOKEN ?? null);
   const app = Fastify({ logger: false });
 
   // --- bearer auth on /api/* (Tailscale is the primary boundary; this is layer 2) ---
@@ -111,15 +114,45 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
     if (!t) return reply.code(404).send({ error: 'not found' });
     const gate = validateTask(t);
     if (!gate.ok) return reply.code(409).send({ error: 'gate not satisfied', gate });
-    setStatus(db, id, 'queued', { detail: 'queued via api' });
+    // Controlled auto-queue path (used by the MCP, which queues by default): cap how many
+    // tasks may be auto-enqueued so a burst of MCP calls can't flood autonomous spend.
+    // Manual queueing (from the board/CLI, no `auto` flag) is intentionally uncapped.
+    const auto =
+      (req.query as any)?.auto === '1' ||
+      (req.query as any)?.auto === 'true' ||
+      (req.body as any)?.auto === true;
+    if (auto) {
+      const max = getNum(db, 'max_autoqueue', 3);
+      const counts = countByStatus(db);
+      const active = (counts.queued ?? 0) + (counts.running ?? 0);
+      if (active >= max) {
+        return reply.code(429).send({
+          error: 'autoqueue limit reached',
+          limit: max,
+          active,
+          message: `Auto-queue limit reached (${active} queued+running ≥ max_autoqueue=${max}). Task left as draft — queue it from the board or raise max_autoqueue.`,
+        });
+      }
+    }
+    setStatus(db, id, 'queued', { detail: auto ? 'auto-queued via api' : 'queued via api' });
     return { ok: true };
   });
 
   app.post('/api/tasks/:id/close', async (req, reply) => {
     const id = (req.params as any).id;
-    if (!getTask(db, id)) return reply.code(404).send({ error: 'not found' });
+    const t = getTask(db, id);
+    if (!t) return reply.code(404).send({ error: 'not found' });
     setStatus(db, id, 'closed', { detail: 'closed via api' });
+    cleanupWorktree(db, t); // work is done — reclaim the worktree's disk
     return { ok: true };
+  });
+
+  // Task result for editors/MCP: PR link, gap-review, failure reason, recent log —
+  // so a caller can see the outcome without opening the board.
+  app.get('/api/tasks/:id/result', async (req, reply) => {
+    const r = taskResult(db, (req.params as any).id);
+    if (!r) return reply.code(404).send({ error: 'not found' });
+    return r;
   });
 
   app.post('/api/tasks/:id/abort', async (req, reply) => {
@@ -140,6 +173,7 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
       return reply.code(409).send({ error: 'task is active — abort it first' });
     }
     for (const r of activeRuns(db).filter((r) => r.task_id === id)) killRun(db, { id: r.id, pid: r.pid }, 'user');
+    cleanupWorktree(db, t); // remove the worktree before the run rows are cascade-deleted
     deleteTask(db, id);
     return { ok: true, deleted: id };
   });
