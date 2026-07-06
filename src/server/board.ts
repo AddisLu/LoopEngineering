@@ -8,6 +8,8 @@ import { resolvePolicy } from '../scheduler/policy.js';
 import { validateTask } from '../gate/validateTask.js';
 import { estimatePct } from '../token/accounting.js';
 import { timeoutMinFor } from '../scheduler/timeout.js';
+import { paths } from '../config.js';
+import { listOutputFiles, type OutputFile } from '../orchestrator/outputFiles.js';
 import type { Task } from '../types.js';
 
 export interface BoardCard {
@@ -36,6 +38,8 @@ export interface BoardCard {
   dep_state?: string; // waiting | satisfied | dep-failed | dep-missing (absent when no dep)
   requires?: string | null; // CSV of capability tokens this task needs (see capabilities.ts)
   verify_deferred?: string | null; // unmet capabilities that deferred the last run's verify to manual
+  output_dir?: string; // coding_tool='generic' only: its persistent outputs/<id> dir
+  output_file_count?: number; // coding_tool='generic' only
 }
 
 export interface BoardState {
@@ -106,6 +110,13 @@ export interface TaskResult {
   log_tail: string[];
   branch: string | null;
   elapsedMin: number | null;
+  output_dir?: string | null; // coding_tool='generic' only
+  output_files?: OutputFile[] | null; // coding_tool='generic' only (name+size, capped ~50)
+}
+
+/** A generic task's persistent, non-git workspace — see runTask's isGeneric branch. */
+export function outputDirFor(taskId: string): string {
+  return path.join(paths.outputsDir, taskId);
 }
 
 /** Parse a stored timestamp (ISO from finishRun, or sqlite "YYYY-MM-DD HH:MM:SS" UTC). */
@@ -175,6 +186,11 @@ export function boardState(db: Database.Database): BoardState {
       updated_at: t.updated_at,
     };
     if (t.requires) card.requires = t.requires;
+    if (t.coding_tool === 'generic') {
+      const dir = outputDirFor(t.id);
+      card.output_dir = dir;
+      card.output_file_count = fs.existsSync(dir) ? listOutputFiles(dir, 1000).length : 0;
+    }
     if (t.depends_on) {
       card.depends_on = t.depends_on;
       card.dep_state = dependencyState(db, t);
@@ -283,6 +299,14 @@ export function taskResult(db: Database.Database, id: string): TaskResult | null
     elapsedMin = Math.max(0, Math.round((endMs - tsToMs(run.started_at)) / 60000));
   }
 
+  let output_dir: string | null = null;
+  let output_files: OutputFile[] | null = null;
+  if (t.coding_tool === 'generic') {
+    const dir = outputDirFor(t.id);
+    output_dir = dir;
+    output_files = fs.existsSync(dir) ? listOutputFiles(dir, 50) : [];
+  }
+
   return {
     id: t.id,
     status: t.status,
@@ -294,5 +318,6 @@ export function taskResult(db: Database.Database, id: string): TaskResult | null
     log_tail: run ? tailLog(run.log_path, 12) : [],
     branch: run?.branch ?? null,
     elapsedMin,
+    ...(t.coding_tool === 'generic' ? { output_dir, output_files } : {}),
   };
 }
