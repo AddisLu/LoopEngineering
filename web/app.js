@@ -134,6 +134,7 @@
     meta.appendChild(el('span', 'chip mono', `P${c.priority}`));
     meta.appendChild(el('span', 'chip tool', c.model || c.coding_tool));
     if (c.status === 'queued') meta.appendChild(el('span', 'chip mono', `~${c.est_pct}%`));
+    if (c.coding_tool === 'generic') meta.appendChild(el('span', 'chip mono', `📄 產出 ${c.output_file_count ?? 0}`));
     if (c.requires) meta.appendChild(el('span', 'chip mono requires', `⚙ 需要: ${c.requires}`));
     // serial-chain dependency chip (draft/queued cards waiting on another task)
     if (c.depends_on && c.dep_state && c.dep_state !== 'satisfied') {
@@ -192,15 +193,20 @@
       if (c.fail_detail) card.appendChild(el('div', 'fail-detail', c.fail_detail));
     }
     if (c.status === 'review') {
-      const manualPending = c.merge_status === 'pending' &&
-        String(c.verify_mode || '').split(',').map((m) => m.trim()).includes('manual');
-      if (manualPending) card.appendChild(el('div', 'banner attn', '⚠ 待人工驗證 — 見 VERIFY.md，驗過後按合併'));
+      const isGenericTool = c.coding_tool === 'generic';
+      const manualMode = String(c.verify_mode || '').split(',').map((m) => m.trim()).includes('manual');
+      // generic never sets merge_status (nothing to merge) — a manual verify_mode alone
+      // means the outcome was 'manual', so treat that as pending for a generic task.
+      const manualPending = manualMode && (c.merge_status === 'pending' || isGenericTool);
+      if (manualPending) card.appendChild(el('div', 'banner attn', isGenericTool ? '⚠ 待人工驗證 — 見產出檔案' : '⚠ 待人工驗證 — 見 VERIFY.md，驗過後按合併'));
       else card.appendChild(el('div', 'banner ok', '✓ verify 通過，待結案'));
-      // git close-out state
-      if (c.merge_status === 'merged') meta.appendChild(el('span', 'chip merged', '✓ 已合併'));
-      else if (c.merge_status === 'pending') meta.appendChild(el('span', 'chip pending', '待合併'));
-      else if (c.merge_status === 'conflict')
-        card.appendChild(el('div', 'banner danger', '⚠ 合併衝突（已建解衝突任務）'));
+      // git close-out state (generic has none — no branch/merge chips for it)
+      if (!isGenericTool) {
+        if (c.merge_status === 'merged') meta.appendChild(el('span', 'chip merged', '✓ 已合併'));
+        else if (c.merge_status === 'pending') meta.appendChild(el('span', 'chip pending', '待合併'));
+        else if (c.merge_status === 'conflict')
+          card.appendChild(el('div', 'banner danger', '⚠ 合併衝突（已建解衝突任務）'));
+      }
     }
 
     // log tail for active runs
@@ -345,7 +351,18 @@
       }
     } catch (e) { /* datalist just stays empty */ }
   }
-  $('new-btn').onclick = () => { fillEnvList(); dialog.showModal(); };
+  // generic runs in a persistent non-git output dir — repo/base are meaningless for it.
+  const repoRow = $('repo-row');
+  const repoHint = $('repo-hint');
+  const toolSelect = dialog.querySelector('select[name="coding_tool"]');
+  function syncRepoRow() {
+    const isGeneric = toolSelect.value === 'generic';
+    repoRow.hidden = isGeneric;
+    repoHint.hidden = !isGeneric;
+  }
+  toolSelect.addEventListener('change', syncRepoRow);
+
+  $('new-btn').onclick = () => { fillEnvList(); syncRepoRow(); dialog.showModal(); };
   $('new-cancel').onclick = () => dialog.close();
 
   $('new-form').addEventListener('submit', async (e) => {
@@ -535,7 +552,9 @@
     list.appendChild(dRow('Verify mode', t.verify_mode || 'command'));
     if (t.verify_rubric) list.appendChild(dRow('驗收標準', t.verify_rubric));
     if (t.requires) list.appendChild(dRow('需要', t.requires));
-    list.appendChild(dRow('Repo', t.repo_path ? `${t.repo_path}${t.base_branch ? '  @ ' + t.base_branch : ''}` : '–'));
+    if (t.coding_tool !== 'generic') {
+      list.appendChild(dRow('Repo', t.repo_path ? `${t.repo_path}${t.base_branch ? '  @ ' + t.base_branch : ''}` : '–'));
+    }
     if (t.setup_cmd) list.appendChild(dRow('Setup', t.setup_cmd));
     list.appendChild(dRow('Tool / Model', `${t.coding_tool || '–'}${t.model ? ' · ' + t.model : ''}`));
     list.appendChild(dRow('Complexity / Priority', `${t.complexity} · P${t.priority}`));
@@ -554,6 +573,15 @@
         const verifyList = el('div', 'd-list');
         verifyList.appendChild(dRow('VERIFY.md', r.verify_md));
         detailBody.appendChild(verifyList);
+      }
+      if (r && r.output_dir) {
+        const files = Array.isArray(r.output_files) ? r.output_files : [];
+        const outList = el('div', 'd-list');
+        outList.appendChild(dRow('產出目錄', r.output_dir));
+        outList.appendChild(dRow('產出檔案', files.length
+          ? files.map((f) => `${f.name} (${f.size}B)`).join('　•　')
+          : '(尚無檔案)'));
+        detailBody.appendChild(outList);
       }
     } catch (e) { /* best effort */ }
 
