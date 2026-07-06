@@ -18,16 +18,23 @@
 <style>
   main.voice { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 22px clamp(16px, 4vw, 40px); max-width: 640px; margin: 0 auto; width: 100%; }
   .voice .lead { color: var(--text-2); font-size: 14px; margin: 0 0 22px; }
-  .mic-wrap { display: flex; flex-direction: column; align-items: center; gap: 14px; margin: 10px 0 26px; }
+  .mic-wrap { display: flex; flex-direction: column; align-items: stretch; gap: 12px; margin: 10px 0 26px; }
   .mic-btn {
-    width: 92px; height: 92px; border-radius: 50%;
+    width: 100%; min-height: 84px; border-radius: var(--r);
     border: 1px solid var(--border-2); background: var(--surface); box-shadow: var(--shadow-1);
-    font-size: 38px; line-height: 1; cursor: pointer; color: var(--text);
-    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; color: var(--text);
+    display: flex; align-items: center; justify-content: center; gap: 12px;
+    font: inherit; font-size: 17px; font-weight: 600;
   }
+  .mic-btn .mic-icon { font-size: 34px; line-height: 1; }
   .mic-btn:disabled { opacity: 0.55; cursor: default; }
-  .mic-btn.recording { color: var(--on-accent); background: var(--danger); border-color: transparent; animation: pulse 1.1s ease-in-out infinite; }
-  .mic-status { font-size: 13.5px; color: var(--text-3); min-height: 18px; text-align: center; }
+  .mic-btn.recording {
+    color: var(--on-accent); background: var(--danger); border-color: transparent;
+    animation: pulse 1.1s ease-in-out infinite;
+  }
+  .mic-btn.busy { color: var(--text-2); background: var(--surface-2); }
+  .mic-timer { font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1; }
+  .mic-status { font-size: 14px; color: var(--text-3); min-height: 18px; text-align: center; font-weight: 500; }
   .mic-status.err { color: var(--danger); }
   .mic-status.ok { color: var(--ok); }
   .voice-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); padding: 16px 18px; box-shadow: var(--shadow-1); margin-bottom: 16px; }
@@ -40,6 +47,38 @@
   .voice-card textarea { resize: vertical; }
   .voice-actions { display: flex; justify-content: flex-end; gap: 10px; }
   .transcript-box { white-space: pre-wrap; font-size: 13px; color: var(--text-2); }
+
+  .glossary-add-row { display: flex; gap: 8px; margin-top: 8px; }
+  .glossary-add-row input { flex: 1 1 auto; }
+  .glossary-add-row .btn { flex: 0 0 auto; }
+
+  .banner {
+    font-size: 13.5px; border-radius: var(--r-sm); padding: 9px 12px; margin: 0 0 14px;
+    background: var(--surface-sunk); color: var(--text-2); border: 1px solid var(--hairline);
+  }
+  .banner.warn {
+    color: var(--danger); background: var(--danger-soft);
+    border-color: color-mix(in srgb, var(--danger) 40%, transparent);
+    font-weight: 600;
+  }
+
+  .clarify-list { margin: 0 0 14px; display: flex; flex-direction: column; gap: 12px; }
+  .clarify-item { font-size: 13.5px; }
+  .clarify-item .q { display: block; margin-bottom: 6px; }
+  .clarify-opts { display: flex; flex-wrap: wrap; gap: 8px; }
+  .opt-btn {
+    font: inherit; font-size: 13px; padding: 6px 12px; border-radius: 999px;
+    border: 1px solid var(--border-2); background: var(--surface-2); color: var(--text); cursor: pointer;
+  }
+  .opt-btn.chosen { background: var(--accent); color: var(--on-accent); border-color: transparent; }
+
+  .chips-row { display: flex; flex-wrap: wrap; gap: 14px 20px; margin: 0 0 14px; }
+  .chip-group { display: flex; flex-direction: column; gap: 6px; }
+  .chip-group .g-label { font-size: 12px; color: var(--text-3); }
+  .chip-opts { display: flex; flex-wrap: wrap; gap: 6px; }
+
+  .confirm-row { display: flex; align-items: center; gap: 8px; font-size: 13.5px; }
+  .confirm-row input { width: auto; margin: 0; }
 </style>
 </head>
 <body>
@@ -58,17 +97,29 @@
     <p class="lead">錄一段語音描述要做的事（中英文夾雜、停頓都沒關係）：GPU 上的 faster-whisper 轉文字，再由 LLM 整理成任務欄位。結果只會「帶入」下面表單，確認無誤後按送出才會真的建立任務。</p>
 
     <div class="mic-wrap">
-      <button id="mic-btn" class="mic-btn" type="button" title="按一下開始／再按一次停止">🎤</button>
+      <button id="mic-btn" class="mic-btn" type="button" title="按一下開始／再按一次停止">
+        <span class="mic-icon" id="mic-icon">🎤</span>
+        <span id="mic-label">按一下開始錄音</span>
+        <span class="mic-timer" id="mic-timer" hidden>00:00</span>
+      </button>
       <p class="mic-status" id="mic-status"></p>
     </div>
 
     <div class="voice-card" id="transcript-card" hidden>
       <h3>逐字稿</h3>
       <p class="transcript-box" id="transcript-text"></p>
+      <div class="glossary-add-row">
+        <input id="glossary-term" placeholder="聽錯的專有名詞？例如 TGV／CPO" autocomplete="off" />
+        <button id="glossary-add-btn" class="btn" type="button">✏️ 加入詞表</button>
+      </div>
+      <p class="mic-status" id="glossary-status"></p>
     </div>
 
     <form class="voice-card" id="task-form" hidden>
       <h3>任務欄位（確認後送出）</h3>
+      <p class="banner" id="type-banner" hidden></p>
+      <div class="clarify-list" id="clarify-list"></div>
+      <div class="chips-row" id="chips-row"></div>
       <label>Title <span style="color:var(--danger)">*</span><input name="title" required autocomplete="off" /></label>
       <label>Goal <span style="color:var(--danger)">*</span><input name="goal" required autocomplete="off" /></label>
       <label>Verify steps (逗號分隔) <input name="verification_steps" autocomplete="off" /></label>
@@ -79,6 +130,11 @@
       </label>
       <label>Complexity
         <select name="complexity"><option>S</option><option selected>M</option><option>L</option></select>
+      </label>
+      <p class="banner warn" id="missing-banner" hidden></p>
+      <label class="confirm-row" id="confirm-row" hidden>
+        <input type="checkbox" id="confirm-checkbox" />
+        <span>我確認以上欄位正確，仍要建立</span>
       </label>
       <p class="mic-status" id="submit-status"></p>
       <div class="voice-actions">
