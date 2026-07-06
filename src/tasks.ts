@@ -20,15 +20,20 @@ export interface NewTaskInput {
   timeout_min?: number | null;
   depends_on?: string | null;
   environment?: string | null;
+  verify_mode?: string | null;
+  verify_rubric?: string | null;
+  verify_timeout_min?: number | null;
 }
 
 export function createTask(db: Database.Database, input: NewTaskInput): Task {
   const id = `t_${nanoid(10)}`;
   db.prepare(
     `INSERT INTO tasks (id, title, goal, plan_ref, plan_kind, coding_tool, verification_steps,
-       setup_cmd, repo_path, base_branch, complexity, priority, model, timeout_min, depends_on, environment, status)
+       setup_cmd, repo_path, base_branch, complexity, priority, model, timeout_min, depends_on, environment,
+       verify_mode, verify_rubric, verify_timeout_min, status)
      VALUES (@id, @title, @goal, @plan_ref, @plan_kind, @coding_tool, @verification_steps,
-       @setup_cmd, @repo_path, @base_branch, @complexity, @priority, @model, @timeout_min, @depends_on, @environment, 'draft')`,
+       @setup_cmd, @repo_path, @base_branch, @complexity, @priority, @model, @timeout_min, @depends_on, @environment,
+       @verify_mode, @verify_rubric, @verify_timeout_min, 'draft')`,
   ).run({
     id,
     title: input.title,
@@ -46,6 +51,9 @@ export function createTask(db: Database.Database, input: NewTaskInput): Task {
     timeout_min: input.timeout_min ?? null,
     depends_on: input.depends_on ?? null,
     environment: input.environment ?? null,
+    verify_mode: input.verify_mode?.trim() || 'command',
+    verify_rubric: input.verify_rubric ?? null,
+    verify_timeout_min: input.verify_timeout_min ?? null,
   });
   logEvent(db, { task_id: id, kind: 'status', to_status: 'draft', detail: 'created' });
   return getTask(db, id)!;

@@ -9,7 +9,7 @@ export const PERCENT_KEYS = new Set([
 export const NONNEG_KEYS = new Set([
   'max_concurrency', 'poll_interval_sec', 'min_runway_min', 'max_resumes', 'max_autoqueue',
   'timeout_S', 'timeout_M', 'timeout_L', 'usage_refresh_sec', 'ledger_fallback_after_min',
-  'age_step_min', 'starve_min', 'knowledge_budget_chars',
+  'age_step_min', 'starve_min', 'knowledge_budget_chars', 'verify_step_timeout_min',
 ]);
 // Phase 3 feature flags: stored as 'true'/'false'.
 export const BOOL_KEYS = new Set([

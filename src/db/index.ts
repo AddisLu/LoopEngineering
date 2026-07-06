@@ -68,6 +68,12 @@ function migrate(db: Database.Database): void {
   ]);
   // knowledge base: optional environment label a task's knowledge should be scoped to
   add('tasks', [['environment', 'TEXT']]);
+  // layered verification: modes (command/llm/manual) + rubric + per-task timeout override
+  add('tasks', [
+    ["verify_mode", "TEXT NOT NULL DEFAULT 'command'"],
+    ['verify_rubric', 'TEXT'],
+    ['verify_timeout_min', 'INTEGER'],
+  ]);
 }
 
 function seedSettings(db: Database.Database): void {

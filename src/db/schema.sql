@@ -25,6 +25,11 @@ CREATE TABLE IF NOT EXISTS tasks (
   depends_on     TEXT,                        -- task id this one waits for (serial chains);
                                               -- held until that task is closed. Soft ref (no FK).
 
+  -- layered verification (see src/orchestrator/judge.ts + verify.ts)
+  verify_mode    TEXT NOT NULL DEFAULT 'command', -- CSV of command|llm|manual
+  verify_rubric  TEXT,                        -- acceptance criteria: what "done" means
+  verify_timeout_min INTEGER,                 -- per-task verify per-step timeout override (min)
+
   -- lifecycle
   status         TEXT NOT NULL DEFAULT 'draft',
     -- draft|ready|queued|running|verifying|blocked|attention|review|failed|closed

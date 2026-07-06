@@ -165,6 +165,12 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // HANDOFF/gap-review/goal to draft candidate knowledge nodes (status='draft', never
   // injected — see src/knowledge/distill.ts). Off restores the old close-only behavior.
   knowledge_distill: 'true',
+
+  // layered verification (src/orchestrator/judge.ts, verify.ts, run.ts runVerifyPipeline):
+  // per-step timeout fallback (minutes) when a task doesn't set verify_timeout_min, and the
+  // model used for the optional LLM verify judge.
+  verify_step_timeout_min: '10',
+  llm_judge_model: 'haiku',
 };
 
 export const TOKEN_REFRESH_MS = 180_000; // TokenBar cadence

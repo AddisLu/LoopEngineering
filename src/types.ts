@@ -16,6 +16,9 @@ export interface Task {
   model: string | null;
   timeout_min: number | null;
   depends_on: string | null;
+  verify_mode: string;
+  verify_rubric: string | null;
+  verify_timeout_min: number | null;
   status: TaskStatus;
   resume_count: number;
   pr_url: string | null;
@@ -76,4 +79,13 @@ export function parseSteps(task: Pick<Task, 'verification_steps'>): string[] {
   } catch {
     return [];
   }
+}
+
+/** Parsed verify_mode CSV, defaulting to {'command'} when null/empty (zero behavior change). */
+export function parseVerifyMode(task: Pick<Task, 'verify_mode'>): Set<string> {
+  const modes = (task.verify_mode ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return new Set(modes.length ? modes : ['command']);
 }
