@@ -166,7 +166,8 @@
     <a href="#forecast">16 · Backlog 用量預估</a>
     <a href="#discipline">17 · 執行紀律（實驗性，預設關）</a>
     <a href="#envdeploy">18 · 環境與部署（Environments + Deploy）</a>
-    <a href="#appendix">19 · 附錄（API / 檔案位置）</a>
+    <a href="#pipelines">19 · 交付 pipeline 模板</a>
+    <a href="#appendix">20 · 附錄（API / 檔案位置）</a>
   </nav>
 
   <main>
@@ -401,6 +402,9 @@
           <tr><td><code>env list｜add &lt;name&gt;｜remove &lt;name&gt;</code></td><td>管理部署環境（見第 18 章）。<code>add</code> 旗標：<code>--kind</code> <code>--host</code> <code>--capabilities</code> <code>--deploy-cmd</code> <code>--auto-deploy</code>。</td></tr>
           <tr><td><code>deploy --env &lt;name&gt; --repo &lt;path&gt; --base &lt;branch&gt;</code></td><td>建立並排入一個 <code>tool=deploy</code> 任務（見第 18 章）。</td></tr>
           <tr><td><code>deploy rollback &lt;env&gt;</code></td><td>把該環境回滾到上一次成功部署的 commit。</td></tr>
+          <tr><td><code>pipeline list</code></td><td>列出 pipeline 模板（內建 <code>feature</code>／<code>fix</code>／<code>ship</code>，見第 19 章）與各自的 stage。</td></tr>
+          <tr><td><code>pipeline run &lt;name&gt; --goal* [--repo] [--base] [--env] [--title] [--verify]</code></td><td>實體化模板為一條 <code>depends_on</code> 任務鏈（見第 19 章）。</td></tr>
+          <tr><td><code>pipeline import [file]</code></td><td>批次匯入／更新模板（不給檔案就重匯內建 <code>seed/pipelines/*.json</code>）。</td></tr>
         </tbody>
       </table>
       </div>
@@ -587,6 +591,7 @@ systemctl --user disable loop-engineering</code></pre>
           <tr><td><code>loop_list_environments</code></td><td>列出部署環境（見第 18 章）</td></tr>
           <tr><td><code>loop_deploy</code></td><td>建立並排入一個部署任務（<code>tool=deploy</code>）</td></tr>
           <tr><td><code>loop_rollback_deployment</code></td><td>把某環境回滾到上一次成功部署的 commit</td></tr>
+          <tr><td><code>loop_run_pipeline</code></td><td>一次實體化一個 pipeline 模板（<code>feature</code>／<code>fix</code>／<code>ship</code>）為一條任務鏈（見第 19 章）</td></tr>
         </tbody>
       </table></div>
       <div class="note info"><span class="ic">🔗</span><span><b>用 MCP 串成鏈：</b>先建任務 A，再建 B 時說「依賴 A」（帶 <code>depends_on</code>）——A 結案後 B 自動放行，避免多個任務同時從舊 base 切分支而互相衝突。</span></div>
@@ -752,8 +757,26 @@ npm run loop -- add --title "Epic: 上線通知系統" \
       <div class="note info"><span class="ic">☁</span><span>看板卡片上會看到「☁ deploy: company (manual-pending)」這類徽章；點開卡片可看部署環境／狀態／詳情（含 DEPLOY.md 路徑）。新增任務對話框的 Environment 欄位下拉，同時合併知識庫 <code>env:&lt;name&gt;</code> 與這張 <code>environments</code> 表的名稱。</span></div>
     </section>
 
+    <section id="pipelines">
+      <h2><span class="num">19</span>交付 pipeline 模板</h2>
+      <p>ADO 的 multi-stage pipeline 是人工寫的 YAML（build→test→deploy）、推 push 觸發；Loop 的自主版是<b>預定義模板</b>——一個動作就把「implement → verify → deploy」這種固定分解，實體化成一條第 13 章的 <code>depends_on</code> 任務鏈，每個 stage 沿用既有的驗證模式（command／llm／manual，見第 6 章）與第 18 章的部署當作自己的關卡。這不是新的執行語意，只是 <code>depends_on</code> + verify + deploy 的一個方便組合。</p>
+      <ul>
+        <li><b>模板存哪</b>：<code>pipelines</code> 表（<code>name</code> 主鍵、<code>def</code> JSON），首次啟動即從 <code>seed/pipelines/*.json</code> 播種（<code>INSERT OR IGNORE</code>，不覆蓋你自己的修改，作法同第 18 章的 <code>environments</code> 播種）。內建三個：<code>feature</code>（implement → llm-gate → deploy home）、<code>fix</code>（implement → command-verify）、<code>ship</code>（implement → verify → deploy home → deploy company〔人工〕）。</li>
+        <li><b>怎麼跑</b>：<code>loop pipeline run &lt;name&gt; --goal "…" --repo /path --base main [--env home] [--title "…"] [--verify "npm run typecheck,npm test"]</code>，或 <code>POST /api/pipelines/:name/run</code>，或 MCP 的 <code>loop_run_pipeline</code>。<code>goal</code>／<code>repo</code>／<code>base</code>／<code>verify</code> 由每個 stage <b>共用</b>（因為改的是同一份 code），各 stage 自己的 <code>verify_mode</code>／<code>environment</code>／<code>complexity</code> 則照模板固定。</li>
+        <li><b>實體化</b>：依模板順序建出一串任務，用 <code>depends_on</code> 串成鏈，共享一個新的 <code>pipeline_id</code>（+ 各自的 <code>stage_name</code>，如 <code>implement</code>／<code>deploy-home</code>）；第一個 stage 通過 gate 就直接 <code>queued</code>，其餘留 <code>draft</code>，交給第 13 章既有的任務鏈機制依序放行。</li>
+        <li><b>關卡＝既有驗證模式</b>：command stage 要跑過驗證指令；llm stage 要過 rubric（模板的 <code>rubric_hint</code> 會變成該任務的 <code>verify_rubric</code>）；deploy stage 走第 18 章的部署（環境是 <code>auto_deploy</code> 就自動部署，否則產出人工部署包）。<b>任一 stage 失敗</b>（<code>failed</code>）就停在原地——下一棒的 <code>depends_on</code> 判定為 <code>dep-failed</code>，永遠不會被自動派工，跟第 13 章第 3 節的任務鏈規則完全一樣，沒有另外發明失敗處理。</li>
+        <li><b>看板</b>：頂欄下方多一條 pipeline 進度列，例如「<code>feature: implement ✓ → review-gate ⏳ → deploy-home ○</code>」，點任一 stage 開該任務詳情；卡片本身也會多一顆「🚦 stage 名稱」徽章，詳情視窗列出整條 pipeline 各 stage 的狀態。</li>
+        <li><b>自訂模板</b>：<code>loop pipeline list</code> 看目前有哪些；<code>loop pipeline import [file]</code>（不給檔案就重新匯入內建 <code>seed/pipelines/*.json</code>）或 <code>POST /api/pipelines/import</code> 批次匯入——壞掉的 stage（缺 name、<code>coding_tool</code> 不合法等）該筆會被拒絕並回報原因，不影響其他筆匯入成功。</li>
+      </ul>
+      <pre><code># CLI：用 ship 模板一次交付到兩個環境
+npm run loop -- pipeline run ship \
+  --goal "上線第三方登入" --repo /path --base main \
+  --verify "npm run typecheck,npm test"</code></pre>
+      <div class="note info"><span class="ic">🚦</span><span>Pipeline 只是幫你<b>一次生出</b>一條固定的任務鏈；生出來之後，續跑／重來／放棄／attention 觸發，全部跟一般任務鏈一模一樣（見第 13 章）——沒有專屬的例外處理。</span></div>
+    </section>
+
     <section id="appendix">
-      <h2><span class="num">19</span>附錄</h2>
+      <h2><span class="num">20</span>附錄</h2>
       <h3>REST / SSE 端點</h3>
       <p>除 <code>/</code> 靜態頁外，<code>/api/*</code> 需帶 bearer（<code>Authorization: Bearer &lt;token&gt;</code>）或 <code>?token=</code>。</p>
       <div class="tbl-wrap">
@@ -788,6 +811,10 @@ npm run loop -- add --title "Epic: 上線通知系統" \
           <tr><td>DELETE</td><td><code>/api/environments/:name</code></td><td>刪除環境</td></tr>
           <tr><td>GET</td><td><code>/api/deployments?env=</code></td><td>部署歷史（可依環境過濾）</td></tr>
           <tr><td>POST</td><td><code>/api/deployments/:id/rollback</code></td><td>回滾到該環境上一次成功部署的 commit</td></tr>
+          <tr><td>GET</td><td><code>/api/pipelines</code></td><td>列出 pipeline 模板（見第 19 章）</td></tr>
+          <tr><td>GET</td><td><code>/api/pipelines/:name</code></td><td>單一模板定義</td></tr>
+          <tr><td>POST</td><td><code>/api/pipelines/import</code></td><td>批次匯入／更新模板（<code>{"items":[...]}</code>）</td></tr>
+          <tr><td>POST</td><td><code>/api/pipelines/:name/run</code></td><td>實體化為一條 <code>depends_on</code> 任務鏈並回傳 task ids</td></tr>
         </tbody>
       </table>
       </div>
