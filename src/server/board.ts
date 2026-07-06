@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import path from 'node:path';
 import type Database from 'better-sqlite3';
 import { getBool } from '../db/index.js';
 import { listTasks, countByStatus, activeRuns, getTask, latestRun, dependencyState } from '../tasks.js';
@@ -22,6 +23,7 @@ export interface BoardCard {
   gate: { ok: boolean; missing: string[]; warnings: string[] };
   pr_url: string | null;
   merge_status: string | null;
+  verify_mode: string;
   est_pct: number;
   updated_at: string;
   fail_detail?: string | null; // latest failure/interrupt detail (attention/failed/blocked)
@@ -97,6 +99,7 @@ export interface TaskResult {
   pr_url: string | null;
   merge_status: string | null;
   review_md: string | null;
+  verify_md: string | null;
   fail_detail: string | null;
   log_tail: string[];
   branch: string | null;
@@ -159,6 +162,7 @@ export function boardState(db: Database.Database): BoardState {
       gate: validateTask(t),
       pr_url: t.pr_url,
       merge_status: t.merge_status,
+      verify_mode: t.verify_mode,
       est_pct: estimatePct(db, t.complexity),
       updated_at: t.updated_at,
     };
@@ -230,6 +234,18 @@ export function taskResult(db: Database.Database, id: string): TaskResult | null
     }
   }
 
+  // best-effort: manual-verify tasks ask the agent to write VERIFY.md in the worktree
+  // root; only readable while the worktree still exists (cleanupWorktree deliberately
+  // skips manual-pending tasks so this stays visible until a human merges it).
+  let verify_md: string | null = null;
+  if (run?.worktree_path) {
+    try {
+      verify_md = fs.readFileSync(path.join(run.worktree_path, 'VERIFY.md'), 'utf8');
+    } catch {
+      /* absent or worktree gone — fine */
+    }
+  }
+
   let fail_detail: string | null = null;
   if (t.status === 'attention' || t.status === 'failed' || t.status === 'blocked') {
     const ev = db
@@ -254,6 +270,7 @@ export function taskResult(db: Database.Database, id: string): TaskResult | null
     pr_url: t.pr_url,
     merge_status: t.merge_status,
     review_md,
+    verify_md,
     fail_detail,
     log_tail: run ? tailLog(run.log_path, 12) : [],
     branch: run?.branch ?? null,

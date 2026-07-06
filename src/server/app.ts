@@ -44,6 +44,9 @@ interface CreateTaskBody {
   model?: string | null;
   depends_on?: string | null;
   environment?: string | null;
+  verify_mode?: string | null;
+  verify_rubric?: string | null;
+  verify_timeout_min?: number | null;
 }
 
 export function buildApp(opts: AppOptions = {}): FastifyInstance {
@@ -111,6 +114,9 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
       model: b.model ?? null,
       depends_on: b.depends_on ?? null,
       environment: b.environment ?? null,
+      verify_mode: b.verify_mode ?? null,
+      verify_rubric: b.verify_rubric ?? null,
+      verify_timeout_min: b.verify_timeout_min ?? null,
     });
     return { task: t, gate: validateTask(t) };
   });

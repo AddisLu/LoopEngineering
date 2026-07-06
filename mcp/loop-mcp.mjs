@@ -176,6 +176,9 @@ server.registerTool('loop_add_task', {
     queue: z.boolean().optional().describe('default TRUE — queue for execution if the gate passes. false = leave as draft.'),
     depends_on: z.string().optional().describe('Task id this one waits for (serial chain): held until that task is CLOSED, then auto-queued. Use to run tasks strictly one after another.'),
     environment: z.string().optional().describe('Environment label (e.g. "company", "home") this task should be scoped to — pulls in matching env:<name> knowledge nodes when the task runs.'),
+    verify_mode: z.string().optional().describe('CSV of command|llm|manual (default "command"). "llm" judges the diff against verify_rubric/goal; "manual" (or an inconclusive llm judge) defers to a human — the task still reaches review with a backup PR, merge deferred until you verify and press 合併.'),
+    verify_rubric: z.string().optional().describe('Acceptance criteria — what "done" means. Required when verify_mode includes "llm"; also shown to a human for a "manual" review.'),
+    verify_timeout_min: z.number().int().optional().describe('Per-task verify per-step timeout override, in minutes (default: the verify_step_timeout_min setting, 10).'),
   },
 }, async (a) => {
   const isMock = a.coding_tool === 'mock';
@@ -205,6 +208,9 @@ server.registerTool('loop_add_task', {
       model: a.model ?? null,
       depends_on: a.depends_on ?? null,
       environment: a.environment ?? null,
+      verify_mode: a.verify_mode ?? null,
+      verify_rubric: a.verify_rubric ?? null,
+      verify_timeout_min: a.verify_timeout_min ?? null,
     },
   });
   const id = created.task?.id;
@@ -388,6 +394,7 @@ function fmtResult(r) {
     r.pr_url ? `PR: ${r.pr_url}` : null,
     r.fail_detail ? `failure:\n${r.fail_detail}` : null,
     r.review_md ? `\n--- gap review ---\n${String(r.review_md).slice(0, 2000)}` : null,
+    r.verify_md ? `\n--- VERIFY.md (manual verification checklist) ---\n${String(r.verify_md).slice(0, 2000)}` : null,
     Array.isArray(r.log_tail) && r.log_tail.length ? `\n--- log tail ---\n${r.log_tail.join('\n')}` : null,
   ].filter(Boolean);
   return lines.join('\n');

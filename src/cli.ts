@@ -44,6 +44,9 @@ program
   .option('--model <model>', 'sonnet|opus|default')
   .option('--depends-on <taskId>', 'hold this task until that task is closed (serial chain)')
   .option('--env <name>', 'environment label (e.g. company, home) — scopes knowledge injection to matching env:<name> nodes')
+  .option('--verify-mode <csv>', 'comma-separated: command|llm|manual (default command)')
+  .option('--rubric <text>', 'acceptance criteria for the llm judge / manual review')
+  .option('--verify-timeout <min>', 'per-task verify per-step timeout override (minutes)', (v) => parseInt(v, 10))
   .action((o) => {
     const db = getDb();
     const kind = o.plan
@@ -68,6 +71,9 @@ program
       model: o.model ?? null,
       depends_on: o.dependsOn ?? null,
       environment: o.env ?? null,
+      verify_mode: o.verifyMode ?? null,
+      verify_rubric: o.rubric ?? null,
+      verify_timeout_min: o.verifyTimeout ?? null,
     });
     const gate = validateTask(getTask(db, t.id)!);
     console.log(`created ${t.id} (${t.status})`);
