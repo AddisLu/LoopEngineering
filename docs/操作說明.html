@@ -329,10 +329,10 @@
           <tr><td>Title</td><td>是</td><td>任務標題。</td></tr>
           <tr><td>Goal</td><td>是</td><td>目標描述，不可空白。</td></tr>
           <tr><td>Plan</td><td>是</td><td>計畫參照：存在的 <code>.md</code>/<code>.html</code> 檔路徑，或合法 URL。</td></tr>
-          <tr><td>Tool</td><td>是</td><td><code>claude-code</code> 或 <code>mock</code>（mock 為零 token 測試用）。</td></tr>
-          <tr><td>Verify steps</td><td>是</td><td>至少一條驗證指令（逗號分隔），例：<code>npm run lint, npm test</code>。</td></tr>
-          <tr><td>Repo path</td><td>是*</td><td>存在的 git repo 目錄。<span class="pill">mock 略過</span></td></tr>
-          <tr><td>Base branch</td><td>是*</td><td>存在的基底分支。<span class="pill">mock 略過</span></td></tr>
+          <tr><td>Tool</td><td>是</td><td><code>claude-code</code>／<code>mock</code>（零 token 測試用）／<code>generic</code>（無 git、產出檔案的非編碼任務——見下方「任務類型與驗證模式」）。</td></tr>
+          <tr><td>Verify steps</td><td>是*</td><td>至少一條驗證指令（逗號分隔），例：<code>npm run lint, npm test</code>。<span class="pill">verify mode 含 manual／llm 時可免</span></td></tr>
+          <tr><td>Repo path</td><td>是*</td><td>存在的 git repo 目錄。<span class="pill">mock／generic 略過</span></td></tr>
+          <tr><td>Base branch</td><td>是*</td><td>存在的基底分支。<span class="pill">mock／generic 略過</span></td></tr>
           <tr><td>Complexity</td><td>—</td><td><code>S</code>/<code>M</code>/<code>L</code>（預設 M）；決定逾時與預估用量。</td></tr>
           <tr><td>Priority</td><td>—</td><td>整數，預設 2。</td></tr>
           <tr><td>Model</td><td>—</td><td>留空＝用<b>全域預設模型</b>（<code>default_model</code>，預設 <code>sonnet</code> = Sonnet 5）。要對單一任務加碼可選 <code>opus</code>／<code>haiku</code>／<code>fable-5</code>。</td></tr>
@@ -340,7 +340,32 @@
         </tbody>
       </table>
       </div>
-      <p style="color:var(--ink-3);font-size:14px">* Repo/branch 僅在工具為 <code>claude-code</code> 時必填；<code>mock</code> 在暫存目錄執行，故略過 repo 檢查。</p>
+      <p style="color:var(--ink-3);font-size:14px">* Repo/branch 僅在工具為 <code>claude-code</code> 時必填；<code>mock</code>／<code>generic</code> 不在 git repo 中執行，故略過 repo 檢查。Verify steps 僅在 verify mode 不含 <code>manual</code>／<code>llm</code> 時必填。</p>
+
+      <h3>任務類型與驗證模式</h3>
+      <p>Tool 決定任務<b>在哪裡、怎麼跑</b>；Verify mode 決定<b>怎麼判定完成</b>。兩者互相獨立，可自由組合（例：<code>generic</code> ＋ <code>llm</code> 用來跑一份分析報告，由 LLM 對照 rubric 判斷是否合格）。</p>
+      <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Tool</th><th>執行位置</th><th>Git 收尾</th><th>用途</th></tr></thead>
+        <tbody>
+          <tr><td><code>claude-code</code></td><td>專屬 git worktree（<code>loop/&lt;id&gt;</code> 分支，從 base 切出）</td><td>完整（見第 13 章）：commit → push → 併回 base → PR</td><td>一般編碼任務。</td></tr>
+          <tr><td><code>mock</code></td><td>暫存目錄（每次 run 全新建立，用完即棄）</td><td>無（零 token 測試/演練用，不代表真實產出）</td><td>排程器/斷路器/watchdog 的零 token 測試。</td></tr>
+          <tr><td><code>generic</code></td><td><b>持久化</b>產出目錄 <code>~/.local/share/loop-engineering/outputs/&lt;id&gt;</code>（跨 resume 保留，結案也<b>不會</b>被清掉）</td><td><b>完全略過</b>——不建 worktree、不 commit、不 push、不併回、不開 PR</td><td>非編碼工作：報告、資料分析、一次性腳本、設計產出等。真的呼叫 Claude Code（非 mock），只是不碰 git。</td></tr>
+        </tbody>
+      </table>
+      </div>
+      <div class="note info"><span class="ic">📄</span><span><b>generic 的產出怎麼看？</b>看板卡片顯示「📄 產出 N」徽章；點開卡片可看產出目錄路徑與檔案清單（名稱＋大小，最多列 ~50 個）；也可呼叫 <code>GET /api/tasks/:id/result</code> 或 MCP 的 <code>loop_task_result</code> 取得同樣資訊。</span></div>
+      <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Verify mode</th><th>怎麼判定完成</th><th>備註</th></tr></thead>
+        <tbody>
+          <tr><td><code>command</code>（預設）</td><td>執行 Verify steps，全部 exit 0 才算過。</td><td>至少要有一條指令；<code>generic</code> 的指令在產出目錄執行。</td></tr>
+          <tr><td><code>llm</code></td><td>把變更（<code>claude-code</code>／<code>mock</code> 是 git diff；<code>generic</code> 是產出目錄的檔案清單＋小型文字檔摘錄）連同 Rubric 交給 LLM 判官，回覆 pass/fail。</td><td>需填「驗收標準 Rubric」；判官不可用（無 <code>claude</code> CLI／用量已達硬上限）時<b>絕不自動放行</b>，改判為 manual。</td></tr>
+          <tr><td><code>manual</code></td><td>一律停在待人工驗證，由你依 Rubric／產出親自確認後按合併或結案。</td><td>可免填 Verify steps；<code>claude-code</code> 會請 agent 寫一份 <code>VERIFY.md</code> 交接手動驗證清單。</td></tr>
+        </tbody>
+      </table>
+      </div>
+      <p style="color:var(--ink-3);font-size:14px">Verify mode 可複選（逗號分隔，如 <code>command,llm</code>）：只要其中一種判定失敗，就整體算失敗；只要包含 <code>manual</code>，最終一定停在待人工驗證。</p>
     </section>
 
     <section id="cli">
