@@ -4,6 +4,7 @@ import type Database from 'better-sqlite3';
 import { getNum, getSetting } from '../db/index.js';
 import { readUsage } from '../token/usage.js';
 import type { Task } from '../types.js';
+import { buildFileListing } from './outputFiles.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -47,9 +48,11 @@ function gitDiff(cwd: string, base: string): string {
   }
 }
 
-function buildPrompt(task: Task, cwd: string, base: string): string {
-  const diff = task.repo_path ? gitDiff(cwd, base) : '(no repo — mock task, nothing to diff)';
-  return `You are judging whether a completed coding task meets its acceptance criteria.
+function buildPrompt(task: Task, cwd: string, base: string | null): string {
+  // base===null means a repo-less (generic) task: judge the output files instead of a
+  // git diff. A mock task never reaches here (runLlmJudge returns early for it above).
+  const diff = base === null ? buildFileListing(cwd) : gitDiff(cwd, base);
+  return `You are judging whether a completed task meets its acceptance criteria.
 
 ## Goal
 ${task.goal}
@@ -57,7 +60,7 @@ ${task.goal}
 ## Acceptance criteria (rubric)
 ${task.verify_rubric?.trim() || '(none provided — judge against the goal alone)'}
 
-## Change to judge (git diff)
+## Change to judge (${base === null ? 'output files' : 'git diff'})
 ${diff}
 
 Output STRICT JSON ONLY — no markdown code fences, no commentary — exactly this shape:
@@ -98,7 +101,7 @@ export async function runLlmJudge(
   db: Database.Database,
   task: Task,
   workdir: string,
-  base: string,
+  base: string | null,
   exec?: JudgeExec,
 ): Promise<JudgeResult> {
   if (task.coding_tool === 'mock') return { pass: null, reason: 'skipped' };

@@ -37,7 +37,9 @@ import type { Adapter, DispatchResult } from './adapters/types.js';
 
 function pickAdapter(tool: string): Adapter {
   if (tool === 'mock') return mockAdapter;
-  if (tool === 'claude-code') return claudeCodeAdapter;
+  // 'generic' is the real claude-code adapter dispatched into a persistent output dir
+  // instead of a git worktree — see the workspace setup in runTask.
+  if (tool === 'claude-code' || tool === 'generic') return claudeCodeAdapter;
   throw new Error(`unknown coding_tool: ${tool}`);
 }
 
@@ -72,9 +74,15 @@ export function commitCheckpoint(
 export async function runTask(
   db: Database.Database,
   task: Task,
-  opts: { resume?: boolean } = {},
+  // `adapter` is a test-only injection point (mirrors runVerifyPipeline's judgeExec):
+  // production call sites never set it and get pickAdapter(task.coding_tool). Lets a
+  // hermetic test drive the full coding_tool='generic' orchestration path (persistent
+  // output dir, no worktree, no git close-out) with the zero-token mock adapter instead
+  // of spawning a real `claude` process.
+  opts: { resume?: boolean; adapter?: Adapter } = {},
 ): Promise<void> {
   const isMock = task.coding_tool === 'mock';
+  const isGeneric = task.coding_tool === 'generic';
   const hardLimit = getNum(db, 'hard_limit_pct', 95);
   // Bill the run against a fresh reading at both boundaries. A cached reading (TTL
   // 180s) can make a short run look like ~0% delta and bias the estimator toward
@@ -100,6 +108,12 @@ export async function runTask(
 
     if (isMock) {
       worktreePath = fs.mkdtempSync(path.join(paths.worktreesDir, `mock-${task.id}-`));
+    } else if (isGeneric) {
+      // Persistent, task-id-keyed dir — NOT a scratch dir: it survives resumes and is
+      // never cleaned up on close (it IS the deliverable). branch stays null, so every
+      // git-only step below (worktree, commit, push, merge, PR) is skipped for generic.
+      worktreePath = path.join(paths.outputsDir, task.id);
+      fs.mkdirSync(worktreePath, { recursive: true });
     } else {
       branch = `loop/${task.id}`;
       const wt = addWorktree(task.repo_path!, branch, task.base_branch!, {
@@ -126,9 +140,10 @@ export async function runTask(
   });
 
   const taskFilePath = writeTaskFile(worktreePath, task, { knowledge: knowledgeContext(db, task) });
-  if (!isMock) {
+  if (!isMock && !isGeneric) {
     // Keep engine-written artifacts out of the task branch/PR: exclude them locally
-    // before any commitAll (checkpoint or auto-commit) can `git add -A` them.
+    // before any commitAll (checkpoint or auto-commit) can `git add -A` them. Generic's
+    // output dir is never a git repo, so this git op is skipped entirely for it.
     excludeLocal(worktreePath, ['/LOOP_TASK.md', '/.claude/settings.local.json']);
   }
   if (task.setup_cmd) {
@@ -165,7 +180,7 @@ export async function runTask(
     detail: `tool=${task.coding_tool} est=${est}%${opts.resume ? ' resume' : ''}`,
   });
 
-  const adapter = pickAdapter(task.coding_tool);
+  const adapter = opts.adapter ?? pickAdapter(task.coding_tool);
   const timeoutMs = process.env.LOOP_TEST_TIMEOUT_MS
     ? Number(process.env.LOOP_TEST_TIMEOUT_MS)
     : timeoutMinFor(db, task) * 60_000;
@@ -252,7 +267,7 @@ export async function runTask(
   // Interrupted mid-flight: commit a WIP checkpoint BEFORE the early-return branches
   // below, so uncommitted work isn't lost and a resume has something to build on.
   // (The old auto-commit insurance sits after these returns and never ran for them.)
-  if (!isMock && finished.interrupted_by) {
+  if (!isMock && !isGeneric && finished.interrupted_by) {
     commitCheckpoint(db, task, run.id, worktreePath, finished.interrupted_by);
   }
 
@@ -299,8 +314,8 @@ export async function runTask(
     return;
   }
 
-  // auto-commit insurance (real repos only)
-  if (!isMock) {
+  // auto-commit insurance (real repos only — generic has no git worktree to commit)
+  if (!isMock && !isGeneric) {
     try {
       if (isDirty(worktreePath)) commitAll(worktreePath, `loop(${task.id}): auto-commit`);
     } catch (err) {
@@ -308,17 +323,24 @@ export async function runTask(
     }
   }
 
-  // verify
+  // verify (base=null for a repo-less generic task: judge.ts builds a file-list prompt
+  // instead of a git diff when it runs the llm judge)
   setStatus(db, task.id, 'verifying', { run_id: run.id });
-  const verifyOutcome = await runVerifyPipeline(db, task, worktreePath, run.id, task.base_branch ?? '');
+  const verifyOutcome = await runVerifyPipeline(db, task, worktreePath, run.id, task.base_branch);
   if (verifyOutcome === 'fail') return; // already routed to blocked/attention inside the pipeline
   let manualVerify = verifyOutcome === 'manual';
 
   // A manual verify outcome always parks the task in review with merge_status='pending'
   // (reusing the existing pending/合併 button) — true for a mock/repo-less task too, so
   // this is set before the repo-only close-out below (which a mock task never enters).
+  // Generic NEVER sets merge_status (there is nothing to merge) — its review detail just
+  // notes where the deliverable landed.
   let reviewDetail = 'verification passed';
-  if (manualVerify) reviewDetail = markManualPending(db, task.id);
+  if (manualVerify) {
+    reviewDetail = isGeneric ? `待人工驗證 — 產出於 outputs/${task.id}` : markManualPending(db, task.id);
+  } else if (isGeneric) {
+    reviewDetail = `verification passed；產出於 outputs/${task.id}`;
+  }
 
   // post-verify git close-out: push branch (backup) -> merge latest base into branch
   // -> (re-verify on merge) -> diffstat/gap-review/PR -> integrate into base. All
@@ -326,7 +348,7 @@ export async function runTask(
   // diffstat -> gap-review -> PR flow. A 'manual' verify outcome defers auto-integrate
   // entirely (still pushes + opens a backup PR) so a human can merge after verifying on
   // hardware/at the company.
-  if (!isMock && branch && task.base_branch && task.repo_path) {
+  if (!isMock && !isGeneric && branch && task.base_branch && task.repo_path) {
     const base = task.base_branch;
     const autoPush = getBool(db, 'auto_push_branch', true);
     const autoMerge = getBool(db, 'auto_merge', true) && !manualVerify;
@@ -439,7 +461,8 @@ export async function runVerifyPipeline(
   task: Task,
   worktree: string,
   runId: string,
-  base: string,
+  // null for a repo-less generic task — see judge.ts's file-listing branch.
+  base: string | null,
   // Test-only injection point for the LLM judge exec (mirrors distill.ts's DistillExec
   // plumbing) — production call sites omit it and get the real `claude` CLI call.
   judgeExec?: JudgeExec,
