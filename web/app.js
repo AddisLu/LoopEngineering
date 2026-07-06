@@ -134,6 +134,7 @@
     meta.appendChild(el('span', 'chip mono', `P${c.priority}`));
     meta.appendChild(el('span', 'chip tool', c.model || c.coding_tool));
     if (c.status === 'queued') meta.appendChild(el('span', 'chip mono', `~${c.est_pct}%`));
+    if (c.requires) meta.appendChild(el('span', 'chip mono requires', `⚙ 需要: ${c.requires}`));
     // serial-chain dependency chip (draft/queued cards waiting on another task)
     if (c.depends_on && c.dep_state && c.dep_state !== 'satisfied') {
       const depLabel = c.dep_state === 'waiting' ? `⏳ 等 ${c.depends_on}`
@@ -182,6 +183,7 @@
     }
 
     // status banners
+    if (c.verify_deferred) card.appendChild(el('div', 'banner info', `⏭ 驗證延後（缺 ${c.verify_deferred}）`));
     if (c.status === 'blocked') card.appendChild(el('div', 'banner info', '⏸ blocked · 可自動 resume'));
     if (c.status === 'failed') card.appendChild(el('div', 'banner danger', 'verify/執行失敗'));
     if (c.status === 'attention') {
@@ -532,6 +534,7 @@
     list.appendChild(dRow('Verify', steps.length ? steps.join('　•　') : '–'));
     list.appendChild(dRow('Verify mode', t.verify_mode || 'command'));
     if (t.verify_rubric) list.appendChild(dRow('驗收標準', t.verify_rubric));
+    if (t.requires) list.appendChild(dRow('需要', t.requires));
     list.appendChild(dRow('Repo', t.repo_path ? `${t.repo_path}${t.base_branch ? '  @ ' + t.base_branch : ''}` : '–'));
     if (t.setup_cmd) list.appendChild(dRow('Setup', t.setup_cmd));
     list.appendChild(dRow('Tool / Model', `${t.coding_tool || '–'}${t.model ? ' · ' + t.model : ''}`));

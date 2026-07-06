@@ -107,6 +107,7 @@
           <label class="chk"><input type="checkbox" name="verify_mode" value="manual" /> manual</label>
         </div>
         <label>驗收標準 Rubric（llm／manual 用，怎樣算「完成」）<textarea name="verify_rubric" rows="3" placeholder="例如：介面能正確顯示…" autocomplete="off"></textarea></label>
+        <label>需要的硬體/環境 Requires（逗號分隔，本機不具備時自動轉手動驗證）<input name="requires" placeholder="gpu, camera, os:windows" autocomplete="off" /></label>
         <div class="row">
           <label>Repo path <input name="repo_path" placeholder="/path/to/repo" autocomplete="off" /></label>
           <label>Base branch <input name="base_branch" placeholder="main" autocomplete="off" /></label>

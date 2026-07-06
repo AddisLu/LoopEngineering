@@ -179,6 +179,7 @@ server.registerTool('loop_add_task', {
     verify_mode: z.string().optional().describe('CSV of command|llm|manual (default "command"). "llm" judges the diff against verify_rubric/goal; "manual" (or an inconclusive llm judge) defers to a human — the task still reaches review with a backup PR, merge deferred until you verify and press 合併.'),
     verify_rubric: z.string().optional().describe('Acceptance criteria — what "done" means. Required when verify_mode includes "llm"; also shown to a human for a "manual" review.'),
     verify_timeout_min: z.number().int().optional().describe('Per-task verify per-step timeout override, in minutes (default: the verify_step_timeout_min setting, 10).'),
+    requires: z.string().optional().describe('CSV of capability tokens this task needs this HOST to have (e.g. "gpu", "camera", "network", "os:windows"). If the host\'s `host_capabilities` setting is missing one, command verification is skipped and the task auto-defers to manual review instead of failing — use this when a task needs hardware/OS this machine may not have.'),
   },
 }, async (a) => {
   const isMock = a.coding_tool === 'mock';
@@ -211,6 +212,7 @@ server.registerTool('loop_add_task', {
       verify_mode: a.verify_mode ?? null,
       verify_rubric: a.verify_rubric ?? null,
       verify_timeout_min: a.verify_timeout_min ?? null,
+      requires: a.requires ?? null,
     },
   });
   const id = created.task?.id;
