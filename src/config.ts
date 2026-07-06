@@ -225,6 +225,16 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   voice_intake_enabled: 'false',
   voice_model: 'large-v3',
   voice_terms_path: '/home/addis/Coding/VoiceToTemplate/terms.txt',
+  // warm whisper worker (scripts/transcribe_daemon.py, src/voice/daemon.ts): a singleton
+  // subprocess keeps the model loaded in VRAM between requests instead of paying the
+  // ~1.6s load+CUDA-init cost on every recording. On by default; any daemon failure falls
+  // back to the one-shot scripts/transcribe.py transparently. Idle for voice_worker_idle_min
+  // minutes -> the worker exits on its own to free VRAM.
+  voice_warm_worker: 'true',
+  voice_worker_idle_min: '10',
+  // model used to clean a transcript into structured task fields (src/voice/structure.ts).
+  // haiku is fast/cheap and plenty for this cleanup task; overrides default_model for voice only.
+  voice_structure_model: 'haiku',
 };
 
 export const TOKEN_REFRESH_MS = 180_000; // TokenBar cadence

@@ -10,6 +10,7 @@ export const NONNEG_KEYS = new Set([
   'max_concurrency', 'poll_interval_sec', 'min_runway_min', 'max_resumes', 'max_autoqueue',
   'timeout_S', 'timeout_M', 'timeout_L', 'usage_refresh_sec', 'ledger_fallback_after_min',
   'age_step_min', 'starve_min', 'knowledge_budget_chars', 'verify_step_timeout_min',
+  'voice_worker_idle_min',
 ]);
 // Phase 3 feature flags: stored as 'true'/'false'.
 export const BOOL_KEYS = new Set([
@@ -27,7 +28,7 @@ export const BOOL_KEYS = new Set([
   // ADO/GitHub integration bridge
   'integration_pushback',
   // mobile voice -> task intake
-  'voice_intake_enabled',
+  'voice_intake_enabled', 'voice_warm_worker',
 ]);
 
 /** Accepted `integration_provider` values ('none' = the bridge is fully off). */
@@ -73,8 +74,8 @@ export function validateSetting(key: string, value: string): string | null {
     if (!/^\d{2}:\d{2}-\d{2}:\d{2}$/.test(value)) return 'day_window must be HH:MM-HH:MM (e.g. 08:00-23:00)';
   } else if (BOOL_KEYS.has(key)) {
     if (value !== 'true' && value !== 'false') return `${key} must be true or false`;
-  } else if (key === 'default_model') {
-    if (!MODEL_VALUES.has(value)) return `default_model must be one of: ${[...MODEL_VALUES].filter(Boolean).join(', ')} (or empty for CLI default)`;
+  } else if (key === 'default_model' || key === 'voice_structure_model') {
+    if (!MODEL_VALUES.has(value)) return `${key} must be one of: ${[...MODEL_VALUES].filter(Boolean).join(', ')} (or empty for CLI default)`;
   } else if (key === 'integration_provider') {
     if (!INTEGRATION_PROVIDER_VALUES.has(value)) return `integration_provider must be one of: ${[...INTEGRATION_PROVIDER_VALUES].join(', ')}`;
   } else if (key === 'agent_backend') {
