@@ -24,6 +24,7 @@ import { writeSettingsLocal } from './settingsLocal.js';
 import { runVerification, type VerifyResult } from './verify.js';
 import { runLlmJudge, type JudgeExec } from './judge.js';
 import { parseSteps, parseVerifyMode } from '../types.js';
+import { unmetCapabilities } from '../capabilities.js';
 import { runGapReview } from '../review/gapReviewer.js';
 import { createPr } from '../git/pr.js';
 import { syncWithBase, pushBranch, stripLoopArtifacts, integrateIntoBase } from '../git/integrate.js';
@@ -446,6 +447,21 @@ export async function runVerifyPipeline(
   const modes = parseVerifyMode(task);
   const timeoutMs = (task.verify_timeout_min ?? getNum(db, 'verify_step_timeout_min', 10)) * 60_000;
   let needsManual = modes.has('manual');
+
+  // hardware/environment awareness: this host may lack a capability the task requires
+  // (e.g. camera for AOI) — command verification can't meaningfully run here, so skip it
+  // and defer to manual instead of failing. Zero-impact when requires is null/all-met.
+  const unmet = unmetCapabilities(task, getSetting(db, 'host_capabilities') ?? '');
+  if (unmet.length > 0) {
+    logEvent(db, {
+      task_id: task.id,
+      run_id: runId,
+      kind: 'note',
+      detail: `capability(s) unavailable here: ${unmet.join(',')} → command verification skipped, deferred to manual`,
+    });
+    modes.delete('command');
+    needsManual = true;
+  }
 
   if (modes.has('command') && parseSteps(task).length > 0) {
     const vres = await runVerification(task, worktree, timeoutMs);
