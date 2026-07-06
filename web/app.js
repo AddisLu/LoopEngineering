@@ -152,6 +152,7 @@
     // epic hierarchy: rollup chip on the epic card, back-reference chip on each child
     if (c.children) meta.appendChild(el('span', 'chip mono epic', `子任務 ${c.children.closed}/${c.children.total} 完成`));
     if (c.parent_id) meta.appendChild(el('span', 'chip mono epic-ref', `↳ epic: ${c.parent_id}`));
+    if (c.pipeline_id) meta.appendChild(el('span', 'chip mono', `🚦 ${c.stage_name || 'stage'}`));
     // serial-chain dependency chip (draft/queued cards waiting on another task)
     if (c.depends_on && c.dep_state && c.dep_state !== 'satisfied') {
       const depLabel = c.dep_state === 'waiting' ? `⏳ 等 ${c.depends_on}`
@@ -298,9 +299,36 @@
   const cardMap = new Map(); // id -> { el, sig }
   let lastBoard = null; // latest full board snapshot, so the detail modal can list an epic's children
 
+  // ---- delivery pipeline strip: 「feature: implement ✓ → review ⏳ → deploy ○」 ----
+  const STAGE_GLYPH = {
+    closed: '✓', review: '✓',
+    running: '⏳', verifying: '⏳', queued: '⏳', blocked: '⏳',
+    attention: '⚠', failed: '⚠',
+  };
+  const pipelineStripEl = $('pipeline-strip');
+  function renderPipelines(pipelines) {
+    pipelineStripEl.replaceChildren();
+    pipelineStripEl.hidden = !pipelines.length;
+    for (const p of pipelines) {
+      const row = el('div', 'pipeline-row');
+      row.appendChild(el('span', 'pipeline-name', p.name));
+      p.stages.forEach((st, i) => {
+        if (i > 0) row.appendChild(el('span', 'pipeline-arrow', '→'));
+        const glyph = STAGE_GLYPH[st.status] || '○';
+        const stageEl = el('span', `pipeline-stage st-${st.status}`, `${st.stage_name} ${glyph}`);
+        stageEl.dataset.id = st.task_id;
+        stageEl.title = `${st.stage_name} — ${st.status}`;
+        stageEl.addEventListener('click', () => openDetail(st.task_id));
+        row.appendChild(stageEl);
+      });
+      pipelineStripEl.appendChild(row);
+    }
+  }
+
   function render(s) {
     lastBoard = s;
     renderTop(s);
+    renderPipelines(Array.isArray(s.pipelines) ? s.pipelines : []);
     const seen = new Set();
     const cards = Array.isArray(s.cards) ? s.cards : [];
 
@@ -603,6 +631,19 @@
         childList.appendChild(dRow(child.id, `${STATUS_LABEL[child.status] || child.status} — ${child.title}`));
       }
       detailBody.appendChild(childList);
+    }
+
+    // delivery pipeline: list this stage's siblings (same pipeline_id), in stage order
+    // (the board strip is the at-a-glance summary; this is the full per-task list).
+    if (t.pipeline_id) {
+      const pipeline = (lastBoard && Array.isArray(lastBoard.pipelines))
+        ? lastBoard.pipelines.find((p) => p.pipeline_id === t.pipeline_id) : null;
+      const pipeList = el('div', 'd-list');
+      pipeList.appendChild(dRow('Pipeline', pipeline ? pipeline.name : t.pipeline_id));
+      for (const st of (pipeline ? pipeline.stages : [])) {
+        pipeList.appendChild(dRow(st.stage_name, `${STATUS_LABEL[st.status] || st.status}${st.task_id === t.id ? '（本任務）' : ''}`));
+      }
+      detailBody.appendChild(pipeList);
     }
 
     // best-effort: surfaces VERIFY.md when a manual-verify run wrote one (absent once

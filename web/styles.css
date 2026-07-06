@@ -327,6 +327,48 @@ body {
   50% { opacity: 0.4; }
 }
 
+/* ---- Pipeline strip ------------------------------------------------ */
+.pipeline-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 24px 0;
+}
+.pipeline-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 12.5px;
+}
+.pipeline-name {
+  font-weight: 600;
+  color: var(--text);
+  margin-right: 2px;
+}
+.pipeline-arrow {
+  color: var(--text-3);
+}
+.pipeline-stage {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--mono);
+  color: var(--text-2);
+  background: var(--surface-sunk);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px 9px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.pipeline-stage:hover { background: var(--surface); border-color: var(--text-3); }
+.pipeline-stage.st-closed, .pipeline-stage.st-review { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 30%, transparent); }
+.pipeline-stage.st-running, .pipeline-stage.st-verifying, .pipeline-stage.st-queued, .pipeline-stage.st-blocked {
+  color: var(--st-running); border-color: color-mix(in srgb, var(--st-running) 30%, transparent);
+}
+.pipeline-stage.st-attention, .pipeline-stage.st-failed { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 30%, transparent); }
+
 /* ---- Board ------------------------------------------------- */
 .board {
   flex: 1 1 auto;

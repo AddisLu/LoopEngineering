@@ -46,6 +46,8 @@ export interface BoardCard {
   deploy_env?: string; // coding_tool='deploy' only: the target environment name
   deploy_status?: string; // coding_tool='deploy' only: latest deployments.status for this task
   deploy_detail?: string | null; // coding_tool='deploy' only: latest deployments.detail (e.g. DEPLOY.md path)
+  pipeline_id?: string | null; // delivery pipeline: shared id across this template instance's stage tasks
+  stage_name?: string | null; // delivery pipeline: this task's stage name within its pipeline_id
 }
 
 export interface EpicRollup {
@@ -53,6 +55,19 @@ export interface EpicRollup {
   closed: number;
   running: number;
   failed: number;
+}
+
+export interface PipelineStageStatus {
+  stage_name: string;
+  task_id: string;
+  status: string;
+}
+
+/** One instantiated pipeline (grouped by pipeline_id), stages in depends_on chain order. */
+export interface PipelineRollup {
+  pipeline_id: string;
+  name: string;
+  stages: PipelineStageStatus[];
 }
 
 export interface BoardState {
@@ -72,6 +87,7 @@ export interface BoardState {
   reason: string | null;
   counts: Record<string, number>;
   cards: BoardCard[];
+  pipelines: PipelineRollup[];
   // compact backlog-usage forecast for the topbar chip — see forecastBacklog() for the full shape.
   forecast: { weekly_backlog_pct: number; weekly_headroom: number; capacity_more_M: number; verdict: string };
 }
@@ -161,6 +177,58 @@ export function tailLog(path: string | null, n = 6): string[] {
   }
 }
 
+/** The pipeline's display label, recovered from a stage task's title (see pipeline/
+ * materialize.ts's `${label}: ${stage.name}` convention) — no separate name column is
+ * kept on tasks, so this just strips the known ": <stage_name>" suffix. */
+function pipelineLabel(t: Task): string {
+  if (!t.stage_name) return t.title;
+  const suffix = `: ${t.stage_name}`;
+  return t.title.endsWith(suffix) ? t.title.slice(0, -suffix.length) : t.title;
+}
+
+/**
+ * Order a pipeline instance's tasks by walking its depends_on chain (robust against
+ * same-second created_at ties, unlike an ORDER BY created_at query) — start at the stage
+ * whose depends_on doesn't point at another task in this same pipeline_id group, then
+ * follow each task's dependent forward. Falls back to input order if the chain is broken.
+ */
+function pipelineChain(tasks: Task[]): Task[] {
+  const byId = new Map(tasks.map((t) => [t.id, t]));
+  const next = new Map<string, Task>();
+  let head: Task | undefined;
+  for (const t of tasks) {
+    if (t.depends_on && byId.has(t.depends_on)) next.set(t.depends_on, t);
+    else head = head ?? t;
+  }
+  const chain: Task[] = [];
+  const seen = new Set<string>();
+  let cur = head;
+  while (cur && !seen.has(cur.id)) {
+    seen.add(cur.id);
+    chain.push(cur);
+    cur = next.get(cur.id);
+  }
+  return chain.length === tasks.length ? chain : tasks;
+}
+
+function pipelineRollups(allTasks: Task[]): PipelineRollup[] {
+  const byPipeline = new Map<string, Task[]>();
+  for (const t of allTasks) {
+    if (!t.pipeline_id) continue;
+    const arr = byPipeline.get(t.pipeline_id);
+    if (arr) arr.push(t);
+    else byPipeline.set(t.pipeline_id, [t]);
+  }
+  return [...byPipeline.entries()].map(([pipeline_id, tasks]) => {
+    const chain = pipelineChain(tasks); // always the same length as `tasks` (>= 1, see above)
+    return {
+      pipeline_id,
+      name: pipelineLabel(chain[0]!),
+      stages: chain.map((t) => ({ stage_name: t.stage_name ?? '', task_id: t.id, status: t.status })),
+    };
+  });
+}
+
 export function boardState(db: Database.Database): BoardState {
   const usage = readUsage();
   const policy = resolvePolicy(db);
@@ -217,6 +285,10 @@ export function boardState(db: Database.Database): BoardState {
     };
     if (t.requires) card.requires = t.requires;
     if (t.parent_id) card.parent_id = t.parent_id;
+    if (t.pipeline_id) {
+      card.pipeline_id = t.pipeline_id;
+      card.stage_name = t.stage_name;
+    }
     const kids = childrenByParent.get(t.id);
     if (kids) {
       card.children = {
@@ -298,6 +370,7 @@ export function boardState(db: Database.Database): BoardState {
     reason: schedRow?.detail ?? null,
     counts: countByStatus(db),
     cards,
+    pipelines: pipelineRollups(allTasks),
     forecast: {
       weekly_backlog_pct: fc.weekly_backlog_pct,
       weekly_headroom: fc.weekly_headroom,
