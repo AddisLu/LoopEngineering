@@ -26,6 +26,16 @@ import { upsertNode, listNodes, searchNodes, importNodes, type ImportNodeInput, 
 import { exportClaudeMd } from './knowledge/export.js';
 import type { KnowledgeNode, Kind, Status } from './knowledge/types.js';
 import { collectDistillMaterial, runDistiller } from './knowledge/distill.js';
+import {
+  upsertEnvironment,
+  getEnvironment,
+  listEnvironments,
+  deleteEnvironment,
+  environmentMap,
+  lastDeployed,
+  type EnvironmentRow,
+} from './deploy/store.js';
+import { runRollback } from './orchestrator/deployTask.js';
 
 const program = new Command();
 program.name('loop').description('Loop Engineering — token-aware coding-task scheduler').version('0.1.0');
@@ -36,7 +46,7 @@ program
   .requiredOption('--title <title>')
   .requiredOption('--goal <goal>')
   .option('--plan <ref>', 'plan .md/.html path or URL')
-  .option('--tool <tool>', 'claude-code | mock | generic | plan (generic: no repo/git, real agent in a persistent output dir; plan: an epic — an AI planner decomposes --goal/--plan into a depends_on child task chain and executes it)', 'claude-code')
+  .option('--tool <tool>', 'claude-code | mock | generic | plan | deploy (generic: no repo/git, real agent in a persistent output dir; plan: an epic — an AI planner decomposes --goal/--plan into a depends_on child task chain and executes it; deploy: no agent — runs/queues a deploy to --env, see `loop deploy`)', 'claude-code')
   .option('--verify <steps>', 'comma-separated verification commands')
   .option('--setup <cmd>', 'setup command run in worktree before dispatch')
   .option('--repo <path>', 'git repo path')
@@ -79,7 +89,7 @@ program
       verify_timeout_min: o.verifyTimeout ?? null,
       requires: o.requires ?? null,
     });
-    const gate = validateTask(getTask(db, t.id)!, getSetting(db, 'host_capabilities') ?? '');
+    const gate = validateTask(getTask(db, t.id)!, getSetting(db, 'host_capabilities') ?? '', environmentMap(db));
     console.log(`created ${t.id} (${t.status})`);
     printGate(gate);
   });
@@ -91,7 +101,7 @@ program
     const db = getDb();
     const t = getTask(db, id);
     if (!t) return fail(`no such task: ${id}`);
-    printGate(validateTask(t, getSetting(db, 'host_capabilities') ?? ''));
+    printGate(validateTask(t, getSetting(db, 'host_capabilities') ?? '', environmentMap(db)));
   });
 
 program
@@ -101,7 +111,7 @@ program
     const db = getDb();
     const t = getTask(db, id);
     if (!t) return fail(`no such task: ${id}`);
-    const gate = validateTask(t, getSetting(db, 'host_capabilities') ?? '');
+    const gate = validateTask(t, getSetting(db, 'host_capabilities') ?? '', environmentMap(db));
     if (!gate.ok) {
       console.log('cannot queue — gate not satisfied:');
       printGate(gate);
@@ -383,7 +393,100 @@ knowledge
     console.log(`exported ${result.nodeCount} node(s) -> ${result.path}`);
   });
 
+const env = program.command('env').description('manage deploy environments (home/company/…)');
+
+env
+  .command('list')
+  .description('list environments')
+  .action(() => {
+    printEnvironments(listEnvironments(getDb()));
+  });
+
+env
+  .command('add <name>')
+  .description('create or update an environment (deploy target)')
+  .option('--kind <kind>', 'dev|staging|prod', 'dev')
+  .option('--host <host>', 'informational, e.g. linux-rtx2080 / windows-11')
+  .option('--capabilities <csv>', 'CSV, e.g. gpu,os:windows — feeds the V2 unmet-capability check', '')
+  .option('--deploy-cmd <cmd>', 'shell command run on auto-deploy (omit for a manual/prod environment)')
+  .option('--auto-deploy', 'run --deploy-cmd automatically on a deploy task (default: manual package + checklist)')
+  .action((name: string, o) => {
+    const env = upsertEnvironment(getDb(), {
+      name,
+      kind: o.kind,
+      host: o.host ?? null,
+      capabilities: o.capabilities ?? '',
+      deploy_cmd: o.deployCmd ?? null,
+      auto_deploy: !!o.autoDeploy,
+    });
+    console.log(`${env.name}  kind=${env.kind} host=${env.host ?? '-'} capabilities=${env.capabilities || '-'} auto_deploy=${!!env.auto_deploy}`);
+  });
+
+env
+  .command('remove <name>')
+  .description('delete an environment')
+  .action((name: string) => {
+    if (!deleteEnvironment(getDb(), name)) return fail(`no such environment: ${name}`);
+    console.log(`removed ${name}`);
+  });
+
+// Plain (not required) options on the parent: `loop deploy rollback <env>` dispatches to
+// the `rollback` subcommand below without ever invoking/validating the parent's own
+// action, so required-option enforcement here would wrongly reject that invocation.
+const deploy = program
+  .command('deploy')
+  .description('create + queue a deploy task (coding_tool=deploy) targeting an environment')
+  .option('--env <name>', 'target environment (see `loop env list`)')
+  .option('--repo <path>', 'git repo path (the source to deploy)')
+  .option('--base <branch>', 'base branch to deploy (usually main, after a feature merged)')
+  .action((o) => {
+    if (!o.env || !o.repo || !o.base) return fail('usage: loop deploy --env <name> --repo <path> --base <branch>');
+    const db = getDb();
+    const t = createTask(db, {
+      title: `deploy ${o.env}`,
+      goal: `Deploy ${o.base} to ${o.env}`,
+      coding_tool: 'deploy',
+      complexity: 'S',
+      environment: o.env,
+      repo_path: o.repo,
+      base_branch: o.base,
+    });
+    const gate = validateTask(getTask(db, t.id)!, getSetting(db, 'host_capabilities') ?? '', environmentMap(db));
+    if (!gate.ok) {
+      console.log(`created ${t.id} (${t.status}) — cannot queue yet:`);
+      printGate(gate);
+      return;
+    }
+    setStatus(db, t.id, 'queued', { detail: 'queued via cli (loop deploy)' });
+    console.log(`created ${t.id} -> queued (deploy ${o.base} -> ${o.env})`);
+  });
+
+deploy
+  .command('rollback <env>')
+  .description("roll <env> back to its previous deployed commit")
+  .action(async (envName: string) => {
+    const db = getDb();
+    if (!getEnvironment(db, envName)) return fail(`no such environment: ${envName}`);
+    const cur = lastDeployed(db, envName);
+    if (!cur) return fail(`no deployment recorded for ${envName}`);
+    const result = await runRollback(db, cur.id);
+    if (!result.ok && result.error) return fail(`rollback failed: ${result.error}`);
+    console.log(`${envName}: rolled back -> commit ${result.record?.commit_sha ?? '(unknown)'} (${result.record?.status})`);
+  });
+
 program.parseAsync();
+
+function printEnvironments(envs: EnvironmentRow[]): void {
+  if (!envs.length) {
+    console.log('(no environments — seeded home/company should exist by default)');
+    return;
+  }
+  for (const e of envs) {
+    console.log(
+      `${pad(e.name, 12)} kind=${pad(e.kind, 8)} host=${pad(e.host ?? '-', 14)} capabilities=${pad(e.capabilities || '-', 16)} auto_deploy=${!!e.auto_deploy}`,
+    );
+  }
+}
 
 function printGate(g: { ok: boolean; missing: string[]; warnings: string[] }): void {
   if (g.ok) console.log('  gate: OK');

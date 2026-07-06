@@ -501,5 +501,68 @@ server.registerTool('loop_cleanup', {
   }
 });
 
+// ---- environments + deploy (在家開發帶去公司部署) ----
+
+server.registerTool('loop_list_environments', {
+  title: 'List Loop deploy environments',
+  description: 'List deploy environments (e.g. home/company): kind, host, capabilities, deploy_cmd, auto_deploy.',
+  inputSchema: {},
+}, async () => {
+  try {
+    const { environments } = await api('/api/environments');
+    const rows = (environments || []).map((e) =>
+      `${e.name}  kind=${e.kind} host=${e.host ?? '-'} capabilities=${e.capabilities || '-'} auto_deploy=${!!e.auto_deploy}`);
+    return { content: [{ type: 'text', text: rows.join('\n') || '(no environments)' }] };
+  } catch (e) {
+    return { content: [{ type: 'text', text: `Could not list environments: ${e.message}` }] };
+  }
+});
+
+server.registerTool('loop_deploy', {
+  title: 'Deploy to an environment',
+  description:
+    'Create + queue a deploy task (coding_tool=deploy) targeting an environment. Auto-deploy environments (e.g. home) run deploy_cmd immediately; manual environments (e.g. company) produce a DEPLOY.md package + checklist for a human to run at the target, then the task reaches review.',
+  inputSchema: {
+    environment: z.string().describe('REQUIRED. Target environment name, e.g. "home" or "company" (see loop_list_environments).'),
+    repo_path: z.string().describe('REQUIRED. Git repo path — the source to deploy.'),
+    base_branch: z.string().describe('REQUIRED. Base branch to deploy, usually "main" after a feature merged.'),
+  },
+}, async ({ environment, repo_path, base_branch }) => {
+  try {
+    const { task } = await api('/api/tasks', {
+      method: 'POST',
+      body: {
+        title: `deploy ${environment}`,
+        goal: `Deploy ${base_branch} to ${environment}`,
+        coding_tool: 'deploy',
+        complexity: 'S',
+        environment,
+        repo_path,
+        base_branch,
+      },
+    });
+    await api(`/api/tasks/${task.id}/queue`, { method: 'POST' });
+    return { content: [{ type: 'text', text: `Task ${task.id} -> queued (deploy ${base_branch} -> ${environment}).` }] };
+  } catch (e) {
+    return { content: [{ type: 'text', text: `Could not create/queue deploy task: ${e.message}` }] };
+  }
+});
+
+server.registerTool('loop_rollback_deployment', {
+  title: 'Roll back a deployment',
+  description: "Roll an environment back to its previous successfully deployed commit. Finds the environment's most recent 'deployed' record and rolls back from there.",
+  inputSchema: { environment: z.string().describe('REQUIRED. Environment name to roll back, e.g. "home" or "company".') },
+}, async ({ environment }) => {
+  try {
+    const { deployments } = await api(`/api/deployments?env=${encodeURIComponent(environment)}`);
+    const current = (deployments || []).find((d) => d.status === 'deployed');
+    if (!current) return { content: [{ type: 'text', text: `No deployment recorded for ${environment}.` }] };
+    const r = await api(`/api/deployments/${current.id}/rollback`, { method: 'POST' });
+    return { content: [{ type: 'text', text: `${environment}: rolled back -> commit ${r.record?.commit_sha ?? '(unknown)'} (${r.record?.status}).` }] };
+  } catch (e) {
+    return { content: [{ type: 'text', text: `Rollback failed for ${environment}: ${e.message}` }] };
+  }
+});
+
 const transport = new StdioServerTransport();
 await server.connect(transport);
