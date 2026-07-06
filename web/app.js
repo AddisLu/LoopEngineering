@@ -118,8 +118,16 @@
       const verdictState = { plenty: 'ok', some: 'warn', tight: 'danger', full: 'danger' };
       const chip = $('forecast-chip');
       chip.setAttribute('data-state', verdictState[fc.verdict] || 'ok');
-      chip.textContent =
-        `Backlog 預估 · weekly +${Math.round(fc.weekly_backlog_pct)}% · 剩 ${Math.round(fc.weekly_headroom)}% · 可加~${fc.capacity_more_M}`;
+      const bk = Math.round(fc.weekly_backlog_pct);
+      const head = Math.round(fc.weekly_headroom);
+      const cap = fc.capacity_more_M;
+      const now = Math.round(s.usage.weekly);
+      const max = Math.round(s.policy.weeklyMax);
+      // Compact, unambiguous label (no bare "剩 X%" that reads like current usage);
+      // full explanation in the tooltip.
+      chip.textContent = bk > 0 ? `Backlog · weekly +${bk}% · 還可加~${cap}` : `Backlog 空 · 還可加~${cap}`;
+      chip.title =
+        `待處理任務預計再吃 weekly ${bk}%（目前 ${now}% / 上限 ${max}%）→ 跑完後距上限還剩 ${head}%，約可再加 ${cap} 個 M 任務`;
     }
   }
 

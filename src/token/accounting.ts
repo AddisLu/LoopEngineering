@@ -168,13 +168,18 @@ export function forecastBacklog(db: Database.Database): BacklogForecast {
   const safetyReserve = getNum(db, 'safety_reserve_pct', 5);
   const largest_task_session_fits = largest_task_session_pct <= hardLimit - safetyReserve;
 
-  const capacity_more_M = estW.M > 0 ? Math.floor(weekly_headroom / estW.M) : 0;
-  const capacity_more_L = estW.L > 0 ? Math.floor(weekly_headroom / estW.L) : 0;
+  // Weekly estimates auto-calibrate downward toward ~0% for cheap tasks (real runs
+  // barely move the weekly meter). Floor the per-task divisor at 1% so a near-free
+  // estimate reports a LARGE capacity, not a misleading 0 ("can't add any").
+  const capacity_more_M = Math.floor(weekly_headroom / Math.max(estW.M, 1));
+  const capacity_more_L = Math.floor(weekly_headroom / Math.max(estW.L, 1));
 
+  // Verdict keys off the weekly headroom PERCENT (robust), not the calibration-
+  // sensitive task count — so a huge headroom never shows as 'tight'.
   let verdict: BacklogForecast['verdict'];
   if (weekly_headroom <= 0) verdict = 'full';
-  else if (capacity_more_M < 1) verdict = 'tight';
-  else if (capacity_more_M < 3) verdict = 'some';
+  else if (weekly_headroom < 10) verdict = 'tight';
+  else if (weekly_headroom < 25) verdict = 'some';
   else verdict = 'plenty';
 
   return {

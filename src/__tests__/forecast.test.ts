@@ -71,18 +71,27 @@ describe('forecastBacklog', () => {
     expect(f.largest_task_session_pct).toBe(20);
   });
 
-  it('verdict thresholds by weekly headroom (empty backlog, headroom = weekly_max - weekly_now)', () => {
-    setCachedUsage(10, 20); // headroom = 80-20 = 60 -> capacity_more_M = 20
+  it('verdict keys off weekly-headroom %% (robust vs estimate calibration)', () => {
+    setCachedUsage(10, 20); // headroom = 80-20 = 60 -> plenty (>=25)
     expect(forecastBacklog(db).verdict).toBe('plenty');
 
-    setCachedUsage(10, 74); // headroom = 6 -> capacity_more_M = 2
+    setCachedUsage(10, 60); // headroom = 20 -> some (10..25)
     expect(forecastBacklog(db).verdict).toBe('some');
 
-    setCachedUsage(10, 78); // headroom = 2 -> capacity_more_M = 0, but > 0
+    setCachedUsage(10, 74); // headroom = 6 -> tight (<10)
     expect(forecastBacklog(db).verdict).toBe('tight');
 
-    setCachedUsage(10, 85); // headroom = max(0, -5) = 0
+    setCachedUsage(10, 85); // headroom = max(0, -5) = 0 -> full
     expect(forecastBacklog(db).verdict).toBe('full');
+  });
+
+  it('regression: an estimate calibrated to ~0 reports large capacity + plenty, not 0/tight', () => {
+    setSetting(db, 'est_weekly_pct_M', '0'); // cheap tasks calibrate the weekly est toward 0
+    setCachedUsage(10, 5); // empty backlog, weekly_headroom = 80 - 5 = 75
+    const f = forecastBacklog(db);
+    expect(f.weekly_headroom).toBe(75);
+    expect(f.capacity_more_M).toBe(75); // floor(75 / max(0,1)) — NOT 0
+    expect(f.verdict).toBe('plenty'); // 75% headroom is plenty, never 'tight'
   });
 
   it('empty backlog -> zeros and full headroom (plenty)', () => {
