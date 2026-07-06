@@ -15,6 +15,7 @@ import {
 } from './tasks.js';
 import { validateTask } from './gate/validateTask.js';
 import { readUsage, setCachedUsage } from './token/usage.js';
+import { forecastBacklog } from './token/accounting.js';
 import { killRun } from './orchestrator/kill.js';
 import { cleanupWorktree } from './orchestrator/cleanup.js';
 import { pruneTaskArtifacts, type ArtifactCleanup } from './git/worktree.js';
@@ -139,6 +140,25 @@ program
       console.log('active runs:');
       for (const r of runs) console.log(`  ${r.id} task=${r.task_id} pid=${r.pid}`);
     }
+  });
+
+program
+  .command('forecast')
+  .description('backlog usage forecast — should I add more tasks?')
+  .action(() => {
+    const db = getDb();
+    const f = forecastBacklog(db);
+    console.log(`usage: session ${f.session_now}%/${f.session_max}%  weekly ${f.weekly_now}%/${f.weekly_max}%`);
+    console.log(
+      `backlog: ${f.pending} pending (S${f.by_complexity.S} M${f.by_complexity.M} L${f.by_complexity.L}) — weekly +${f.weekly_backlog_pct}%`,
+    );
+    console.log(
+      `weekly headroom: ${f.weekly_headroom}%  → ~${f.capacity_more_M} more M task(s) / ~${f.capacity_more_L} more L task(s)  [${f.verdict}]`,
+    );
+    console.log(
+      `session (per-window, does not sum): largest backlog task ~${f.largest_task_session_pct}% ` +
+        (f.largest_task_session_fits ? '— fits a session window' : '— ⚠ exceeds a single session window'),
+    );
   });
 
 program

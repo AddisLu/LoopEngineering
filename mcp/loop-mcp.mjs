@@ -383,11 +383,18 @@ server.registerTool('loop_list_tasks', {
 
 server.registerTool('loop_status', {
   title: 'Loop scheduler status',
-  description: 'Get Loop Engineering scheduler + usage status: whether scheduling is paused and the current session/weekly usage percentages.',
+  description: 'Get Loop Engineering scheduler + usage status: whether scheduling is paused, the current session/weekly usage percentages, and a backlog forecast (pending tasks\' weekly cost, headroom, and ~how many more M/L tasks fit). Use this for "Loop 還能加幾個任務？" / "is there budget to add more tasks?".',
   inputSchema: {},
 }, async () => {
   const s = await api('/api/status');
-  return { content: [{ type: 'text', text: `paused: ${s.paused}\nsession: ${s.usage?.session}%  weekly: ${s.usage?.weekly}%  (source=${s.usage?.source})` }] };
+  let forecastLine = '';
+  try {
+    const f = await api('/api/forecast');
+    forecastLine =
+      `\nBacklog 預估: ${f.pending} pending (S${f.by_complexity.S}/M${f.by_complexity.M}/L${f.by_complexity.L}) ` +
+      `— weekly +${f.weekly_backlog_pct}% · 剩 ${f.weekly_headroom}% · 可加~${f.capacity_more_M} 個 M / ~${f.capacity_more_L} 個 L（${f.verdict}）`;
+  } catch { /* forecast is a nice-to-have; never fail loop_status over it */ }
+  return { content: [{ type: 'text', text: `paused: ${s.paused}\nsession: ${s.usage?.session}%  weekly: ${s.usage?.weekly}%  (source=${s.usage?.source})` + forecastLine }] };
 });
 
 // ---- inspect a task's outcome without opening the board ----
