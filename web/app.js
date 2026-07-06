@@ -190,7 +190,10 @@
       if (c.fail_detail) card.appendChild(el('div', 'fail-detail', c.fail_detail));
     }
     if (c.status === 'review') {
-      card.appendChild(el('div', 'banner ok', '✓ verify 通過，待結案'));
+      const manualPending = c.merge_status === 'pending' &&
+        String(c.verify_mode || '').split(',').map((m) => m.trim()).includes('manual');
+      if (manualPending) card.appendChild(el('div', 'banner attn', '⚠ 待人工驗證 — 見 VERIFY.md，驗過後按合併'));
+      else card.appendChild(el('div', 'banner ok', '✓ verify 通過，待結案'));
       // git close-out state
       if (c.merge_status === 'merged') meta.appendChild(el('span', 'chip merged', '✓ 已合併'));
       else if (c.merge_status === 'pending') meta.appendChild(el('span', 'chip pending', '待合併'));
@@ -349,6 +352,8 @@
     const fd = new FormData(e.target);
     const body = Object.fromEntries(fd.entries());
     body.priority = Number(body.priority || 2);
+    const verifyModes = fd.getAll('verify_mode');
+    body.verify_mode = verifyModes.length ? verifyModes.join(',') : 'command';
     const createBtn = $('create-btn');
     createBtn.disabled = true; // guard against a double-submit creating two tasks
     try {
@@ -525,6 +530,8 @@
     list.appendChild(dRow('Goal', t.goal));
     list.appendChild(dRow('Plan', t.plan_ref));
     list.appendChild(dRow('Verify', steps.length ? steps.join('　•　') : '–'));
+    list.appendChild(dRow('Verify mode', t.verify_mode || 'command'));
+    if (t.verify_rubric) list.appendChild(dRow('驗收標準', t.verify_rubric));
     list.appendChild(dRow('Repo', t.repo_path ? `${t.repo_path}${t.base_branch ? '  @ ' + t.base_branch : ''}` : '–'));
     if (t.setup_cmd) list.appendChild(dRow('Setup', t.setup_cmd));
     list.appendChild(dRow('Tool / Model', `${t.coding_tool || '–'}${t.model ? ' · ' + t.model : ''}`));
@@ -535,6 +542,17 @@
     }
     list.appendChild(dRow('建立 / 更新', `${t.created_at || '–'}  /  ${t.updated_at || '–'}`));
     detailBody.appendChild(list);
+
+    // best-effort: surfaces VERIFY.md when a manual-verify run wrote one (absent once
+    // the worktree is gone, e.g. after merge — never blocks rendering the rest)
+    try {
+      const r = await api('/api/tasks/' + id + '/result', 'GET');
+      if (r && r.verify_md) {
+        const verifyList = el('div', 'd-list');
+        verifyList.appendChild(dRow('VERIFY.md', r.verify_md));
+        detailBody.appendChild(verifyList);
+      }
+    } catch (e) { /* best effort */ }
 
     const menu = el('menu');
     // attention triage from the modal too: 續跑 / 重來 / 放棄
