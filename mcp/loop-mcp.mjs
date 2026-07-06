@@ -169,7 +169,7 @@ server.registerTool('loop_add_task', {
     verification_steps: z.union([z.array(z.string()), z.string()]).optional().describe('Commands that must all exit 0 to pass. If omitted, auto-detected from the repo (e.g. ["npm run typecheck","npm test"]).'),
     setup_cmd: z.string().optional().describe('Deps install run before dispatch. If omitted, auto-detected (npm ci / pip install ...).'),
     plan: z.string().optional().describe('markdown text / .md path / URL. If omitted, synthesized from title+goal+verify.'),
-    coding_tool: z.enum(['claude-code', 'mock', 'generic']).optional().describe('default "claude-code"; "mock" is a zero-token dry run; "generic" runs the real agent in a persistent output dir with NO git/repo/PR — for non-coding work (reports, data analysis, one-off scripts). repo/base are skipped for generic; give it verify_mode=manual or llm (or explicit verification_steps to run in the output dir).'),
+    coding_tool: z.enum(['claude-code', 'mock', 'generic', 'plan']).optional().describe('default "claude-code"; "mock" is a zero-token dry run; "generic" runs the real agent in a persistent output dir with NO git/repo/PR — for non-coding work (reports, data analysis, one-off scripts); "plan" is an EPIC — hand it one big goal and an AI planner decomposes it into 2-6 concrete subtasks, chains them with depends_on, and executes them autonomously one after another (use this instead of decomposing a large feature into multiple loop_add_task calls yourself). repo/base are skipped for generic; optional for plan (inherited by its children if given). give generic verify_mode=manual or llm (or explicit verification_steps); plan needs no verification_steps at all.'),
     complexity: z.enum(['S', 'M', 'L']).optional().describe('S/M/L — sets timeout, estimate, model routing (default M).'),
     priority: z.number().int().optional().describe('integer priority (default 2; lower runs first).'),
     model: z.string().optional().describe('sonnet | opus | default (optional).'),
@@ -184,13 +184,14 @@ server.registerTool('loop_add_task', {
 }, async (a) => {
   const isMock = a.coding_tool === 'mock';
   const isGeneric = a.coding_tool === 'generic';
-  const skipRepoDetect = isMock || isGeneric; // generic runs in a persistent non-git output dir
+  const isPlan = a.coding_tool === 'plan';
+  const skipRepoDetect = isMock || isGeneric || isPlan; // plan's repo/base (if given) are only inherited by its children
   const title = (a.title && a.title.trim()) ? a.title.trim().slice(0, 80) : firstLine(a.goal);
   const repo = skipRepoDetect ? (a.repo_path ?? null) : detectRepo(a.repo_path);
   const base = skipRepoDetect ? (a.base_branch ?? null) : detectBranch(repo, a.base_branch);
   let steps = normSteps(a.verification_steps);
-  if (!steps.length) steps = isMock ? ['true'] : isGeneric ? [] : detectVerify(repo);
-  const setup = isMock ? null : detectSetup(repo, a.setup_cmd);
+  if (!steps.length) steps = isMock ? ['true'] : (isGeneric || isPlan) ? [] : detectVerify(repo);
+  const setup = (isMock || isPlan) ? null : detectSetup(repo, a.setup_cmd);
   const planText = (a.plan && a.plan.trim()) ? a.plan : synthPlan(title, a.goal, steps);
   const { plan_ref, plan_kind } = resolvePlan(planText, title);
 

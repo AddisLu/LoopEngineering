@@ -136,6 +136,9 @@
     if (c.status === 'queued') meta.appendChild(el('span', 'chip mono', `~${c.est_pct}%`));
     if (c.coding_tool === 'generic') meta.appendChild(el('span', 'chip mono', `📄 產出 ${c.output_file_count ?? 0}`));
     if (c.requires) meta.appendChild(el('span', 'chip mono requires', `⚙ 需要: ${c.requires}`));
+    // epic hierarchy: rollup chip on the epic card, back-reference chip on each child
+    if (c.children) meta.appendChild(el('span', 'chip mono epic', `子任務 ${c.children.closed}/${c.children.total} 完成`));
+    if (c.parent_id) meta.appendChild(el('span', 'chip mono epic-ref', `↳ epic: ${c.parent_id}`));
     // serial-chain dependency chip (draft/queued cards waiting on another task)
     if (c.depends_on && c.dep_state && c.dep_state !== 'satisfied') {
       const depLabel = c.dep_state === 'waiting' ? `⏳ 等 ${c.depends_on}`
@@ -280,8 +283,10 @@
   })();
 
   const cardMap = new Map(); // id -> { el, sig }
+  let lastBoard = null; // latest full board snapshot, so the detail modal can list an epic's children
 
   function render(s) {
+    lastBoard = s;
     renderTop(s);
     const seen = new Set();
     const cards = Array.isArray(s.cards) ? s.cards : [];
@@ -564,6 +569,23 @@
     }
     list.appendChild(dRow('建立 / 更新', `${t.created_at || '–'}  /  ${t.updated_at || '–'}`));
     detailBody.appendChild(list);
+
+    // epic hierarchy: list this epic's children with their statuses (simple list, not a
+    // full tree widget — the rollup chip on the board card is the at-a-glance summary).
+    const allCards = (lastBoard && Array.isArray(lastBoard.cards)) ? lastBoard.cards : [];
+    if (t.parent_id) {
+      const epic = allCards.find((c) => c.id === t.parent_id);
+      list.appendChild(dRow('所屬 Epic', epic ? `${epic.title} (${t.parent_id})` : t.parent_id));
+    }
+    const children = allCards.filter((c) => c.parent_id === t.id);
+    if (children.length) {
+      const childList = el('div', 'd-list');
+      childList.appendChild(dRow('子任務', `${children.filter((c) => c.status === 'closed').length}/${children.length} 完成`));
+      for (const child of children) {
+        childList.appendChild(dRow(child.id, `${STATUS_LABEL[child.status] || child.status} — ${child.title}`));
+      }
+      detailBody.appendChild(childList);
+    }
 
     // best-effort: surfaces VERIFY.md when a manual-verify run wrote one (absent once
     // the worktree is gone, e.g. after merge — never blocks rendering the rest)

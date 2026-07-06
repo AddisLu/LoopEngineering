@@ -40,6 +40,15 @@ export interface BoardCard {
   verify_deferred?: string | null; // unmet capabilities that deferred the last run's verify to manual
   output_dir?: string; // coding_tool='generic' only: its persistent outputs/<id> dir
   output_file_count?: number; // coding_tool='generic' only
+  parent_id?: string | null; // epic hierarchy: set on a child task materialized by the planner
+  children?: EpicRollup; // present only on an epic (a task that IS some other task's parent_id)
+}
+
+export interface EpicRollup {
+  total: number;
+  closed: number;
+  running: number;
+  failed: number;
 }
 
 export interface BoardState {
@@ -160,7 +169,18 @@ export function boardState(db: Database.Database): BoardState {
       ORDER BY id DESC LIMIT 1`,
   );
 
-  const cards: BoardCard[] = listTasks(db).map((t: Task) => {
+  const allTasks = listTasks(db);
+  // epic hierarchy: group children by parent_id once, so each epic card's rollup is O(1)
+  // instead of re-scanning all tasks per card.
+  const childrenByParent = new Map<string, Task[]>();
+  for (const t of allTasks) {
+    if (!t.parent_id) continue;
+    const arr = childrenByParent.get(t.parent_id);
+    if (arr) arr.push(t);
+    else childrenByParent.set(t.parent_id, [t]);
+  }
+
+  const cards: BoardCard[] = allTasks.map((t: Task) => {
     let verify: string[] = [];
     try {
       verify = JSON.parse(t.verification_steps);
@@ -186,6 +206,16 @@ export function boardState(db: Database.Database): BoardState {
       updated_at: t.updated_at,
     };
     if (t.requires) card.requires = t.requires;
+    if (t.parent_id) card.parent_id = t.parent_id;
+    const kids = childrenByParent.get(t.id);
+    if (kids) {
+      card.children = {
+        total: kids.length,
+        closed: kids.filter((k) => k.status === 'closed').length,
+        running: kids.filter((k) => k.status === 'running' || k.status === 'verifying').length,
+        failed: kids.filter((k) => k.status === 'failed' || k.status === 'attention').length,
+      };
+    }
     if (t.coding_tool === 'generic') {
       const dir = outputDirFor(t.id);
       card.output_dir = dir;

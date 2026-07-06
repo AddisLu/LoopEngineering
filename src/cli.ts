@@ -34,7 +34,7 @@ program
   .requiredOption('--title <title>')
   .requiredOption('--goal <goal>')
   .option('--plan <ref>', 'plan .md/.html path or URL')
-  .option('--tool <tool>', 'claude-code | mock | generic (generic: no repo/git, real agent in a persistent output dir)', 'claude-code')
+  .option('--tool <tool>', 'claude-code | mock | generic | plan (generic: no repo/git, real agent in a persistent output dir; plan: an epic — an AI planner decomposes --goal/--plan into a depends_on child task chain and executes it)', 'claude-code')
   .option('--verify <steps>', 'comma-separated verification commands')
   .option('--setup <cmd>', 'setup command run in worktree before dispatch')
   .option('--repo <path>', 'git repo path')
