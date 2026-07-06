@@ -163,7 +163,8 @@
     <a href="#autoflow">13 · 自動化：Git 收尾與任務鏈</a>
     <a href="#knowledge">14 · 知識庫：越跑越聰明</a>
     <a href="#metrics">15 · 儀表板：自主產出</a>
-    <a href="#appendix">16 · 附錄（API / 檔案位置）</a>
+    <a href="#forecast">16 · Backlog 用量預估</a>
+    <a href="#appendix">17 · 附錄（API / 檔案位置）</a>
   </nav>
 
   <main>
@@ -299,6 +300,7 @@
           <tr><td>☾ / ☀ 主題鈕</td><td>切換亮/暗佈景，記憶於 localStorage。</td></tr>
           <tr><td>＋ 新增 task</td><td>開啟新增任務對話框。</td></tr>
           <tr><td>儀表板</td><td>開啟 <code>/metrics.html</code>——自主產出儀表板（見第 15 章）。</td></tr>
+          <tr><td>Backlog 預估 chip</td><td><code>weekly +N%・剩 M%・可加~K</code>——待處理任務吃掉的 weekly 額度、剩餘可加碼空間、粗估還能加幾個 M 任務；依 verdict 變色（見第 16 章）。</td></tr>
         </tbody>
       </table>
       </div>
@@ -391,6 +393,7 @@
           <tr><td><code>prune [--status &lt;list&gt;] [--older-than &lt;days&gt;] [--yes]</code></td><td>批次清理終態任務＋產物（預設 dry-run，加 <code>--yes</code> 才真刪）。</td></tr>
           <tr><td><code>config [list｜get｜set] [key] [value]</code></td><td>檢視 / 即時修改排程設定（門檻、模型、Git 收尾旗標）。例：<code>loop config set default_model sonnet</code>。改完下一個 tick 生效、免重啟；含防呆。</td></tr>
           <tr><td><code>set-usage --session &lt;%&gt; [--weekly &lt;%&gt;]</code></td><td><b>開發用</b>：強制寫入共享用量快取（斷路器演練）。</td></tr>
+          <tr><td><code>forecast</code></td><td>Backlog 用量預估——目前用量、待處理任務的 weekly 加總、剩餘 headroom、粗估還能加幾個 M/L 任務（見第 16 章）。</td></tr>
         </tbody>
       </table>
       </div>
@@ -568,7 +571,7 @@ systemctl --user disable loop-engineering</code></pre>
           <tr><td><code>loop_add_task</code></td><td>最小輸入建立（預設直接排程）任務，回傳自動填入值與 gate 結果。可帶 <code>depends_on</code>（串行鏈）、<code>model</code>（覆寫全域預設）。</td></tr>
           <tr><td><code>loop_queue_task</code></td><td>把某個 draft 入列執行</td></tr>
           <tr><td><code>loop_list_tasks</code></td><td>看板摘要（可依狀態過濾）</td></tr>
-          <tr><td><code>loop_status</code></td><td>排程 / 用量狀態</td></tr>
+          <tr><td><code>loop_status</code></td><td>排程 / 用量狀態，並附一行 Backlog 用量預估（「Loop 還能加幾個任務？」直接問這個工具即可，見第 16 章）</td></tr>
           <tr><td><code>loop_task_result</code></td><td>取某任務的結果：PR 連結、gap-review、失敗原因、log 尾巴</td></tr>
           <tr><td><code>loop_wait_task</code></td><td>輪詢等待任務到終態（review／attention／failed／closed）後回傳</td></tr>
           <tr><td><code>loop_delete_task</code></td><td>永久刪除任務＋磁碟產物</td></tr>
@@ -685,8 +688,20 @@ npm run loop -- add --title "Epic: 上線通知系統" \
       <div class="note info"><span class="ic">📊</span><span>頁面每 30 秒自動刷新一次（非 SSE，用量夠低不需要即時）；換「天數」立即重抓。</span></div>
     </section>
 
+    <section id="forecast">
+      <h2><span class="num">16</span>Backlog 用量預估</h2>
+      <p>回答「還能不能再加任務？」：把既有的每任務估計（<code>est_pct_*</code> / <code>est_weekly_pct_*</code>）加總成一個 backlog 預測，純讀取、<b>不影響</b>排程或預算行為。「pending」= 非終態任務（<code>draft/ready/queued/running/verifying/blocked</code>，排除 <code>closed/failed/review/attention</code>）。</p>
+      <ul>
+        <li><b>Weekly 是累加約束</b>（整週不會中途歸零）：<code>weekly_backlog_pct</code> = 所有 pending 任務的 <code>estimateWeeklyPct</code> 加總；<code>weekly_headroom</code> = <code>max(0, weekly_max − weekly_now − weekly_backlog_pct)</code>。</li>
+        <li><b>Session 是逐窗口的</b>（每 5 小時歸零一次）：<b>不</b>把 backlog 的 session 估計加總，只回報其中最大的單一任務估計（<code>largest_task_session_pct</code>）與是否塞得進一個 session 窗口（<code>largest_task_session_fits</code>，即 ≤ <code>hard_limit_pct − safety_reserve_pct</code>）。</li>
+        <li><b>verdict</b>：依 <code>weekly_headroom</code>／<code>capacity_more_M</code> 分四級——<code>plenty</code>（餘裕多）／<code>some</code>（還加得下幾個）／<code>tight</code>（勉強擠得下）／<code>full</code>（額度已滿）。</li>
+      </ul>
+      <p>四個入口都看得到同一份預估：看板頂欄 chip（見第 5 章）、<code>loop forecast</code> CLI（見第 7 章）、<code>GET /api/forecast</code>（見附錄）、以及 MCP 的 <code>loop_status</code>（見第 12 章）——問「Loop 還能加幾個任務？」它就會回。</p>
+      <div class="note info"><span class="ic">📐</span><span>只讀既有估計，不新增任何調度判斷——關掉這個功能（不呼叫它）對排程/預算行為零影響。</span></div>
+    </section>
+
     <section id="appendix">
-      <h2><span class="num">16</span>附錄</h2>
+      <h2><span class="num">17</span>附錄</h2>
       <h3>REST / SSE 端點</h3>
       <p>除 <code>/</code> 靜態頁外，<code>/api/*</code> 需帶 bearer（<code>Authorization: Bearer &lt;token&gt;</code>）或 <code>?token=</code>。</p>
       <div class="tbl-wrap">
@@ -698,6 +713,7 @@ npm run loop -- add --title "Epic: 上線通知系統" \
           <tr><td>GET</td><td><code>/api/token</code></td><td>詳細用量讀數</td></tr>
           <tr><td>GET</td><td><code>/api/history?limit=</code></td><td>用量歷史快照</td></tr>
           <tr><td>GET</td><td><code>/api/metrics?days=</code></td><td>自主產出儀表板快照（1..90 天，預設 14）</td></tr>
+          <tr><td>GET</td><td><code>/api/forecast</code></td><td>Backlog 用量預估（見第 16 章）</td></tr>
           <tr><td>GET</td><td><code>/api/stream</code></td><td>SSE：每秒推送完整看板</td></tr>
           <tr><td>POST</td><td><code>/api/tasks</code></td><td>建立任務（JSON body）</td></tr>
           <tr><td>POST</td><td><code>/api/tasks/:id/queue</code></td><td>審核 + 入列</td></tr>
