@@ -48,6 +48,7 @@ export interface BoardCard {
   deploy_detail?: string | null; // coding_tool='deploy' only: latest deployments.detail (e.g. DEPLOY.md path)
   pipeline_id?: string | null; // delivery pipeline: shared id across this template instance's stage tasks
   stage_name?: string | null; // delivery pipeline: this task's stage name within its pipeline_id
+  source_ref?: string | null; // ADO/GitHub bridge: origin work item this task was imported from
 }
 
 export interface EpicRollup {
@@ -146,6 +147,7 @@ export interface TaskResult {
   deploy_env?: string | null; // coding_tool='deploy' only
   deploy_status?: string | null; // coding_tool='deploy' only: latest deployments.status
   deploy_detail?: string | null; // coding_tool='deploy' only: latest deployments.detail (e.g. DEPLOY.md path)
+  pushback_detail?: string | null; // ADO/GitHub bridge: latest pushback attempt outcome (see integrations/pushback.ts)
 }
 
 /** A generic task's persistent, non-git workspace — see runTask's isGeneric branch. */
@@ -289,6 +291,7 @@ export function boardState(db: Database.Database): BoardState {
       card.pipeline_id = t.pipeline_id;
       card.stage_name = t.stage_name;
     }
+    if (t.source_ref) card.source_ref = t.source_ref;
     const kids = childrenByParent.get(t.id);
     if (kids) {
       card.children = {
@@ -442,6 +445,16 @@ export function taskResult(db: Database.Database, id: string): TaskResult | null
     deployExtra = { deploy_env: t.environment, deploy_status: dep?.status ?? null, deploy_detail: dep?.detail ?? null };
   }
 
+  let pushback_detail: string | null = null;
+  if (t.source_ref) {
+    const ev = db
+      .prepare(
+        `SELECT detail FROM task_events WHERE task_id = ? AND kind = 'note' AND detail LIKE 'pushback:%' ORDER BY id DESC LIMIT 1`,
+      )
+      .get(id) as { detail: string } | undefined;
+    pushback_detail = ev?.detail ?? null;
+  }
+
   return {
     id: t.id,
     status: t.status,
@@ -455,5 +468,6 @@ export function taskResult(db: Database.Database, id: string): TaskResult | null
     elapsedMin,
     ...(t.coding_tool === 'generic' ? { output_dir, output_files } : {}),
     ...deployExtra,
+    ...(t.source_ref ? { pushback_detail } : {}),
   };
 }

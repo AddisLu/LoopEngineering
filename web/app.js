@@ -32,6 +32,16 @@
   const esc = (s) =>
     String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
+  // 'github:owner/name#123' -> 'github#123'; 'ado:456' -> 'ado#456' (chip stays short).
+  const sourceRefLabel = (ref) => {
+    const idx = String(ref ?? '').indexOf(':');
+    if (idx < 0) return String(ref ?? '');
+    const provider = ref.slice(0, idx);
+    const rest = ref.slice(idx + 1);
+    const hashIdx = rest.lastIndexOf('#');
+    return `${provider}#${hashIdx >= 0 ? rest.slice(hashIdx + 1) : rest}`;
+  };
+
   // Duration formatter: 45m, 1h 20m — reads better than raw "125m".
   const fmtDur = (min) => {
     if (min == null || isNaN(min)) return '–';
@@ -153,6 +163,7 @@
     if (c.children) meta.appendChild(el('span', 'chip mono epic', `子任務 ${c.children.closed}/${c.children.total} 完成`));
     if (c.parent_id) meta.appendChild(el('span', 'chip mono epic-ref', `↳ epic: ${c.parent_id}`));
     if (c.pipeline_id) meta.appendChild(el('span', 'chip mono', `🚦 ${c.stage_name || 'stage'}`));
+    if (c.source_ref) meta.appendChild(el('span', 'chip mono', `⇄ ${sourceRefLabel(c.source_ref)}`));
     // serial-chain dependency chip (draft/queued cards waiting on another task)
     if (c.depends_on && c.dep_state && c.dep_state !== 'satisfied') {
       const depLabel = c.dep_state === 'waiting' ? `⏳ 等 ${c.depends_on}`
@@ -613,6 +624,7 @@
       const a = el('a', null, t.pr_url); a.href = t.pr_url; a.target = '_blank'; a.rel = 'noopener';
       list.appendChild(dRow('PR', a));
     }
+    if (t.source_ref) list.appendChild(dRow('來源', t.source_ref));
     list.appendChild(dRow('建立 / 更新', `${t.created_at || '–'}  /  ${t.updated_at || '–'}`));
     detailBody.appendChild(list);
 
@@ -670,6 +682,11 @@
         deployList.appendChild(dRow('部署狀態', r.deploy_status || '–'));
         if (r.deploy_detail) deployList.appendChild(dRow('部署詳情', r.deploy_detail));
         detailBody.appendChild(deployList);
+      }
+      if (t.source_ref) {
+        const pushList = el('div', 'd-list');
+        pushList.appendChild(dRow('Pushback', r && r.pushback_detail ? r.pushback_detail : '（尚未推送，或 integration_pushback 關閉）'));
+        detailBody.appendChild(pushList);
       }
     } catch (e) { /* best effort */ }
 
