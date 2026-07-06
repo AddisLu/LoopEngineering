@@ -35,6 +35,8 @@ import { mockAdapter } from './adapters/mock.js';
 import { claudeCodeAdapter } from './adapters/claudeCode.js';
 import type { Adapter, DispatchResult } from './adapters/types.js';
 import { runPlanner, type PlannerExec } from './planner.js';
+import { runDeployTask, type DeployExec } from './deployTask.js';
+import { getEnvironment } from '../deploy/store.js';
 
 function pickAdapter(tool: string): Adapter {
   if (tool === 'mock') return mockAdapter;
@@ -80,12 +82,16 @@ export async function runTask(
   // hermetic test drive the full coding_tool='generic' orchestration path (persistent
   // output dir, no worktree, no git close-out) with the zero-token mock adapter instead
   // of spawning a real `claude` process.
-  opts: { resume?: boolean; adapter?: Adapter; plannerExec?: PlannerExec } = {},
+  opts: { resume?: boolean; adapter?: Adapter; plannerExec?: PlannerExec; deployExec?: DeployExec } = {},
 ): Promise<void> {
   // An epic (coding_tool='plan') never touches a worktree/adapter — it's decomposed into
   // a child task chain by runPlanner and closes immediately. Entirely separate lifecycle
   // from the git/mock/generic paths below.
   if (task.coding_tool === 'plan') return runPlanTask(db, task, opts.plannerExec);
+  // A deploy task (coding_tool='deploy') never touches a worktree/adapter either — it
+  // resolves a target `environments` row and either runs deploy_cmd or hands off a
+  // DEPLOY.md package. See deployTask.ts.
+  if (task.coding_tool === 'deploy') return runDeployTask(db, task, opts.deployExec);
 
   const isMock = task.coding_tool === 'mock';
   const isGeneric = task.coding_tool === 'generic';
@@ -502,7 +508,12 @@ export async function runVerifyPipeline(
   // hardware/environment awareness: this host may lack a capability the task requires
   // (e.g. camera for AOI) — command verification can't meaningfully run here, so skip it
   // and defer to manual instead of failing. Zero-impact when requires is null/all-met.
-  const unmet = unmetCapabilities(task, getSetting(db, 'host_capabilities') ?? '');
+  // A task's `environment` (e.g. 'company') additionally contributes that environments
+  // row's `capabilities` (e.g. os:windows) into the same check — promoting environment
+  // from a knowledge label to something the verify pipeline actually understands.
+  const envCaps = task.environment ? (getEnvironment(db, task.environment)?.capabilities ?? '') : '';
+  const extraRequires = envCaps.split(',').map((s) => s.trim()).filter(Boolean);
+  const unmet = unmetCapabilities(task, getSetting(db, 'host_capabilities') ?? '', extraRequires);
   if (unmet.length > 0) {
     logEvent(db, {
       task_id: task.id,
