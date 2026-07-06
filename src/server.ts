@@ -5,6 +5,7 @@ import { buildApp } from './server/app.js';
 import { notify, nearLimitEdge, routeStatusEvent } from './notify.js';
 import { readUsage } from './token/usage.js';
 import { paths } from './config.js';
+import { pumpPushback } from './integrations/pushback.js';
 
 /** Production entry: runs the scheduling loop AND serves the API/board. systemd runs this. */
 export async function main(): Promise<void> {
@@ -17,6 +18,7 @@ export async function main(): Promise<void> {
   let lastActive = -1;
   let nearWarned = false;
   let lastReason: string | null = null;
+  let lastPushbackId = lastEventId;
 
   const loop = () => {
     try {
@@ -39,6 +41,10 @@ export async function main(): Promise<void> {
       lastEventId = r.lastEventId;
       lastActive = r.lastActive;
       nearWarned = r.nearWarned;
+    });
+    // D5 pushback: fire-and-forget, never delays the tick loop (see integrations/pushback.ts)
+    void pumpPushback(db, lastPushbackId).then((id) => {
+      lastPushbackId = id;
     });
   };
 
