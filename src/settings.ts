@@ -22,6 +22,8 @@ export const BOOL_KEYS = new Set([
   'self_update', 'dep_done_on_merge',
   // knowledge base
   'knowledge_inject', 'knowledge_distill',
+  // execution-discipline prompt (experimental, opt-in)
+  'prompt_discipline',
 ]);
 
 /** Keys the board settings panel reads/writes (the budget/scheduling knobs). */
@@ -34,6 +36,8 @@ export const TUNABLE_KEYS = [
   'git_fetch_base', 'auto_push_branch', 'auto_merge', 'merge_conflict_task',
   // execution model
   'default_model',
+  // execution-discipline prompt (experimental, opt-in)
+  'prompt_discipline',
 ] as const;
 
 /** Accepted model aliases for coding runs ('' / 'default' = the claude CLI default). */

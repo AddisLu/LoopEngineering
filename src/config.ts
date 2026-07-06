@@ -180,6 +180,13 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // command verification is skipped and the run defers to manual (see runVerifyPipeline).
   // Empty (default) means "assume nothing special" — any hardware requirement defers.
   host_capabilities: '',
+
+  // execution-discipline prompt (src/orchestrator/prompt.ts): opt-in `## 執行紀律` block
+  // distilled from test-driven-development/systematic-debugging/verification-before-completion
+  // (prompt-only — no plugin, no subagents, no clarifying questions). Off by default = zero
+  // change to LOOP_TASK.md; measure the effect via computeMetrics' discipline_ab block before
+  // ever flipping this on for real work.
+  prompt_discipline: 'false',
 };
 
 export const TOKEN_REFRESH_MS = 180_000; // TokenBar cadence

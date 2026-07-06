@@ -221,14 +221,15 @@ export function createRun(
     session_pct_before?: number | null;
     weekly_pct_before?: number | null;
     dispatch_window?: string | null;
+    discipline?: number | null;
   },
 ): TaskRun {
   const id = `r_${nanoid(10)}`;
   db.prepare(
     `INSERT INTO task_runs (id, task_id, resume_of, attempt, worktree_path, branch, log_path,
-       session_pct_before, weekly_pct_before, dispatch_window)
+       session_pct_before, weekly_pct_before, dispatch_window, discipline)
      VALUES (@id, @task_id, @resume_of, @attempt, @worktree_path, @branch, @log_path,
-       @session_pct_before, @weekly_pct_before, @dispatch_window)`,
+       @session_pct_before, @weekly_pct_before, @dispatch_window, @discipline)`,
   ).run({
     id,
     task_id: args.task_id,
@@ -240,6 +241,7 @@ export function createRun(
     session_pct_before: args.session_pct_before ?? null,
     weekly_pct_before: args.weekly_pct_before ?? null,
     dispatch_window: args.dispatch_window ?? null,
+    discipline: args.discipline ?? null,
   });
   return getRun(db, id)!;
 }

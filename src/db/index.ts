@@ -85,6 +85,8 @@ function migrate(db: Database.Database): void {
   // epic decomposition: the epic task's id on each child materialized by the planner
   // (src/orchestrator/planner.ts). Nullable; distinct from depends_on/parent_task_id.
   add('tasks', [['parent_id', 'TEXT']]);
+  // execution-discipline A/B: which side of prompt_discipline a run was dispatched under.
+  add('task_runs', [['discipline', 'INTEGER']]);
 }
 
 function seedSettings(db: Database.Database): void {

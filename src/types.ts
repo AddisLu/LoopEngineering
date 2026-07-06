@@ -54,6 +54,7 @@ export interface TaskRun {
   weekly_pct_before: number | null;
   weekly_pct_after: number | null;
   dispatch_window: string | null;
+  discipline: number | null;
   started_at: string;
   finished_at: string | null;
 }
