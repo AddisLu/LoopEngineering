@@ -151,6 +151,32 @@ CREATE TABLE IF NOT EXISTS knowledge_edges (
   UNIQUE(src, dst, relation)
 );
 
+-- Environments: promotes `tasks.environment` from a knowledge-scope label to a real
+-- execution/deploy target (see src/deploy/store.ts). Additive — the env:<name> knowledge
+-- scope keeps working unchanged whether or not a row exists here.
+CREATE TABLE IF NOT EXISTS environments (
+  name        TEXT PRIMARY KEY,         -- 'home' | 'company' | any
+  kind        TEXT NOT NULL DEFAULT 'dev',   -- dev | staging | prod
+  host        TEXT,                      -- informational (e.g. 'linux-rtx2080', 'windows-11')
+  capabilities TEXT NOT NULL DEFAULT '', -- CSV, mirrors host_capabilities semantics (gpu,camera,os:windows...)
+  deploy_cmd  TEXT,                      -- shell run on auto-deploy (dev); NULL/empty = manual (prod)
+  auto_deploy INTEGER NOT NULL DEFAULT 0,-- 1 = run deploy_cmd automatically on a deploy task
+  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- History of deploy attempts (+ rollback targets). task_id is nullable so a deployment
+-- record survives its originating task being deleted (e.g. a later rollback).
+CREATE TABLE IF NOT EXISTS deployments (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id     TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+  environment TEXT NOT NULL,
+  commit_sha  TEXT,                      -- what was deployed (for rollback)
+  status      TEXT NOT NULL DEFAULT 'pending', -- pending|deployed|manual-pending|failed|rolledback
+  detail      TEXT,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_deployments_env ON deployments(environment);
+
 -- MUST use the trigram tokenizer: default unicode61 cannot segment Chinese
 -- ("只能" would never match "公司只能用"). Requires SQLite >= 3.34 (better-sqlite3
 -- 11.x bundles >= 3.45), verified with a runtime probe in knowledge.store.test.ts.

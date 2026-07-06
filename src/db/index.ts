@@ -20,6 +20,7 @@ export function getDb(dbPath: string = paths.db): Database.Database {
   db.exec(schema);
   migrate(db);
   seedSettings(db);
+  seedEnvironments(db);
 
   _db = db;
   return db;
@@ -34,6 +35,7 @@ export function openTestDb(): Database.Database {
   db.exec(schema);
   migrate(db);
   seedSettings(db);
+  seedEnvironments(db);
   return db;
 }
 
@@ -93,6 +95,24 @@ function seedSettings(db: Database.Database): void {
   const insert = db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)');
   const tx = db.transaction(() => {
     for (const [k, v] of Object.entries(DEFAULT_SETTINGS)) insert.run(k, v);
+  });
+  tx();
+}
+
+/**
+ * First-run seed for the two environments this engine's own deploy workflow targets
+ * (在家開發帶去公司部署): home = dev, auto-deploys; company = prod, manual gate (no
+ * deploy_cmd). INSERT OR IGNORE so a user's own edits (via `loop env add`/API) are
+ * never overwritten on a later startup.
+ */
+function seedEnvironments(db: Database.Database): void {
+  const insert = db.prepare(
+    `INSERT OR IGNORE INTO environments (name, kind, host, capabilities, deploy_cmd, auto_deploy)
+     VALUES (@name, @kind, @host, @capabilities, @deploy_cmd, @auto_deploy)`,
+  );
+  const tx = db.transaction(() => {
+    insert.run({ name: 'home', kind: 'dev', host: 'linux-rtx2080', capabilities: 'gpu', deploy_cmd: null, auto_deploy: 1 });
+    insert.run({ name: 'company', kind: 'prod', host: 'windows-11', capabilities: 'os:windows', deploy_cmd: null, auto_deploy: 0 });
   });
   tx();
 }
