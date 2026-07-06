@@ -16,6 +16,7 @@ import {
 import { validateTask } from './gate/validateTask.js';
 import { readUsage, setCachedUsage } from './token/usage.js';
 import { forecastBacklog } from './token/accounting.js';
+import { computeMetrics } from './server/metrics.js';
 import { killRun } from './orchestrator/kill.js';
 import { cleanupWorktree } from './orchestrator/cleanup.js';
 import { pruneTaskArtifacts, type ArtifactCleanup } from './git/worktree.js';
@@ -159,6 +160,13 @@ program
       `session (per-window, does not sum): largest backlog task ~${f.largest_task_session_pct}% ` +
         (f.largest_task_session_fits ? '— fits a session window' : '— ⚠ exceeds a single session window'),
     );
+    const ab = computeMetrics(db).discipline_ab.groups;
+    if (ab.some((g) => g.count > 0)) {
+      const fmt = (g: (typeof ab)[number]): string =>
+        `${g.discipline ? 'on ' : 'off'} n=${g.count} avg_session%=${g.avg_session_pct?.toFixed(1) ?? '–'} ` +
+        `attention=${Math.round(g.attention_rate * 100)}% resumes=${g.avg_resume_count?.toFixed(1) ?? '–'} avg_cycle=${g.avg_cycle_min == null ? '–' : Math.round(g.avg_cycle_min) + 'm'}`;
+      console.log(`discipline A/B (prompt_discipline, last 14d): ${ab.map(fmt).join('  |  ')}`);
+    }
   });
 
 program

@@ -28,6 +28,16 @@ export interface MetricsSnapshot {
   };
   usage_trend: { session_pct: number | null; weekly_pct: number | null; created_at: string }[];
   autonomy: { self_updates: number; auto_merged: number; merge_conflict_tasks: number };
+  discipline_ab: {
+    groups: {
+      discipline: 0 | 1;
+      count: number;
+      avg_session_pct: number | null;
+      attention_rate: number;
+      avg_resume_count: number | null;
+      avg_cycle_min: number | null;
+    }[];
+  };
 }
 
 /** Parse a stored timestamp (sqlite "YYYY-MM-DD HH:MM:SS" UTC, or ISO). */
@@ -164,6 +174,48 @@ export function computeMetrics(db: Database.Database, opts: { days?: number } = 
     .prepare(`SELECT COUNT(*) AS n FROM tasks WHERE parent_task_id IS NOT NULL AND created_at >= datetime('now', ?)`)
     .get(since) as { n: number };
 
+  // ---- discipline A/B: does prompt_discipline actually reduce tokens/rework? ----
+  // Grouped by each closed task's LATEST run's `discipline` flag (0/1) — a task resumed
+  // across a setting flip is attributed to whatever it dispatched under most recently.
+  // Tasks with no runs, or runs predating this column (discipline IS NULL), are excluded
+  // from both groups rather than guessed into one.
+  const disciplineRows = db
+    .prepare(
+      `SELECT
+         t.id AS task_id,
+         t.resume_count AS resume_count,
+         t.created_at AS created_at,
+         t.updated_at AS updated_at,
+         (SELECT discipline FROM task_runs WHERE task_id = t.id ORDER BY started_at DESC LIMIT 1) AS discipline,
+         (SELECT SUM(session_pct_after - session_pct_before) FROM task_runs
+            WHERE task_id = t.id AND session_pct_after IS NOT NULL AND session_pct_before IS NOT NULL) AS session_delta,
+         (SELECT COUNT(*) FROM task_events WHERE task_id = t.id AND kind = 'status' AND to_status = 'attention') AS attention_count
+       FROM tasks t
+       WHERE t.status = 'closed' AND t.updated_at >= datetime('now', ?)`,
+    )
+    .all(since) as {
+    task_id: string;
+    resume_count: number;
+    created_at: string;
+    updated_at: string;
+    discipline: number | null;
+    session_delta: number | null;
+    attention_count: number;
+  }[];
+  const disciplineGroups = ([0, 1] as const).map((flag) => {
+    const rows = disciplineRows.filter((r) => r.discipline === flag);
+    const sessionDeltas = rows.map((r) => r.session_delta).filter((d): d is number => d != null);
+    const cycleMins = rows.map((r) => (tsToMs(r.updated_at) - tsToMs(r.created_at)) / 60000);
+    return {
+      discipline: flag,
+      count: rows.length,
+      avg_session_pct: avg(sessionDeltas),
+      attention_rate: rows.length ? rows.filter((r) => r.attention_count > 0).length / rows.length : 0,
+      avg_resume_count: avg(rows.map((r) => r.resume_count)),
+      avg_cycle_min: avg(cycleMins),
+    };
+  });
+
   return {
     days,
     throughput: { by_day, total_closed },
@@ -195,5 +247,6 @@ export function computeMetrics(db: Database.Database, opts: { days?: number } = 
       auto_merged: autoMerged.n,
       merge_conflict_tasks: mergeConflictTasks.n,
     },
+    discipline_ab: { groups: disciplineGroups },
   };
 }
