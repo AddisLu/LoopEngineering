@@ -137,6 +137,13 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // GitHub Copilot CLI (needs a PAT + its own adapter — not built yet).
   agent_backend: 'claude-code',
 
+  // which shell runs verify steps / setup_cmd / deploy_cmd (see src/util/shell.ts).
+  // 'auto' (default): linux/darwin = bash -lc (byte-identical to the pre-portability
+  // behavior); win32 = git-bash if found, else PowerShell, else cmd. Explicit values
+  // ('bash' | 'powershell' | 'cmd' | 'git-bash') force that shell on any platform —
+  // prep for the Windows company deployment, testable today from Linux.
+  shell: 'auto',
+
   // usage-fetch cadence + ledger fallback
   usage_refresh_sec: '180',
   ledger_fallback_after_min: '10',

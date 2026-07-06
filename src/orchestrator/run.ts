@@ -22,6 +22,7 @@ import { writeTaskFile, writeResumeContext, collectResumeContext } from './promp
 import { knowledgeContext } from '../knowledge/context.js';
 import { writeSettingsLocal } from './settingsLocal.js';
 import { runVerification, type VerifyResult } from './verify.js';
+import { resolveShell, runShell } from '../util/shell.js';
 import { runLlmJudge, type JudgeExec } from './judge.js';
 import { parseSteps, parseVerifyMode } from '../types.js';
 import { unmetCapabilities } from '../capabilities.js';
@@ -176,7 +177,7 @@ export async function runTask(
     // skip while unchanged, re-run when the command itself changes. Mock scratch dirs
     // run setup too (harmlessly — no adapter token spend either way), which is what
     // makes the fail-fast path below testable with zero tokens.
-    const outcome = await runTaskSetup(task, worktreePath, logPath);
+    const outcome = await runTaskSetup(task, worktreePath, logPath, getSetting(db, 'shell'));
     if (outcome.kind === 'skipped') {
       logEvent(db, { task_id: task.id, run_id: run.id, kind: 'note', detail: 'setup skipped (unchanged, already installed)' });
     } else if (outcome.kind === 'failed') {
@@ -533,7 +534,7 @@ export async function runVerifyPipeline(
   }
 
   if (modes.has('command') && parseSteps(task).length > 0) {
-    const vres = await runVerification(task, worktree, timeoutMs);
+    const vres = await runVerification(task, worktree, timeoutMs, { shellSetting: getSetting(db, 'shell') });
     if (!vres.ok) {
       handleVerifyFailure(db, task, runId, worktree, vres);
       return 'fail';
@@ -629,7 +630,12 @@ function dispatchFailed(r: DispatchResult): boolean {
 export type SetupOutcome = { kind: 'skipped' } | { kind: 'ok' } | { kind: 'failed'; exitCode: number | null; tail: string };
 
 /** Run a task's setup_cmd, honoring the per-worktree sentinel. Caller has already checked task.setup_cmd. */
-export async function runTaskSetup(task: Task, worktreePath: string, logPath: string): Promise<SetupOutcome> {
+export async function runTaskSetup(
+  task: Task,
+  worktreePath: string,
+  logPath: string,
+  shellSetting?: string,
+): Promise<SetupOutcome> {
   const sentinel = worktreeInternalFile(worktreePath, 'loop-setup-done');
   let alreadyDone = false;
   try {
@@ -638,7 +644,7 @@ export async function runTaskSetup(task: Task, worktreePath: string, logPath: st
     /* no sentinel yet */
   }
   if (alreadyDone) return { kind: 'skipped' };
-  const { exitCode, tail } = await runSetup(task.setup_cmd!, worktreePath, logPath);
+  const { exitCode, tail } = await runSetup(task.setup_cmd!, worktreePath, logPath, shellSetting);
   if (exitCode !== 0) return { kind: 'failed', exitCode, tail };
   try {
     fs.writeFileSync(sentinel, task.setup_cmd!);
@@ -648,32 +654,27 @@ export async function runTaskSetup(task: Task, worktreePath: string, logPath: st
   return { kind: 'ok' };
 }
 
-function runSetup(cmd: string, cwd: string, logPath: string): Promise<{ exitCode: number | null; tail: string }> {
-  return new Promise((resolve) => {
-    import('node:child_process').then(({ spawn }) => {
-      const child = spawn('bash', ['-lc', cmd], { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
-      const fd = fs.openSync(logPath, 'a');
-      let tail = '';
-      const w = (d: Buffer) => {
-        fs.writeSync(fd, d);
-        tail = (tail + d.toString('utf8')).slice(-1500);
-      };
-      child.stdout.on('data', w);
-      child.stderr.on('data', w);
-      const timer = setTimeout(() => child.kill('SIGKILL'), 10 * 60_000);
-      child.on('close', (code) => {
-        clearTimeout(timer);
-        try {
-          fs.closeSync(fd);
-        } catch {
-          /* ignore */
-        }
-        resolve({ exitCode: code, tail });
-      });
-      child.on('error', () => {
-        clearTimeout(timer);
-        resolve({ exitCode: null, tail });
-      });
-    });
+function runSetup(
+  cmd: string,
+  cwd: string,
+  logPath: string,
+  shellSetting?: string,
+): Promise<{ exitCode: number | null; tail: string }> {
+  const fd = fs.openSync(logPath, 'a');
+  let tail = '';
+  return runShell(cmd, cwd, {
+    timeoutMs: 10 * 60_000,
+    shell: resolveShell({ shellSetting }),
+    onData: (d) => {
+      fs.writeSync(fd, d);
+      tail = (tail + d.toString('utf8')).slice(-1500);
+    },
+  }).then(({ exitCode }) => {
+    try {
+      fs.closeSync(fd);
+    } catch {
+      /* ignore */
+    }
+    return { exitCode, tail };
   });
 }

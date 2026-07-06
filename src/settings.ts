@@ -37,6 +37,9 @@ export const INTEGRATION_PROVIDER_VALUES = new Set(['none', 'github', 'ado']);
  * warned): getBackend() falls back to 'claude-code' at dispatch time regardless. */
 export const AGENT_BACKEND_VALUES = new Set(['claude-code', 'copilot-cli']);
 
+/** Accepted `shell` values (see src/util/shell.ts resolveShell). */
+export const SHELL_VALUES = new Set(['auto', 'bash', 'powershell', 'cmd', 'git-bash']);
+
 /** Keys the board settings panel reads/writes (the budget/scheduling knobs). */
 export const TUNABLE_KEYS = [
   'day_window',
@@ -74,6 +77,8 @@ export function validateSetting(key: string, value: string): string | null {
     if (!AGENT_BACKEND_VALUES.has(value)) {
       console.warn(`warning: agent_backend '${value}' is not a recognized backend id (known: ${[...AGENT_BACKEND_VALUES].join(', ')}) — dispatch falls back to claude-code`);
     }
+  } else if (key === 'shell') {
+    if (!SHELL_VALUES.has(value)) return `shell must be one of: ${[...SHELL_VALUES].join(', ')}`;
   }
   return null;
 }
