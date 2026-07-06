@@ -29,6 +29,7 @@ export interface NewTaskInput {
   parent_id?: string | null;
   pipeline_id?: string | null;
   stage_name?: string | null;
+  source_ref?: string | null;
 }
 
 export function createTask(db: Database.Database, input: NewTaskInput): Task {
@@ -37,11 +38,11 @@ export function createTask(db: Database.Database, input: NewTaskInput): Task {
     `INSERT INTO tasks (id, title, goal, plan_ref, plan_kind, coding_tool, verification_steps,
        setup_cmd, repo_path, base_branch, complexity, priority, model, timeout_min, depends_on, environment,
        verify_mode, verify_rubric, verify_timeout_min, requires, owner, created_by, parent_id,
-       pipeline_id, stage_name, status)
+       pipeline_id, stage_name, source_ref, status)
      VALUES (@id, @title, @goal, @plan_ref, @plan_kind, @coding_tool, @verification_steps,
        @setup_cmd, @repo_path, @base_branch, @complexity, @priority, @model, @timeout_min, @depends_on, @environment,
        @verify_mode, @verify_rubric, @verify_timeout_min, @requires, @owner, @created_by, @parent_id,
-       @pipeline_id, @stage_name, 'draft')`,
+       @pipeline_id, @stage_name, @source_ref, 'draft')`,
   ).run({
     id,
     title: input.title,
@@ -68,9 +69,15 @@ export function createTask(db: Database.Database, input: NewTaskInput): Task {
     parent_id: input.parent_id ?? null,
     pipeline_id: input.pipeline_id ?? null,
     stage_name: input.stage_name ?? null,
+    source_ref: input.source_ref ?? null,
   });
   logEvent(db, { task_id: id, kind: 'status', to_status: 'draft', detail: 'created' });
   return getTask(db, id)!;
+}
+
+/** Lookup by source_ref for idempotent import (see src/integrations/import.ts). */
+export function getTaskBySourceRef(db: Database.Database, sourceRef: string): Task | undefined {
+  return db.prepare('SELECT * FROM tasks WHERE source_ref = ?').get(sourceRef) as Task | undefined;
 }
 
 /**

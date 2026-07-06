@@ -187,6 +187,13 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // change to LOOP_TASK.md; measure the effect via computeMetrics' discipline_ab block before
   // ever flipping this on for real work.
   prompt_discipline: 'false',
+
+  // ADO/GitHub integration bridge (src/integrations/): pull work-items -> Loop tasks and
+  // push results back. Off by default = zero external calls; credentials come from
+  // ~/.config/loop-engineering/env (GITHUB_TOKEN/GITHUB_API_URL or ADO_PAT/ADO_ORG/ADO_PROJECT),
+  // never the DB. 'none' (default) disables both import and pushback regardless of creds.
+  integration_provider: 'none',
+  integration_pushback: 'false',
 };
 
 export const TOKEN_REFRESH_MS = 180_000; // TokenBar cadence

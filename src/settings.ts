@@ -24,7 +24,12 @@ export const BOOL_KEYS = new Set([
   'knowledge_inject', 'knowledge_distill',
   // execution-discipline prompt (experimental, opt-in)
   'prompt_discipline',
+  // ADO/GitHub integration bridge
+  'integration_pushback',
 ]);
+
+/** Accepted `integration_provider` values ('none' = the bridge is fully off). */
+export const INTEGRATION_PROVIDER_VALUES = new Set(['none', 'github', 'ado']);
 
 /** Keys the board settings panel reads/writes (the budget/scheduling knobs). */
 export const TUNABLE_KEYS = [
@@ -57,6 +62,8 @@ export function validateSetting(key: string, value: string): string | null {
     if (value !== 'true' && value !== 'false') return `${key} must be true or false`;
   } else if (key === 'default_model') {
     if (!MODEL_VALUES.has(value)) return `default_model must be one of: ${[...MODEL_VALUES].filter(Boolean).join(', ')} (or empty for CLI default)`;
+  } else if (key === 'integration_provider') {
+    if (!INTEGRATION_PROVIDER_VALUES.has(value)) return `integration_provider must be one of: ${[...INTEGRATION_PROVIDER_VALUES].join(', ')}`;
   }
   return null;
 }

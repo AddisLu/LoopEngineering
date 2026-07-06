@@ -30,6 +30,7 @@ export interface Task {
   parent_id: string | null; // epic hierarchy: this task's parent epic (coding_tool='plan'), distinct from depends_on (ordering) and parent_task_id (merge-conflict lineage)
   pipeline_id: string | null; // delivery pipeline: shared id across a template's materialized stage tasks (see src/pipeline/materialize.ts)
   stage_name: string | null; // delivery pipeline: this task's stage name within its pipeline_id (e.g. "implement", "deploy-home")
+  source_ref: string | null; // ADO/GitHub bridge: 'provider:repo#id' or 'provider:id' this task was imported from (see src/integrations/)
   environment: string | null;
   owner: string | null; // team-prep: unused passthrough, reserves the multi-user path
   created_by: string | null; // team-prep: unused passthrough, reserves the multi-user path

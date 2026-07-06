@@ -98,6 +98,10 @@ function migrate(db: Database.Database): void {
     ['pipeline_id', 'TEXT'],
     ['stage_name', 'TEXT'],
   ]);
+  // ADO/GitHub integration bridge: which work item this task was imported from (see
+  // src/integrations/import.ts) — nullable, drives idempotent re-import + pushback.
+  add('tasks', [['source_ref', 'TEXT']]);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_tasks_source_ref ON tasks(source_ref)');
 }
 
 function seedSettings(db: Database.Database): void {
