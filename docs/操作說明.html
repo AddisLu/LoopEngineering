@@ -165,7 +165,8 @@
     <a href="#metrics">15 · 儀表板：自主產出</a>
     <a href="#forecast">16 · Backlog 用量預估</a>
     <a href="#discipline">17 · 執行紀律（實驗性，預設關）</a>
-    <a href="#appendix">18 · 附錄（API / 檔案位置）</a>
+    <a href="#envdeploy">18 · 環境與部署（Environments + Deploy）</a>
+    <a href="#appendix">19 · 附錄（API / 檔案位置）</a>
   </nav>
 
   <main>
@@ -334,18 +335,19 @@
           <tr><td>Title</td><td>是</td><td>任務標題。</td></tr>
           <tr><td>Goal</td><td>是</td><td>目標描述，不可空白。</td></tr>
           <tr><td>Plan</td><td>是</td><td>計畫參照：存在的 <code>.md</code>/<code>.html</code> 檔路徑，或合法 URL。</td></tr>
-          <tr><td>Tool</td><td>是</td><td><code>claude-code</code>／<code>mock</code>（零 token 測試用）／<code>generic</code>（無 git、產出檔案的非編碼任務）／<code>plan</code>（Epic 自主規劃——見下方「任務類型與驗證模式」與第 13 章）。</td></tr>
-          <tr><td>Verify steps</td><td>是*</td><td>至少一條驗證指令（逗號分隔），例：<code>npm run lint, npm test</code>。<span class="pill">verify mode 含 manual／llm 或 tool=plan 時可免</span></td></tr>
+          <tr><td>Tool</td><td>是</td><td><code>claude-code</code>／<code>mock</code>（零 token 測試用）／<code>generic</code>（無 git、產出檔案的非編碼任務）／<code>plan</code>（Epic 自主規劃——見下方「任務類型與驗證模式」與第 13 章）／<code>deploy</code>（部署任務，不派工給 agent——見第 18 章）。</td></tr>
+          <tr><td>Verify steps</td><td>是*</td><td>至少一條驗證指令（逗號分隔），例：<code>npm run lint, npm test</code>。<span class="pill">verify mode 含 manual／llm 或 tool=plan／deploy 時可免</span></td></tr>
           <tr><td>Repo path</td><td>是*</td><td>存在的 git repo 目錄。<span class="pill">mock／generic 略過</span></td></tr>
           <tr><td>Base branch</td><td>是*</td><td>存在的基底分支。<span class="pill">mock／generic 略過</span></td></tr>
           <tr><td>Complexity</td><td>—</td><td><code>S</code>/<code>M</code>/<code>L</code>（預設 M）；決定逾時與預估用量。</td></tr>
           <tr><td>Priority</td><td>—</td><td>整數，預設 2。</td></tr>
           <tr><td>Model</td><td>—</td><td>留空＝用<b>全域預設模型</b>（<code>default_model</code>，預設 <code>sonnet</code> = Sonnet 5）。要對單一任務加碼可選 <code>opus</code>／<code>haiku</code>／<code>fable-5</code>。</td></tr>
           <tr><td>Setup cmd</td><td>—</td><td>派工前在 worktree 執行的準備指令（如 <code>npm ci</code>）。未填只是警告。</td></tr>
+          <tr><td>Environment</td><td>—（<code>deploy</code> 必填）</td><td>套用對應 <code>env:&lt;name&gt;</code> 知識；<code>tool=deploy</code> 時同時是部署目標，必須是已存在的 environment（見第 18 章）。</td></tr>
         </tbody>
       </table>
       </div>
-      <p style="color:var(--ink-3);font-size:14px">* Repo/branch 僅在工具為 <code>claude-code</code> 時必填；<code>mock</code>／<code>generic</code> 不在 git repo 中執行，故略過 repo 檢查。Verify steps 僅在 verify mode 不含 <code>manual</code>／<code>llm</code> 時必填。</p>
+      <p style="color:var(--ink-3);font-size:14px">* Repo/branch 僅在工具為 <code>claude-code</code>／<code>deploy</code> 時必填；<code>mock</code>／<code>generic</code>／<code>plan</code> 不在 git repo 中執行，故略過 repo 檢查。Verify steps 僅在 verify mode 不含 <code>manual</code>／<code>llm</code> 且 tool 不是 <code>plan</code>／<code>deploy</code> 時必填。</p>
 
       <h3>任務類型與驗證模式</h3>
       <p>Tool 決定任務<b>在哪裡、怎麼跑</b>；Verify mode 決定<b>怎麼判定完成</b>。兩者互相獨立，可自由組合（例：<code>generic</code> ＋ <code>llm</code> 用來跑一份分析報告，由 LLM 對照 rubric 判斷是否合格）。</p>
@@ -357,6 +359,7 @@
           <tr><td><code>mock</code></td><td>暫存目錄（每次 run 全新建立，用完即棄）</td><td>無（零 token 測試/演練用，不代表真實產出）</td><td>排程器/斷路器/watchdog 的零 token 測試。</td></tr>
           <tr><td><code>generic</code></td><td><b>持久化</b>產出目錄 <code>~/.local/share/loop-engineering/outputs/&lt;id&gt;</code>（跨 resume 保留，結案也<b>不會</b>被清掉）</td><td><b>完全略過</b>——不建 worktree、不 commit、不 push、不併回、不開 PR</td><td>非編碼工作：報告、資料分析、一次性腳本、設計產出等。真的呼叫 Claude Code（非 mock），只是不碰 git。</td></tr>
           <tr><td><code>plan</code>（Epic）</td><td>不執行任何工作區——AI 規劃器把目標拆成子任務，子任務才各自建 worktree</td><td><b>無</b>（本身不改任何程式碼；子任務照常走完整收尾）</td><td>一句話丟一個大目標，自動拆成 2–6 個子任務並依序自主執行——見第 13 章「Epic 自主規劃」。</td></tr>
+          <tr><td><code>deploy</code></td><td>不派工給 agent——直接在 <code>repo_path</code> 執行 <code>deploy_cmd</code>（環境 <code>auto_deploy=1</code>），或產出 <code>outputs/deploy-&lt;id&gt;/DEPLOY.md</code> 部署包（<code>auto_deploy=0</code>）</td><td><b>無</b>（不是編碼任務，沒有 diff 可併）</td><td>把 <code>environment</code> 從知識標籤升級成真正的部署目標——見第 18 章「環境與部署」。</td></tr>
         </tbody>
       </table>
       </div>
@@ -395,6 +398,9 @@
           <tr><td><code>config [list｜get｜set] [key] [value]</code></td><td>檢視 / 即時修改排程設定（門檻、模型、Git 收尾旗標）。例：<code>loop config set default_model sonnet</code>。改完下一個 tick 生效、免重啟；含防呆。</td></tr>
           <tr><td><code>set-usage --session &lt;%&gt; [--weekly &lt;%&gt;]</code></td><td><b>開發用</b>：強制寫入共享用量快取（斷路器演練）。</td></tr>
           <tr><td><code>forecast</code></td><td>Backlog 用量預估（見第 16 章）；若有可比較資料，尾端再附一行執行紀律 A/B 摘要（見第 17 章）。</td></tr>
+          <tr><td><code>env list｜add &lt;name&gt;｜remove &lt;name&gt;</code></td><td>管理部署環境（見第 18 章）。<code>add</code> 旗標：<code>--kind</code> <code>--host</code> <code>--capabilities</code> <code>--deploy-cmd</code> <code>--auto-deploy</code>。</td></tr>
+          <tr><td><code>deploy --env &lt;name&gt; --repo &lt;path&gt; --base &lt;branch&gt;</code></td><td>建立並排入一個 <code>tool=deploy</code> 任務（見第 18 章）。</td></tr>
+          <tr><td><code>deploy rollback &lt;env&gt;</code></td><td>把該環境回滾到上一次成功部署的 commit。</td></tr>
         </tbody>
       </table>
       </div>
@@ -578,6 +584,9 @@ systemctl --user disable loop-engineering</code></pre>
           <tr><td><code>loop_wait_task</code></td><td>輪詢等待任務到終態（review／attention／failed／closed）後回傳</td></tr>
           <tr><td><code>loop_delete_task</code></td><td>永久刪除任務＋磁碟產物</td></tr>
           <tr><td><code>loop_cleanup</code></td><td>批次清理終態任務（含 dryRun 預覽）</td></tr>
+          <tr><td><code>loop_list_environments</code></td><td>列出部署環境（見第 18 章）</td></tr>
+          <tr><td><code>loop_deploy</code></td><td>建立並排入一個部署任務（<code>tool=deploy</code>）</td></tr>
+          <tr><td><code>loop_rollback_deployment</code></td><td>把某環境回滾到上一次成功部署的 commit</td></tr>
         </tbody>
       </table></div>
       <div class="note info"><span class="ic">🔗</span><span><b>用 MCP 串成鏈：</b>先建任務 A，再建 B 時說「依賴 A」（帶 <code>depends_on</code>）——A 結案後 B 自動放行，避免多個任務同時從舊 base 切分支而互相衝突。</span></div>
@@ -715,8 +724,36 @@ npm run loop -- add --title "Epic: 上線通知系統" \
       <div class="note info"><span class="ic">💡</span><span>Superpowers 這個 plugin 本身很適合<b>互動式</b> Claude（brainstorming 等技能靠使用者來回才有價值），只是不適合 Loop 這種無頭排程執行——兩者的使用情境不同，不是互斥。</span></div>
     </section>
 
+    <section id="envdeploy">
+      <h2><span class="num">18</span>環境與部署（Environments + Deploy）</h2>
+      <p><code>environment</code> 欄位原本只是套用 <code>env:&lt;name&gt;</code> 知識的標籤；現在額外對到一張真正的 <code>environments</code> 表，把「環境」升級成一個可執行的部署目標——服務「在家開發、帶去公司部署」：<b>home</b> 設 <code>auto_deploy</code>，本機直接跑 <code>deploy_cmd</code>；<b>company</b> 不設 <code>deploy_cmd</code>（<code>auto_deploy=0</code>），改產出一份部署包＋人工檢查清單，帶去公司照做。</p>
+      <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>欄位</th><th>說明</th></tr></thead>
+        <tbody>
+          <tr><td><code>name</code></td><td>環境名稱（主鍵），例 <code>home</code>／<code>company</code>。</td></tr>
+          <tr><td><code>kind</code></td><td><code>dev</code>／<code>staging</code>／<code>prod</code>（僅供顯示，不影響行為）。</td></tr>
+          <tr><td><code>host</code></td><td>資訊性描述，例 <code>linux-rtx2080</code>／<code>windows-11</code>。</td></tr>
+          <tr><td><code>capabilities</code></td><td>CSV，語意與 <code>host_capabilities</code> 設定相同（<code>gpu,camera,os:windows,...</code>）；任何 <code>environment=此名稱</code> 的一般任務，這些 token 會併入第 9 章的 V2 缺能力檢查——本機若不具備，command 驗證自動跳過、改判 manual。</td></tr>
+          <tr><td><code>deploy_cmd</code></td><td>在 <code>repo_path</code> 執行的部署 shell 指令。留空＝這個環境永遠走人工部署包。</td></tr>
+          <tr><td><code>auto_deploy</code></td><td><code>1</code> 且 <code>deploy_cmd</code> 有值，才會自動執行；否則一律走人工。</td></tr>
+        </tbody>
+      </table>
+      </div>
+      <p>首次啟動即播種兩筆（<code>INSERT OR IGNORE</code>，不覆蓋你自己的修改）：<code>home</code>（<code>kind=dev, host=linux-rtx2080, capabilities=gpu, auto_deploy=1</code>）、<code>company</code>（<code>kind=prod, host=windows-11, capabilities=os:windows, auto_deploy=0</code>）。<code>deploy_cmd</code> 兩者皆留白——請用 <code>loop env add home --deploy-cmd "..."</code> 補上你自己主機的實際部署指令。</p>
+      <h3>部署任務怎麼跑（<code>tool=deploy</code>）</h3>
+      <ul>
+        <li>不派工給 agent、不建 worktree、不跑驗證——直接解析 <code>environment</code>／<code>repo_path</code>／<code>base_branch</code>，記下要部署的 commit（<code>base_branch</code> 的 <code>git rev-parse</code>）。</li>
+        <li><b>auto_deploy 環境</b>（如 home）：在 <code>repo_path</code> 執行 <code>deploy_cmd</code>；exit 0 → <code>deployments</code> 記一筆 <code>deployed</code>（含 commit），任務轉 review；非 0 → 記 <code>failed</code>，任務轉待確認。</li>
+        <li><b>manual 環境</b>（如 company，<code>auto_deploy=0</code>）：不執行任何指令，改在 <code>outputs/deploy-&lt;id&gt;/DEPLOY.md</code> 寫一份部署包（commit、repo/base、依知識庫 <code>env:&lt;name&gt;</code> 整理的環境限制、人工部署步驟），<code>deployments</code> 記 <code>manual-pending</code>，任務轉 review「待人工部署」——帶去公司照著做，做完回來按結案。</li>
+      </ul>
+      <h3>回滾</h3>
+      <p><code>loop deploy rollback &lt;env&gt;</code> 或 <code>POST /api/deployments/:id/rollback</code>：找出該環境上一筆 <code>deployed</code> 的 commit，新增一筆 <code>rolledback</code> 記錄指向它；<code>auto_deploy</code> 環境會帶 <code>LOOP_DEPLOY_SHA</code> 環境變數重跑 <code>deploy_cmd</code>（by design 不直接動你的 checkout——要 checkout 到該 commit 由 <code>deploy_cmd</code> 腳本自己用這個變數處理，符合「絕不動使用者 checkout」的鐵律）；manual 環境則產出 <code>outputs/rollback-&lt;env&gt;-&lt;id&gt;/ROLLBACK.md</code> 人工檢查清單。</p>
+      <div class="note info"><span class="ic">☁</span><span>看板卡片上會看到「☁ deploy: company (manual-pending)」這類徽章；點開卡片可看部署環境／狀態／詳情（含 DEPLOY.md 路徑）。新增任務對話框的 Environment 欄位下拉，同時合併知識庫 <code>env:&lt;name&gt;</code> 與這張 <code>environments</code> 表的名稱。</span></div>
+    </section>
+
     <section id="appendix">
-      <h2><span class="num">18</span>附錄</h2>
+      <h2><span class="num">19</span>附錄</h2>
       <h3>REST / SSE 端點</h3>
       <p>除 <code>/</code> 靜態頁外，<code>/api/*</code> 需帶 bearer（<code>Authorization: Bearer &lt;token&gt;</code>）或 <code>?token=</code>。</p>
       <div class="tbl-wrap">
@@ -746,6 +783,11 @@ npm run loop -- add --title "Epic: 上線通知系統" \
           <tr><td>POST</td><td><code>/api/resume-scheduler</code></td><td>恢復排程</td></tr>
           <tr><td>GET</td><td><code>/api/settings</code></td><td>取得可調的日夜門檻等設定</td></tr>
           <tr><td>POST</td><td><code>/api/settings</code></td><td>更新設定（含驗證，看板 ⚙ 面板使用）</td></tr>
+          <tr><td>GET</td><td><code>/api/environments</code></td><td>列出部署環境（見第 18 章）</td></tr>
+          <tr><td>POST</td><td><code>/api/environments</code></td><td>新增／更新環境（依 <code>name</code> upsert）</td></tr>
+          <tr><td>DELETE</td><td><code>/api/environments/:name</code></td><td>刪除環境</td></tr>
+          <tr><td>GET</td><td><code>/api/deployments?env=</code></td><td>部署歷史（可依環境過濾）</td></tr>
+          <tr><td>POST</td><td><code>/api/deployments/:id/rollback</code></td><td>回滾到該環境上一次成功部署的 commit</td></tr>
         </tbody>
       </table>
       </div>
