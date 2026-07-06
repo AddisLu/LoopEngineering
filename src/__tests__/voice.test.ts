@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import type Database from 'better-sqlite3';
 import { openTestDb, setSetting } from '../db/index.js';
@@ -8,6 +8,7 @@ import { transcribe, type TranscribeExec } from '../voice/transcribe.js';
 import { structureTranscript, parseStructured, type StructureExec } from '../voice/structure.js';
 import { seedGlossaryTerms, mergedGlossaryTerms } from '../voice/glossary.js';
 import { listNodes, upsertNode } from '../knowledge/store.js';
+import { WarmWorker, type ChildLike, type SpawnFn } from '../voice/daemon.js';
 
 let db: Database.Database;
 let app: FastifyInstance;
@@ -333,5 +334,164 @@ describe('mergedGlossaryTerms', () => {
     upsertNode(db, { title: 'CPO', kind: 'tech', tags: ['glossary'], scope: 'global', status: 'approved' });
     const readFile = () => { throw new Error('ENOENT'); };
     expect(mergedGlossaryTerms(db, '/nope.txt', readFile)).toEqual(['CPO']);
+  });
+});
+
+// ---- 6. WarmWorker: singleton daemon lifecycle, all via a fake child (no real python) ----
+
+interface FakeChild {
+  child: ChildLike;
+  writes: string[];
+  emitData: (s: string) => void;
+  emitExit: () => void;
+  emitError: (e: Error) => void;
+}
+
+function makeFakeChild(): FakeChild {
+  const listeners: Record<string, Array<(...args: unknown[]) => void>> = {};
+  const stdoutListeners: Record<string, Array<(chunk: Buffer | string) => void>> = {};
+  const writes: string[] = [];
+  let killed = false;
+  const child: ChildLike = {
+    stdin: { write: (chunk: string) => { writes.push(chunk); return true; } },
+    stdout: { on: (event, cb) => { (stdoutListeners[event] ??= []).push(cb); } },
+    stderr: { on: () => {} },
+    on: (event, cb) => { (listeners[event] ??= []).push(cb as (...args: unknown[]) => void); },
+    kill: () => { killed = true; },
+    get killed() { return killed; },
+  };
+  return {
+    child,
+    writes,
+    emitData: (s) => (stdoutListeners['data'] ?? []).forEach((cb) => cb(s)),
+    emitExit: () => (listeners['exit'] ?? []).forEach((cb) => cb()),
+    emitError: (e) => (listeners['error'] ?? []).forEach((cb) => cb(e)),
+  };
+}
+
+describe('WarmWorker', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('spawns once and reuses the same child across requests', async () => {
+    const fakes: FakeChild[] = [];
+    const spawnFn: SpawnFn = () => {
+      const f = makeFakeChild();
+      fakes.push(f);
+      return f.child;
+    };
+    const worker = new WarmWorker(spawnFn, '/fake/python', '/fake/daemon.py', () => 10, 5000);
+
+    const p1 = worker.transcribe('/a.webm', '/terms.txt');
+    fakes[0].emitData(JSON.stringify({ text: 'first' }) + '\n');
+    expect(await p1).toBe('first');
+
+    const p2 = worker.transcribe('/b.webm', '/terms.txt');
+    fakes[0].emitData(JSON.stringify({ text: 'second' }) + '\n');
+    expect(await p2).toBe('second');
+
+    expect(fakes).toHaveLength(1);
+    expect(fakes[0].writes).toHaveLength(2);
+  });
+
+  it('respawns a fresh child after the worker dies', async () => {
+    const fakes: FakeChild[] = [];
+    const spawnFn: SpawnFn = () => {
+      const f = makeFakeChild();
+      fakes.push(f);
+      return f.child;
+    };
+    const worker = new WarmWorker(spawnFn, '/fake/python', '/fake/daemon.py', () => 10, 5000);
+
+    const p1 = worker.transcribe('/a.webm', '/terms.txt');
+    fakes[0].emitExit();
+    await expect(p1).rejects.toThrow(/exited/);
+
+    const p2 = worker.transcribe('/b.webm', '/terms.txt');
+    expect(fakes).toHaveLength(2);
+    fakes[1].emitData(JSON.stringify({ text: 'after respawn' }) + '\n');
+    expect(await p2).toBe('after respawn');
+  });
+
+  it('shuts the worker down after the configured idle period, freeing VRAM', async () => {
+    vi.useFakeTimers();
+    const fakes: FakeChild[] = [];
+    const spawnFn: SpawnFn = () => {
+      const f = makeFakeChild();
+      fakes.push(f);
+      return f.child;
+    };
+    const worker = new WarmWorker(spawnFn, '/fake/python', '/fake/daemon.py', () => 10, 5000);
+
+    const p1 = worker.transcribe('/a.webm', '/terms.txt');
+    fakes[0].emitData(JSON.stringify({ text: 'ok' }) + '\n');
+    await p1;
+    expect(worker.isAlive()).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(10 * 60_000 + 1);
+    expect(worker.isAlive()).toBe(false);
+  });
+
+  it('rejects and kills the worker on a response timeout', async () => {
+    vi.useFakeTimers();
+    const fakes: FakeChild[] = [];
+    const spawnFn: SpawnFn = () => {
+      const f = makeFakeChild();
+      fakes.push(f);
+      return f.child;
+    };
+    const worker = new WarmWorker(spawnFn, '/fake/python', '/fake/daemon.py', () => 10, 5000);
+
+    const p1 = worker.transcribe('/a.webm', '/terms.txt');
+    const assertion = expect(p1).rejects.toThrow(/timed out/);
+    await vi.advanceTimersByTimeAsync(5001);
+    await assertion;
+    expect(worker.isAlive()).toBe(false);
+  });
+});
+
+// ---- 7. transcribe.ts: merged terms + warm-worker fallback (all hermetic) ----
+
+describe('transcribe: merged terms + warm worker', () => {
+  it('writes the merged (file ∪ knowledge-base) glossary to the terms file passed to exec', async () => {
+    upsertNode(db, { title: 'CPO', kind: 'tech', tags: ['glossary'], scope: 'global', status: 'approved' });
+    setSetting(db, 'voice_terms_path', '/fake/terms.txt');
+    setSetting(db, 'voice_warm_worker', 'false');
+    const written: Record<string, string> = {};
+    const exec: TranscribeExec = async () => 'ok';
+    await transcribe(db, '/tmp/rec.webm', exec, {
+      readFile: () => 'TGV\n',
+      writeFile: (p, content) => { written[p] = content; },
+    });
+    const content = Object.values(written)[0];
+    expect(content).toContain('TGV');
+    expect(content).toContain('CPO');
+  });
+
+  it('uses the warm worker when voice_warm_worker=true (default) and never calls the one-shot exec', async () => {
+    let oneShotCalls = 0;
+    const exec: TranscribeExec = async () => { oneShotCalls++; return 'should not be used'; };
+    const warmWorker = { transcribe: async () => 'from warm worker' };
+    const out = await transcribe(db, '/tmp/rec.webm', exec, { warmWorker, readFile: () => '', writeFile: () => {} });
+    expect(out).toBe('from warm worker');
+    expect(oneShotCalls).toBe(0);
+  });
+
+  it('falls back to the one-shot script when the warm worker throws', async () => {
+    const exec: TranscribeExec = async () => 'fallback transcript';
+    const warmWorker = { transcribe: async () => { throw new Error('daemon down'); } };
+    const out = await transcribe(db, '/tmp/rec.webm', exec, { warmWorker, readFile: () => '', writeFile: () => {} });
+    expect(out).toBe('fallback transcript');
+  });
+
+  it('skips the warm worker entirely when voice_warm_worker=false', async () => {
+    setSetting(db, 'voice_warm_worker', 'false');
+    let warmCalls = 0;
+    const warmWorker = { transcribe: async () => { warmCalls++; return 'warm'; } };
+    const exec: TranscribeExec = async () => 'one-shot';
+    const out = await transcribe(db, '/tmp/rec.webm', exec, { warmWorker, readFile: () => '', writeFile: () => {} });
+    expect(out).toBe('one-shot');
+    expect(warmCalls).toBe(0);
   });
 });
