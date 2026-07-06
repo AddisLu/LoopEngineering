@@ -461,6 +461,98 @@
     }
   });
 
+  // ---- voice intake: record -> /api/voice/intake -> prefill #new-form ------------------
+  const voiceBtn = $('voice-btn');
+  const voiceStatus = $('voice-status');
+  let voiceRecorder = null;
+  let voiceStream = null;
+  let voiceChunks = [];
+
+  function pickVoiceMime() {
+    const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/mp4;codecs=mp4a.40.2', 'audio/ogg'];
+    for (const c of candidates) {
+      if (window.MediaRecorder && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(c)) return c;
+    }
+    return '';
+  }
+  function extFromMime(mime) {
+    if (!mime) return 'webm';
+    if (mime.includes('mp4')) return 'mp4';
+    if (mime.includes('ogg')) return 'ogg';
+    return 'webm';
+  }
+
+  async function startVoiceRecording() {
+    voiceStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const mimeType = pickVoiceMime();
+    voiceChunks = [];
+    voiceRecorder = new MediaRecorder(voiceStream, mimeType ? { mimeType } : undefined);
+    voiceRecorder.ondataavailable = (e) => { if (e.data && e.data.size) voiceChunks.push(e.data); };
+    voiceRecorder.onstop = onVoiceStop;
+    voiceRecorder.start();
+    voiceBtn.classList.add('recording');
+    voiceBtn.textContent = '⏹';
+    voiceStatus.hidden = false;
+    voiceStatus.textContent = '錄音中…再按一次停止';
+  }
+
+  function stopVoiceRecording() {
+    if (voiceRecorder && voiceRecorder.state !== 'inactive') voiceRecorder.stop();
+    if (voiceStream) voiceStream.getTracks().forEach((t) => t.stop());
+    voiceBtn.classList.remove('recording');
+    voiceBtn.textContent = '🎤';
+  }
+
+  async function onVoiceStop() {
+    const mimeType = (voiceRecorder && voiceRecorder.mimeType) || 'audio/webm';
+    const blob = new Blob(voiceChunks, { type: mimeType });
+    if (!blob.size) { voiceStatus.textContent = '沒有錄到聲音，請再試一次'; return; }
+    voiceBtn.disabled = true;
+    voiceStatus.textContent = '上傳並轉錄中…';
+    try {
+      const fd = new FormData();
+      fd.append('audio', blob, `voice.${extFromMime(mimeType)}`);
+      const r = await fetch('/api/voice/intake', { method: 'POST', headers: authHeaders, body: fd });
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(body.error || r.statusText);
+      applyVoiceResult(body.transcript, body.fields);
+      voiceStatus.textContent = '✓ 已帶入表單，請確認後建立';
+    } catch (err) {
+      voiceStatus.textContent = '語音處理失敗：' + err.message;
+    } finally {
+      voiceBtn.disabled = false;
+    }
+  }
+
+  function applyVoiceResult(transcript, fields) {
+    const form = $('new-form');
+    const set = (name, value) => {
+      const input = form.elements.namedItem(name);
+      if (input && value != null && value !== '') input.value = value;
+    };
+    if (fields) {
+      set('title', fields.title);
+      set('goal', fields.goal);
+      if (Array.isArray(fields.verify_steps) && fields.verify_steps.length) {
+        set('verification_steps', fields.verify_steps.join(', '));
+      }
+      set('repo_path', fields.repo_path);
+      set('environment', fields.environment);
+      if (fields.coding_tool) set('coding_tool', fields.coding_tool);
+      if (fields.complexity) set('complexity', fields.complexity);
+      syncRepoRow();
+    } else {
+      set('title', (transcript || '').slice(0, 60) || '語音建立的任務');
+      set('goal', transcript);
+    }
+  }
+
+  voiceBtn.onclick = () => {
+    if (voiceRecorder && voiceRecorder.state === 'recording') { stopVoiceRecording(); return; }
+    voiceStatus.hidden = false;
+    startVoiceRecording().catch((err) => { voiceStatus.textContent = '無法使用麥克風：' + err.message; });
+  };
+
   // ---- settings panel (day/night thresholds etc.) ----------------------
   const settingsDialog = $('settings-dialog');
   const settingsForm = $('settings-form');

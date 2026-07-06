@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="zh-Hant" data-mode="light">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Loop Engineering — 語音加 task</title>
+<script>
+  (function () {
+    try {
+      var m = localStorage.getItem('loop_mode');
+      if (m !== 'light' && m !== 'dark')
+        m = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-mode', m);
+    } catch (e) {}
+  })();
+</script>
+<link rel="stylesheet" href="/styles.css" />
+<style>
+  main.voice { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 22px clamp(16px, 4vw, 40px); max-width: 640px; margin: 0 auto; width: 100%; }
+  .voice .lead { color: var(--text-2); font-size: 14px; margin: 0 0 22px; }
+  .mic-wrap { display: flex; flex-direction: column; align-items: center; gap: 14px; margin: 10px 0 26px; }
+  .mic-btn {
+    width: 92px; height: 92px; border-radius: 50%;
+    border: 1px solid var(--border-2); background: var(--surface); box-shadow: var(--shadow-1);
+    font-size: 38px; line-height: 1; cursor: pointer; color: var(--text);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .mic-btn:disabled { opacity: 0.55; cursor: default; }
+  .mic-btn.recording { color: var(--on-accent); background: var(--danger); border-color: transparent; animation: pulse 1.1s ease-in-out infinite; }
+  .mic-status { font-size: 13.5px; color: var(--text-3); min-height: 18px; text-align: center; }
+  .mic-status.err { color: var(--danger); }
+  .mic-status.ok { color: var(--ok); }
+  .voice-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); padding: 16px 18px; box-shadow: var(--shadow-1); margin-bottom: 16px; }
+  .voice-card h3 { margin: 0 0 10px; font-size: 15px; }
+  .voice-card label { display: block; margin: 10px 0; font-size: 13.5px; }
+  .voice-card input, .voice-card select, .voice-card textarea {
+    width: 100%; margin-top: 4px; padding: 7px 9px; border: 1px solid var(--border-2);
+    border-radius: var(--r-sm); background: var(--surface-2); color: var(--text); font: inherit; box-sizing: border-box;
+  }
+  .voice-card textarea { resize: vertical; }
+  .voice-actions { display: flex; justify-content: flex-end; gap: 10px; }
+  .transcript-box { white-space: pre-wrap; font-size: 13px; color: var(--text-2); }
+</style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><div class="brand-mark"></div>
+      <div class="brand-text"><span class="brand-name">語音加 task</span><span class="brand-sub">Loop Engineering</span></div>
+    </div>
+    <span class="spacer" style="margin-left:auto"></span>
+    <div class="controls">
+      <a class="btn" href="/">← 看板</a>
+      <a class="btn" href="/help.html">說明</a>
+      <button id="theme-btn" class="btn icon-btn" type="button" title="切換佈景">☾</button>
+    </div>
+  </header>
+  <main class="voice">
+    <p class="lead">錄一段語音描述要做的事（中英文夾雜、停頓都沒關係）：GPU 上的 faster-whisper 轉文字，再由 LLM 整理成任務欄位。結果只會「帶入」下面表單，確認無誤後按送出才會真的建立任務。</p>
+
+    <div class="mic-wrap">
+      <button id="mic-btn" class="mic-btn" type="button" title="按一下開始／再按一次停止">🎤</button>
+      <p class="mic-status" id="mic-status"></p>
+    </div>
+
+    <div class="voice-card" id="transcript-card" hidden>
+      <h3>逐字稿</h3>
+      <p class="transcript-box" id="transcript-text"></p>
+    </div>
+
+    <form class="voice-card" id="task-form" hidden>
+      <h3>任務欄位（確認後送出）</h3>
+      <label>Title <span style="color:var(--danger)">*</span><input name="title" required autocomplete="off" /></label>
+      <label>Goal <span style="color:var(--danger)">*</span><input name="goal" required autocomplete="off" /></label>
+      <label>Verify steps (逗號分隔) <input name="verification_steps" autocomplete="off" /></label>
+      <label>Repo path <input name="repo_path" autocomplete="off" /></label>
+      <label>Environment <input name="environment" autocomplete="off" /></label>
+      <label>Tool
+        <select name="coding_tool"><option>claude-code</option><option>mock</option><option>generic</option><option>plan</option><option>deploy</option></select>
+      </label>
+      <label>Complexity
+        <select name="complexity"><option>S</option><option selected>M</option><option>L</option></select>
+      </label>
+      <p class="mic-status" id="submit-status"></p>
+      <div class="voice-actions">
+        <button class="btn primary" id="submit-btn" type="submit">送出建立</button>
+      </div>
+    </form>
+  </main>
+  <script src="/voice.js"></script>
+</body>
+</html>

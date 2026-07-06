@@ -73,6 +73,7 @@
         <a class="btn" href="/brain.html">知識庫</a>
         <a class="btn" href="/metrics.html">儀表板</a>
         <a class="btn" href="/pipelines.html">Pipelines</a>
+        <a class="btn" href="/voice.html">語音</a>
         <a class="btn" href="/help.html" title="操作說明">說明</a>
         <button id="new-btn" class="btn primary" type="button">+ 新增 task</button>
       </div>
@@ -84,7 +85,8 @@
 
     <dialog id="new-dialog">
       <form method="dialog" id="new-form">
-        <h3>新增 task</h3>
+        <h3>新增 task <button id="voice-btn" class="btn icon-btn" type="button" title="語音輸入" aria-label="語音輸入">🎤</button></h3>
+        <p class="dialog-hint" id="voice-status" hidden></p>
         <label>Title <span class="req">*</span><input name="title" required autocomplete="off" /></label>
         <label>Goal <span class="req">*</span><input name="goal" required autocomplete="off" /></label>
         <label>Plan (.md/.html 或 URL) <input name="plan_ref" placeholder="./plan.md or https://…" autocomplete="off" /></label>
