@@ -459,6 +459,7 @@ npm run loop -- list --status review</code></pre>
         <thead><tr><th>鍵</th><th>預設</th><th>說明</th></tr></thead>
         <tbody>
           <tr><td><code>default_model</code></td><td><code>sonnet</code></td><td><b>全域預設模型</b>：任務未指定 model 時就用它。<code>sonnet</code>＝Sonnet 5，自主 coding 用它就夠、又省 token；避免繼承你互動用的 Fable 5。可選 <code>haiku</code>／<code>opus</code>／<code>fable-5</code>／<code>default</code>（CLI 預設）。單一任務可在新增表單覆寫。</td></tr>
+          <tr><td><code>agent_backend</code></td><td><code>claude-code</code></td><td><b>執行後端（adapter）</b>：真正派工時實際呼叫哪個 CLI（與 <code>coding_tool</code> 是兩回事——後者是任務類型／工作區模式，前者是底層跑哪個 agent）。目前只有 <code>claude-code</code> 已實作；<code>copilot-cli</code> 是預留給日後公司環境改用 GitHub Copilot CLI 的後端代號（尚需 PAT＋公司端煙霧測試，暫無 adapter）。設成未知值不會擋下設定，只會警告並在派工時退回 <code>claude-code</code>。</td></tr>
         </tbody>
       </table></div>
 
