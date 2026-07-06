@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import type { Task } from '../types.js';
 import { parseSteps, parseVerifyMode } from '../types.js';
 import { unmetCapabilities } from '../capabilities.js';
+import type { EnvironmentRow } from '../deploy/store.js';
 
 export interface GateResult {
   ok: boolean;
@@ -10,30 +11,37 @@ export interface GateResult {
   warnings: string[];
 }
 
-const ALLOWED_TOOLS = new Set(['claude-code', 'mock', 'generic', 'plan']);
+const ALLOWED_TOOLS = new Set(['claude-code', 'mock', 'generic', 'plan', 'deploy']);
 
 /**
  * Required-fields checklist (no LLM review). A task may only advance
  * draft -> ready -> queued when this returns ok=true.
  * `hostCaps` (the `host_capabilities` setting) is only used for a non-blocking warning —
  * an unmet capability never blocks queueing, it auto-defers to manual at verify time.
+ * `envs` (name -> environments row) is optional so existing callers/tests are unaffected;
+ * when given, it (a) enforces that a deploy task's `environment` actually exists, and
+ * (b) folds that environment's `capabilities` into the unmet-capability warning.
  */
-export function validateTask(task: Task, hostCaps = ''): GateResult {
+export function validateTask(task: Task, hostCaps = '', envs?: Map<string, EnvironmentRow>): GateResult {
   const missing: string[] = [];
   const warnings: string[] = [];
 
   if (!task.goal || !task.goal.trim()) missing.push('goal');
 
-  // plan_ref: file must exist with .md/.html, or be a well-formed URL
-  if (!task.plan_ref || !task.plan_ref.trim()) {
-    missing.push('plan_ref (plan .md/.html or URL)');
-  } else {
-    const ref = task.plan_ref.trim();
-    if (/^https?:\/\//i.test(ref)) {
-      if (!isWellFormedUrl(ref)) missing.push('plan_ref (malformed URL)');
+  // plan_ref: file must exist with .md/.html, or be a well-formed URL. A deploy task has
+  // no plan to review — it deploys already-merged code — so it's exempt, same idea as the
+  // repo-check exemptions below.
+  if (task.coding_tool !== 'deploy') {
+    if (!task.plan_ref || !task.plan_ref.trim()) {
+      missing.push('plan_ref (plan .md/.html or URL)');
     } else {
-      if (!fs.existsSync(ref)) missing.push('plan_ref (file not found)');
-      else if (!/\.(md|html?)$/i.test(ref)) missing.push('plan_ref (must be .md/.html)');
+      const ref = task.plan_ref.trim();
+      if (/^https?:\/\//i.test(ref)) {
+        if (!isWellFormedUrl(ref)) missing.push('plan_ref (malformed URL)');
+      } else {
+        if (!fs.existsSync(ref)) missing.push('plan_ref (file not found)');
+        else if (!/\.(md|html?)$/i.test(ref)) missing.push('plan_ref (must be .md/.html)');
+      }
     }
   }
 
@@ -47,12 +55,14 @@ export function validateTask(task: Task, hostCaps = ''): GateResult {
   // default mode 'command'. A generic (non-git) task is relaxed further: any verify_mode
   // that includes 'manual' or 'llm' needs no command step at all (commands, when present,
   // just run in the persistent output dir). A plan (epic) task needs NO verification at
-  // all — its "output" is the child task chain the planner materializes, not a diff.
+  // all — its "output" is the child task chain the planner materializes, not a diff. A
+  // deploy task needs none either — deploy_cmd (or the manual checklist) IS the action.
   const modes = parseVerifyMode(task);
   const manualOnly = modes.size === 1 && modes.has('manual');
   const genericRelax = task.coding_tool === 'generic' && (modes.has('manual') || modes.has('llm'));
   const planRelax = task.coding_tool === 'plan';
-  if (!manualOnly && !genericRelax && !planRelax) {
+  const deployRelax = task.coding_tool === 'deploy';
+  if (!manualOnly && !genericRelax && !planRelax && !deployRelax) {
     const steps = parseSteps(task);
     if (steps.length === 0) missing.push('verification_steps (>= 1 command)');
     else if (steps.some((s) => !s || !s.trim())) missing.push('verification_steps (empty step)');
@@ -64,7 +74,8 @@ export function validateTask(task: Task, hostCaps = ''): GateResult {
   // repo checks are skipped for the mock and generic tools (mock runs in a scratch dir,
   // generic runs in a persistent non-git output dir — neither touches a repo) and for
   // plan (an epic never touches a repo itself; repo/base, if given, are only inherited
-  // by the children the planner materializes).
+  // by the children the planner materializes). A deploy task DOES need repo/base — that's
+  // its source (what commit gets deployed).
   if (task.coding_tool !== 'mock' && task.coding_tool !== 'generic' && task.coding_tool !== 'plan') {
     if (!task.repo_path || !fs.existsSync(task.repo_path)) {
       missing.push('repo_path (existing directory)');
@@ -77,12 +88,23 @@ export function validateTask(task: Task, hostCaps = ''): GateResult {
     }
   }
 
+  // deploy: must target a real environments row (the deploy target, not just a knowledge label)
+  if (task.coding_tool === 'deploy') {
+    if (!task.environment || !task.environment.trim()) {
+      missing.push('environment (required for deploy tasks)');
+    } else if (envs && !envs.has(task.environment)) {
+      missing.push(`environment (unknown: '${task.environment}' — add it with 'loop env add')`);
+    }
+  }
+
   // non-blocking warning
   if (!task.setup_cmd || !task.setup_cmd.trim()) {
     warnings.push('setup_cmd empty — verification may fail if deps are not installed');
   }
 
-  const unmet = unmetCapabilities(task, hostCaps);
+  const envCaps = task.environment ? (envs?.get(task.environment)?.capabilities ?? '') : '';
+  const extraRequires = envCaps.split(',').map((s) => s.trim()).filter(Boolean);
+  const unmet = unmetCapabilities(task, hostCaps, extraRequires);
   if (unmet.length > 0) {
     warnings.push(`需要 ${unmet.join(', ')}，本主機不具備 → 將自動轉手動驗證`);
   }

@@ -10,6 +10,7 @@ import { estimatePct, forecastBacklog } from '../token/accounting.js';
 import { timeoutMinFor } from '../scheduler/timeout.js';
 import { paths } from '../config.js';
 import { listOutputFiles, type OutputFile } from '../orchestrator/outputFiles.js';
+import { environmentMap, latestDeploymentForTask } from '../deploy/store.js';
 import type { Task } from '../types.js';
 
 export interface BoardCard {
@@ -42,6 +43,9 @@ export interface BoardCard {
   output_file_count?: number; // coding_tool='generic' only
   parent_id?: string | null; // epic hierarchy: set on a child task materialized by the planner
   children?: EpicRollup; // present only on an epic (a task that IS some other task's parent_id)
+  deploy_env?: string; // coding_tool='deploy' only: the target environment name
+  deploy_status?: string; // coding_tool='deploy' only: latest deployments.status for this task
+  deploy_detail?: string | null; // coding_tool='deploy' only: latest deployments.detail (e.g. DEPLOY.md path)
 }
 
 export interface EpicRollup {
@@ -123,6 +127,9 @@ export interface TaskResult {
   elapsedMin: number | null;
   output_dir?: string | null; // coding_tool='generic' only
   output_files?: OutputFile[] | null; // coding_tool='generic' only (name+size, capped ~50)
+  deploy_env?: string | null; // coding_tool='deploy' only
+  deploy_status?: string | null; // coding_tool='deploy' only: latest deployments.status
+  deploy_detail?: string | null; // coding_tool='deploy' only: latest deployments.detail (e.g. DEPLOY.md path)
 }
 
 /** A generic task's persistent, non-git workspace — see runTask's isGeneric branch. */
@@ -158,6 +165,7 @@ export function boardState(db: Database.Database): BoardState {
   const usage = readUsage();
   const policy = resolvePolicy(db);
   const hostCaps = getSetting(db, 'host_capabilities') ?? '';
+  const envs = environmentMap(db);
   const runs = activeRuns(db);
   const runByTask = new Map(runs.map((r) => [r.task_id, r]));
   const failDetailStmt = db.prepare(
@@ -200,7 +208,7 @@ export function boardState(db: Database.Database): BoardState {
       model: t.model,
       coding_tool: t.coding_tool,
       verify_count: Array.isArray(verify) ? verify.length : 0,
-      gate: validateTask(t, hostCaps),
+      gate: validateTask(t, hostCaps, envs),
       pr_url: t.pr_url,
       merge_status: t.merge_status,
       verify_mode: t.verify_mode,
@@ -222,6 +230,14 @@ export function boardState(db: Database.Database): BoardState {
       const dir = outputDirFor(t.id);
       card.output_dir = dir;
       card.output_file_count = fs.existsSync(dir) ? listOutputFiles(dir, 1000).length : 0;
+    }
+    if (t.coding_tool === 'deploy') {
+      if (t.environment) card.deploy_env = t.environment;
+      const dep = latestDeploymentForTask(db, t.id);
+      if (dep) {
+        card.deploy_status = dep.status;
+        card.deploy_detail = dep.detail;
+      }
     }
     if (t.depends_on) {
       card.depends_on = t.depends_on;
@@ -347,6 +363,12 @@ export function taskResult(db: Database.Database, id: string): TaskResult | null
     output_files = fs.existsSync(dir) ? listOutputFiles(dir, 50) : [];
   }
 
+  let deployExtra: Pick<TaskResult, 'deploy_env' | 'deploy_status' | 'deploy_detail'> = {};
+  if (t.coding_tool === 'deploy') {
+    const dep = latestDeploymentForTask(db, t.id);
+    deployExtra = { deploy_env: t.environment, deploy_status: dep?.status ?? null, deploy_detail: dep?.detail ?? null };
+  }
+
   return {
     id: t.id,
     status: t.status,
@@ -359,5 +381,6 @@ export function taskResult(db: Database.Database, id: string): TaskResult | null
     branch: run?.branch ?? null,
     elapsedMin,
     ...(t.coding_tool === 'generic' ? { output_dir, output_files } : {}),
+    ...deployExtra,
   };
 }

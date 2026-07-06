@@ -19,6 +19,8 @@ import { forecastBacklog } from '../token/accounting.js';
 import { computeMetrics } from './metrics.js';
 import type { Complexity } from '../config.js';
 import { registerKnowledgeRoutes } from './knowledgeRoutes.js';
+import { registerDeployRoutes } from './deployRoutes.js';
+import { environmentMap } from '../deploy/store.js';
 import { collectDistillMaterial, runDistiller, type DistillExec } from '../knowledge/distill.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -126,13 +128,13 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
       verify_timeout_min: b.verify_timeout_min ?? null,
       requires: b.requires ?? null,
     });
-    return { task: t, gate: validateTask(t, getSetting(db, 'host_capabilities') ?? '') };
+    return { task: t, gate: validateTask(t, getSetting(db, 'host_capabilities') ?? '', environmentMap(db)) };
   });
 
   app.get('/api/tasks/:id', async (req, reply) => {
     const t = getTask(db, (req.params as any).id);
     if (!t) return reply.code(404).send({ error: 'not found' });
-    return { task: t, gate: validateTask(t, getSetting(db, 'host_capabilities') ?? '') };
+    return { task: t, gate: validateTask(t, getSetting(db, 'host_capabilities') ?? '', environmentMap(db)) };
   });
 
   app.post('/api/tasks/:id/queue', async (req, reply) => {
@@ -147,7 +149,7 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
         status: t.status,
       });
     }
-    const gate = validateTask(t, getSetting(db, 'host_capabilities') ?? '');
+    const gate = validateTask(t, getSetting(db, 'host_capabilities') ?? '', environmentMap(db));
     if (!gate.ok) return reply.code(409).send({ error: 'gate not satisfied', gate });
     // Controlled auto-queue path (used by the MCP, which queues by default): cap how many
     // tasks may be auto-enqueued so a burst of MCP calls can't flood autonomous spend.
@@ -385,6 +387,7 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
   });
 
   registerKnowledgeRoutes(app, db);
+  registerDeployRoutes(app, db);
 
   app.register(fastifyStatic, { root: WEB_DIR, prefix: '/' });
 
