@@ -6,6 +6,8 @@ import { buildApp } from '../server/app.js';
 import { setCachedUsage } from '../token/usage.js';
 import { transcribe, type TranscribeExec } from '../voice/transcribe.js';
 import { structureTranscript, parseStructured, type StructureExec } from '../voice/structure.js';
+import { seedGlossaryTerms, mergedGlossaryTerms } from '../voice/glossary.js';
+import { listNodes, upsertNode } from '../knowledge/store.js';
 
 let db: Database.Database;
 let app: FastifyInstance;
@@ -273,5 +275,63 @@ describe('POST /api/voice/intake', () => {
     expect(res.statusCode).toBe(500);
     const board = await app.inject({ method: 'GET', url: '/api/board' });
     expect(board.json().counts.draft ?? 0).toBe(0);
+  });
+});
+
+// ---- 5. glossary: knowledge-base-backed term list ----
+
+describe('seedGlossaryTerms', () => {
+  it('imports each line/comma-separated term as an approved glossary knowledge node', () => {
+    const readFile = () => 'TGV, CPO\n光學檢測\n';
+    const result = seedGlossaryTerms(db, '/fake/terms.txt', readFile);
+    expect(result).toEqual({ created: 3, skipped: 0 });
+    const nodes = listNodes(db, { kind: 'tech' });
+    expect(nodes.map((n) => n.title).sort()).toEqual(['CPO', 'TGV', '光學檢測'].sort());
+    for (const n of nodes) {
+      expect(JSON.parse(n.tags)).toContain('glossary');
+      expect(n.scope).toBe('global');
+      expect(n.status).toBe('approved');
+      expect(n.source).toBe('seed');
+    }
+  });
+
+  it('is idempotent: seeding twice does not duplicate nodes', () => {
+    const readFile = () => 'TGV, CPO\n';
+    seedGlossaryTerms(db, '/fake/terms.txt', readFile);
+    const second = seedGlossaryTerms(db, '/fake/terms.txt', readFile);
+    expect(second).toEqual({ created: 0, skipped: 2 });
+    expect(listNodes(db, { kind: 'tech' })).toHaveLength(2);
+  });
+
+  it('gracefully returns zero when the terms file is missing/unreadable', () => {
+    const readFile = () => { throw new Error('ENOENT'); };
+    expect(seedGlossaryTerms(db, '/nope.txt', readFile)).toEqual({ created: 0, skipped: 0 });
+  });
+
+  it('returns zero for an empty terms path', () => {
+    expect(seedGlossaryTerms(db, '', () => 'unused')).toEqual({ created: 0, skipped: 0 });
+  });
+});
+
+describe('mergedGlossaryTerms', () => {
+  it('unions terms.txt content with approved glossary knowledge nodes, de-duped', () => {
+    upsertNode(db, { title: 'CPO', kind: 'tech', tags: ['glossary'], scope: 'global', status: 'approved' });
+    upsertNode(db, { title: '學到的新詞', kind: 'tech', tags: ['glossary'], scope: 'global', status: 'approved' });
+    const readFile = () => 'TGV, CPO\n';
+    const terms = mergedGlossaryTerms(db, '/fake/terms.txt', readFile);
+    expect(terms).toEqual(['TGV', 'CPO', '學到的新詞']);
+  });
+
+  it('ignores non-glossary or non-approved knowledge nodes', () => {
+    upsertNode(db, { title: 'not-glossary', kind: 'tech', tags: ['other'], scope: 'global', status: 'approved' });
+    upsertNode(db, { title: 'draft-glossary', kind: 'tech', tags: ['glossary'], scope: 'global', status: 'draft' });
+    const terms = mergedGlossaryTerms(db, '', () => '');
+    expect(terms).toEqual([]);
+  });
+
+  it('tolerates a missing terms file, falling back to knowledge-base terms only', () => {
+    upsertNode(db, { title: 'CPO', kind: 'tech', tags: ['glossary'], scope: 'global', status: 'approved' });
+    const readFile = () => { throw new Error('ENOENT'); };
+    expect(mergedGlossaryTerms(db, '/nope.txt', readFile)).toEqual(['CPO']);
   });
 });
