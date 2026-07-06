@@ -1,0 +1,10 @@
+{
+  "name": "ship",
+  "description": "implement -> verify -> deploy home -> deploy company (manual)",
+  "stages": [
+    { "name": "implement", "coding_tool": "claude-code", "verify_mode": "command", "complexity": "M" },
+    { "name": "verify", "coding_tool": "claude-code", "verify_mode": "llm", "rubric_hint": "meets acceptance criteria", "complexity": "S" },
+    { "name": "deploy-home", "coding_tool": "deploy", "environment": "home" },
+    { "name": "deploy-company", "coding_tool": "deploy", "environment": "company" }
+  ]
+}

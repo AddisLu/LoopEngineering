@@ -177,6 +177,16 @@ CREATE TABLE IF NOT EXISTS deployments (
 );
 CREATE INDEX IF NOT EXISTS idx_deployments_env ON deployments(environment);
 
+-- Pipeline templates: ordered stage specs that instantiate a depends_on task chain in one
+-- action (see src/pipeline/*.ts). def is the JSON stage array; built-ins (feature/fix/ship)
+-- are seeded from seed/pipelines/*.json at startup, same idiom as environments below.
+CREATE TABLE IF NOT EXISTS pipelines (
+  name        TEXT PRIMARY KEY,
+  description TEXT,
+  def         TEXT NOT NULL,   -- JSON: { name, description, stages: [...] }
+  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- MUST use the trigram tokenizer: default unicode61 cannot segment Chinese
 -- ("只能" would never match "公司只能用"). Requires SQLite >= 3.34 (better-sqlite3
 -- 11.x bundles >= 3.45), verified with a runtime probe in knowledge.store.test.ts.

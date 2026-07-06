@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { paths, ensureDirs, DEFAULT_SETTINGS } from '../config.js';
+import { seedPipelines } from '../pipeline/store.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -21,6 +22,7 @@ export function getDb(dbPath: string = paths.db): Database.Database {
   migrate(db);
   seedSettings(db);
   seedEnvironments(db);
+  seedPipelines(db);
 
   _db = db;
   return db;
@@ -36,6 +38,7 @@ export function openTestDb(): Database.Database {
   migrate(db);
   seedSettings(db);
   seedEnvironments(db);
+  seedPipelines(db);
   return db;
 }
 
@@ -89,6 +92,12 @@ function migrate(db: Database.Database): void {
   add('tasks', [['parent_id', 'TEXT']]);
   // execution-discipline A/B: which side of prompt_discipline a run was dispatched under.
   add('task_runs', [['discipline', 'INTEGER']]);
+  // delivery pipeline templates: which pipeline instance + stage this task materializes
+  // from (see src/pipeline/materialize.ts). Nullable; distinct from parent_id/depends_on.
+  add('tasks', [
+    ['pipeline_id', 'TEXT'],
+    ['stage_name', 'TEXT'],
+  ]);
 }
 
 function seedSettings(db: Database.Database): void {

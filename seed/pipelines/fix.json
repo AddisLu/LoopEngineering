@@ -1,0 +1,7 @@
+{
+  "name": "fix",
+  "description": "implement -> command-verify",
+  "stages": [
+    { "name": "implement", "coding_tool": "claude-code", "verify_mode": "command", "complexity": "S" }
+  ]
+}

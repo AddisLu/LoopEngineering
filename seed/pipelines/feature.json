@@ -1,0 +1,9 @@
+{
+  "name": "feature",
+  "description": "implement -> verify -> deploy",
+  "stages": [
+    { "name": "implement", "coding_tool": "claude-code", "verify_mode": "command", "complexity": "M" },
+    { "name": "review-gate", "coding_tool": "claude-code", "verify_mode": "llm", "rubric_hint": "meets the feature spec", "complexity": "S" },
+    { "name": "deploy-home", "coding_tool": "deploy", "environment": "home" }
+  ]
+}
