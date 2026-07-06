@@ -132,6 +132,7 @@ export async function runTask(
     return;
   }
 
+  const disciplineOn = getBool(db, 'prompt_discipline', false);
   const logPath = path.join(paths.logsDir, `${task.id}-${Date.now()}.jsonl`);
   const run = createRun(db, {
     task_id: task.id,
@@ -143,9 +144,13 @@ export async function runTask(
     session_pct_before: before,
     weekly_pct_before: weeklyBefore,
     dispatch_window: dispatchWindow,
+    discipline: disciplineOn ? 1 : 0,
   });
 
-  const taskFilePath = writeTaskFile(worktreePath, task, { knowledge: knowledgeContext(db, task) });
+  const taskFilePath = writeTaskFile(worktreePath, task, {
+    knowledge: knowledgeContext(db, task),
+    discipline: disciplineOn,
+  });
   if (!isMock && !isGeneric) {
     // Keep engine-written artifacts out of the task branch/PR: exclude them locally
     // before any commitAll (checkpoint or auto-commit) can `git add -A` them. Generic's

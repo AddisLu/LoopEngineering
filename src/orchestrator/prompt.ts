@@ -16,13 +16,34 @@ function planContent(task: Task): string {
 }
 
 /**
+ * Compact `## 執行紀律` block distilled from test-driven-development/systematic-debugging/
+ * verification-before-completion (prompt-only — no plugin, no subagents, no clarifying
+ * questions: those parts of Superpowers are net-negative for Loop's headless runs). Kept
+ * short (<~600 chars) since it's added to every dispatch when the setting is on.
+ */
+const DISCIPLINE_BLOCK = `
+## 執行紀律
+- TDD：先寫會失敗的測試 → 最小實作到綠 → 重構；每步小 commit。
+- 系統化除錯：復現 → 二分定位根因 → 修根因不修表象 → 加回歸測試。
+- 完成前驗證：交付前自行跑完所有 verification steps 並修到全綠；列出你實際驗證了什麼。
+- 這是無人值守執行，遇不確定一律自主決策後繼續，絕不停下反問。
+`;
+
+/**
  * Write LOOP_TASK.md into the worktree. The dispatch prompt only tells the agent to
  * read this file, so all task context lives here (goal, plan, verification, rules).
  * `extras.knowledge` (when non-null) is inserted as a `## Knowledge / Environment`
  * section between Goal and Plan; omitted entirely when null/absent, so an empty
  * knowledge base produces byte-identical output to before this option existed.
+ * `extras.discipline` (when true) appends the `## 執行紀律` block after Rules; omitted
+ * entirely when false/absent (the `prompt_discipline` setting's default), so default-off
+ * output is byte-identical to before this option existed.
  */
-export function writeTaskFile(cwd: string, task: Task, extras?: { knowledge?: string | null }): string {
+export function writeTaskFile(
+  cwd: string,
+  task: Task,
+  extras?: { knowledge?: string | null; discipline?: boolean },
+): string {
   const steps = parseSteps(task);
   const modes = parseVerifyMode(task);
   const file = path.join(cwd, 'LOOP_TASK.md');
@@ -35,6 +56,7 @@ export function writeTaskFile(cwd: string, task: Task, extras?: { knowledge?: st
   const manualRule = modes.has('manual')
     ? '\n- 你可能無法在此環境完整驗證（缺硬體/非目標 OS）。盡量自動驗證能驗的部分，並在 repo 根目錄寫一份 `VERIFY.md`：列出你做了什麼、還有哪些必須在目標環境（硬體/公司 Windows）手動驗證的具體步驟與預期結果。'
     : '';
+  const disciplineBlock = extras?.discipline ? DISCIPLINE_BLOCK : '';
   const body = `# Loop task: ${task.title}
 
 ## Goal
@@ -53,7 +75,7 @@ ${acceptanceBlock}
 - If a \`LOOP_RESUME_CONTEXT.md\` is present, a previous attempt was interrupted or its verification failed — read it FIRST and continue from there instead of starting over.
 - Before finishing, run the verification steps yourself and fix until they pass.
 - If you cannot complete the task, clearly explain the blocker and stop — do not force a workaround.${manualRule}
-`;
+${disciplineBlock}`;
   fs.writeFileSync(file, body);
   return file;
 }
