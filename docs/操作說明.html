@@ -168,7 +168,8 @@
     <a href="#envdeploy">18 · 環境與部署（Environments + Deploy）</a>
     <a href="#pipelines">19 · 交付 pipeline 模板</a>
     <a href="#integrations">20 · ADO/GitHub 整合橋接</a>
-    <a href="#appendix">21 · 附錄（API / 檔案位置）</a>
+    <a href="#voice">21 · 語音加 task（手機）</a>
+    <a href="#appendix">22 · 附錄（API / 檔案位置）</a>
   </nav>
 
   <main>
@@ -492,6 +493,16 @@ npm run loop -- list --status review</code></pre>
         </tbody>
       </table></div>
 
+      <h3>語音加 task（見第 21 章）</h3>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>鍵</th><th>預設</th><th>說明</th></tr></thead>
+        <tbody>
+          <tr><td><code>voice_intake_enabled</code></td><td>false</td><td>開啟 <code>POST /api/voice/intake</code> 與看板/手機的語音入口；關閉時該端點回 404，零行為影響。</td></tr>
+          <tr><td><code>voice_model</code></td><td>large-v3</td><td>faster-whisper 模型名稱。</td></tr>
+          <tr><td><code>voice_terms_path</code></td><td>/home/addis/Coding/VoiceToTemplate/terms.txt</td><td>餵給 whisper 當 <code>initial_prompt</code> 的專有名詞表路徑（逗號/換行分隔）。</td></tr>
+        </tbody>
+      </table></div>
+
       <h3>自主接力、自我更新與其他旗標</h3>
       <div class="tbl-wrap"><table>
         <thead><tr><th>鍵</th><th>預設</th><th>說明</th></tr></thead>
@@ -519,6 +530,7 @@ npm run loop -- list --status review</code></pre>
           <tr><td><code>LOOP_PUBLIC_URL</code></td><td>ntfy 暫停動作用的公開網址。</td></tr>
           <tr><td><code>GITHUB_TOKEN</code> / <code>GITHUB_API_URL</code></td><td>GitHub PAT；<code>GITHUB_API_URL</code> 選填，指向 GHES 時覆寫預設的 <code>api.github.com</code>（見第 20 章）。</td></tr>
           <tr><td><code>ADO_PAT</code> / <code>ADO_ORG</code> / <code>ADO_PROJECT</code></td><td>Azure DevOps PAT ＋ 組織／專案；三者需同時存在才會啟用 <code>ado</code> provider（見第 20 章）。</td></tr>
+          <tr><td><code>LOOP_VOICE_PYTHON</code></td><td>faster-whisper venv 的 python 執行檔路徑；預設 <code>~/.local/share/loop-engineering/voice-venv/bin/python</code>（見第 21 章）。</td></tr>
         </tbody>
       </table>
       </div>
@@ -817,8 +829,21 @@ npm run loop -- pipeline run ship \
       <div class="note info"><span class="ic">🔗</span><span>這條橋接完成了 ADO-surpass 藍圖 D1–D5：Loop 從獨立排程器，走到能直接吃公司既有 ADO/GitHub 的待辦，自主做完再把結果留言回去——不用手動搬 issue，也不用打開兩套系統核對進度。</span></div>
     </section>
 
+    <section id="voice">
+      <h2><span class="num">21</span>語音加 task（手機）</h2>
+      <p>手機上打字不方便，於是加了語音入口：錄一段話（中英文夾雜、有停頓都沒關係）→ 這台主機（RTX 2080）上的 faster-whisper 轉成逐字稿 → 一支 LLM（跟第 6 章新增表單同一顆 <code>default_model</code>）把口語逐字稿清理成任務欄位 → <b>只會帶入</b>新增任務表單，你確認無誤才按送出——語音不會直接建立任務。<b>預設整個功能關閉（<code>voice_intake_enabled=false</code>），零行為影響。</b></p>
+      <ul>
+        <li><b>怎麼用</b>：手機瀏覽器開 <code>http://&lt;主機&gt;:4711/voice.html?token=…</code>（跟看板同一個 bearer token），按 🎤 錄音、再按一次停止；或直接在看板「+ 新增 task」對話框裡按標題旁的 🎤，錄完會直接把欄位填進同一張表單。iOS Safari／Android Chrome 都支援（<code>MediaRecorder</code> 會挑瀏覽器實際支援的格式，如 <code>audio/mp4</code> 或 <code>audio/webm</code>）。</li>
+        <li><b>兩段式管線</b>：<code>scripts/transcribe.py</code>（<code>~/.local/share/loop-engineering/voice-venv</code> 裡的 faster-whisper，<code>device=cuda, compute_type=float16</code>，GPU/驅動異常時自動退到 <code>int8_float16</code> 再退到 CPU）先轉出逐字稿；<code>src/voice/structure.ts</code> 再呼叫 <code>claude -p</code>（跟第 6 章 planner 同款嚴格 JSON 輸出）把逐字稿清成 <code>title/goal/verify_steps/repo_path/environment/coding_tool/complexity</code>。任何一段失敗都只回傳能回傳的部分（例如 LLM 沒開就退回把整段逐字稿塞進 goal），絕不擋住你手動編輯後送出。</li>
+        <li><b>啟用</b>：<code>loop config set voice_intake_enabled true</code>（或看板 ⚙ 面板尚未收錄此鍵時，直接用 <code>POST /api/settings</code>）。<code>voice_model</code>（預設 <code>large-v3</code>）與 <code>voice_terms_path</code>（預設 <code>/home/addis/Coding/VoiceToTemplate/terms.txt</code>，一份逗號/換行分隔的專有名詞表，餵給 whisper 當 <code>initial_prompt</code> 提升辨識率）也存在 <code>settings</code> 表，改法相同。</li>
+        <li><b>術語表</b>：<code>voice_terms_path</code> 指到的檔案本身不由 Loop 維護——直接編輯那個檔案（逗號或換行都可分隔）就能讓 whisper 更認得你常提到的專有名詞/人名/代號。</li>
+        <li><b>測試</b>：<code>src/__tests__/voice.test.ts</code>——<code>transcribe</code>／<code>structureTranscript</code> 的 exec 全部注入假實作，零音檔/GPU/token；<code>POST /api/voice/intake</code> 走 <code>app.inject</code> 手拼 multipart body 驗證啟用/停用/欄位缺失/例外情況，全程零網路。</li>
+      </ul>
+      <div class="note info"><span class="ic">🎤</span><span>語音辨識、口語清理都會出錯——所以設計上<b>永遠停在「帶入表單」這一步</b>，跟第 6 章的入場審核一樣，由你確認欄位再按送出，不存在語音直接建任務的路徑。</span></div>
+    </section>
+
     <section id="appendix">
-      <h2><span class="num">21</span>附錄</h2>
+      <h2><span class="num">22</span>附錄</h2>
       <h3>REST / SSE 端點</h3>
       <p>除 <code>/</code> 靜態頁外，<code>/api/*</code> 需帶 bearer（<code>Authorization: Bearer &lt;token&gt;</code>）或 <code>?token=</code>。</p>
       <div class="tbl-wrap">
@@ -858,6 +883,7 @@ npm run loop -- pipeline run ship \
           <tr><td>POST</td><td><code>/api/pipelines/import</code></td><td>批次匯入／更新模板（<code>{"items":[...]}</code>）</td></tr>
           <tr><td>POST</td><td><code>/api/pipelines/:name/run</code></td><td>實體化為一條 <code>depends_on</code> 任務鏈並回傳 task ids</td></tr>
           <tr><td>POST</td><td><code>/api/integrations/import</code></td><td>拉取 work items 建成任務（見第 20 章；<code>integration_provider=none</code> 回 409，零外部呼叫）</td></tr>
+          <tr><td>POST</td><td><code>/api/voice/intake</code></td><td>上傳一段語音（multipart），回傳逐字稿＋（盡力而為的）結構化任務欄位；<code>voice_intake_enabled=false</code>（預設）回 404（見第 21 章）</td></tr>
         </tbody>
       </table>
       </div>
@@ -872,6 +898,8 @@ npm run loop -- pipeline run ship \
           <tr><td><code>~/.config/loop-engineering/env</code></td><td>環境設定（token、port、TokenBar、ntfy）</td></tr>
           <tr><td><code>~/.config/systemd/user/loop-engineering.service</code></td><td>systemd 使用者服務單元</td></tr>
           <tr><td><code>~/.claude/.credentials.json</code></td><td>Claude Code 訂閱登入憑證（勿設 API key，否則按量計費）</td></tr>
+          <tr><td><code>~/.local/share/loop-engineering/voice-venv</code></td><td>faster-whisper venv（RTX 2080，<code>scripts/transcribe.py</code> 用；見第 21 章）</td></tr>
+          <tr><td><code>~/.local/share/loop-engineering/voice</code></td><td>上傳的語音暫存檔（轉錄完即刪除）</td></tr>
         </tbody>
       </table>
       </div>
