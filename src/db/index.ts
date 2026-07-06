@@ -76,6 +76,12 @@ function migrate(db: Database.Database): void {
   ]);
   // hardware/environment awareness: capability tokens a task requires (see capabilities.ts)
   add('tasks', [['requires', 'TEXT']]);
+  // team-prep: nullable, unused passthrough reserving the multi-user path (no reads/writes
+  // beyond createTask/getTask) — zero behavior change until a future task wires them up.
+  add('tasks', [
+    ['owner', 'TEXT'],
+    ['created_by', 'TEXT'],
+  ]);
 }
 
 function seedSettings(db: Database.Database): void {

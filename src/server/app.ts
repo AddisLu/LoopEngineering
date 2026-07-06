@@ -15,6 +15,7 @@ import { integrateIntoBase } from '../git/integrate.js';
 import { latestRun } from '../tasks.js';
 import fs from 'node:fs';
 import { boardState, taskResult } from './board.js';
+import { computeMetrics } from './metrics.js';
 import type { Complexity } from '../config.js';
 import { registerKnowledgeRoutes } from './knowledgeRoutes.js';
 import { collectDistillMaterial, runDistiller, type DistillExec } from '../knowledge/distill.js';
@@ -369,6 +370,13 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
     send();
     const iv = setInterval(send, 1000);
     req.raw.on('close', () => clearInterval(iv));
+  });
+
+  // Autonomous-velocity dashboard: what ADO's human-velocity view can't show.
+  app.get('/api/metrics', async (req) => {
+    const raw = Number((req.query as any)?.days);
+    const days = Number.isFinite(raw) ? Math.min(90, Math.max(1, Math.round(raw))) : 14;
+    return computeMetrics(db, { days });
   });
 
   registerKnowledgeRoutes(app, db);

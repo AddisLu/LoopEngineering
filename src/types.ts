@@ -28,6 +28,8 @@ export interface Task {
   merge_status: string | null;
   parent_task_id: string | null;
   environment: string | null;
+  owner: string | null; // team-prep: unused passthrough, reserves the multi-user path
+  created_by: string | null; // team-prep: unused passthrough, reserves the multi-user path
   created_at: string;
   updated_at: string;
 }
