@@ -38,6 +38,8 @@ import {
 import { runRollback } from './orchestrator/deployTask.js';
 import { listPipelineDefs, getPipelineDef, importPipelineDefs } from './pipeline/store.js';
 import { materializePipeline } from './pipeline/materialize.js';
+import { resolveProvider } from './integrations/config.js';
+import { importWorkItems } from './integrations/import.js';
 
 const program = new Command();
 program.name('loop').description('Loop Engineering — token-aware coding-task scheduler').version('0.1.0');
@@ -545,6 +547,30 @@ pipeline
     const result = importPipelineDefs(db, items);
     console.log(`import: created=${result.created} updated=${result.updated} rejected=${result.rejected.length}`);
     for (const r of result.rejected) console.log(`  [${r.index}] ${r.error}`);
+  });
+
+program
+  .command('pull')
+  .description('pull work items (GitHub issues / ADO work items) into Loop tasks — idempotent by source_ref')
+  .requiredOption('--provider <name>', 'github | ado (must match the configured integration_provider setting)')
+  .requiredOption('--query <query>', 'GitHub: search query, e.g. "assignee:@me label:loop repo:owner/name". ADO: a WIQL query string.')
+  .option('--repo <path>', 'target git repo for created tasks')
+  .option('--base <branch>', 'base branch for created tasks')
+  .option('--verify <steps>', 'comma-separated verification commands shared by every imported task')
+  .action(async (o) => {
+    const db = getDb();
+    const active = getSetting(db, 'integration_provider') ?? 'none';
+    if (active === 'none') return fail('integration_provider is "none" — set it (and provider credentials) first: loop config set integration_provider github');
+    if (o.provider !== active) return fail(`provider mismatch: configured=${active}, requested=${o.provider}`);
+    const provider = resolveProvider(db);
+    if (!provider) return fail(`provider '${active}' is missing credentials in ~/.config/loop-engineering/env`);
+    const result = await importWorkItems(db, provider, o.query, {
+      repo_path: o.repo ?? null,
+      base_branch: o.base ?? null,
+      verification_steps: o.verify ? String(o.verify).split(',').map((s: string) => s.trim()) : [],
+    });
+    console.log(`pulled: created=${result.created.length} skipped=${result.skipped.length}`);
+    for (const t of result.created) console.log(`  ${t.id}  ${pad(t.status, 8)} ${t.title}`);
   });
 
 program.parseAsync();

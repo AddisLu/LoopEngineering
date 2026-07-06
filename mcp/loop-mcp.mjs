@@ -613,5 +613,44 @@ server.registerTool('loop_run_pipeline', {
   }
 });
 
+// ---- ADO/GitHub integration bridge (D5) ----
+
+server.registerTool('loop_pull_workitems', {
+  title: 'Pull work items from GitHub/ADO into Loop tasks',
+  description:
+    "Import work items — GitHub issues via a search query, or ADO work items via a WIQL query — as Loop tasks, idempotent by " +
+    "source_ref (running the same query twice never creates duplicates). Requires the server's integration_provider setting " +
+    "to already be set to 'github' or 'ado' with credentials configured in ~/.config/loop-engineering/env — if unconfigured, " +
+    'this returns an error explaining what to set. Each created task auto-queues up to max_autoqueue; the rest stay draft.',
+  inputSchema: {
+    provider: z.enum(['github', 'ado']).describe("REQUIRED. Must match the server's configured integration_provider setting."),
+    query: z.string().describe('REQUIRED. GitHub: a search query, e.g. "assignee:@me label:loop repo:owner/name is:open". ADO: a WIQL query string.'),
+    repo_path: z.string().optional().describe('Target git repo for created tasks (absolute). If omitted, auto-detected from LOOP_DEFAULT_REPO / the MCP cwd.'),
+    base_branch: z.string().optional().describe('Base branch for created tasks. If omitted, auto-detected: origin default branch, else main/master.'),
+    verification_steps: z.union([z.array(z.string()), z.string()]).optional().describe('Commands shared by every imported task. If omitted, auto-detected from the repo like loop_add_task.'),
+  },
+}, async (a) => {
+  const repo = detectRepo(a.repo_path);
+  const base = detectBranch(repo, a.base_branch);
+  let steps = normSteps(a.verification_steps);
+  if (!steps.length) steps = detectVerify(repo);
+  try {
+    const result = await api('/api/integrations/import', {
+      method: 'POST',
+      body: { provider: a.provider, query: a.query, repo_path: repo, base_branch: base, verification_steps: steps },
+    });
+    const skipped = result.skipped || [];
+    const rows = (result.tasks || []).map((t) => `${t.id}  ${String(t.status).padEnd(9)} ${t.title}`);
+    return {
+      content: [{
+        type: 'text',
+        text: `Imported ${result.created?.length ?? 0} task(s)${skipped.length ? `, skipped ${skipped.length} already-imported` : ''}:\n${rows.join('\n')}`,
+      }],
+    };
+  } catch (e) {
+    return { content: [{ type: 'text', text: `Could not pull work items: ${e.message}` }] };
+  }
+});
+
 const transport = new StdioServerTransport();
 await server.connect(transport);
