@@ -30,6 +30,11 @@ CREATE TABLE IF NOT EXISTS tasks (
   verify_rubric  TEXT,                        -- acceptance criteria: what "done" means
   verify_timeout_min INTEGER,                 -- per-task verify per-step timeout override (min)
 
+  -- hardware/environment awareness (see src/capabilities.ts)
+  requires       TEXT,                        -- CSV of capability tokens this task needs
+                                              -- (e.g. gpu, camera, network, os:windows) — unmet
+                                              -- ones defer command verification to manual
+
   -- lifecycle
   status         TEXT NOT NULL DEFAULT 'draft',
     -- draft|ready|queued|running|verifying|blocked|attention|review|failed|closed

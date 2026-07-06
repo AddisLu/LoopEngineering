@@ -74,6 +74,8 @@ function migrate(db: Database.Database): void {
     ['verify_rubric', 'TEXT'],
     ['verify_timeout_min', 'INTEGER'],
   ]);
+  // hardware/environment awareness: capability tokens a task requires (see capabilities.ts)
+  add('tasks', [['requires', 'TEXT']]);
 }
 
 function seedSettings(db: Database.Database): void {

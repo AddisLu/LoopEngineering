@@ -171,6 +171,12 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // model used for the optional LLM verify judge.
   verify_step_timeout_min: '10',
   llm_judge_model: 'haiku',
+
+  // hardware/environment awareness (src/capabilities.ts): CSV of what THIS host provides
+  // (e.g. "gpu,network,linux"). A task's `requires` tokens not listed here are unmet —
+  // command verification is skipped and the run defers to manual (see runVerifyPipeline).
+  // Empty (default) means "assume nothing special" — any hardware requirement defers.
+  host_capabilities: '',
 };
 
 export const TOKEN_REFRESH_MS = 180_000; // TokenBar cadence

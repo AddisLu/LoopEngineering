@@ -19,6 +19,7 @@ export interface Task {
   verify_mode: string;
   verify_rubric: string | null;
   verify_timeout_min: number | null;
+  requires: string | null;
   status: TaskStatus;
   resume_count: number;
   pr_url: string | null;
