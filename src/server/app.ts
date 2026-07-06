@@ -15,6 +15,7 @@ import { integrateIntoBase } from '../git/integrate.js';
 import { latestRun } from '../tasks.js';
 import fs from 'node:fs';
 import { boardState, taskResult } from './board.js';
+import { forecastBacklog } from '../token/accounting.js';
 import { computeMetrics } from './metrics.js';
 import type { Complexity } from '../config.js';
 import { registerKnowledgeRoutes } from './knowledgeRoutes.js';
@@ -82,6 +83,10 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
   app.get('/api/token', async () => readUsage());
 
   app.get('/api/board', async () => boardState(db));
+
+  // Backlog usage forecast: "should I add more tasks?" — read-only over existing
+  // per-task estimates (see forecastBacklog).
+  app.get('/api/forecast', async () => forecastBacklog(db));
 
   app.get('/api/history', async (req) => {
     const limit = Math.min(2000, Number((req.query as any)?.limit ?? 500));

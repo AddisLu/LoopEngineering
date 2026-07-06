@@ -6,7 +6,7 @@ import { listTasks, countByStatus, activeRuns, getTask, latestRun, dependencySta
 import { readUsage } from '../token/usage.js';
 import { resolvePolicy } from '../scheduler/policy.js';
 import { validateTask } from '../gate/validateTask.js';
-import { estimatePct } from '../token/accounting.js';
+import { estimatePct, forecastBacklog } from '../token/accounting.js';
 import { timeoutMinFor } from '../scheduler/timeout.js';
 import { paths } from '../config.js';
 import { listOutputFiles, type OutputFile } from '../orchestrator/outputFiles.js';
@@ -68,6 +68,8 @@ export interface BoardState {
   reason: string | null;
   counts: Record<string, number>;
   cards: BoardCard[];
+  // compact backlog-usage forecast for the topbar chip — see forecastBacklog() for the full shape.
+  forecast: { weekly_backlog_pct: number; weekly_headroom: number; capacity_more_M: number; verdict: string };
 }
 
 /** Render one tool_use content block as a compact activity line (→ Edit src/foo.ts). */
@@ -263,6 +265,8 @@ export function boardState(db: Database.Database): BoardState {
     .prepare(`SELECT detail FROM task_events WHERE kind = 'scheduler' ORDER BY id DESC LIMIT 1`)
     .get() as { detail: string | null } | undefined;
 
+  const fc = forecastBacklog(db);
+
   return {
     ts: new Date().toISOString(),
     paused: getBool(db, 'scheduler_paused'),
@@ -278,6 +282,12 @@ export function boardState(db: Database.Database): BoardState {
     reason: schedRow?.detail ?? null,
     counts: countByStatus(db),
     cards,
+    forecast: {
+      weekly_backlog_pct: fc.weekly_backlog_pct,
+      weekly_headroom: fc.weekly_headroom,
+      capacity_more_M: fc.capacity_more_M,
+      verdict: fc.verdict,
+    },
   };
 }
 
