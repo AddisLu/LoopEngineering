@@ -22,6 +22,8 @@ import { writeTaskFile, writeResumeContext, collectResumeContext } from './promp
 import { knowledgeContext } from '../knowledge/context.js';
 import { writeSettingsLocal } from './settingsLocal.js';
 import { runVerification, type VerifyResult } from './verify.js';
+import { runLlmJudge, type JudgeExec } from './judge.js';
+import { parseSteps, parseVerifyMode } from '../types.js';
 import { runGapReview } from '../review/gapReviewer.js';
 import { createPr } from '../git/pr.js';
 import { syncWithBase, pushBranch, stripLoopArtifacts, integrateIntoBase } from '../git/integrate.js';
@@ -307,40 +309,49 @@ export async function runTask(
 
   // verify
   setStatus(db, task.id, 'verifying', { run_id: run.id });
-  const vres = await runVerification(task, worktreePath);
-  if (!vres.ok) {
-    handleVerifyFailure(db, task, run.id, worktreePath, vres);
-    return;
-  }
+  const verifyOutcome = await runVerifyPipeline(db, task, worktreePath, run.id, task.base_branch ?? '');
+  if (verifyOutcome === 'fail') return; // already routed to blocked/attention inside the pipeline
+  let manualVerify = verifyOutcome === 'manual';
+
+  // A manual verify outcome always parks the task in review with merge_status='pending'
+  // (reusing the existing pending/合併 button) — true for a mock/repo-less task too, so
+  // this is set before the repo-only close-out below (which a mock task never enters).
+  let reviewDetail = 'verification passed';
+  if (manualVerify) reviewDetail = markManualPending(db, task.id);
 
   // post-verify git close-out: push branch (backup) -> merge latest base into branch
   // -> (re-verify on merge) -> diffstat/gap-review/PR -> integrate into base. All
   // host-only and best-effort; with every git_* setting off this reduces to the old
-  // diffstat -> gap-review -> PR flow.
-  let reviewDetail = 'verification passed';
+  // diffstat -> gap-review -> PR flow. A 'manual' verify outcome defers auto-integrate
+  // entirely (still pushes + opens a backup PR) so a human can merge after verifying on
+  // hardware/at the company.
   if (!isMock && branch && task.base_branch && task.repo_path) {
     const base = task.base_branch;
     const autoPush = getBool(db, 'auto_push_branch', true);
-    const autoMerge = getBool(db, 'auto_merge', true);
+    const autoMerge = getBool(db, 'auto_merge', true) && !manualVerify;
 
     // 1. early backup push of the loop branch
     if (autoPush) pushBranch(worktreePath, branch);
 
     // 2. bring the latest base into the branch — ONLY when we intend to integrate.
-    //    With auto_merge off the branch is left exactly as the agent committed it,
-    //    so all-flags-off truly restores the old diffstat -> gap-review -> PR flow.
+    //    With auto_merge off (or a manual verify outcome) the branch is left exactly as
+    //    the agent committed it, so all-flags-off truly restores the old diffstat ->
+    //    gap-review -> PR flow.
     if (autoMerge) {
       const sync = syncWithBase(worktreePath, base, getBool(db, 'git_fetch_base', true));
       if (sync.status === 'merged') {
         logEvent(db, { task_id: task.id, run_id: run.id, kind: 'merge', detail: `merged ${sync.baseRef} into ${branch}` });
-        // the branch changed — re-verify with identical failure semantics
+        // the branch changed — re-verify (command+llm gates only; reaching this branch
+        // already proves the first pass was NOT 'manual', since autoMerge would be false)
         setStatus(db, task.id, 'verifying', { run_id: run.id });
-        const reVres = await runVerification(task, worktreePath);
-        if (!reVres.ok) {
-          handleVerifyFailure(db, task, run.id, worktreePath, reVres);
-          return;
+        const reOutcome = await runVerifyPipeline(db, task, worktreePath, run.id, base);
+        if (reOutcome === 'fail') return;
+        if (reOutcome === 'manual') {
+          manualVerify = true; // e.g. budget crossed the hard limit between the two passes
+          reviewDetail = markManualPending(db, task.id);
+        } else if (autoPush) {
+          pushBranch(worktreePath, branch);
         }
-        if (autoPush) pushBranch(worktreePath, branch);
       } else if (sync.status === 'refused') {
         // Not a content conflict (e.g. dirty tracked files from a verify step) — skip
         // sync and continue; integrate below still FFs or degrades to 'pending'.
@@ -385,9 +396,9 @@ export async function runTask(
     // 4. PR (its internal push is now a cheap re-push)
     const prUrl = tryCreatePr(db, task, run.id, worktreePath, branch);
 
-    // 5. integrate into base
+    // 5. integrate into base (skipped entirely for a manual verify outcome)
     let mergeStatus: string | null = null;
-    if (autoMerge) {
+    if (autoMerge && !manualVerify) {
       stripLoopArtifacts(worktreePath);
       if (autoPush) pushBranch(worktreePath, branch);
       const r = integrateIntoBase(task.repo_path, worktreePath, branch, base);
@@ -404,12 +415,67 @@ export async function runTask(
         logEvent(db, { task_id: task.id, run_id: run.id, kind: 'note', detail: 'self-update pending: engine repo changed on main' });
       }
     }
-
     // 6. reclaim the worktree once work is externalized (merged OR a PR link exists);
-    //    keep it for pending/conflict-without-PR so the local diff stays reachable.
-    if (mergeStatus === 'merged' || prUrl) cleanupWorktree(db, task);
+    //    keep it for pending/conflict-without-PR (and manual review, so VERIFY.md and the
+    //    branch stay reachable until a human merges it).
+    if (!manualVerify && (mergeStatus === 'merged' || prUrl)) cleanupWorktree(db, task);
   }
   setStatus(db, task.id, 'review', { run_id: run.id, detail: reviewDetail });
+}
+
+export type VerifyPipelineOutcome = 'pass' | 'fail' | 'manual';
+
+/**
+ * Layered verification: command steps (shell exit 0) -> optional LLM judge (rubric) ->
+ * manual human gate. A command or llm-judge FAIL routes through handleVerifyFailure
+ * (identical blocked/attention semantics as a plain command failure) and returns 'fail'.
+ * An inconclusive LLM judge (no `claude` CLI, mock tool, or over-budget) is NEVER treated
+ * as a pass — it downgrades to 'manual', same as an explicit verify_mode=manual. Default
+ * verify_mode='command' reduces to the old runVerification call: byte-identical behavior.
+ */
+export async function runVerifyPipeline(
+  db: Database.Database,
+  task: Task,
+  worktree: string,
+  runId: string,
+  base: string,
+  // Test-only injection point for the LLM judge exec (mirrors distill.ts's DistillExec
+  // plumbing) — production call sites omit it and get the real `claude` CLI call.
+  judgeExec?: JudgeExec,
+): Promise<VerifyPipelineOutcome> {
+  const modes = parseVerifyMode(task);
+  const timeoutMs = (task.verify_timeout_min ?? getNum(db, 'verify_step_timeout_min', 10)) * 60_000;
+  let needsManual = modes.has('manual');
+
+  if (modes.has('command') && parseSteps(task).length > 0) {
+    const vres = await runVerification(task, worktree, timeoutMs);
+    if (!vres.ok) {
+      handleVerifyFailure(db, task, runId, worktree, vres);
+      return 'fail';
+    }
+  }
+
+  if (modes.has('llm')) {
+    const judged = await runLlmJudge(db, task, worktree, base, judgeExec);
+    if (judged.pass === false) {
+      const synthetic: VerifyResult = {
+        ok: false,
+        results: [{ step: 'LLM judge', ok: false, exitCode: null, timedOut: false, output: judged.reason }],
+        failedStep: 'LLM judge',
+      };
+      handleVerifyFailure(db, task, runId, worktree, synthetic);
+      return 'fail';
+    }
+    if (judged.pass === null) needsManual = true;
+  }
+
+  return needsManual ? 'manual' : 'pass';
+}
+
+/** Park a task's merge as pending for a manual verify outcome; returns the review detail. */
+function markManualPending(db: Database.Database, taskId: string): string {
+  db.prepare('UPDATE tasks SET merge_status = ? WHERE id = ?').run('pending', taskId);
+  return '待人工驗證 — 見 VERIFY.md；驗過後按合併';
 }
 
 /**

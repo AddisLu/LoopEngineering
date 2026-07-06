@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Task } from '../types.js';
-import { parseSteps } from '../types.js';
+import { parseSteps, parseVerifyMode } from '../types.js';
 
 /** Resolve the plan content to inline into LOOP_TASK.md (best effort). */
 function planContent(task: Task): string {
@@ -24,9 +24,16 @@ function planContent(task: Task): string {
  */
 export function writeTaskFile(cwd: string, task: Task, extras?: { knowledge?: string | null }): string {
   const steps = parseSteps(task);
+  const modes = parseVerifyMode(task);
   const file = path.join(cwd, 'LOOP_TASK.md');
   const knowledgeBlock = extras?.knowledge
     ? `\n## Knowledge / Environment\n（以下為使用者的長期環境／偏好／限制知識，執行本任務時必須遵守；若與 Plan 衝突，以 Plan 為準）\n${extras.knowledge}\n`
+    : '';
+  const acceptanceBlock = task.verify_rubric?.trim()
+    ? `\n## 驗收標準 (Acceptance)\n${task.verify_rubric.trim()}\n`
+    : '';
+  const manualRule = modes.has('manual')
+    ? '\n- 你可能無法在此環境完整驗證（缺硬體/非目標 OS）。盡量自動驗證能驗的部分，並在 repo 根目錄寫一份 `VERIFY.md`：列出你做了什麼、還有哪些必須在目標環境（硬體/公司 Windows）手動驗證的具體步驟與預期結果。'
     : '';
   const body = `# Loop task: ${task.title}
 
@@ -38,14 +45,14 @@ ${planContent(task)}
 
 ## Verification steps (must all pass before you finish)
 ${steps.map((s) => `- \`${s}\``).join('\n') || '- (none)'}
-
+${acceptanceBlock}
 ## Rules
 - Only modify files needed for this task; do not touch anything outside its scope.
 - Commit your work in small, conventional commits.
 - Maintain a \`HANDOFF.md\` at the repo root with sections: Done / TODO / Key decisions / How to resume. Update AND commit it before any long or risky step, so a resumed run can pick up exactly where you left off if you are interrupted near the usage limit.
 - If a \`LOOP_RESUME_CONTEXT.md\` is present, a previous attempt was interrupted or its verification failed — read it FIRST and continue from there instead of starting over.
 - Before finishing, run the verification steps yourself and fix until they pass.
-- If you cannot complete the task, clearly explain the blocker and stop — do not force a workaround.
+- If you cannot complete the task, clearly explain the blocker and stop — do not force a workaround.${manualRule}
 `;
   fs.writeFileSync(file, body);
   return file;

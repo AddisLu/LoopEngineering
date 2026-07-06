@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import type { Task } from '../types.js';
-import { parseSteps } from '../types.js';
+import { parseSteps, parseVerifyMode } from '../types.js';
 
 export interface GateResult {
   ok: boolean;
@@ -38,9 +38,20 @@ export function validateTask(task: Task): GateResult {
     missing.push(`coding_tool (allowed: ${[...ALLOWED_TOOLS].join(', ')})`);
   }
 
-  const steps = parseSteps(task);
-  if (steps.length === 0) missing.push('verification_steps (>= 1 command)');
-  else if (steps.some((s) => !s || !s.trim())) missing.push('verification_steps (empty step)');
+  // verify_mode relaxation: a manual-only task has no automated check to require, so it
+  // needs zero verification steps. Any other mode (including 'command' alongside
+  // 'llm'/'manual') keeps the old >= 1 step requirement — zero behavior change for the
+  // default mode 'command'.
+  const modes = parseVerifyMode(task);
+  const manualOnly = modes.size === 1 && modes.has('manual');
+  if (!manualOnly) {
+    const steps = parseSteps(task);
+    if (steps.length === 0) missing.push('verification_steps (>= 1 command)');
+    else if (steps.some((s) => !s || !s.trim())) missing.push('verification_steps (empty step)');
+  }
+  if (modes.has('llm') && (!task.verify_rubric || !task.verify_rubric.trim())) {
+    missing.push('verify_rubric');
+  }
 
   // repo checks are skipped for the mock tool (mock runs in a scratch dir)
   if (task.coding_tool !== 'mock') {
