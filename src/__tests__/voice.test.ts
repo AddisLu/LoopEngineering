@@ -42,10 +42,13 @@ describe('parseStructured', () => {
       environment: 'home',
       coding_tool: 'claude-code',
       complexity: 'S',
+      task_type: 'unknown',
+      missing: [],
+      clarify: [],
     });
   });
 
-  it('defaults missing fields (coding_tool=claude-code, complexity=M, verify_steps=[])', () => {
+  it('defaults missing fields (coding_tool=claude-code, complexity=M, verify_steps=[], task_type=unknown)', () => {
     const out = parseStructured(JSON.stringify({ title: 't', goal: 'g' }));
     expect(out).toEqual({
       title: 't',
@@ -55,7 +58,38 @@ describe('parseStructured', () => {
       environment: '',
       coding_tool: 'claude-code',
       complexity: 'M',
+      task_type: 'unknown',
+      missing: [],
+      clarify: [],
     });
+  });
+
+  it('parses task_type/missing/clarify when present', () => {
+    const out = parseStructured(
+      JSON.stringify({
+        title: 't',
+        goal: 'g',
+        task_type: 'coding',
+        missing: ['repo_path', ''],
+        clarify: [
+          { field: 'repo_path', question: '這個 repo 在哪？' },
+          { field: 'complexity', question: '大概多大？', options: ['S', 'M', 'L'] },
+          { field: '', question: 'dropped: no field' },
+          'not an object',
+        ],
+      }),
+    );
+    expect(out?.task_type).toBe('coding');
+    expect(out?.missing).toEqual(['repo_path']);
+    expect(out?.clarify).toEqual([
+      { field: 'repo_path', question: '這個 repo 在哪？' },
+      { field: 'complexity', question: '大概多大？', options: ['S', 'M', 'L'] },
+    ]);
+  });
+
+  it('falls back to task_type=unknown for an invalid value', () => {
+    const out = parseStructured(JSON.stringify({ title: 't', goal: 'g', task_type: 'bogus' }));
+    expect(out?.task_type).toBe('unknown');
   });
 
   it('returns null for malformed JSON', () => {
@@ -182,6 +216,9 @@ describe('POST /api/voice/intake', () => {
       environment: '',
       coding_tool: 'claude-code',
       complexity: 'M',
+      task_type: 'unknown',
+      missing: [],
+      clarify: [],
     });
   });
 
