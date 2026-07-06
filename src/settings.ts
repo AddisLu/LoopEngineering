@@ -31,6 +31,12 @@ export const BOOL_KEYS = new Set([
 /** Accepted `integration_provider` values ('none' = the bridge is fully off). */
 export const INTEGRATION_PROVIDER_VALUES = new Set(['none', 'github', 'ado']);
 
+/** Documented `agent_backend` ids (see src/orchestrator/adapters/registry.ts).
+ * 'copilot-cli' is reserved — no adapter ships for it yet. Unlike
+ * INTEGRATION_PROVIDER_VALUES, an unknown value here is NOT hard-blocked (only
+ * warned): getBackend() falls back to 'claude-code' at dispatch time regardless. */
+export const AGENT_BACKEND_VALUES = new Set(['claude-code', 'copilot-cli']);
+
 /** Keys the board settings panel reads/writes (the budget/scheduling knobs). */
 export const TUNABLE_KEYS = [
   'day_window',
@@ -64,6 +70,10 @@ export function validateSetting(key: string, value: string): string | null {
     if (!MODEL_VALUES.has(value)) return `default_model must be one of: ${[...MODEL_VALUES].filter(Boolean).join(', ')} (or empty for CLI default)`;
   } else if (key === 'integration_provider') {
     if (!INTEGRATION_PROVIDER_VALUES.has(value)) return `integration_provider must be one of: ${[...INTEGRATION_PROVIDER_VALUES].join(', ')}`;
+  } else if (key === 'agent_backend') {
+    if (!AGENT_BACKEND_VALUES.has(value)) {
+      console.warn(`warning: agent_backend '${value}' is not a recognized backend id (known: ${[...AGENT_BACKEND_VALUES].join(', ')}) — dispatch falls back to claude-code`);
+    }
   }
   return null;
 }

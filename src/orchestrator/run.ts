@@ -32,18 +32,25 @@ import { createMergeTask } from './mergeTask.js';
 import { cleanupWorktree } from './cleanup.js';
 import { killRun } from './kill.js';
 import { mockAdapter } from './adapters/mock.js';
-import { claudeCodeAdapter } from './adapters/claudeCode.js';
+import { getBackend } from './adapters/registry.js';
 import type { Adapter, DispatchResult } from './adapters/types.js';
 import { runPlanner, type PlannerExec } from './planner.js';
 import { runDeployTask, type DeployExec } from './deployTask.js';
 import { getEnvironment } from '../deploy/store.js';
 
-function pickAdapter(tool: string): Adapter {
-  if (tool === 'mock') return mockAdapter;
-  // 'generic' is the real claude-code adapter dispatched into a persistent output dir
-  // instead of a git worktree — see the workspace setup in runTask.
-  if (tool === 'claude-code' || tool === 'generic') return claudeCodeAdapter;
-  throw new Error(`unknown coding_tool: ${tool}`);
+/**
+ * `coding_tool` (task type) and `agent_backend` (setting, see adapters/registry.ts) are
+ * separate axes. 'mock' is always the zero-token adapter regardless of agent_backend.
+ * 'claude-code' and 'generic' (a persistent-output-dir workspace mode — see runTask)
+ * both dispatch through whichever backend `agent_backend` currently selects, so
+ * switching that one setting swaps the real backend everywhere at once.
+ */
+export function pickAdapter(task: Task, db: Database.Database): Adapter {
+  if (task.coding_tool === 'mock') return mockAdapter;
+  if (task.coding_tool === 'claude-code' || task.coding_tool === 'generic') {
+    return getBackend(getSetting(db, 'agent_backend') || 'claude-code');
+  }
+  throw new Error(`unknown coding_tool: ${task.coding_tool}`);
 }
 
 /**
@@ -197,7 +204,7 @@ export async function runTask(
     detail: `tool=${task.coding_tool} est=${est}%${opts.resume ? ' resume' : ''}`,
   });
 
-  const adapter = opts.adapter ?? pickAdapter(task.coding_tool);
+  const adapter = opts.adapter ?? pickAdapter(task, db);
   const timeoutMs = process.env.LOOP_TEST_TIMEOUT_MS
     ? Number(process.env.LOOP_TEST_TIMEOUT_MS)
     : timeoutMinFor(db, task) * 60_000;

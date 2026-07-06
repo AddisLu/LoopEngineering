@@ -131,6 +131,12 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // `model` overrides this; 'default' / '' means "use the claude CLI default".
   default_model: 'sonnet',
 
+  // which CLI backend dispatches real (non-mock) claude-code/generic runs — see
+  // src/orchestrator/adapters/registry.ts. 'claude-code' is the only implemented
+  // backend today; 'copilot-cli' is reserved for a future company deployment on
+  // GitHub Copilot CLI (needs a PAT + its own adapter — not built yet).
+  agent_backend: 'claude-code',
+
   // usage-fetch cadence + ledger fallback
   usage_refresh_sec: '180',
   ledger_fallback_after_min: '10',
