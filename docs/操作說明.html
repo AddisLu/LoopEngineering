@@ -164,7 +164,8 @@
     <a href="#knowledge">14 · 知識庫：越跑越聰明</a>
     <a href="#metrics">15 · 儀表板：自主產出</a>
     <a href="#forecast">16 · Backlog 用量預估</a>
-    <a href="#appendix">17 · 附錄（API / 檔案位置）</a>
+    <a href="#discipline">17 · 執行紀律（實驗性，預設關）</a>
+    <a href="#appendix">18 · 附錄（API / 檔案位置）</a>
   </nav>
 
   <main>
@@ -393,7 +394,7 @@
           <tr><td><code>prune [--status &lt;list&gt;] [--older-than &lt;days&gt;] [--yes]</code></td><td>批次清理終態任務＋產物（預設 dry-run，加 <code>--yes</code> 才真刪）。</td></tr>
           <tr><td><code>config [list｜get｜set] [key] [value]</code></td><td>檢視 / 即時修改排程設定（門檻、模型、Git 收尾旗標）。例：<code>loop config set default_model sonnet</code>。改完下一個 tick 生效、免重啟；含防呆。</td></tr>
           <tr><td><code>set-usage --session &lt;%&gt; [--weekly &lt;%&gt;]</code></td><td><b>開發用</b>：強制寫入共享用量快取（斷路器演練）。</td></tr>
-          <tr><td><code>forecast</code></td><td>Backlog 用量預估——目前用量、待處理任務的 weekly 加總、剩餘 headroom、粗估還能加幾個 M/L 任務（見第 16 章）。</td></tr>
+          <tr><td><code>forecast</code></td><td>Backlog 用量預估（見第 16 章）；若有可比較資料，尾端再附一行執行紀律 A/B 摘要（見第 17 章）。</td></tr>
         </tbody>
       </table>
       </div>
@@ -436,6 +437,7 @@ npm run loop -- list --status review</code></pre>
           <tr><td><code>max_resumes</code></td><td>2</td><td>一個任務可自動續跑的次數上限；用盡後轉 <code>attention</code>。</td></tr>
           <tr><td><code>usage_refresh_sec</code></td><td>180</td><td>用量抓取週期。</td></tr>
           <tr><td><code>ntfy_server</code> / <code>ntfy_topic</code></td><td>（空）</td><td>ntfy 推播設定。</td></tr>
+          <tr><td><code>prompt_discipline</code></td><td>false</td><td>派工時附加「執行紀律」提示區塊（實驗性，見第 17 章）；預設關＝零影響。</td></tr>
         </tbody>
       </table>
       </div>
@@ -684,6 +686,7 @@ npm run loop -- add --title "Epic: 上線通知系統" \
         <li><b>用量趨勢折線圖</b>：session／weekly 用量百分比隨時間變化（取自 <code>token_snapshots</code>）。</li>
         <li><b>每日結案長條圖</b>：closed/day，天數視右上角「天數」下拉（7／14／30／90）而定。</li>
         <li><b>狀態漏斗</b>：建立 → 進入 Review → 結案／待確認／失敗，各自佔建立總數的比率。</li>
+        <li><b>執行紀律 A/B 表</b>：<code>prompt_discipline</code> 開／關兩組的任務數、平均 session %、待確認率、續跑次數、週期比較（實驗性功能，見第 17 章）。</li>
       </ul>
       <div class="note info"><span class="ic">📊</span><span>頁面每 30 秒自動刷新一次（非 SSE，用量夠低不需要即時）；換「天數」立即重抓。</span></div>
     </section>
@@ -700,8 +703,20 @@ npm run loop -- add --title "Epic: 上線通知系統" \
       <div class="note info"><span class="ic">📐</span><span>只讀既有估計，不新增任何調度判斷——關掉這個功能（不呼叫它）對排程/預算行為零影響。</span></div>
     </section>
 
+    <section id="discipline">
+      <h2><span class="num">17</span>執行紀律（實驗性，預設關）</h2>
+      <p>社群傳的「Superpowers 6.0 = 速度 2 倍／token −50%」是誤讀了 Superpowers 自己 6.0 對比 5.x 的 changelog（不是對比原生 Claude Code）；獨立測試顯示平均省 ~14%、簡單任務反而更貴，而且它的工作流程本來就偏吃 token。把整個 plugin 裝進 Loop 是<b>淨負面</b>：Loop 無頭派工的 <code>--allowed-tools</code> 沒有 <code>Skill</code>/<code>Task</code>，它的技能大多根本不會被觸發（描述注入的 token 白花）；<code>brainstorming</code> 技能會反問使用者，對無人值守是致命的；worktree／plan／code-review／subagent 相關技能還會跟 Loop 自己的 worktree.ts／planner／gapReviewer／verify 重複＋衝突。</p>
+      <p><b>所以：不安裝 plugin。</b>唯一真正可搬、不衝突、便宜的部分，是三個「純提示詞」紀律：test-driven-development、systematic-debugging、verification-before-completion。這裡把它們濃縮成一段選配的 <code>## 執行紀律</code> 提示（見 <code>src/orchestrator/prompt.ts</code>），完全不含 subagent、不含反問，由 <code>prompt_discipline</code> 開關控制（預設 <code>false</code> ＝ 對 <code>LOOP_TASK.md</code> 零影響）。</p>
+      <ul>
+        <li><b>怎麼開</b>：看板 ⚙ 面板「執行紀律（實驗性）」，或 <code>loop config set prompt_discipline true</code>。</li>
+        <li><b>怎麼量測</b>：開/關各跑幾個可比較的任務，回儀表板（<code>/metrics.html</code>）看新增的「執行紀律 A/B」表——依每個結案任務<b>最新一次 run</b> 的 <code>discipline</code> 分組，列任務數、平均實際 session %／任務（<code>session_pct_before/after</code> 差值加總）、待確認率、平均續跑次數、平均週期。同一份資料也能從 <code>GET /api/metrics</code> 或 <code>loop forecast</code> CLI 尾端看到。</li>
+        <li><b>誠實原則</b>：這是量測工具，不是背書——效果好壞看你自己的任務跑出來的數字，不是相信這段文案。</li>
+      </ul>
+      <div class="note info"><span class="ic">💡</span><span>Superpowers 這個 plugin 本身很適合<b>互動式</b> Claude（brainstorming 等技能靠使用者來回才有價值），只是不適合 Loop 這種無頭排程執行——兩者的使用情境不同，不是互斥。</span></div>
+    </section>
+
     <section id="appendix">
-      <h2><span class="num">17</span>附錄</h2>
+      <h2><span class="num">18</span>附錄</h2>
       <h3>REST / SSE 端點</h3>
       <p>除 <code>/</code> 靜態頁外，<code>/api/*</code> 需帶 bearer（<code>Authorization: Bearer &lt;token&gt;</code>）或 <code>?token=</code>。</p>
       <div class="tbl-wrap">
@@ -712,7 +727,7 @@ npm run loop -- add --title "Epic: 上線通知系統" \
           <tr><td>GET</td><td><code>/api/board</code></td><td>完整看板狀態（卡片、用量、政策、計數）</td></tr>
           <tr><td>GET</td><td><code>/api/token</code></td><td>詳細用量讀數</td></tr>
           <tr><td>GET</td><td><code>/api/history?limit=</code></td><td>用量歷史快照</td></tr>
-          <tr><td>GET</td><td><code>/api/metrics?days=</code></td><td>自主產出儀表板快照（1..90 天，預設 14）</td></tr>
+          <tr><td>GET</td><td><code>/api/metrics?days=</code></td><td>自主產出儀表板快照（1..90 天，預設 14），含執行紀律 A/B（見第 17 章）</td></tr>
           <tr><td>GET</td><td><code>/api/forecast</code></td><td>Backlog 用量預估（見第 16 章）</td></tr>
           <tr><td>GET</td><td><code>/api/stream</code></td><td>SSE：每秒推送完整看板</td></tr>
           <tr><td>POST</td><td><code>/api/tasks</code></td><td>建立任務（JSON body）</td></tr>
