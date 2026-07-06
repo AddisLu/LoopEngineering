@@ -26,6 +26,7 @@ export interface NewTaskInput {
   requires?: string | null;
   owner?: string | null;
   created_by?: string | null;
+  parent_id?: string | null;
 }
 
 export function createTask(db: Database.Database, input: NewTaskInput): Task {
@@ -33,10 +34,10 @@ export function createTask(db: Database.Database, input: NewTaskInput): Task {
   db.prepare(
     `INSERT INTO tasks (id, title, goal, plan_ref, plan_kind, coding_tool, verification_steps,
        setup_cmd, repo_path, base_branch, complexity, priority, model, timeout_min, depends_on, environment,
-       verify_mode, verify_rubric, verify_timeout_min, requires, owner, created_by, status)
+       verify_mode, verify_rubric, verify_timeout_min, requires, owner, created_by, parent_id, status)
      VALUES (@id, @title, @goal, @plan_ref, @plan_kind, @coding_tool, @verification_steps,
        @setup_cmd, @repo_path, @base_branch, @complexity, @priority, @model, @timeout_min, @depends_on, @environment,
-       @verify_mode, @verify_rubric, @verify_timeout_min, @requires, @owner, @created_by, 'draft')`,
+       @verify_mode, @verify_rubric, @verify_timeout_min, @requires, @owner, @created_by, @parent_id, 'draft')`,
   ).run({
     id,
     title: input.title,
@@ -60,6 +61,7 @@ export function createTask(db: Database.Database, input: NewTaskInput): Task {
     requires: input.requires ?? null,
     owner: input.owner ?? null,
     created_by: input.created_by ?? null,
+    parent_id: input.parent_id ?? null,
   });
   logEvent(db, { task_id: id, kind: 'status', to_status: 'draft', detail: 'created' });
   return getTask(db, id)!;
@@ -101,6 +103,13 @@ export function listTasks(db: Database.Database, status?: TaskStatus): Task[] {
       .all(status) as Task[];
   }
   return db.prepare('SELECT * FROM tasks ORDER BY created_at ASC').all() as Task[];
+}
+
+/** Children of an epic (coding_tool='plan'), ordered by creation (== chain order). */
+export function listChildren(db: Database.Database, parentId: string): Task[] {
+  return db
+    .prepare('SELECT * FROM tasks WHERE parent_id = ? ORDER BY created_at ASC')
+    .all(parentId) as Task[];
 }
 
 export function countByStatus(db: Database.Database): Record<string, number> {

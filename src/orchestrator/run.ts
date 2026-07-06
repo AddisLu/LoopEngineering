@@ -34,6 +34,7 @@ import { killRun } from './kill.js';
 import { mockAdapter } from './adapters/mock.js';
 import { claudeCodeAdapter } from './adapters/claudeCode.js';
 import type { Adapter, DispatchResult } from './adapters/types.js';
+import { runPlanner, type PlannerExec } from './planner.js';
 
 function pickAdapter(tool: string): Adapter {
   if (tool === 'mock') return mockAdapter;
@@ -79,8 +80,13 @@ export async function runTask(
   // hermetic test drive the full coding_tool='generic' orchestration path (persistent
   // output dir, no worktree, no git close-out) with the zero-token mock adapter instead
   // of spawning a real `claude` process.
-  opts: { resume?: boolean; adapter?: Adapter } = {},
+  opts: { resume?: boolean; adapter?: Adapter; plannerExec?: PlannerExec } = {},
 ): Promise<void> {
+  // An epic (coding_tool='plan') never touches a worktree/adapter — it's decomposed into
+  // a child task chain by runPlanner and closes immediately. Entirely separate lifecycle
+  // from the git/mock/generic paths below.
+  if (task.coding_tool === 'plan') return runPlanTask(db, task, opts.plannerExec);
+
   const isMock = task.coding_tool === 'mock';
   const isGeneric = task.coding_tool === 'generic';
   const hardLimit = getNum(db, 'hard_limit_pct', 95);
@@ -444,6 +450,23 @@ export async function runTask(
     if (!manualVerify && (mergeStatus === 'merged' || prUrl)) cleanupWorktree(db, task);
   }
   setStatus(db, task.id, 'review', { run_id: run.id, detail: reviewDetail });
+}
+
+/**
+ * Full lifecycle for an epic dispatch: no worktree, no adapter, no verify/git close-out —
+ * an epic's "output" is the child task chain the planner materializes. Success closes the
+ * epic directly (no review step: there is no diff to review); a planner failure (bad/no
+ * LLM output, budget guard) parks it in attention for a human to retry or hand-decompose.
+ */
+async function runPlanTask(db: Database.Database, task: Task, plannerExec?: PlannerExec): Promise<void> {
+  setStatus(db, task.id, 'running', {});
+  logEvent(db, { task_id: task.id, kind: 'dispatch', detail: 'tool=plan' });
+  const children = await runPlanner(db, task, plannerExec);
+  if (!children) {
+    setStatus(db, task.id, 'attention', { detail: 'planner failed to produce subtasks' });
+    return;
+  }
+  setStatus(db, task.id, 'closed', { detail: `已拆解為 ${children.length} 個子任務` });
 }
 
 export type VerifyPipelineOutcome = 'pass' | 'fail' | 'manual';

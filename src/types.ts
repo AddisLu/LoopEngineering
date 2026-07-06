@@ -27,6 +27,7 @@ export interface Task {
   est_session_pct: number | null;
   merge_status: string | null;
   parent_task_id: string | null;
+  parent_id: string | null; // epic hierarchy: this task's parent epic (coding_tool='plan'), distinct from depends_on (ordering) and parent_task_id (merge-conflict lineage)
   environment: string | null;
   owner: string | null; // team-prep: unused passthrough, reserves the multi-user path
   created_by: string | null; // team-prep: unused passthrough, reserves the multi-user path

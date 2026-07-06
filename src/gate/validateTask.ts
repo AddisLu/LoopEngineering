@@ -10,7 +10,7 @@ export interface GateResult {
   warnings: string[];
 }
 
-const ALLOWED_TOOLS = new Set(['claude-code', 'mock', 'generic']);
+const ALLOWED_TOOLS = new Set(['claude-code', 'mock', 'generic', 'plan']);
 
 /**
  * Required-fields checklist (no LLM review). A task may only advance
@@ -46,11 +46,13 @@ export function validateTask(task: Task, hostCaps = ''): GateResult {
   // 'llm'/'manual') keeps the old >= 1 step requirement — zero behavior change for the
   // default mode 'command'. A generic (non-git) task is relaxed further: any verify_mode
   // that includes 'manual' or 'llm' needs no command step at all (commands, when present,
-  // just run in the persistent output dir).
+  // just run in the persistent output dir). A plan (epic) task needs NO verification at
+  // all — its "output" is the child task chain the planner materializes, not a diff.
   const modes = parseVerifyMode(task);
   const manualOnly = modes.size === 1 && modes.has('manual');
   const genericRelax = task.coding_tool === 'generic' && (modes.has('manual') || modes.has('llm'));
-  if (!manualOnly && !genericRelax) {
+  const planRelax = task.coding_tool === 'plan';
+  if (!manualOnly && !genericRelax && !planRelax) {
     const steps = parseSteps(task);
     if (steps.length === 0) missing.push('verification_steps (>= 1 command)');
     else if (steps.some((s) => !s || !s.trim())) missing.push('verification_steps (empty step)');
@@ -60,8 +62,10 @@ export function validateTask(task: Task, hostCaps = ''): GateResult {
   }
 
   // repo checks are skipped for the mock and generic tools (mock runs in a scratch dir,
-  // generic runs in a persistent non-git output dir — neither touches a repo).
-  if (task.coding_tool !== 'mock' && task.coding_tool !== 'generic') {
+  // generic runs in a persistent non-git output dir — neither touches a repo) and for
+  // plan (an epic never touches a repo itself; repo/base, if given, are only inherited
+  // by the children the planner materializes).
+  if (task.coding_tool !== 'mock' && task.coding_tool !== 'generic' && task.coding_tool !== 'plan') {
     if (!task.repo_path || !fs.existsSync(task.repo_path)) {
       missing.push('repo_path (existing directory)');
     } else if (!isGitRepo(task.repo_path)) {

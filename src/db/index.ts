@@ -82,6 +82,9 @@ function migrate(db: Database.Database): void {
     ['owner', 'TEXT'],
     ['created_by', 'TEXT'],
   ]);
+  // epic decomposition: the epic task's id on each child materialized by the planner
+  // (src/orchestrator/planner.ts). Nullable; distinct from depends_on/parent_task_id.
+  add('tasks', [['parent_id', 'TEXT']]);
 }
 
 function seedSettings(db: Database.Database): void {
