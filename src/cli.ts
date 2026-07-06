@@ -47,6 +47,7 @@ program
   .option('--verify-mode <csv>', 'comma-separated: command|llm|manual (default command)')
   .option('--rubric <text>', 'acceptance criteria for the llm judge / manual review')
   .option('--verify-timeout <min>', 'per-task verify per-step timeout override (minutes)', (v) => parseInt(v, 10))
+  .option('--requires <csv>', 'comma-separated capability tokens this task needs (e.g. gpu,camera,os:windows) — unmet ones defer command verification to manual')
   .action((o) => {
     const db = getDb();
     const kind = o.plan
@@ -74,8 +75,9 @@ program
       verify_mode: o.verifyMode ?? null,
       verify_rubric: o.rubric ?? null,
       verify_timeout_min: o.verifyTimeout ?? null,
+      requires: o.requires ?? null,
     });
-    const gate = validateTask(getTask(db, t.id)!);
+    const gate = validateTask(getTask(db, t.id)!, getSetting(db, 'host_capabilities') ?? '');
     console.log(`created ${t.id} (${t.status})`);
     printGate(gate);
   });
@@ -87,7 +89,7 @@ program
     const db = getDb();
     const t = getTask(db, id);
     if (!t) return fail(`no such task: ${id}`);
-    printGate(validateTask(t));
+    printGate(validateTask(t, getSetting(db, 'host_capabilities') ?? ''));
   });
 
 program
@@ -97,7 +99,7 @@ program
     const db = getDb();
     const t = getTask(db, id);
     if (!t) return fail(`no such task: ${id}`);
-    const gate = validateTask(t);
+    const gate = validateTask(t, getSetting(db, 'host_capabilities') ?? '');
     if (!gate.ok) {
       console.log('cannot queue — gate not satisfied:');
       printGate(gate);

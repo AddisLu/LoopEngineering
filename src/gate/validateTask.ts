@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import type { Task } from '../types.js';
 import { parseSteps, parseVerifyMode } from '../types.js';
+import { unmetCapabilities } from '../capabilities.js';
 
 export interface GateResult {
   ok: boolean;
@@ -14,8 +15,10 @@ const ALLOWED_TOOLS = new Set(['claude-code', 'mock']);
 /**
  * Required-fields checklist (no LLM review). A task may only advance
  * draft -> ready -> queued when this returns ok=true.
+ * `hostCaps` (the `host_capabilities` setting) is only used for a non-blocking warning —
+ * an unmet capability never blocks queueing, it auto-defers to manual at verify time.
  */
-export function validateTask(task: Task): GateResult {
+export function validateTask(task: Task, hostCaps = ''): GateResult {
   const missing: string[] = [];
   const warnings: string[] = [];
 
@@ -69,6 +72,11 @@ export function validateTask(task: Task): GateResult {
   // non-blocking warning
   if (!task.setup_cmd || !task.setup_cmd.trim()) {
     warnings.push('setup_cmd empty — verification may fail if deps are not installed');
+  }
+
+  const unmet = unmetCapabilities(task, hostCaps);
+  if (unmet.length > 0) {
+    warnings.push(`需要 ${unmet.join(', ')}，本主機不具備 → 將自動轉手動驗證`);
   }
 
   return { ok: missing.length === 0, missing, warnings };

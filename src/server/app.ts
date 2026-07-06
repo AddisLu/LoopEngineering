@@ -47,6 +47,7 @@ interface CreateTaskBody {
   verify_mode?: string | null;
   verify_rubric?: string | null;
   verify_timeout_min?: number | null;
+  requires?: string | null;
 }
 
 export function buildApp(opts: AppOptions = {}): FastifyInstance {
@@ -117,14 +118,15 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
       verify_mode: b.verify_mode ?? null,
       verify_rubric: b.verify_rubric ?? null,
       verify_timeout_min: b.verify_timeout_min ?? null,
+      requires: b.requires ?? null,
     });
-    return { task: t, gate: validateTask(t) };
+    return { task: t, gate: validateTask(t, getSetting(db, 'host_capabilities') ?? '') };
   });
 
   app.get('/api/tasks/:id', async (req, reply) => {
     const t = getTask(db, (req.params as any).id);
     if (!t) return reply.code(404).send({ error: 'not found' });
-    return { task: t, gate: validateTask(t) };
+    return { task: t, gate: validateTask(t, getSetting(db, 'host_capabilities') ?? '') };
   });
 
   app.post('/api/tasks/:id/queue', async (req, reply) => {
@@ -139,7 +141,7 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
         status: t.status,
       });
     }
-    const gate = validateTask(t);
+    const gate = validateTask(t, getSetting(db, 'host_capabilities') ?? '');
     if (!gate.ok) return reply.code(409).send({ error: 'gate not satisfied', gate });
     // Controlled auto-queue path (used by the MCP, which queues by default): cap how many
     // tasks may be auto-enqueued so a burst of MCP calls can't flood autonomous spend.

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type Database from 'better-sqlite3';
-import { getBool } from '../db/index.js';
+import { getBool, getSetting } from '../db/index.js';
 import { listTasks, countByStatus, activeRuns, getTask, latestRun, dependencyState } from '../tasks.js';
 import { readUsage } from '../token/usage.js';
 import { resolvePolicy } from '../scheduler/policy.js';
@@ -34,6 +34,8 @@ export interface BoardCard {
   elapsedPct?: number | null; // percent of the run's timeout elapsed (may exceed 100)
   depends_on?: string | null;
   dep_state?: string; // waiting | satisfied | dep-failed | dep-missing (absent when no dep)
+  requires?: string | null; // CSV of capability tokens this task needs (see capabilities.ts)
+  verify_deferred?: string | null; // unmet capabilities that deferred the last run's verify to manual
 }
 
 export interface BoardState {
@@ -133,11 +135,17 @@ export function tailLog(path: string | null, n = 6): string[] {
 export function boardState(db: Database.Database): BoardState {
   const usage = readUsage();
   const policy = resolvePolicy(db);
+  const hostCaps = getSetting(db, 'host_capabilities') ?? '';
   const runs = activeRuns(db);
   const runByTask = new Map(runs.map((r) => [r.task_id, r]));
   const failDetailStmt = db.prepare(
     `SELECT detail FROM task_events
       WHERE task_id = ? AND to_status IN ('attention','failed','blocked') AND detail IS NOT NULL
+      ORDER BY id DESC LIMIT 1`,
+  );
+  const deferredStmt = db.prepare(
+    `SELECT detail FROM task_events
+      WHERE task_id = ? AND run_id = ? AND kind = 'note' AND detail LIKE 'capability(s) unavailable here%'
       ORDER BY id DESC LIMIT 1`,
   );
 
@@ -159,16 +167,27 @@ export function boardState(db: Database.Database): BoardState {
       model: t.model,
       coding_tool: t.coding_tool,
       verify_count: Array.isArray(verify) ? verify.length : 0,
-      gate: validateTask(t),
+      gate: validateTask(t, hostCaps),
       pr_url: t.pr_url,
       merge_status: t.merge_status,
       verify_mode: t.verify_mode,
       est_pct: estimatePct(db, t.complexity),
       updated_at: t.updated_at,
     };
+    if (t.requires) card.requires = t.requires;
     if (t.depends_on) {
       card.depends_on = t.depends_on;
       card.dep_state = dependencyState(db, t);
+    }
+    {
+      const lastRunId = run?.id ?? latestRun(db, t.id)?.id;
+      if (lastRunId) {
+        const ev = deferredStmt.get(t.id, lastRunId) as { detail: string } | undefined;
+        if (ev) {
+          const m = /^capability\(s\) unavailable here: (.*?) →/.exec(ev.detail);
+          card.verify_deferred = m ? m[1] : ev.detail;
+        }
+      }
     }
     if (t.status === 'attention' || t.status === 'failed' || t.status === 'blocked') {
       const ev = failDetailStmt.get(t.id) as { detail: string } | undefined;

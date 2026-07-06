@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3';
-import { getBool, getNum, setSetting, logEvent } from '../db/index.js';
+import { getBool, getNum, getSetting, setSetting, logEvent } from '../db/index.js';
 import { countByStatus, listTasks, latestRun, activeRunCosts, dependencyState, setStatus } from '../tasks.js';
 import { validateTask } from '../gate/validateTask.js';
 import { readUsage } from '../token/usage.js';
@@ -100,7 +100,7 @@ export function tick(db: Database.Database, deps: TickDeps): TickInfo {
     for (const t of listTasks(db, 'draft')) {
       if (!t.depends_on) continue;
       if (dependencyState(db, t) !== 'satisfied') continue;
-      if (!validateTask(t).ok) continue; // stays draft; gate errors are visible on the board
+      if (!validateTask(t, getSetting(db, 'host_capabilities') ?? '').ok) continue; // stays draft; gate errors are visible on the board
       setStatus(db, t.id, 'queued', { detail: `auto-queued: dependency ${t.depends_on} closed` });
       logEvent(db, { task_id: t.id, kind: 'note', detail: 'released by dependency chain' });
     }
