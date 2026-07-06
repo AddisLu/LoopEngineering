@@ -10,7 +10,7 @@ export interface GateResult {
   warnings: string[];
 }
 
-const ALLOWED_TOOLS = new Set(['claude-code', 'mock']);
+const ALLOWED_TOOLS = new Set(['claude-code', 'mock', 'generic']);
 
 /**
  * Required-fields checklist (no LLM review). A task may only advance
@@ -44,10 +44,13 @@ export function validateTask(task: Task, hostCaps = ''): GateResult {
   // verify_mode relaxation: a manual-only task has no automated check to require, so it
   // needs zero verification steps. Any other mode (including 'command' alongside
   // 'llm'/'manual') keeps the old >= 1 step requirement — zero behavior change for the
-  // default mode 'command'.
+  // default mode 'command'. A generic (non-git) task is relaxed further: any verify_mode
+  // that includes 'manual' or 'llm' needs no command step at all (commands, when present,
+  // just run in the persistent output dir).
   const modes = parseVerifyMode(task);
   const manualOnly = modes.size === 1 && modes.has('manual');
-  if (!manualOnly) {
+  const genericRelax = task.coding_tool === 'generic' && (modes.has('manual') || modes.has('llm'));
+  if (!manualOnly && !genericRelax) {
     const steps = parseSteps(task);
     if (steps.length === 0) missing.push('verification_steps (>= 1 command)');
     else if (steps.some((s) => !s || !s.trim())) missing.push('verification_steps (empty step)');
@@ -56,8 +59,9 @@ export function validateTask(task: Task, hostCaps = ''): GateResult {
     missing.push('verify_rubric');
   }
 
-  // repo checks are skipped for the mock tool (mock runs in a scratch dir)
-  if (task.coding_tool !== 'mock') {
+  // repo checks are skipped for the mock and generic tools (mock runs in a scratch dir,
+  // generic runs in a persistent non-git output dir — neither touches a repo).
+  if (task.coding_tool !== 'mock' && task.coding_tool !== 'generic') {
     if (!task.repo_path || !fs.existsSync(task.repo_path)) {
       missing.push('repo_path (existing directory)');
     } else if (!isGitRepo(task.repo_path)) {

@@ -33,6 +33,9 @@ export const paths = {
   worktreesDir: path.join(DATA_DIR, 'worktrees'),
   plansDir: path.join(DATA_DIR, 'plans'),
   reviewsDir: path.join(DATA_DIR, 'reviews'),
+  // Persistent per-task workspace for coding_tool='generic' (non-git tasks): unlike a
+  // worktree, this directory is NEVER cleaned up on close — it IS the deliverable.
+  outputsDir: path.join(DATA_DIR, 'outputs'),
   // TokenBar integration (host)
   tokenbarMcpDir: process.env.TOKENBAR_MCP_DIR ? expand(process.env.TOKENBAR_MCP_DIR) : null,
   tokenCache: expand(
@@ -46,7 +49,7 @@ export const paths = {
 } as const;
 
 export function ensureDirs(): void {
-  for (const d of [paths.dataDir, paths.logsDir, paths.worktreesDir, paths.plansDir, paths.reviewsDir]) {
+  for (const d of [paths.dataDir, paths.logsDir, paths.worktreesDir, paths.plansDir, paths.reviewsDir, paths.outputsDir]) {
     fs.mkdirSync(d, { recursive: true });
   }
 }

@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   -- intake gate fields
   plan_ref       TEXT,                       -- md/html path or URL
   plan_kind      TEXT,                        -- md | html | url
-  coding_tool    TEXT NOT NULL DEFAULT 'claude-code', -- claude-code | mock
+  coding_tool    TEXT NOT NULL DEFAULT 'claude-code', -- claude-code | mock | generic (non-git, persistent output dir)
   verification_steps TEXT NOT NULL DEFAULT '[]',       -- JSON array of shell commands
   setup_cmd      TEXT,                        -- optional, run in worktree before dispatch
 
