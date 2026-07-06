@@ -86,7 +86,7 @@
         <label>Plan (.md/.html 或 URL) <input name="plan_ref" placeholder="./plan.md or https://…" autocomplete="off" /></label>
         <div class="row">
           <label>Tool
-            <select name="coding_tool"><option>claude-code</option><option>mock</option><option>generic</option><option>plan</option></select>
+            <select name="coding_tool"><option>claude-code</option><option>mock</option><option>generic</option><option>plan</option><option>deploy</option></select>
           </label>
           <label>Complexity
             <select name="complexity"><option>S</option><option selected>M</option><option>L</option></select>
@@ -117,7 +117,7 @@
         </div>
         <p class="dialog-hint" id="repo-hint" hidden>generic 工具在獨立的產出目錄執行，不需要 repo/base（無 git）。</p>
         <label>Setup cmd <input name="setup_cmd" placeholder="npm ci" autocomplete="off" /></label>
-        <label>Environment（選填，套用對應 env:&lt;name&gt; 知識）
+        <label>Environment（選填，套用對應 env:&lt;name&gt; 知識；亦為 deploy 任務的目標）
           <input name="environment" list="env-list" placeholder="company / home" autocomplete="off" />
           <datalist id="env-list"></datalist>
         </label>

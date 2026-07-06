@@ -144,6 +144,10 @@
     meta.appendChild(el('span', 'chip tool', c.model || c.coding_tool));
     if (c.status === 'queued') meta.appendChild(el('span', 'chip mono', `~${c.est_pct}%`));
     if (c.coding_tool === 'generic') meta.appendChild(el('span', 'chip mono', `📄 產出 ${c.output_file_count ?? 0}`));
+    if (c.coding_tool === 'deploy' && c.deploy_env) {
+      const label = c.deploy_status ? `☁ deploy: ${c.deploy_env} (${c.deploy_status})` : `☁ deploy: ${c.deploy_env}`;
+      meta.appendChild(el('span', 'chip mono deploy', label));
+    }
     if (c.requires) meta.appendChild(el('span', 'chip mono requires', `⚙ 需要: ${c.requires}`));
     // epic hierarchy: rollup chip on the epic card, back-reference chip on each child
     if (c.children) meta.appendChild(el('span', 'chip mono epic', `子任務 ${c.children.closed}/${c.children.total} 完成`));
@@ -349,21 +353,26 @@
 
   const dialog = $('new-dialog');
   const envList = $('env-list');
-  // env:<name> scopes -> distinct names, refreshed each time the dialog opens (knowledge
-  // changes slowly; no need to keep this live).
+  // Union of env:<name> knowledge scopes AND real `environments` deploy targets -> distinct
+  // names, refreshed each time the dialog opens (both change slowly; no need to keep live).
   async function fillEnvList() {
+    const names = new Set();
     try {
       const { nodes } = await api('/api/knowledge?kind=environment', 'GET');
-      const names = [...new Set((nodes || [])
-        .map((n) => (n.scope || '').startsWith('env:') ? n.scope.slice(4) : null)
-        .filter(Boolean))];
-      envList.replaceChildren();
-      for (const name of names) {
-        const opt = document.createElement('option');
-        opt.value = name;
-        envList.appendChild(opt);
+      for (const n of nodes || []) {
+        if ((n.scope || '').startsWith('env:')) names.add(n.scope.slice(4));
       }
-    } catch (e) { /* datalist just stays empty */ }
+    } catch (e) { /* knowledge source unavailable — environments below may still populate it */ }
+    try {
+      const { environments } = await api('/api/environments', 'GET');
+      for (const e of environments || []) names.add(e.name);
+    } catch (e) { /* environments source unavailable */ }
+    envList.replaceChildren();
+    for (const name of names) {
+      const opt = document.createElement('option');
+      opt.value = name;
+      envList.appendChild(opt);
+    }
   }
   // generic runs in a persistent non-git output dir — repo/base are meaningless for it.
   const repoRow = $('repo-row');
@@ -613,6 +622,13 @@
           ? files.map((f) => `${f.name} (${f.size}B)`).join('　•　')
           : '(尚無檔案)'));
         detailBody.appendChild(outList);
+      }
+      if (r && r.deploy_env) {
+        const deployList = el('div', 'd-list');
+        deployList.appendChild(dRow('部署環境', r.deploy_env));
+        deployList.appendChild(dRow('部署狀態', r.deploy_status || '–'));
+        if (r.deploy_detail) deployList.appendChild(dRow('部署詳情', r.deploy_detail));
+        detailBody.appendChild(deployList);
       }
     } catch (e) { /* best effort */ }
 
