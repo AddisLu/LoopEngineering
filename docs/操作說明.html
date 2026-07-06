@@ -162,7 +162,8 @@
     <a href="#mcp">12 · MCP：編輯器一句話派工</a>
     <a href="#autoflow">13 · 自動化：Git 收尾與任務鏈</a>
     <a href="#knowledge">14 · 知識庫：越跑越聰明</a>
-    <a href="#appendix">15 · 附錄（API / 檔案位置）</a>
+    <a href="#metrics">15 · 儀表板：自主產出</a>
+    <a href="#appendix">16 · 附錄（API / 檔案位置）</a>
   </nav>
 
   <main>
@@ -297,6 +298,7 @@
           <tr><td>⚙ 設定</td><td>開啟排程設定面板，直接調整日夜門檻等（見第 8 章）；儲存後下一個 tick 生效、免重啟。Mac/手機皆可改。</td></tr>
           <tr><td>☾ / ☀ 主題鈕</td><td>切換亮/暗佈景，記憶於 localStorage。</td></tr>
           <tr><td>＋ 新增 task</td><td>開啟新增任務對話框。</td></tr>
+          <tr><td>儀表板</td><td>開啟 <code>/metrics.html</code>——自主產出儀表板（見第 15 章）。</td></tr>
         </tbody>
       </table>
       </div>
@@ -653,8 +655,20 @@ npm run loop -- add --title "B" --goal "…" --plan ./B.md \
       <div class="note tip"><span class="ic">🧠</span><span><b>已預載你的環境</b>：公司（Win11＋Python 3.8.10、3.8 語法約束）、家用開發機（Linux＋RTX 2080 CUDA）、數位轉型辦公自動化專案、在家開發帶去公司部署的流程偏好。之後建任務時 environment 填 <code>company</code>，產出的程式碼就會自動遵守 3.8 相容。</span></div>
     </section>
 
+    <section id="metrics">
+      <h2><span class="num">15</span>儀表板：自主產出</h2>
+      <p>看板頂欄的「儀表板」開啟 <code>/metrics.html</code>：ADO 只看得到<b>人</b>的 velocity，這頁補上 ADO 產不出來的數字——<b>AI 自主跑掉了多少</b>。純讀取既有資料（<code>tasks</code>／<code>task_events</code>／<code>token_snapshots</code>），對排程/執行零影響。</p>
+      <ul>
+        <li><b>統計磚</b>：已結案總數、結案／天、成功率、平均週期（建立→結案）、平均 token %／任務、引擎自我更新次數、自動合併次數。</li>
+        <li><b>用量趨勢折線圖</b>：session／weekly 用量百分比隨時間變化（取自 <code>token_snapshots</code>）。</li>
+        <li><b>每日結案長條圖</b>：closed/day，天數視右上角「天數」下拉（7／14／30／90）而定。</li>
+        <li><b>狀態漏斗</b>：建立 → 進入 Review → 結案／待確認／失敗，各自佔建立總數的比率。</li>
+      </ul>
+      <div class="note info"><span class="ic">📊</span><span>頁面每 30 秒自動刷新一次（非 SSE，用量夠低不需要即時）；換「天數」立即重抓。</span></div>
+    </section>
+
     <section id="appendix">
-      <h2><span class="num">15</span>附錄</h2>
+      <h2><span class="num">16</span>附錄</h2>
       <h3>REST / SSE 端點</h3>
       <p>除 <code>/</code> 靜態頁外，<code>/api/*</code> 需帶 bearer（<code>Authorization: Bearer &lt;token&gt;</code>）或 <code>?token=</code>。</p>
       <div class="tbl-wrap">
@@ -665,6 +679,7 @@ npm run loop -- add --title "B" --goal "…" --plan ./B.md \
           <tr><td>GET</td><td><code>/api/board</code></td><td>完整看板狀態（卡片、用量、政策、計數）</td></tr>
           <tr><td>GET</td><td><code>/api/token</code></td><td>詳細用量讀數</td></tr>
           <tr><td>GET</td><td><code>/api/history?limit=</code></td><td>用量歷史快照</td></tr>
+          <tr><td>GET</td><td><code>/api/metrics?days=</code></td><td>自主產出儀表板快照（1..90 天，預設 14）</td></tr>
           <tr><td>GET</td><td><code>/api/stream</code></td><td>SSE：每秒推送完整看板</td></tr>
           <tr><td>POST</td><td><code>/api/tasks</code></td><td>建立任務（JSON body）</td></tr>
           <tr><td>POST</td><td><code>/api/tasks/:id/queue</code></td><td>審核 + 入列</td></tr>

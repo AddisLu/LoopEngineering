@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="zh-Hant" data-mode="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>儀表板 · Loop Engineering</title>
+    <script>
+      // Set theme before first paint to avoid a flash of the wrong mode.
+      (function () {
+        try {
+          var m = localStorage.getItem('loop_mode');
+          if (m !== 'light' && m !== 'dark') {
+            m = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+          }
+          document.documentElement.setAttribute('data-mode', m);
+        } catch (e) {}
+      })();
+    </script>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span class="brand-text">
+          <strong class="brand-name">Loop Engineering</strong>
+          <span class="brand-sub">儀表板 · 自主產出</span>
+        </span>
+      </div>
+
+      <div class="controls">
+        <label class="days-select-wrap">
+          天數
+          <select id="days-select" class="days-select">
+            <option value="7">7</option>
+            <option value="14" selected>14</option>
+            <option value="30">30</option>
+            <option value="90">90</option>
+          </select>
+        </label>
+        <a class="btn" href="/">← 看板</a>
+        <a class="btn" href="/brain.html">知識庫</a>
+        <button id="theme-btn" class="btn icon-btn" type="button" title="切換佈景" aria-label="切換佈景"></button>
+      </div>
+    </header>
+
+    <main class="metrics" aria-live="polite">
+      <div id="stat-tiles" class="stat-tiles"></div>
+
+      <section class="chart-card">
+        <h2 class="chart-title">用量趨勢（session／weekly %）</h2>
+        <svg id="trend-svg" class="trend-svg" viewBox="0 0 640 200" xmlns="http://www.w3.org/2000/svg"></svg>
+        <div id="trend-empty" class="empty" hidden>尚無用量快照資料</div>
+      </section>
+
+      <section class="chart-card">
+        <h2 class="chart-title">每日結案數（closed/day）</h2>
+        <svg id="throughput-svg" class="throughput-svg" viewBox="0 0 640 200" xmlns="http://www.w3.org/2000/svg"></svg>
+        <div id="throughput-empty" class="empty" hidden>尚無結案任務</div>
+      </section>
+
+      <section class="chart-card">
+        <h2 class="chart-title">狀態漏斗</h2>
+        <div id="funnel-row" class="funnel-row"></div>
+      </section>
+    </main>
+
+    <script src="/metrics.js"></script>
+  </body>
+</html>
