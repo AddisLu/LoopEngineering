@@ -167,7 +167,8 @@
     <a href="#discipline">17 · 執行紀律（實驗性，預設關）</a>
     <a href="#envdeploy">18 · 環境與部署（Environments + Deploy）</a>
     <a href="#pipelines">19 · 交付 pipeline 模板</a>
-    <a href="#appendix">20 · 附錄（API / 檔案位置）</a>
+    <a href="#integrations">20 · ADO/GitHub 整合橋接</a>
+    <a href="#appendix">21 · 附錄（API / 檔案位置）</a>
   </nav>
 
   <main>
@@ -405,6 +406,7 @@
           <tr><td><code>pipeline list</code></td><td>列出 pipeline 模板（內建 <code>feature</code>／<code>fix</code>／<code>ship</code>，見第 19 章）與各自的 stage。</td></tr>
           <tr><td><code>pipeline run &lt;name&gt; --goal* [--repo] [--base] [--env] [--title] [--verify]</code></td><td>實體化模板為一條 <code>depends_on</code> 任務鏈（見第 19 章）。</td></tr>
           <tr><td><code>pipeline import [file]</code></td><td>批次匯入／更新模板（不給檔案就重匯內建 <code>seed/pipelines/*.json</code>）。</td></tr>
+          <tr><td><code>pull --provider &lt;github|ado&gt; --query &lt;q&gt; [--repo] [--base] [--verify]</code></td><td>拉取 work items 建成 Loop 任務，依 <code>source_ref</code> 冪等（見第 20 章）。<code>--provider</code> 須符合已設定的 <code>integration_provider</code>。</td></tr>
         </tbody>
       </table>
       </div>
@@ -479,6 +481,15 @@ npm run loop -- list --status review</code></pre>
         </tbody>
       </table></div>
 
+      <h3>ADO/GitHub 整合橋接（見第 20 章）</h3>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>鍵</th><th>預設</th><th>說明</th></tr></thead>
+        <tbody>
+          <tr><td><code>integration_provider</code></td><td>none</td><td><code>none</code>／<code>github</code>／<code>ado</code>。<code>none</code>＝整個橋接完全關閉，不論憑證是否存在都不會有任何外部呼叫。</td></tr>
+          <tr><td><code>integration_pushback</code></td><td>false</td><td>任務進 review/closed 時，是否把 PR 連結＋狀態留言回原 work item（背景執行，不擋任務本身）。</td></tr>
+        </tbody>
+      </table></div>
+
       <h3>環境變數（<code>~/.config/loop-engineering/env</code>）</h3>
       <div class="tbl-wrap">
       <table>
@@ -491,6 +502,8 @@ npm run loop -- list --status review</code></pre>
           <tr><td><code>TOKENBAR_TOKEN_CACHE</code> / <code>TOKENBAR_HISTORY</code></td><td>共享 token 快取 / 歷史 ledger 路徑。</td></tr>
           <tr><td><code>NTFY_SERVER</code> / <code>NTFY_TOPIC</code></td><td>ntfy 推播（含一鍵暫停動作）。</td></tr>
           <tr><td><code>LOOP_PUBLIC_URL</code></td><td>ntfy 暫停動作用的公開網址。</td></tr>
+          <tr><td><code>GITHUB_TOKEN</code> / <code>GITHUB_API_URL</code></td><td>GitHub PAT；<code>GITHUB_API_URL</code> 選填，指向 GHES 時覆寫預設的 <code>api.github.com</code>（見第 20 章）。</td></tr>
+          <tr><td><code>ADO_PAT</code> / <code>ADO_ORG</code> / <code>ADO_PROJECT</code></td><td>Azure DevOps PAT ＋ 組織／專案；三者需同時存在才會啟用 <code>ado</code> provider（見第 20 章）。</td></tr>
         </tbody>
       </table>
       </div>
@@ -592,6 +605,7 @@ systemctl --user disable loop-engineering</code></pre>
           <tr><td><code>loop_deploy</code></td><td>建立並排入一個部署任務（<code>tool=deploy</code>）</td></tr>
           <tr><td><code>loop_rollback_deployment</code></td><td>把某環境回滾到上一次成功部署的 commit</td></tr>
           <tr><td><code>loop_run_pipeline</code></td><td>一次實體化一個 pipeline 模板（<code>feature</code>／<code>fix</code>／<code>ship</code>）為一條任務鏈（見第 19 章）</td></tr>
+          <tr><td><code>loop_pull_workitems</code></td><td>拉取 GitHub issue／ADO work item 建成任務，依 <code>source_ref</code> 冪等；需伺服器已設定 <code>integration_provider</code> 與憑證（見第 20 章）</td></tr>
         </tbody>
       </table></div>
       <div class="note info"><span class="ic">🔗</span><span><b>用 MCP 串成鏈：</b>先建任務 A，再建 B 時說「依賴 A」（帶 <code>depends_on</code>）——A 結案後 B 自動放行，避免多個任務同時從舊 base 切分支而互相衝突。</span></div>
@@ -775,8 +789,21 @@ npm run loop -- pipeline run ship \
       <div class="note info"><span class="ic">🚦</span><span>Pipeline 只是幫你<b>一次生出</b>一條固定的任務鏈；生出來之後，續跑／重來／放棄／attention 觸發，全部跟一般任務鏈一模一樣（見第 13 章）——沒有專屬的例外處理。</span></div>
     </section>
 
+    <section id="integrations">
+      <h2><span class="num">20</span>ADO/GitHub 整合橋接</h2>
+      <p>D5：Loop 不取代公司的 ADO/GitHub，而是<b>插在它上面當自主執行層</b>——從 ADO/GitHub 拉一張 work item/issue → 建成 Loop 任務 → Loop 自主實作 → 把結果（PR 連結＋狀態）推回原 work item 留言。<b>預設整個功能全關、零外部呼叫</b>；只有明確設定 provider 並在環境檔案填妥憑證後才會動作。</p>
+      <ul>
+        <li><b>啟用</b>：<code>loop config set integration_provider github</code>（或 <code>ado</code>；預設 <code>none</code>＝完全關閉，不論憑證是否存在都不會呼叫外部）。憑證只放在 <code>~/.config/loop-engineering/env</code>（絕不進 SQLite、絕不進 log）：GitHub 用 <code>GITHUB_TOKEN</code>（＋選填 <code>GITHUB_API_URL</code>，支援 GHES）；ADO 用 <code>ADO_PAT</code> / <code>ADO_ORG</code> / <code>ADO_PROJECT</code>（三者缺一即視為未設定）。</li>
+        <li><b>拉取（import）</b>：<code>loop pull --provider github --query "assignee:@me label:loop repo:owner/name"</code>（GitHub 的 query 是 search 語法；ADO 則整段當 WIQL 查詢），或 <code>POST /api/integrations/import</code>，或 MCP 的 <code>loop_pull_workitems</code>。每個 work item 建一個 Loop 任務（標題/目標取自 item、plan 由內容合成），並記一個新的 <code>source_ref</code> 欄位（如 <code>github:owner/name#123</code> / <code>ado:456</code>）——<b>同一個 query 重跑不會重複建立</b>（依 <code>source_ref</code> 判斷已存在即跳過）。建立後依 <code>max_autoqueue</code> 剩餘額度自動入列，其餘留 <code>draft</code>。</li>
+        <li><b>推回（pushback）</b>：任務進到 <code>review</code>／<code>closed</code> 時，若該任務有 <code>source_ref</code> 且 <code>integration_pushback</code> 設定為 <code>true</code>（預設 <code>false</code>），背景（fire-and-forget，不擋 tick）在原 work item 留言 PR 連結＋狀態；失敗只記一筆 note，不影響任務本身。</li>
+        <li><b>看板</b>：卡片上會看到「⇄ github#123」這類徽章（從 <code>source_ref</code> 解析）；點開卡片可看完整來源與最近一次 pushback 結果。</li>
+        <li><b>測試</b>：<code>src/__tests__/integration.test.ts</code>——provider 的 fetch 全部注入假實作，零網路；涵蓋 listWorkItems 解析/失敗降級為 []、import 的建立與冪等、pushResult 的留言內容、pushback pump 的旗標/憑證閘門。</li>
+      </ul>
+      <div class="note info"><span class="ic">🔗</span><span>這條橋接完成了 ADO-surpass 藍圖 D1–D5：Loop 從獨立排程器，走到能直接吃公司既有 ADO/GitHub 的待辦，自主做完再把結果留言回去——不用手動搬 issue，也不用打開兩套系統核對進度。</span></div>
+    </section>
+
     <section id="appendix">
-      <h2><span class="num">20</span>附錄</h2>
+      <h2><span class="num">21</span>附錄</h2>
       <h3>REST / SSE 端點</h3>
       <p>除 <code>/</code> 靜態頁外，<code>/api/*</code> 需帶 bearer（<code>Authorization: Bearer &lt;token&gt;</code>）或 <code>?token=</code>。</p>
       <div class="tbl-wrap">
@@ -815,6 +842,7 @@ npm run loop -- pipeline run ship \
           <tr><td>GET</td><td><code>/api/pipelines/:name</code></td><td>單一模板定義</td></tr>
           <tr><td>POST</td><td><code>/api/pipelines/import</code></td><td>批次匯入／更新模板（<code>{"items":[...]}</code>）</td></tr>
           <tr><td>POST</td><td><code>/api/pipelines/:name/run</code></td><td>實體化為一條 <code>depends_on</code> 任務鏈並回傳 task ids</td></tr>
+          <tr><td>POST</td><td><code>/api/integrations/import</code></td><td>拉取 work items 建成任務（見第 20 章；<code>integration_provider=none</code> 回 409，零外部呼叫）</td></tr>
         </tbody>
       </table>
       </div>

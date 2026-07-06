@@ -34,6 +34,11 @@ TOKENBAR_MCP_DIR=/home/you/TokenBar/mcp # reuse usage-core.mjs + shared cache
 NTFY_SERVER=https://ntfy.sh             # optional push + one-tap pause
 NTFY_TOPIC=loop-eng-xxxx
 LOOP_PUBLIC_URL=https://<host>.<tailnet>.ts.net   # used in ntfy pause action
+GITHUB_TOKEN=<pat>                      # optional: ADO/GitHub bridge (integration_provider=github)
+GITHUB_API_URL=https://api.github.com   # optional: override for GHES
+ADO_PAT=<pat>                           # optional: ADO bridge (integration_provider=ado)
+ADO_ORG=<org>
+ADO_PROJECT=<project>
 ```
 
 `systemctl --user restart loop-engineering` after editing.
