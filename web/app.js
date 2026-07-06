@@ -102,6 +102,15 @@
     $('pause-btn').textContent = s.paused ? '恢復排程' : '暫停排程';
 
     $('self-update-badge').hidden = !s.self_update_pending;
+
+    const fc = s.forecast;
+    if (fc) {
+      const verdictState = { plenty: 'ok', some: 'warn', tight: 'danger', full: 'danger' };
+      const chip = $('forecast-chip');
+      chip.setAttribute('data-state', verdictState[fc.verdict] || 'ok');
+      chip.textContent =
+        `Backlog 預估 · weekly +${Math.round(fc.weekly_backlog_pct)}% · 剩 ${Math.round(fc.weekly_headroom)}% · 可加~${fc.capacity_more_M}`;
+    }
   }
 
   // ---- card rendering --------------------------------------------------

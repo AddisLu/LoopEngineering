@@ -498,6 +498,11 @@ body {
 .chip.dep { color: var(--st-blocked); border-color: color-mix(in srgb, var(--st-blocked) 35%, transparent); max-width: 200px; }
 .chip.merged  { color: var(--ok); background: var(--ok-soft); border-color: color-mix(in srgb, var(--ok) 30%, transparent); }
 .chip.pending { color: var(--warn); background: var(--warn-soft); border-color: color-mix(in srgb, var(--warn) 30%, transparent); }
+
+.chip.forecast { font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.chip.forecast[data-state="ok"]     { color: var(--ok);     background: var(--ok-soft);     border-color: color-mix(in srgb, var(--ok) 30%, transparent); }
+.chip.forecast[data-state="warn"]   { color: var(--warn);   background: var(--warn-soft);   border-color: color-mix(in srgb, var(--warn) 30%, transparent); }
+.chip.forecast[data-state="danger"] { color: var(--danger); background: var(--danger-soft); border-color: color-mix(in srgb, var(--danger) 30%, transparent); }
 .chip .spin {
   width: 7px; height: 7px; border-radius: 50%;
   background: currentColor;
