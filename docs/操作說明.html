@@ -460,6 +460,7 @@ npm run loop -- list --status review</code></pre>
         <tbody>
           <tr><td><code>default_model</code></td><td><code>sonnet</code></td><td><b>全域預設模型</b>：任務未指定 model 時就用它。<code>sonnet</code>＝Sonnet 5，自主 coding 用它就夠、又省 token；避免繼承你互動用的 Fable 5。可選 <code>haiku</code>／<code>opus</code>／<code>fable-5</code>／<code>default</code>（CLI 預設）。單一任務可在新增表單覆寫。</td></tr>
           <tr><td><code>agent_backend</code></td><td><code>claude-code</code></td><td><b>執行後端（adapter）</b>：真正派工時實際呼叫哪個 CLI（與 <code>coding_tool</code> 是兩回事——後者是任務類型／工作區模式，前者是底層跑哪個 agent）。目前只有 <code>claude-code</code> 已實作；<code>copilot-cli</code> 是預留給日後公司環境改用 GitHub Copilot CLI 的後端代號（尚需 PAT＋公司端煙霧測試，暫無 adapter）。設成未知值不會擋下設定，只會警告並在派工時退回 <code>claude-code</code>。</td></tr>
+          <tr><td><code>shell</code></td><td><code>auto</code></td><td><b>跨 OS shell</b>：verify 步驟／<code>setup_cmd</code>／<code>deploy_cmd</code> 實際用哪個殼跑（見 <code>src/util/shell.ts</code>）。<code>auto</code>：Linux／macOS 一律 <code>bash -lc</code>（跟改版前完全一樣，家用機無感）；Windows（<code>win32</code>）則優先找 Git-Bash（<code>git --exec-path</code> 或 PATH 上的 <code>bash</code>），找不到才退到 PowerShell，再退到 <code>cmd</code>——這是為了日後公司（Windows 11、無 WSL）部署預先鋪的路。也可明確設成 <code>bash</code>／<code>powershell</code>／<code>cmd</code>／<code>git-bash</code> 強制指定。<b>注意</b>：這只換執行殼，步驟指令本身仍是你寫的——`rm -rf` 這類 unix-only 指令換到 Windows 一樣會壞，Windows 目標的任務請優先用 <code>npm run x</code> 這種跨殼都能跑的寫法。</td></tr>
         </tbody>
       </table></div>
 
