@@ -1,10 +1,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import type Database from 'better-sqlite3';
 import { paths } from '../config.js';
-import { logEvent } from '../db/index.js';
+import { getSetting, logEvent } from '../db/index.js';
 import type { Task } from '../types.js';
+import { resolveShell, runShell } from '../util/shell.js';
 import { setStatus, getTask } from '../tasks.js';
 import {
   getEnvironment,
@@ -19,8 +20,9 @@ import { envScope } from '../knowledge/types.js';
 
 /**
  * Injectable shell runner for `deploy_cmd` — mirrors the Adapter/JudgeExec test-injection
- * convention. Production call sites omit it and get `defaultDeployExec` (a real `bash -lc`
- * spawn); tests inject a fake so NO real deploy ever runs hermetically.
+ * convention. Production call sites omit it and get `makeDefaultDeployExec` (a real
+ * runShell spawn, OS-shell picked via the `shell` setting); tests inject a fake so NO
+ * real deploy ever runs hermetically.
  */
 export type DeployExec = (
   cmd: string,
@@ -28,33 +30,13 @@ export type DeployExec = (
   extraEnv?: Record<string, string>,
 ) => Promise<{ exitCode: number | null; tail: string }>;
 
-function defaultDeployExec(
-  cmd: string,
-  cwd: string,
-  extraEnv: Record<string, string> = {},
-): Promise<{ exitCode: number | null; tail: string }> {
-  return new Promise((resolve) => {
-    const child = spawn('bash', ['-lc', cmd], {
-      cwd,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, ...extraEnv },
-    });
-    let tail = '';
-    const w = (d: Buffer) => {
-      tail = (tail + d.toString('utf8')).slice(-1500);
-    };
-    child.stdout.on('data', w);
-    child.stderr.on('data', w);
-    const timer = setTimeout(() => child.kill('SIGKILL'), 10 * 60_000);
-    child.on('close', (code) => {
-      clearTimeout(timer);
-      resolve({ exitCode: code, tail });
-    });
-    child.on('error', () => {
-      clearTimeout(timer);
-      resolve({ exitCode: null, tail });
-    });
-  });
+/** Builds the production DeployExec bound to the current `shell` setting (see util/shell.ts). */
+function makeDefaultDeployExec(shellSetting: string | undefined): DeployExec {
+  const shell = resolveShell({ shellSetting });
+  return async (cmd, cwd, extraEnv = {}) => {
+    const { exitCode, output } = await runShell(cmd, cwd, { timeoutMs: 10 * 60_000, shell, env: extraEnv });
+    return { exitCode, tail: output.slice(-1500) };
+  };
 }
 
 /** Local (no fetch) rev-parse — deploy targets whatever the repo already has for `ref`. */
@@ -122,7 +104,7 @@ export async function runDeployTask(db: Database.Database, task: Task, deployExe
   const sha = captureCommitSha(task.repo_path, task.base_branch || 'HEAD');
 
   if (env.auto_deploy && env.deploy_cmd) {
-    const exec = deployExec ?? defaultDeployExec;
+    const exec = deployExec ?? makeDefaultDeployExec(getSetting(db, 'shell'));
     const { exitCode, tail } = await exec(env.deploy_cmd, task.repo_path);
     if (exitCode === 0) {
       recordDeployment(db, { task_id: task.id, environment: envName, commit_sha: sha, status: 'deployed', detail: tail });
@@ -195,7 +177,7 @@ export async function runRollback(
   if (!prior) return { ok: false, error: 'no prior deployment to roll back to' };
 
   if (env.auto_deploy && env.deploy_cmd) {
-    const exec = deployExec ?? defaultDeployExec;
+    const exec = deployExec ?? makeDefaultDeployExec(getSetting(db, 'shell'));
     const cwd = resolveRollbackCwd(db, dep);
     const { exitCode, tail } = await exec(env.deploy_cmd, cwd, { LOOP_DEPLOY_SHA: prior.commit_sha ?? '' });
     const record = recordDeployment(db, {
