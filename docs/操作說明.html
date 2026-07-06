@@ -331,8 +331,8 @@
           <tr><td>Title</td><td>是</td><td>任務標題。</td></tr>
           <tr><td>Goal</td><td>是</td><td>目標描述，不可空白。</td></tr>
           <tr><td>Plan</td><td>是</td><td>計畫參照：存在的 <code>.md</code>/<code>.html</code> 檔路徑，或合法 URL。</td></tr>
-          <tr><td>Tool</td><td>是</td><td><code>claude-code</code>／<code>mock</code>（零 token 測試用）／<code>generic</code>（無 git、產出檔案的非編碼任務——見下方「任務類型與驗證模式」）。</td></tr>
-          <tr><td>Verify steps</td><td>是*</td><td>至少一條驗證指令（逗號分隔），例：<code>npm run lint, npm test</code>。<span class="pill">verify mode 含 manual／llm 時可免</span></td></tr>
+          <tr><td>Tool</td><td>是</td><td><code>claude-code</code>／<code>mock</code>（零 token 測試用）／<code>generic</code>（無 git、產出檔案的非編碼任務）／<code>plan</code>（Epic 自主規劃——見下方「任務類型與驗證模式」與第 13 章）。</td></tr>
+          <tr><td>Verify steps</td><td>是*</td><td>至少一條驗證指令（逗號分隔），例：<code>npm run lint, npm test</code>。<span class="pill">verify mode 含 manual／llm 或 tool=plan 時可免</span></td></tr>
           <tr><td>Repo path</td><td>是*</td><td>存在的 git repo 目錄。<span class="pill">mock／generic 略過</span></td></tr>
           <tr><td>Base branch</td><td>是*</td><td>存在的基底分支。<span class="pill">mock／generic 略過</span></td></tr>
           <tr><td>Complexity</td><td>—</td><td><code>S</code>/<code>M</code>/<code>L</code>（預設 M）；決定逾時與預估用量。</td></tr>
@@ -353,6 +353,7 @@
           <tr><td><code>claude-code</code></td><td>專屬 git worktree（<code>loop/&lt;id&gt;</code> 分支，從 base 切出）</td><td>完整（見第 13 章）：commit → push → 併回 base → PR</td><td>一般編碼任務。</td></tr>
           <tr><td><code>mock</code></td><td>暫存目錄（每次 run 全新建立，用完即棄）</td><td>無（零 token 測試/演練用，不代表真實產出）</td><td>排程器/斷路器/watchdog 的零 token 測試。</td></tr>
           <tr><td><code>generic</code></td><td><b>持久化</b>產出目錄 <code>~/.local/share/loop-engineering/outputs/&lt;id&gt;</code>（跨 resume 保留，結案也<b>不會</b>被清掉）</td><td><b>完全略過</b>——不建 worktree、不 commit、不 push、不併回、不開 PR</td><td>非編碼工作：報告、資料分析、一次性腳本、設計產出等。真的呼叫 Claude Code（非 mock），只是不碰 git。</td></tr>
+          <tr><td><code>plan</code>（Epic）</td><td>不執行任何工作區——AI 規劃器把目標拆成子任務，子任務才各自建 worktree</td><td><b>無</b>（本身不改任何程式碼；子任務照常走完整收尾）</td><td>一句話丟一個大目標，自動拆成 2–6 個子任務並依序自主執行——見第 13 章「Epic 自主規劃」。</td></tr>
         </tbody>
       </table>
       </div>
@@ -575,6 +576,7 @@ systemctl --user disable loop-engineering</code></pre>
         </tbody>
       </table></div>
       <div class="note info"><span class="ic">🔗</span><span><b>用 MCP 串成鏈：</b>先建任務 A，再建 B 時說「依賴 A」（帶 <code>depends_on</code>）——A 結案後 B 自動放行，避免多個任務同時從舊 base 切分支而互相衝突。</span></div>
+      <div class="note tip"><span class="ic">🧬</span><span><b>不用自己拆鏈：</b>大功能直接說「把『X 大功能』交給 Loop 規劃並執行」——Claude Code 會用 <code>coding_tool: "plan"</code> 呼叫 <code>loop_add_task</code>，建一個 Epic 任務，由 Loop 的規劃器自動拆成子任務鏈並依序執行到底（見第 13 章「Epic 自主規劃」）。</span></div>
 
       <h3>設定與維護</h3>
       <ul>
@@ -625,6 +627,22 @@ npm run loop -- add --title "B" --goal "…" --plan ./B.md \
         <li>前置若 <code>failed</code> 或被刪除，後者<b>押住等你處理</b>，絕不誤跑。</li>
         <li>MCP 也支援：建 B 時說「依賴 A」。</li>
       </ul>
+
+      <h3>4 · Epic 自主規劃（<code>coding_tool=plan</code>）</h3>
+      <p>ADO＋Copilot 仍需要人把 Epic 拆成 Feature／Story 才能派工；Loop 的差異化能力是：<b>只丟一個大目標</b>，AI 規劃器自動拆成一條 <code>depends_on</code> 子任務鏈並自主執行到底——就是你原本手動拆任務鏈的動作，改由 Loop 自己做。</p>
+      <ol>
+        <li>建一個 <code>tool=plan</code> 任務（Title/Goal 照填；<b>Plan</b> 欄位當作「Epic 說明書」，可以寫得比一般任務詳細）。Repo／Base／Model／Environment 這幾欄若填了，會被子任務<b>繼承</b>；不填也可以（純規劃）。</li>
+        <li>派工時<b>不會</b>建立 worktree，而是呼叫規劃模型（<code>default_model</code>，通常比知識蒸餾用的 haiku 更強），把「目標＋Plan＋相關知識」丟給它，要求輸出 2–6 個子任務（含各自的 goal／verify steps／複雜度，彼此若有先後用 order 表示）的嚴格 JSON。</li>
+        <li>規劃結果<b>materialize</b> 成一串真正的 <code>claude-code</code> 子任務：<code>parent_id</code> 指回這個 Epic、依 order 用 <code>depends_on</code> 串成鏈、繼承 Epic 的 repo/base/environment/model。第一個子任務（若通過 gate）直接 <code>queued</code>，其餘留 <code>draft</code>，交給既有的任務鏈機制（見上方第 3 節）依序放行。</li>
+        <li>Epic 本身立刻結案（<code>closed</code>，卡片顯示「已拆解為 N 個子任務」）——它的工作就是產生子任務鏈，之後全程由子任務照常跑收尾／verify／人工核可。</li>
+        <li>規劃失敗（模型沒回應、輸出解析不出來、用量已達硬上限）Epic 轉 <code>attention</code>，可續跑重試或改手動拆任務。</li>
+      </ol>
+      <div class="note info"><span class="ic">🧬</span><span><b>看板怎麼看：</b>Epic 卡片顯示「子任務 n/m 完成」rollup 徽章；子任務卡片顯示「↳ epic: t_xxx」回指徽章；點開任一張卡片的詳情視窗都能看到完整的子任務清單與各自狀態。</span></div>
+      <div class="note warn"><span class="ic">⚠️</span><span>Epic 任務不需要（也不會用到）Verify steps／Repo／Base——這些檢查全部略過；真正需要驗證的是它產生出來的子任務。</span></div>
+      <pre><code># CLI：交一個 Epic
+npm run loop -- add --title "Epic: 上線通知系統" \
+  --goal "讓任務結案/attention 時能推播到 Slack" \
+  --plan ./epic-notify.md --tool plan --repo /path --base main</code></pre>
 
       <h3>人與引擎的分工</h3>
       <div class="tbl-wrap"><table>
