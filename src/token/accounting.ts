@@ -1,6 +1,8 @@
 import type Database from 'better-sqlite3';
 import { getNum } from '../db/index.js';
 import type { Complexity } from '../config.js';
+import { resolvePolicy } from '../scheduler/policy.js';
+import { readUsage } from './usage.js';
 
 const MIN_SAMPLES = 5;
 
@@ -99,4 +101,95 @@ export function estimateWeeklyPct(db: Database.Database, complexity: Complexity)
 
 export function isCalibrated(db: Database.Database, complexity: Complexity): boolean {
   return runDeltas(db, complexity).length >= MIN_SAMPLES;
+}
+
+export interface BacklogForecast {
+  pending: number;
+  by_complexity: { S: number; M: number; L: number };
+  weekly_backlog_pct: number;
+  weekly_now: number;
+  weekly_max: number;
+  weekly_headroom: number;
+  session_now: number;
+  session_max: number;
+  largest_task_session_pct: number;
+  largest_task_session_fits: boolean; // largest_task_session_pct <= (hard_limit_pct - safety_reserve_pct)
+  capacity_more_M: number;
+  capacity_more_L: number;
+  verdict: 'plenty' | 'some' | 'tight' | 'full';
+}
+
+/**
+ * Aggregate backlog forecast: "is there budget headroom to add more tasks?" (D-FC).
+ * Read-only over existing per-task estimates — never touches scheduling/budget state.
+ *
+ * Weekly is the CUMULATIVE constraint (it never resets mid-week): sum estimateWeeklyPct
+ * over every non-terminal task. Session is PER-WINDOW (resets every 5h) — reporting the
+ * largest single backlog task's session estimate (not a sum) tells you whether the
+ * costliest queued task fits a session window at all, which a running sum would not.
+ */
+export function forecastBacklog(db: Database.Database): BacklogForecast {
+  const byStatusRows = db
+    .prepare(
+      `SELECT complexity, COUNT(*) AS n FROM tasks
+        WHERE status NOT IN ('closed','failed','review','attention')
+        GROUP BY complexity`,
+    )
+    .all() as { complexity: Complexity; n: number }[];
+
+  const by_complexity = { S: 0, M: 0, L: 0 };
+  for (const r of byStatusRows) {
+    if (r.complexity === 'S' || r.complexity === 'M' || r.complexity === 'L') {
+      by_complexity[r.complexity] = r.n;
+    }
+  }
+  const pending = by_complexity.S + by_complexity.M + by_complexity.L;
+
+  const estW: Record<Complexity, number> = {
+    S: estimateWeeklyPct(db, 'S'),
+    M: estimateWeeklyPct(db, 'M'),
+    L: estimateWeeklyPct(db, 'L'),
+  };
+  const weekly_backlog_pct =
+    by_complexity.S * estW.S + by_complexity.M * estW.M + by_complexity.L * estW.L;
+
+  const policy = resolvePolicy(db);
+  const usage = readUsage();
+  const weekly_now = usage.weekly.percent;
+  const weekly_max = policy.weeklyMax;
+  const weekly_headroom = Math.max(0, weekly_max - weekly_now - weekly_backlog_pct);
+
+  const session_now = usage.session.percent;
+  const session_max = policy.sessionMax;
+  const largest_task_session_pct = (['S', 'M', 'L'] as Complexity[])
+    .filter((c) => by_complexity[c] > 0)
+    .reduce((max, c) => Math.max(max, estimatePct(db, c)), 0);
+  const hardLimit = getNum(db, 'hard_limit_pct', 95);
+  const safetyReserve = getNum(db, 'safety_reserve_pct', 5);
+  const largest_task_session_fits = largest_task_session_pct <= hardLimit - safetyReserve;
+
+  const capacity_more_M = estW.M > 0 ? Math.floor(weekly_headroom / estW.M) : 0;
+  const capacity_more_L = estW.L > 0 ? Math.floor(weekly_headroom / estW.L) : 0;
+
+  let verdict: BacklogForecast['verdict'];
+  if (weekly_headroom <= 0) verdict = 'full';
+  else if (capacity_more_M < 1) verdict = 'tight';
+  else if (capacity_more_M < 3) verdict = 'some';
+  else verdict = 'plenty';
+
+  return {
+    pending,
+    by_complexity,
+    weekly_backlog_pct,
+    weekly_now,
+    weekly_max,
+    weekly_headroom,
+    session_now,
+    session_max,
+    largest_task_session_pct,
+    largest_task_session_fits,
+    capacity_more_M,
+    capacity_more_L,
+    verdict,
+  };
 }
