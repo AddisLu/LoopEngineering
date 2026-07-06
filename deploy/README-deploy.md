@@ -58,3 +58,47 @@ curl -s localhost:4711/api/status                 # {"paused":false,...}
 # from the MacBook (on the tailnet):
 curl -s https://<host>.<tailnet>.ts.net/api/status -H "Authorization: Bearer <token>"
 ```
+
+---
+
+# Remote-control from another machine (Mac / laptop) — one-shot
+
+The engine is **single-host**: tasks always execute on the Linux box above, against repos
+that live there. Other machines act as **remote controls** — the web board (a browser + the
+tailnet URL) plus the Loop MCP tools inside their Claude Code. No engine runs on the client.
+
+On the new machine (Mac or Linux):
+
+```bash
+git clone git@github.com:AddisLu/LoopEngineering.git ~/LoopEngineering
+cd ~/LoopEngineering
+bash deploy/setup-mac.sh            # prompts for LOOP_API_TOKEN
+```
+
+`deploy/setup-mac.sh` installs the MCP shim deps, checks the engine is reachable, and
+registers the `loop-engineering` MCP (scope `user`) in this machine's `claude`, pointed at
+the home engine over Tailscale. Then:
+
+```bash
+claude mcp list                     # loop-engineering ✓ Connected
+# VS Code: ⌘⇧P → Reload Window so the Claude Code MCP panel picks it up
+```
+
+Prerequisites on the client: **Node**, the **claude CLI** (`npm i -g @anthropic-ai/claude-code`),
+and **Tailscale** logged into the same tailnet. Get the token from the home box:
+
+```bash
+grep '^LOOP_API_TOKEN=' ~/.config/loop-engineering/env | cut -d= -f2
+```
+
+Override the engine URL / default repo if needed:
+
+```bash
+LOOP_API_URL=https://<host>.<tailnet>.ts.net \
+LOOP_DEFAULT_REPO=/home/you/Coding/LoopEngineering \
+  bash deploy/setup-mac.sh
+```
+
+Usage note: when adding tasks from the client, `repo_path` must be a path **on the home box**
+(the script sets `LOOP_DEFAULT_REPO` as the default). Repos that exist only on the client
+cannot run remotely.
