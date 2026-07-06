@@ -944,6 +944,16 @@ dialog menu { display: flex; justify-content: flex-end; gap: 10px; margin: 18px 
 .funnel-count { font-size: 18px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
 .funnel-label { margin-top: 4px; font-size: 11.5px; color: var(--text-3); }
 
+.discipline-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.discipline-table th, .discipline-table td {
+  text-align: right;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  font-variant-numeric: tabular-nums;
+}
+.discipline-table th:first-child, .discipline-table td:first-child { text-align: left; }
+.discipline-table th { color: var(--text-3); font-weight: 500; }
+
 @media (max-width: 720px) {
   .metrics { padding: 16px; }
 }

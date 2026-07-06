@@ -145,6 +145,32 @@
     }
   }
 
+  // ---- discipline A/B table (execution-discipline prompt experiment) -----
+  const disciplineTable = $('discipline-table');
+  const disciplineEmpty = $('discipline-empty');
+  function renderDisciplineAb(ab) {
+    const tbody = disciplineTable.querySelector('tbody');
+    tbody.replaceChildren();
+    const groups = (ab && ab.groups) || [];
+    if (!groups.some((g) => g.count > 0)) {
+      disciplineTable.hidden = true;
+      disciplineEmpty.hidden = false;
+      return;
+    }
+    disciplineTable.hidden = false;
+    disciplineEmpty.hidden = true;
+    for (const g of groups) {
+      const tr = el('tr');
+      tr.appendChild(el('td', null, g.discipline ? '開（on）' : '關（off）'));
+      tr.appendChild(el('td', null, String(g.count)));
+      tr.appendChild(el('td', null, g.avg_session_pct == null ? '–' : `${fmtNum(g.avg_session_pct)}%`));
+      tr.appendChild(el('td', null, fmtPct(g.attention_rate)));
+      tr.appendChild(el('td', null, g.avg_resume_count == null ? '–' : fmtNum(g.avg_resume_count)));
+      tr.appendChild(el('td', null, fmtDur(g.avg_cycle_min)));
+      tbody.appendChild(tr);
+    }
+  }
+
   // ---- load + poll --------------------------------------------------------
   const daysSelect = $('days-select');
   let timer = null;
@@ -160,6 +186,7 @@
     renderTrend(m.usage_trend);
     renderThroughput(m.throughput.by_day);
     renderFunnel(m.funnel);
+    renderDisciplineAb(m.discipline_ab);
   }
 
   daysSelect.addEventListener('change', load);

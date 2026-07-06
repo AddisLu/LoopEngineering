@@ -63,6 +63,17 @@
         <h2 class="chart-title">狀態漏斗</h2>
         <div id="funnel-row" class="funnel-row"></div>
       </section>
+
+      <section class="chart-card">
+        <h2 class="chart-title">執行紀律 A/B（實驗性）</h2>
+        <table id="discipline-table" class="discipline-table" hidden>
+          <thead>
+            <tr><th></th><th>任務數</th><th>平均 session %／任務</th><th>待確認率</th><th>平均續跑次數</th><th>平均週期</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+        <div id="discipline-empty" class="empty" hidden>此區間尚無結案任務可比較</div>
+      </section>
     </main>
 
     <script src="/metrics.js"></script>
