@@ -26,6 +26,8 @@ export const BOOL_KEYS = new Set([
   'prompt_discipline',
   // ADO/GitHub integration bridge
   'integration_pushback',
+  // mobile voice -> task intake
+  'voice_intake_enabled',
 ]);
 
 /** Accepted `integration_provider` values ('none' = the bridge is fully off). */
@@ -52,6 +54,8 @@ export const TUNABLE_KEYS = [
   'default_model',
   // execution-discipline prompt (experimental, opt-in)
   'prompt_discipline',
+  // mobile voice -> task intake
+  'voice_intake_enabled',
 ] as const;
 
 /** Accepted model aliases for coding runs ('' / 'default' = the claude CLI default). */

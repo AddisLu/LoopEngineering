@@ -1,5 +1,6 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import fastifyStatic from '@fastify/static';
+import fastifyMultipart from '@fastify/multipart';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type Database from 'better-sqlite3';
@@ -22,8 +23,11 @@ import { registerKnowledgeRoutes } from './knowledgeRoutes.js';
 import { registerDeployRoutes } from './deployRoutes.js';
 import { registerPipelineRoutes } from './pipelineRoutes.js';
 import { registerIntegrationRoutes } from './integrationRoutes.js';
+import { registerVoiceRoutes } from './voiceRoutes.js';
 import { environmentMap } from '../deploy/store.js';
 import { collectDistillMaterial, runDistiller, type DistillExec } from '../knowledge/distill.js';
+import type { TranscribeExec } from '../voice/transcribe.js';
+import type { StructureExec } from '../voice/structure.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WEB_DIR = path.resolve(__dirname, '..', '..', 'web');
@@ -33,6 +37,9 @@ export interface AppOptions {
   apiToken?: string | null;
   /** Test-only injection point for the close route's fire-and-forget distiller call. */
   distillExec?: DistillExec;
+  /** Test-only injection points for POST /api/voice/intake (zero audio/GPU/tokens). */
+  voiceTranscribeExec?: TranscribeExec;
+  voiceStructureExec?: StructureExec;
 }
 
 interface CreateTaskBody {
@@ -63,6 +70,7 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
   // here would let the env var override an intentional `apiToken: null`.
   const apiToken = opts.apiToken !== undefined ? opts.apiToken : (process.env.LOOP_API_TOKEN ?? null);
   const app = Fastify({ logger: false });
+  app.register(fastifyMultipart, { limits: { fileSize: 25 * 1024 * 1024 } });
 
   // --- bearer auth on /api/* (Tailscale is the primary boundary; this is layer 2) ---
   app.addHook('onRequest', async (req, reply) => {
@@ -392,6 +400,10 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
   registerDeployRoutes(app, db);
   registerPipelineRoutes(app, db);
   registerIntegrationRoutes(app, db);
+  registerVoiceRoutes(app, db, {
+    transcribeExec: opts.voiceTranscribeExec,
+    structureExec: opts.voiceStructureExec,
+  });
 
   app.register(fastifyStatic, { root: WEB_DIR, prefix: '/' });
 

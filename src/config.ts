@@ -36,6 +36,8 @@ export const paths = {
   // Persistent per-task workspace for coding_tool='generic' (non-git tasks): unlike a
   // worktree, this directory is NEVER cleaned up on close — it IS the deliverable.
   outputsDir: path.join(DATA_DIR, 'outputs'),
+  // Uploaded voice-intake audio, transcoded/transcribed then deleted (see voiceRoutes.ts).
+  voiceDir: path.join(DATA_DIR, 'voice'),
   // TokenBar integration (host)
   tokenbarMcpDir: process.env.TOKENBAR_MCP_DIR ? expand(process.env.TOKENBAR_MCP_DIR) : null,
   tokenCache: expand(
@@ -49,9 +51,17 @@ export const paths = {
 } as const;
 
 export function ensureDirs(): void {
-  for (const d of [paths.dataDir, paths.logsDir, paths.worktreesDir, paths.plansDir, paths.reviewsDir, paths.outputsDir]) {
+  for (const d of [paths.dataDir, paths.logsDir, paths.worktreesDir, paths.plansDir, paths.reviewsDir, paths.outputsDir, paths.voiceDir]) {
     fs.mkdirSync(d, { recursive: true });
   }
+}
+
+/** faster-whisper venv python (see scripts/transcribe.py); overridable for other hosts. */
+export function getVoicePython(): string {
+  return expand(
+    process.env.LOOP_VOICE_PYTHON ??
+      path.join(os.homedir(), '.local', 'share', 'loop-engineering', 'voice-venv', 'bin', 'python'),
+  );
 }
 
 /**
@@ -207,6 +217,14 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // never the DB. 'none' (default) disables both import and pushback regardless of creds.
   integration_provider: 'none',
   integration_pushback: 'false',
+
+  // mobile voice -> task intake (src/voice/, src/server/voiceRoutes.ts): record on the
+  // board/voice.html -> faster-whisper (RTX 2080 venv) transcribes -> an LLM cleans the
+  // transcript into task fields -> PREFILLS the new-task form (never auto-creates). Off
+  // by default = zero behavior change; voice_model/voice_terms_path only matter once enabled.
+  voice_intake_enabled: 'false',
+  voice_model: 'large-v3',
+  voice_terms_path: '/home/addis/Coding/VoiceToTemplate/terms.txt',
 };
 
 export const TOKEN_REFRESH_MS = 180_000; // TokenBar cadence
