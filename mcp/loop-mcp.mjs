@@ -169,7 +169,7 @@ server.registerTool('loop_add_task', {
     verification_steps: z.union([z.array(z.string()), z.string()]).optional().describe('Commands that must all exit 0 to pass. If omitted, auto-detected from the repo (e.g. ["npm run typecheck","npm test"]).'),
     setup_cmd: z.string().optional().describe('Deps install run before dispatch. If omitted, auto-detected (npm ci / pip install ...).'),
     plan: z.string().optional().describe('markdown text / .md path / URL. If omitted, synthesized from title+goal+verify.'),
-    coding_tool: z.enum(['claude-code', 'mock']).optional().describe('default "claude-code"; "mock" is a zero-token dry run.'),
+    coding_tool: z.enum(['claude-code', 'mock', 'generic']).optional().describe('default "claude-code"; "mock" is a zero-token dry run; "generic" runs the real agent in a persistent output dir with NO git/repo/PR — for non-coding work (reports, data analysis, one-off scripts). repo/base are skipped for generic; give it verify_mode=manual or llm (or explicit verification_steps to run in the output dir).'),
     complexity: z.enum(['S', 'M', 'L']).optional().describe('S/M/L — sets timeout, estimate, model routing (default M).'),
     priority: z.number().int().optional().describe('integer priority (default 2; lower runs first).'),
     model: z.string().optional().describe('sonnet | opus | default (optional).'),
@@ -183,11 +183,13 @@ server.registerTool('loop_add_task', {
   },
 }, async (a) => {
   const isMock = a.coding_tool === 'mock';
+  const isGeneric = a.coding_tool === 'generic';
+  const skipRepoDetect = isMock || isGeneric; // generic runs in a persistent non-git output dir
   const title = (a.title && a.title.trim()) ? a.title.trim().slice(0, 80) : firstLine(a.goal);
-  const repo = isMock ? (a.repo_path ?? null) : detectRepo(a.repo_path);
-  const base = isMock ? (a.base_branch ?? null) : detectBranch(repo, a.base_branch);
+  const repo = skipRepoDetect ? (a.repo_path ?? null) : detectRepo(a.repo_path);
+  const base = skipRepoDetect ? (a.base_branch ?? null) : detectBranch(repo, a.base_branch);
   let steps = normSteps(a.verification_steps);
-  if (!steps.length) steps = isMock ? ['true'] : detectVerify(repo);
+  if (!steps.length) steps = isMock ? ['true'] : isGeneric ? [] : detectVerify(repo);
   const setup = isMock ? null : detectSetup(repo, a.setup_cmd);
   const planText = (a.plan && a.plan.trim()) ? a.plan : synthPlan(title, a.goal, steps);
   const { plan_ref, plan_kind } = resolvePlan(planText, title);
@@ -394,6 +396,7 @@ function fmtResult(r) {
     r.branch ? `branch: ${r.branch}` : null,
     r.elapsedMin != null ? `elapsed: ${r.elapsedMin}m` : null,
     r.pr_url ? `PR: ${r.pr_url}` : null,
+    r.output_dir ? `output dir: ${r.output_dir} (${(r.output_files || []).length} file(s))` : null,
     r.fail_detail ? `failure:\n${r.fail_detail}` : null,
     r.review_md ? `\n--- gap review ---\n${String(r.review_md).slice(0, 2000)}` : null,
     r.verify_md ? `\n--- VERIFY.md (manual verification checklist) ---\n${String(r.verify_md).slice(0, 2000)}` : null,
