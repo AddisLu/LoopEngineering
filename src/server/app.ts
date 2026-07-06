@@ -20,6 +20,7 @@ import { computeMetrics } from './metrics.js';
 import type { Complexity } from '../config.js';
 import { registerKnowledgeRoutes } from './knowledgeRoutes.js';
 import { registerDeployRoutes } from './deployRoutes.js';
+import { registerPipelineRoutes } from './pipelineRoutes.js';
 import { environmentMap } from '../deploy/store.js';
 import { collectDistillMaterial, runDistiller, type DistillExec } from '../knowledge/distill.js';
 
@@ -388,6 +389,7 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
 
   registerKnowledgeRoutes(app, db);
   registerDeployRoutes(app, db);
+  registerPipelineRoutes(app, db);
 
   app.register(fastifyStatic, { root: WEB_DIR, prefix: '/' });
 

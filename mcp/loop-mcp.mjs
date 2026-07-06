@@ -564,5 +564,54 @@ server.registerTool('loop_rollback_deployment', {
   }
 });
 
+// ---- delivery pipeline templates (feature/fix/ship) ----
+
+server.registerTool('loop_run_pipeline', {
+  title: 'Run a Loop delivery pipeline template',
+  description:
+    "Instantiate a Loop pipeline template (e.g. built-ins 'feature', 'fix', 'ship') into a queued depends_on task chain in one action — " +
+    'ADO multi-stage pipelines, autonomous version: each stage reuses the V-chain verify modes (command/llm/manual) and the D3 deploy. ' +
+    'The first stage is queued immediately; later stages stay draft and auto-queue one at a time as each dependency closes. ' +
+    'A failing stage halts the chain (downstream stays waiting) — resolve it from the board like any other attention/failed task. ' +
+    "Use loop_list_tasks / the board to see progress; call this again for a fresh run of the same template.",
+  inputSchema: {
+    name: z.string().describe("REQUIRED. Pipeline template name, e.g. 'feature' | 'fix' | 'ship' (see the board or GET /api/pipelines for the full list)."),
+    goal: z.string().describe('REQUIRED. Shared goal for every stage — what the pipeline should accomplish end to end.'),
+    repo_path: z.string().optional().describe('Target git repo (absolute). If omitted, auto-detected from LOOP_DEFAULT_REPO / the MCP cwd (skipped for a template whose every stage is repo-less, e.g. all-deploy templates targeting no code).'),
+    base_branch: z.string().optional().describe('If omitted, auto-detected: origin default branch, else main/master.'),
+    environment: z.string().optional().describe("Environment for stages that don't set their own in the template (a stage's own environment, e.g. a deploy stage's target, always wins)."),
+    title: z.string().optional().describe('Label used in each stage task title, e.g. "<title>: implement". Defaults to the pipeline template name.'),
+    verification_steps: z.union([z.array(z.string()), z.string()]).optional().describe('Commands shared by every command-mode stage (e.g. ["npm run typecheck","npm test"]). If omitted, auto-detected from the repo like loop_add_task.'),
+  },
+}, async (a) => {
+  const repo = detectRepo(a.repo_path);
+  const base = detectBranch(repo, a.base_branch);
+  let steps = normSteps(a.verification_steps);
+  if (!steps.length) steps = detectVerify(repo);
+  try {
+    const result = await api(`/api/pipelines/${encodeURIComponent(a.name)}/run`, {
+      method: 'POST',
+      body: {
+        goal: a.goal,
+        repo_path: repo,
+        base_branch: base,
+        environment: a.environment ?? null,
+        title: a.title ?? null,
+        verification_steps: steps,
+      },
+    });
+    const rows = (result.tasks || []).map((t) => `${t.id}  ${String(t.status).padEnd(9)} ${t.stage_name ?? ''}  ${t.title}`);
+    return {
+      content: [{
+        type: 'text',
+        text: `Pipeline '${a.name}' -> ${result.task_ids?.length ?? 0} stage(s):\n${rows.join('\n')}\n\n` +
+          'The first stage is queued; later stages auto-queue as each dependency closes. Watch with loop_list_tasks / loop_wait_task.',
+      }],
+    };
+  } catch (e) {
+    return { content: [{ type: 'text', text: `Could not run pipeline '${a.name}': ${e.message}` }] };
+  }
+});
+
 const transport = new StdioServerTransport();
 await server.connect(transport);

@@ -36,6 +36,8 @@ import {
   type EnvironmentRow,
 } from './deploy/store.js';
 import { runRollback } from './orchestrator/deployTask.js';
+import { listPipelineDefs, getPipelineDef, importPipelineDefs } from './pipeline/store.js';
+import { materializePipeline } from './pipeline/materialize.js';
 
 const program = new Command();
 program.name('loop').description('Loop Engineering — token-aware coding-task scheduler').version('0.1.0');
@@ -472,6 +474,77 @@ deploy
     const result = await runRollback(db, cur.id);
     if (!result.ok && result.error) return fail(`rollback failed: ${result.error}`);
     console.log(`${envName}: rolled back -> commit ${result.record?.commit_sha ?? '(unknown)'} (${result.record?.status})`);
+  });
+
+const pipeline = program
+  .command('pipeline')
+  .description('delivery pipeline templates (feature/fix/ship) — instantiate a depends_on stage chain in one action');
+
+pipeline
+  .command('list')
+  .description('list pipeline templates')
+  .action(() => {
+    const defs = listPipelineDefs(getDb());
+    if (!defs.length) {
+      console.log('(no pipeline templates — seeded feature/fix/ship should exist by default)');
+      return;
+    }
+    for (const d of defs) {
+      console.log(`${pad(d.name, 10)} ${d.description ?? ''}`);
+      for (const s of d.stages) {
+        console.log(
+          `  - ${pad(s.name, 14)} tool=${s.coding_tool}` +
+            (s.environment ? ` env=${s.environment}` : '') +
+            (s.verify_mode ? ` verify=${s.verify_mode}` : ''),
+        );
+      }
+    }
+  });
+
+pipeline
+  .command('run <name>')
+  .description('instantiate a pipeline template into a queued depends_on task chain')
+  .requiredOption('--goal <goal>')
+  .option('--repo <path>', 'git repo path')
+  .option('--base <branch>', 'base branch')
+  .option('--env <name>', "environment for stages that don't set their own (a stage's own environment always wins)")
+  .option('--title <title>', 'label used in each stage task title (default: the pipeline name)')
+  .option('--verify <steps>', 'comma-separated verification commands, shared by every command-mode stage')
+  .action((name: string, o) => {
+    const db = getDb();
+    const def = getPipelineDef(db, name);
+    if (!def) return fail(`no such pipeline: ${name} (see 'loop pipeline list')`);
+    const tasks = materializePipeline(db, def, {
+      goal: o.goal,
+      repo_path: o.repo ?? null,
+      base_branch: o.base ?? null,
+      environment: o.env ?? null,
+      title: o.title ?? null,
+      verification_steps: o.verify ? String(o.verify).split(',').map((s: string) => s.trim()) : [],
+    });
+    console.log(`pipeline '${name}' -> ${tasks.length} stage(s):`);
+    for (const t of tasks) console.log(`  ${t.id}  ${pad(t.status, 8)} ${pad(t.stage_name ?? '', 14)} ${t.title}`);
+  });
+
+pipeline
+  .command('import [file]')
+  .description('bulk-import pipeline templates from a JSON file ({"items":[...]}); defaults to the bundled seed/pipelines/*.json')
+  .action((file: string | undefined) => {
+    const db = getDb();
+    let items: unknown[];
+    if (file) {
+      const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+      items = Array.isArray(data) ? data : Array.isArray(data.items) ? data.items : [data];
+    } else {
+      const dir = path.join(ENGINE_REPO_ROOT, 'seed', 'pipelines');
+      items = fs
+        .readdirSync(dir)
+        .filter((f) => f.endsWith('.json'))
+        .map((f) => JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')));
+    }
+    const result = importPipelineDefs(db, items);
+    console.log(`import: created=${result.created} updated=${result.updated} rejected=${result.rejected.length}`);
+    for (const r of result.rejected) console.log(`  [${r.index}] ${r.error}`);
   });
 
 program.parseAsync();
