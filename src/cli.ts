@@ -40,6 +40,9 @@ import { listPipelineDefs, getPipelineDef, importPipelineDefs } from './pipeline
 import { materializePipeline } from './pipeline/materialize.js';
 import { resolveProvider } from './integrations/config.js';
 import { importWorkItems } from './integrations/import.js';
+import { createSource, listSources, deleteSource, getSource } from './knowledge/ingest/sources.js';
+import type { SourceKind } from './knowledge/ingest/types.js';
+import { ingestSource, ingestAll } from './knowledge/ingest/ingest.js';
 
 const program = new Command();
 program.name('loop').description('Loop Engineering — token-aware coding-task scheduler').version('0.1.0');
@@ -571,6 +574,75 @@ program
     });
     console.log(`pulled: created=${result.created.length} skipped=${result.skipped.length}`);
     for (const t of result.created) console.log(`  ${t.id}  ${pad(t.status, 8)} ${t.title}`);
+  });
+
+const ingest = program.command('ingest').description('SSoT ingestion: register sources + run the walk->chunk->embed pipeline');
+
+ingest
+  .command('add')
+  .description('register an ingestion source (exactly one of --git/--folder/--vault)')
+  .option('--git <path>', 'git repo — tracked files via `git ls-files` (respects .gitignore)')
+  .option('--folder <path>', 'plain folder — recursive walk')
+  .option('--vault <path>', 'Obsidian-style markdown vault — recursive walk')
+  .option('--include <csv>', 'comma-separated include globs')
+  .option('--exclude <csv>', 'comma-separated exclude globs')
+  .option('--branch <name>', 'git ref to list from (git sources only; default: working tree)')
+  .option('--disabled', 'register disabled (skipped by `loop ingest run` with no source id)')
+  .action((o) => {
+    const kind: SourceKind | null = o.git ? 'git' : o.folder ? 'folder' : o.vault ? 'vault' : null;
+    const uri = o.git ?? o.folder ?? o.vault;
+    if (!kind || !uri) return fail('usage: loop ingest add --git|--folder|--vault <path>');
+    const source = createSource(getDb(), {
+      kind,
+      uri: path.resolve(uri),
+      config: {
+        include: o.include ? String(o.include).split(',').map((s: string) => s.trim()).filter(Boolean) : undefined,
+        exclude: o.exclude ? String(o.exclude).split(',').map((s: string) => s.trim()).filter(Boolean) : undefined,
+        branch: o.branch,
+      },
+      enabled: !o.disabled,
+    });
+    console.log(`${source.id}  [${source.kind}] ${source.uri}`);
+  });
+
+ingest
+  .command('list')
+  .description('list ingestion sources')
+  .action(() => {
+    const sources = listSources(getDb());
+    if (!sources.length) return console.log('(no sources)');
+    for (const s of sources) {
+      console.log(`${s.id}  [${pad(s.kind, 14)}] ${pad(s.enabled ? 'on' : 'off', 4)} ${s.uri}  last=${s.last_ingested_at ?? '-'}`);
+    }
+  });
+
+ingest
+  .command('rm <id>')
+  .description('remove an ingestion source (cascades its documents/chunks)')
+  .action((id) => {
+    if (!deleteSource(getDb(), id)) return fail(`no such source: ${id}`);
+    console.log(`removed ${id}`);
+  });
+
+ingest
+  .command('run [source]')
+  .description('run the ingest pipeline — all enabled sources, or one by id')
+  .action(async (sourceId: string | undefined) => {
+    const db = getDb();
+    const report = (r: Awaited<ReturnType<typeof ingestSource>>) =>
+      console.log(
+        `${r.source_id}: +${r.documents_created} created, ${r.documents_replaced} replaced, ` +
+          `${r.documents_invalidated} invalidated, ${r.chunks_created} chunks, ${r.skipped_unchanged} unchanged`,
+      );
+    if (sourceId) {
+      const source = getSource(db, sourceId);
+      if (!source) return fail(`no such source: ${sourceId}`);
+      report(await ingestSource(db, source));
+      return;
+    }
+    const results = await ingestAll(db);
+    if (!results.length) return console.log('(no enabled sources)');
+    for (const r of results) report(r);
   });
 
 program.parseAsync();

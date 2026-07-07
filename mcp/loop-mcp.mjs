@@ -652,5 +652,29 @@ server.registerTool('loop_pull_workitems', {
   }
 });
 
+// ---- SSoT ingestion (D-Phase1): trigger the walk->chunk->embed pipeline ----
+
+server.registerTool('loop_ingest', {
+  title: 'Run SSoT ingestion',
+  description:
+    'Trigger the SSoT ingest pipeline (governed walk -> chunk -> embed -> store) for one registered source or every ' +
+    'enabled source. Sources (git repos / folders / Obsidian vaults) are registered on the server host via `loop ingest add` ' +
+    '(not exposed here). Incremental by content hash — unchanged files are skipped, changed files supersede their prior ' +
+    'version, removed files are invalidated (history is kept, never deleted).',
+  inputSchema: {
+    source_id: z.string().optional().describe('Ingest only this source id (see GET /api/sources on the board). Omit to run every enabled source.'),
+  },
+}, async ({ source_id }) => {
+  try {
+    const result = await api('/api/ingest', { method: 'POST', body: { source_id: source_id ?? undefined } });
+    const rows = (result.results || []).map((r) =>
+      `${r.source_id}: +${r.documents_created} created, ${r.documents_replaced} replaced, ` +
+      `${r.documents_invalidated} invalidated, ${r.chunks_created} chunks, ${r.skipped_unchanged} unchanged`);
+    return { content: [{ type: 'text', text: rows.join('\n') || '(no sources ingested)' }] };
+  } catch (e) {
+    return { content: [{ type: 'text', text: `Ingest failed: ${e.message}` }] };
+  }
+});
+
 const transport = new StdioServerTransport();
 await server.connect(transport);

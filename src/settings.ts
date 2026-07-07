@@ -13,6 +13,8 @@ export const NONNEG_KEYS = new Set([
   'voice_worker_idle_min',
   // SSoT/RAG Phase 0
   'embed_dim', 'rag_top_k', 'embed_worker_idle_min',
+  // SSoT/RAG Phase 1
+  'ingest_max_file_kb',
 ]);
 // values must be a number in [0, 1] (a fraction/weight, unlike the 0-100 PERCENT_KEYS)
 export const UNIT_INTERVAL_KEYS = new Set(['rag_hybrid_alpha']);

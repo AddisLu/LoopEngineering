@@ -251,6 +251,11 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // warm embed worker (scripts/embed_daemon.py, reuses src/voice/daemon.ts's WarmWorker):
   // idle minutes before the daemon self-terminates to free VRAM (shared GPU with whisper).
   embed_worker_idle_min: '10',
+
+  // SSoT/RAG Phase 1 (src/knowledge/ingest/*.ts): governed ingest pipeline. Per-file size
+  // cap in KB — a file over this never reaches the chunker/embedder (binaries, huge logs,
+  // generated dumps). Chunks/embeddings themselves still only happen when rag_enabled.
+  ingest_max_file_kb: '1024',
 };
 
 export const TOKEN_REFRESH_MS = 180_000; // TokenBar cadence
