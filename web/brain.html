@@ -49,12 +49,17 @@
       <section id="graph-panel" class="graph-panel" hidden>
         <div class="graph-header">
           <span id="graph-title" class="graph-title"></span>
+          <span id="graph-counts" class="graph-counts"></span>
           <div class="graph-header-actions">
+            <label class="graph-density-label">展示程度
+              <input id="graph-density" type="range" min="1" max="10" value="5" />
+            </label>
             <label class="graph-depth-label">展開跳數
               <input id="graph-depth" type="number" min="1" max="6" value="2" />
             </label>
             <button id="graph-zoom-out" class="btn sm icon-btn" type="button" title="縮小" aria-label="縮小">－</button>
             <button id="graph-zoom-in" class="btn sm icon-btn" type="button" title="放大" aria-label="放大">＋</button>
+            <button id="graph-fullscreen" class="btn sm icon-btn" type="button" title="全螢幕" aria-label="全螢幕">⛶</button>
             <button id="graph-reset" class="btn sm" type="button">重置視圖</button>
             <button id="graph-close" class="btn sm" type="button">關閉</button>
           </div>
@@ -70,12 +75,26 @@
           </div>
         </div>
 
-        <div id="graph-empty" class="empty" hidden>此節點尚無關聯</div>
-        <div class="graph-canvas-wrap">
-          <canvas id="graph-canvas" class="graph-canvas" width="880" height="560"></canvas>
-          <div id="graph-tooltip" class="graph-tooltip" hidden></div>
+        <div class="graph-body">
+          <aside id="graph-category-tree" class="graph-category-tree" aria-label="分類樹" hidden></aside>
+
+          <div class="graph-main">
+            <div id="graph-empty" class="empty" hidden>此節點尚無關聯</div>
+            <div class="graph-canvas-wrap">
+              <canvas id="graph-canvas" class="graph-canvas" width="880" height="560"></canvas>
+              <div id="graph-tooltip" class="graph-tooltip" hidden></div>
+            </div>
+            <p class="graph-hint">拖曳空白處平移、滾輪縮放、拖曳節點調整位置、懸停高亮鄰居、點一下節點聚焦展開並查看詳情。</p>
+          </div>
+
+          <aside id="graph-detail-panel" class="graph-detail-panel" hidden>
+            <div class="graph-detail-header">
+              <span id="graph-detail-title" class="graph-detail-title"></span>
+              <button id="graph-detail-close" class="btn sm icon-btn" type="button" title="關閉詳情" aria-label="關閉詳情">×</button>
+            </div>
+            <div id="graph-detail-body" class="graph-detail-body"></div>
+          </aside>
         </div>
-        <p class="graph-hint">拖曳空白處平移、滾輪縮放、拖曳節點調整位置、懸停高亮鄰居、點一下節點聚焦展開。</p>
       </section>
 
       <section id="draft-edges-panel" class="draft-edges-panel" hidden>

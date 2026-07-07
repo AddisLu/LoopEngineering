@@ -12,6 +12,8 @@ import {
   worldToScreen,
   hitTestVertex,
   vertexRadius,
+  categoryTree,
+  categoryFocusVertices,
 } from '/graph-layout.js';
 
 // ---- auth / token ----------------------------------------------------
@@ -316,6 +318,14 @@ const graphScopeFilter = $('graph-scope-filter');
 const graphShowDocuments = $('graph-show-documents');
 const graphKindChips = $('graph-kind-chips');
 const graphSourceChips = $('graph-source-chips');
+const graphCounts = $('graph-counts');
+const graphDensityInput = $('graph-density');
+const graphFullscreenBtn = $('graph-fullscreen');
+const graphCategoryTree = $('graph-category-tree');
+const graphDetailPanel = $('graph-detail-panel');
+const graphDetailTitle = $('graph-detail-title');
+const graphDetailBody = $('graph-detail-body');
+const graphDetailClose = $('graph-detail-close');
 
 let graphState = null; // { vertices: Map<id, Vertex>, edges: Edge[] } — see graph-layout.js
 let graphView = { offsetX: 0, offsetY: 0, scale: 1 };
@@ -358,7 +368,12 @@ const GRAPH_VISUAL = Object.freeze({
   zoomAnimMs: 420,
 });
 
-let graphLabelDensity = 0; // G4 hook: a future density slider biases the LoD zoom threshold
+let graphLabelDensity = 0; // G4: driven by the 展示程度 slider, biases the LoD zoom threshold
+
+// ---- G4: category tree (left) + node detail panel (right) --------------
+let selectedCategory = null; // { top, sub: string|null } | null -- null = "全部" (no focus)
+let categoryFocus = null; // categoryFocusVertices(graphState, selectedCategory) result, or null
+let currentDetailVertexId = null; // guards against a stale async evidence fetch clobbering the panel
 
 function currentGraphFilters() {
   return {
@@ -372,7 +387,9 @@ function currentGraphFilters() {
 function visibleGraphVertices() {
   if (!graphState) return [];
   const filters = currentGraphFilters();
-  return [...graphState.vertices.values()].filter((v) => matchesFilter(v, filters));
+  let vertices = [...graphState.vertices.values()].filter((v) => matchesFilter(v, filters));
+  if (categoryFocus) vertices = vertices.filter((v) => categoryFocus.visible.has(v.id));
+  return vertices;
 }
 
 function cssVar(name, fallback) {
@@ -431,7 +448,8 @@ function resizeGraphCanvas() {
 
 /** Dark immersive background: a solid base plus a soft off-center glow that falls off
  * into a vignette at the edges — the "night sky" the graph floats in, independent of the
- * page's light/dark theme (see --graph-bg-*/--graph-vignette in styles.css). */
+ * page's light/dark theme (see the --graph-bg-1/--graph-bg-2/--graph-vignette custom
+ * properties in styles.css). */
 function drawBackground(cssW, cssH) {
   gctx.fillStyle = cssVar('--graph-bg-1', '#05070d');
   gctx.fillRect(0, 0, cssW, cssH);
@@ -467,8 +485,10 @@ function drawGraph() {
     const b = graphState.vertices.get(e.dst);
     const pa = worldToScreen(graphView, a.x, a.y, cssW, cssH);
     const pb = worldToScreen(graphView, b.x, b.y, cssW, cssH);
-    const related = highlight && (e.src === highlightId || e.dst === highlightId);
-    gctx.globalAlpha = !highlight ? GRAPH_VISUAL.edgeAlphaBase : related ? GRAPH_VISUAL.edgeAlphaHi : GRAPH_VISUAL.edgeAlphaDim;
+    const inCategoryFocus = categoryFocus && (categoryFocus.focused.has(e.src) || categoryFocus.focused.has(e.dst));
+    const related = (highlight && (e.src === highlightId || e.dst === highlightId)) || inCategoryFocus;
+    const dimSource = highlight || categoryFocus;
+    gctx.globalAlpha = !dimSource ? GRAPH_VISUAL.edgeAlphaBase : related ? GRAPH_VISUAL.edgeAlphaHi : GRAPH_VISUAL.edgeAlphaDim;
     const grad = gctx.createLinearGradient(pa.x, pa.y, pb.x, pb.y);
     grad.addColorStop(0, vertexColor(a));
     grad.addColorStop(1, vertexColor(b));
@@ -495,7 +515,7 @@ function drawGraph() {
     const p = worldToScreen(graphView, v.x, v.y, cssW, cssH);
     const r = vertexRadius(v) * Math.sqrt(graphView.scale);
     const selected = v.id === graphCenterId || v.id === graphFocusId || v.id === hoveredVertexId;
-    const dimmed = highlight && !highlight.has(v.id);
+    const dimmed = (highlight && !highlight.has(v.id)) || (categoryFocus && !categoryFocus.focused.has(v.id));
 
     gctx.globalAlpha = dimmed ? GRAPH_VISUAL.nodeAlphaDim : 1;
     const color = vertexColor(v);
@@ -588,6 +608,72 @@ function populateGraphFilterChips() {
   }
 }
 
+/** Top「實體 N・關係 M」 counts (GRAPH G4): the full live graph state, not just what
+ * passes the current filters -- filtering hides vertices, it doesn't shrink the graph. */
+function updateGraphCounts() {
+  graphCounts.textContent = graphState ? `實體 ${graphState.vertices.size} · 關係 ${graphState.edges.length}` : '';
+}
+
+function categorySwatchColor(top) {
+  const c = CATEGORY_HSL[top] ?? CATEGORY_DEFAULT_HSL;
+  return `hsl(${c.h} ${c.s}% ${c.l}%)`;
+}
+
+/** Recomputes categoryFocus from the current selectedCategory (see categoryFocusVertices
+ * in graph-layout.js) -- call after selectedCategory changes or graphState is rebuilt. */
+function updateCategoryFocus() {
+  categoryFocus = graphState && selectedCategory ? categoryFocusVertices(graphState, selectedCategory) : null;
+}
+
+/** GRAPH G4: left category tree/legend -- built from the live graphState's categories
+ * (only view=brain vertices carry `category`, so this stays empty/hidden for a
+ * node-centered 關聯 view). Clicking a bucket sets selectedCategory (focus-filter, see
+ * visibleGraphVertices/drawGraph); "全部" clears it back to showing everything. */
+function renderCategoryTree() {
+  graphCategoryTree.replaceChildren();
+  const tree = graphState ? categoryTree(graphState) : new Map();
+  if (!tree.size) {
+    graphCategoryTree.hidden = true;
+    return;
+  }
+  graphCategoryTree.hidden = false;
+
+  const select = (next) => {
+    selectedCategory = next;
+    updateCategoryFocus();
+    renderCategoryTree();
+  };
+
+  const allBtn = el('button', 'chip-btn category-tree-all', '全部');
+  allBtn.type = 'button';
+  allBtn.classList.toggle('active', !selectedCategory);
+  allBtn.onclick = () => select(null);
+  graphCategoryTree.appendChild(allBtn);
+
+  for (const [top, info] of [...tree.entries()].sort((a, b) => b[1].count - a[1].count)) {
+    const topBtn = el('button', 'chip-btn category-tree-top');
+    topBtn.type = 'button';
+    const swatch = el('span', 'category-swatch');
+    swatch.style.background = categorySwatchColor(top);
+    topBtn.appendChild(swatch);
+    topBtn.appendChild(el('span', 'category-tree-label', top));
+    topBtn.appendChild(el('span', 'chip mono category-count', String(info.count)));
+    topBtn.classList.toggle('active', selectedCategory?.top === top && !selectedCategory.sub);
+    topBtn.onclick = () => select({ top, sub: null });
+    graphCategoryTree.appendChild(topBtn);
+
+    for (const [sub, count] of [...info.subs.entries()].sort((a, b) => b[1] - a[1])) {
+      const subBtn = el('button', 'chip-btn category-tree-sub');
+      subBtn.type = 'button';
+      subBtn.appendChild(el('span', 'category-tree-label', sub));
+      subBtn.appendChild(el('span', 'chip mono category-count', String(count)));
+      subBtn.classList.toggle('active', selectedCategory?.top === top && selectedCategory?.sub === sub);
+      subBtn.onclick = () => select({ top, sub });
+      graphCategoryTree.appendChild(subBtn);
+    }
+  }
+}
+
 async function fetchGraph(nodeId, depth, view) {
   const qs = new URLSearchParams();
   if (nodeId) qs.set('nodeId', nodeId);
@@ -603,12 +689,16 @@ async function fetchGraph(nodeId, depth, view) {
 async function openGraphView(nodeId) {
   graphPanel.hidden = false;
   graphEmpty.hidden = true;
+  graphDetailPanel.hidden = true;
+  currentDetailVertexId = null;
   graphCenterId = nodeId ?? null;
   graphFocusId = null;
   hoveredVertexId = null;
   viewAnim = null;
   graphView = { offsetX: 0, offsetY: 0, scale: 1 };
   graphViewMode = nodeId ? 'default' : 'brain';
+  selectedCategory = null;
+  categoryFocus = null;
 
   let g;
   try {
@@ -616,6 +706,7 @@ async function openGraphView(nodeId) {
   } catch (e) {
     graphState = null;
     graphTitle.textContent = '';
+    graphCounts.textContent = '';
     graphEmpty.hidden = false;
     graphEmpty.textContent = '載入圖譜失敗：' + e;
     return;
@@ -625,6 +716,8 @@ async function openGraphView(nodeId) {
   computeDegrees(graphState);
   reheat(graphState);
   populateGraphFilterChips();
+  renderCategoryTree();
+  updateGraphCounts();
 
   graphTitle.textContent = nodeId
     ? (graphState.vertices.get(nodeId)?.label ?? '')
@@ -658,6 +751,9 @@ async function expandVertex(vertex) {
   computeDegrees(graphState);
   reheat(graphState);
   populateGraphFilterChips();
+  renderCategoryTree();
+  updateCategoryFocus();
+  updateGraphCounts();
   graphEmpty.hidden = true;
 }
 
@@ -676,7 +772,137 @@ function animateViewTo(target, duration = GRAPH_VISUAL.zoomAnimMs) {
   viewAnim = { from: { ...graphView }, to: target, start: performance.now(), duration };
 }
 
-$('graph-close').onclick = () => { graphPanel.hidden = true; stopGraphLoop(); };
+/** GRAPH G4: right detail panel for a clicked node -- title/category/source, a clickable
+ * neighbor list (jumps focus to that neighbor), and evidence: curated nodes fetch
+ * GET /api/knowledge/:id/evidence (same citations as the list's 佐證 button); documents
+ * show their uri/doc_kind directly (no evidence endpoint for them). Ends with the
+ * "用此脈絡問 AI" action (see askAiAboutVertex). */
+async function showNodeDetail(vertex) {
+  currentDetailVertexId = vertex.id;
+  graphDetailPanel.hidden = false;
+  graphDetailTitle.textContent = vertex.label ?? '';
+  graphDetailBody.replaceChildren();
+
+  const meta = el('div', 'graph-detail-meta');
+  if (vertex.category?.top) meta.appendChild(el('span', 'chip mono', vertex.category.top));
+  if (vertex.category?.sub) meta.appendChild(el('span', 'chip mono', vertex.category.sub));
+  const source = vertex.type === 'document' ? vertex.raw.source_id : vertex.raw.source;
+  if (source) meta.appendChild(el('span', 'chip', String(source)));
+  graphDetailBody.appendChild(meta);
+
+  const neighborsSection = el('div', 'graph-detail-section');
+  neighborsSection.appendChild(el('div', 'settings-group', '關聯'));
+  const neighborIdList = [...neighborIds(graphState, vertex.id)].filter((id) => id !== vertex.id);
+  if (!neighborIdList.length) {
+    neighborsSection.appendChild(el('div', 'muted', '（尚無關聯）'));
+  } else {
+    for (const nid of neighborIdList) {
+      const nv = graphState.vertices.get(nid);
+      if (!nv) continue;
+      const btn = el('button', 'btn sm graph-detail-neighbor', nv.label ?? nid);
+      btn.type = 'button';
+      btn.onclick = () => {
+        focusVertex(nv);
+        showNodeDetail(nv);
+      };
+      neighborsSection.appendChild(btn);
+    }
+  }
+  graphDetailBody.appendChild(neighborsSection);
+
+  const evSection = el('div', 'graph-detail-section');
+  evSection.appendChild(el('div', 'settings-group', '證據'));
+  if (vertex.type === 'document') {
+    const line = `${vertex.raw.doc_kind ?? ''} ${vertex.raw.uri ?? vertex.raw.path ?? ''}`.trim();
+    evSection.appendChild(el('div', 'muted', line || '（無來源資訊）'));
+  } else {
+    evSection.appendChild(el('div', 'muted', '載入中…'));
+  }
+  graphDetailBody.appendChild(evSection);
+
+  appendAskAiSection(vertex);
+
+  if (vertex.type !== 'document') {
+    let evidence = null;
+    try {
+      const res = await api(`/api/knowledge/${vertex.id}/evidence`, 'GET');
+      evidence = res.evidence || [];
+    } catch (e) {
+      evidence = null;
+    }
+    if (currentDetailVertexId !== vertex.id) return; // panel moved on while this was in flight
+    evSection.replaceChildren(el('div', 'settings-group', '證據'));
+    if (evidence === null) {
+      evSection.appendChild(el('div', 'muted', '（載入佐證失敗）'));
+    } else if (!evidence.length) {
+      evSection.appendChild(el('div', 'muted', '（尚無語料佐證）'));
+    } else {
+      for (const ev of evidence) {
+        const row = el('div', 'evidence-row');
+        const lineRef = ev.start_line != null ? `:${ev.start_line}-${ev.end_line ?? ev.start_line}` : '';
+        row.appendChild(el('span', 'chip mono', `${ev.path}${lineRef}`));
+        row.appendChild(el('div', 'evidence-text', String(ev.text || '').replace(/\s+/g, ' ').trim().slice(0, 200)));
+        evSection.appendChild(row);
+      }
+    }
+  }
+}
+
+/** "用此脈絡問 AI" (GRAPH G4): POSTs the node + its neighbors as context to the existing
+ * POST /api/report endpoint (see src/server/reportRoutes.ts) and shows the markdown reply
+ * as plain text (no md->html). That endpoint 404s while `report_enabled` is off (its
+ * default) -- treated as "feature not available" and disabled after the first failure,
+ * rather than surfaced as a hard error. */
+function appendAskAiSection(vertex) {
+  const section = el('div', 'graph-detail-section graph-ask-ai');
+  const btn = el('button', 'btn sm primary', '用此脈絡問 AI');
+  btn.type = 'button';
+  const out = el('div', 'graph-ask-ai-out muted');
+  out.hidden = true;
+  btn.onclick = () => askAiAboutVertex(vertex, btn, out);
+  section.appendChild(btn);
+  section.appendChild(out);
+  graphDetailBody.appendChild(section);
+}
+
+async function askAiAboutVertex(vertex, btn, out) {
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '詢問中…';
+  out.hidden = false;
+  out.className = 'graph-ask-ai-out muted';
+  out.textContent = '';
+
+  const neighborLabels = [...neighborIds(graphState, vertex.id)]
+    .filter((id) => id !== vertex.id)
+    .map((id) => graphState.vertices.get(id)?.label)
+    .filter(Boolean)
+    .slice(0, 8);
+  const topic = vertex.category?.top ?? vertex.kind ?? '';
+  const description = `請針對知識圖節點「${vertex.label}」（${topic}）提供脈絡摘要與建議。相關節點：${neighborLabels.join('、') || '（無）'}`;
+
+  try {
+    const r = await postJSON('/api/report', { description });
+    out.className = 'graph-ask-ai-out';
+    out.textContent = r.markdown || '（無回應內容）';
+    btn.disabled = false;
+    btn.textContent = original;
+  } catch (e) {
+    out.className = 'graph-ask-ai-out muted';
+    out.textContent = '此功能目前未啟用';
+    btn.textContent = original;
+    // leave the button disabled: the endpoint isn't available, so retrying would just fail again
+  }
+}
+
+graphDetailClose.onclick = () => { graphDetailPanel.hidden = true; currentDetailVertexId = null; };
+
+$('graph-close').onclick = () => {
+  graphPanel.hidden = true;
+  graphDetailPanel.hidden = true;
+  currentDetailVertexId = null;
+  stopGraphLoop();
+};
 $('graph-btn').onclick = () => openGraphView(null);
 $('graph-reset').onclick = () => {
   viewAnim = null;
@@ -688,6 +914,20 @@ $('graph-zoom-out').onclick = () => { graphView.scale = Math.max(graphView.scale
 graphDepthInput.addEventListener('change', () => {
   if (graphCenterId) openGraphView(graphCenterId);
 });
+
+// GRAPH G4: 展示程度 slider (1..10, default 5 = unbiased) -- biases graphLabelDensity, the
+// existing LoD hook consumed by shouldShowLabel's `scale` in drawGraph.
+graphDensityInput.addEventListener('input', () => {
+  graphLabelDensity = (Number(graphDensityInput.value) - 5) * 0.25;
+});
+
+// GRAPH G4: fullscreen immersion -- resizeGraphCanvas() already reads the canvas's CSS
+// box size every frame (see drawGraph), so no extra resize wiring is needed here; the
+// fullscreen CSS (styles.css .graph-panel:fullscreen) just gives that box more room.
+graphFullscreenBtn.onclick = () => {
+  if (document.fullscreenElement) document.exitFullscreen?.();
+  else graphPanel.requestFullscreen?.();
+};
 
 // ---- canvas interaction: pan (drag empty space) / zoom (wheel) / drag node / click to expand ----
 let dragTarget = null; // a vertex object, or the string 'pan'
@@ -733,7 +973,10 @@ window.addEventListener('mousemove', (evt) => {
 window.addEventListener('mouseup', () => {
   if (dragTarget && dragTarget !== 'pan') {
     dragTarget.fixed = false;
-    if (!dragMoved) focusVertex(dragTarget);
+    if (!dragMoved) {
+      focusVertex(dragTarget);
+      showNodeDetail(dragTarget);
+    }
   }
   dragTarget = null;
   panStart = null;
