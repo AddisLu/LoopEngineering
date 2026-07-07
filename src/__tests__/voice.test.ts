@@ -5,7 +5,12 @@ import { openTestDb, setSetting } from '../db/index.js';
 import { buildApp } from '../server/app.js';
 import { setCachedUsage } from '../token/usage.js';
 import { transcribe, type TranscribeExec } from '../voice/transcribe.js';
-import { structureTranscript, parseStructured, type StructureExec } from '../voice/structure.js';
+import {
+  structureTranscript,
+  parseStructured,
+  _setClaudeCliCacheForTests,
+  type StructureExec,
+} from '../voice/structure.js';
 import { seedGlossaryTerms, glossaryTermsForPrompt } from '../voice/glossary.js';
 import { listNodes, upsertNode, invalidateNode } from '../knowledge/store.js';
 import { WarmWorker, shutdownWarmWorkers, type ChildLike, type SpawnFn } from '../voice/daemon.js';
@@ -145,6 +150,46 @@ describe('structureTranscript', () => {
     const out = await structureTranscript(db, 'transcript', exec);
     expect(out).toBeNull();
     expect(calls).toBe(0);
+  });
+});
+
+// ---- review #5: hasClaudeCli() is cached (module-scope, computed once) ----
+
+describe('structureTranscript: hasClaudeCli caching', () => {
+  afterEach(() => {
+    _setClaudeCliCacheForTests(null); // don't leak a forced value into other test files
+  });
+
+  it('a forced-false cache short-circuits to null without needing exec at all', async () => {
+    _setClaudeCliCacheForTests(false);
+    let calls = 0;
+    const exec: StructureExec = async () => {
+      calls++;
+      return JSON.stringify({ title: 't', goal: 'g' });
+    };
+    const out = await structureTranscript(db, 'transcript', exec);
+    expect(out).toBeNull();
+    expect(calls).toBe(0);
+  });
+
+  it('caches the presence check — a PATH change after the first call does not affect the cached result', async () => {
+    _setClaudeCliCacheForTests(null);
+    const exec: StructureExec = async () => JSON.stringify({ title: 't', goal: 'g' });
+
+    // first call: real environment has `claude` on PATH (dev sandbox) -> computes + caches true
+    const first = await structureTranscript(db, 'transcript', exec);
+    expect(first).not.toBeNull();
+
+    // if hasClaudeCli() re-ran `which claude` on every call, clearing PATH would now make it
+    // fail; the cached result must stick instead.
+    const origPath = process.env.PATH;
+    process.env.PATH = '';
+    try {
+      const second = await structureTranscript(db, 'transcript', exec);
+      expect(second).not.toBeNull();
+    } finally {
+      process.env.PATH = origPath;
+    }
   });
 });
 

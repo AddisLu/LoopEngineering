@@ -40,13 +40,26 @@ export type StructureExec = (prompt: string) => Promise<string | null>;
 const VALID_COMPLEXITY = new Set<Complexity>(['S', 'M', 'L']);
 const VALID_TASK_TYPE = new Set<TaskType>(['coding', 'scheduled', 'generic', 'unknown']);
 
+// Cached at module scope (computed once): this runs synchronously in the request path
+// (every voice intake) and `which` is a real process spawn — re-running it per request
+// would stall the event loop on every call for a result that never changes at runtime.
+let claudeCliCache: boolean | null = null;
+
 function hasClaudeCli(): boolean {
-  try {
-    execFileSync('which', ['claude'], { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
+  if (claudeCliCache === null) {
+    try {
+      execFileSync('which', ['claude'], { stdio: 'ignore' });
+      claudeCliCache = true;
+    } catch {
+      claudeCliCache = false;
+    }
   }
+  return claudeCliCache;
+}
+
+/** Test-only: reset/force the cached claude-CLI-presence result (see hasClaudeCli above). */
+export function _setClaudeCliCacheForTests(present: boolean | null): void {
+  claudeCliCache = present;
 }
 
 function stripFences(s: string): string {
