@@ -363,6 +363,10 @@ describe('glossaryTermsForPrompt', () => {
 interface FakeChild {
   child: ChildLike;
   writes: string[];
+  /** Events killChild() asked to detach — NOT actually cleared here (see below), so tests
+   * can still manually emit a "late" event after kill and prove the identity check (not
+   * just listener removal) is what neutralizes it. */
+  removedEvents: string[];
   emitData: (s: string) => void;
   emitExit: () => void;
   emitError: (e: Error) => void;
@@ -372,18 +376,24 @@ function makeFakeChild(): FakeChild {
   const listeners: Record<string, Array<(...args: unknown[]) => void>> = {};
   const stdoutListeners: Record<string, Array<(chunk: Buffer | string) => void>> = {};
   const writes: string[] = [];
+  const removedEvents: string[] = [];
   let killed = false;
   const child: ChildLike = {
     stdin: { write: (chunk: string) => { writes.push(chunk); return true; } },
-    stdout: { on: (event, cb) => { (stdoutListeners[event] ??= []).push(cb); } },
-    stderr: { on: () => {} },
+    stdout: {
+      on: (event, cb) => { (stdoutListeners[event] ??= []).push(cb); },
+      removeAllListeners: (event) => { removedEvents.push(`stdout:${event}`); },
+    },
+    stderr: { on: () => {}, removeAllListeners: (event) => { removedEvents.push(`stderr:${event}`); } },
     on: (event, cb) => { (listeners[event] ??= []).push(cb as (...args: unknown[]) => void); },
+    removeAllListeners: (event) => { removedEvents.push(`proc:${event}`); },
     kill: () => { killed = true; },
     get killed() { return killed; },
   };
   return {
     child,
     writes,
+    removedEvents,
     emitData: (s) => (stdoutListeners['data'] ?? []).forEach((cb) => cb(s)),
     emitExit: () => (listeners['exit'] ?? []).forEach((cb) => cb()),
     emitError: (e) => (listeners['error'] ?? []).forEach((cb) => cb(e)),
@@ -469,6 +479,81 @@ describe('WarmWorker', () => {
     await vi.advanceTimersByTimeAsync(5001);
     await assertion;
     expect(worker.isAlive()).toBe(false);
+  });
+
+  // ---- review #1: stale child exit/data must never corrupt a since-respawned child ----
+
+  it('ignores a stale "exit" from an old child after kill+immediate respawn — new child is not nulled, queued request still resolves', async () => {
+    const fakes: FakeChild[] = [];
+    const spawnFn: SpawnFn = () => {
+      const f = makeFakeChild();
+      fakes.push(f);
+      return f.child;
+    };
+    const worker = new WarmWorker(spawnFn, '/fake/python', '/fake/daemon.py', () => 10, 5000);
+
+    const p1 = worker.transcribe('/a.webm', '/terms.txt');
+    fakes[0].emitData(JSON.stringify({ text: 'first' }) + '\n');
+    await p1;
+
+    worker.killChild(); // e.g. idle timeout or per-request timeout firing
+    expect(worker.isAlive()).toBe(false);
+
+    const p2 = worker.transcribe('/b.webm', '/terms.txt'); // respawns immediately -> fakes[1]
+    expect(fakes).toHaveLength(2);
+    expect(worker.isAlive()).toBe(true);
+
+    // old child's OS process only now gets around to reporting exit (a real, late signal) —
+    // this must be a no-op on the already-replaced worker state.
+    fakes[0].emitExit();
+
+    expect(worker.isAlive()).toBe(true);
+    fakes[1].emitData(JSON.stringify({ text: 'second' }) + '\n');
+    await expect(p2).resolves.toBe('second');
+  });
+
+  it('ignores stale stdout "data" from an old child after kill+immediate respawn', async () => {
+    const fakes: FakeChild[] = [];
+    const spawnFn: SpawnFn = () => {
+      const f = makeFakeChild();
+      fakes.push(f);
+      return f.child;
+    };
+    const worker = new WarmWorker(spawnFn, '/fake/python', '/fake/daemon.py', () => 10, 5000);
+
+    const p1 = worker.transcribe('/a.webm', '/terms.txt');
+    fakes[0].emitData(JSON.stringify({ text: 'first' }) + '\n');
+    await p1;
+    worker.killChild();
+
+    const p2 = worker.transcribe('/b.webm', '/terms.txt');
+    expect(fakes).toHaveLength(2);
+
+    // a stray response line from the dead old child must not be consumed as if it were the
+    // new child's answer to p2 (FIFO queue is per-worker, not per-child).
+    fakes[0].emitData(JSON.stringify({ text: 'stale, must be ignored' }) + '\n');
+
+    fakes[1].emitData(JSON.stringify({ text: 'real answer' }) + '\n');
+    await expect(p2).resolves.toBe('real answer');
+  });
+
+  it('killChild() detaches the old child\'s listeners (exit/error/stdout data)', async () => {
+    const fakes: FakeChild[] = [];
+    const spawnFn: SpawnFn = () => {
+      const f = makeFakeChild();
+      fakes.push(f);
+      return f.child;
+    };
+    const worker = new WarmWorker(spawnFn, '/fake/python', '/fake/daemon.py', () => 10, 5000);
+    const p1 = worker.transcribe('/a.webm', '/terms.txt');
+    fakes[0].emitData(JSON.stringify({ text: 'ok' }) + '\n');
+    await p1;
+
+    worker.killChild();
+
+    expect(fakes[0].removedEvents).toContain('proc:exit');
+    expect(fakes[0].removedEvents).toContain('proc:error');
+    expect(fakes[0].removedEvents).toContain('stdout:data');
   });
 });
 

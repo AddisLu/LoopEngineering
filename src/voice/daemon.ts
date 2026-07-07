@@ -6,9 +6,10 @@ import { spawn } from 'node:child_process';
  */
 export interface ChildLike {
   stdin: { write(chunk: string): unknown };
-  stdout: { on(event: 'data', cb: (chunk: Buffer | string) => void): unknown };
-  stderr?: { on(event: 'data', cb: (chunk: Buffer | string) => void): unknown } | null;
+  stdout: { on(event: 'data', cb: (chunk: Buffer | string) => void): unknown; removeAllListeners?(event?: string): unknown };
+  stderr?: { on(event: 'data', cb: (chunk: Buffer | string) => void): unknown; removeAllListeners?(event?: string): unknown } | null;
   on(event: 'exit' | 'error', cb: (err?: unknown) => void): unknown;
+  removeAllListeners?(event?: 'exit' | 'error'): unknown;
   kill(): unknown;
   killed?: boolean;
 }
@@ -93,32 +94,45 @@ export class WarmWorker {
     }
   }
 
-  /** Stop the worker (idle timeout, or explicit shutdown) — frees VRAM. */
+  /** Stop the worker (idle timeout, per-request timeout, or explicit shutdown) — frees
+   * VRAM. Detaches the dying child's listeners first (belt-and-suspenders: onData/onDeath
+   * also check child identity) so a late exit/error/data event from a process we've
+   * already given up on can never reach them and corrupt a since-respawned `this.child`. */
   killChild(): void {
-    if (this.child) {
+    const c = this.child;
+    this.child = null;
+    this.buf = '';
+    if (c) {
+      c.removeAllListeners?.('exit');
+      c.removeAllListeners?.('error');
+      c.stdout.removeAllListeners?.('data');
+      c.stderr?.removeAllListeners?.('data');
       try {
-        this.child.kill();
+        c.kill();
       } catch {
         // already dead
       }
     }
-    this.child = null;
-    this.buf = '';
   }
 
   private ensureSpawned(): void {
     if (this.isAlive()) return;
-    this.child = this.spawnFn(this.pythonBin, this.scriptPath);
+    const c = this.spawnFn(this.pythonBin, this.scriptPath);
+    this.child = c;
     this.buf = '';
-    this.child.stdout.on('data', (chunk) => this.onData(chunk));
-    this.child.stderr?.on('data', () => {
+    c.stdout.on('data', (chunk) => this.onData(c, chunk));
+    c.stderr?.on('data', () => {
       /* daemon logs progress to stderr; nothing to do with it here */
     });
-    this.child.on('exit', () => this.onDeath(new Error('warm worker exited')));
-    this.child.on('error', (err) => this.onDeath(err instanceof Error ? err : new Error(String(err))));
+    c.on('exit', () => this.onDeath(c, new Error('warm worker exited')));
+    c.on('error', (err) => this.onDeath(c, err instanceof Error ? err : new Error(String(err))));
   }
 
-  private onData(chunk: Buffer | string): void {
+  /** `source` is the exact child this listener was bound to (captured at ensureSpawned
+   * time) — if a kill+respawn has since replaced `this.child`, this is a stale event from
+   * the old process and must be ignored rather than corrupting the new one. */
+  private onData(source: ChildLike, chunk: Buffer | string): void {
+    if (this.child !== source) return;
     this.buf += chunk.toString();
     let idx: number;
     while ((idx = this.buf.indexOf('\n')) >= 0) {
@@ -143,7 +157,9 @@ export class WarmWorker {
     }
   }
 
-  private onDeath(err: Error): void {
+  /** Same stale-event guard as onData — see its comment. */
+  private onDeath(source: ChildLike, err: Error): void {
+    if (this.child !== source) return;
     this.child = null;
     this.buf = '';
     const pending = this.queue.splice(0);
