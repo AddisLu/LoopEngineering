@@ -288,6 +288,12 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // try a live OpenProject query (spawns scripts/openproject_dump.py) before falling back
   // to the ingested corpus snapshot; false skips straight to the snapshot search.
   report_live_first: 'true',
+
+  // 報告生成 B（src/report/templates.ts）：reusable "boss persona" report templates.
+  // Empty (default) = generateReport falls back to its built-in one-page instructions
+  // whenever no template name is given/resolved; set to a seeded/custom template name
+  // (e.g. 'plant-manager-onepage') to make it the last-resort default.
+  report_default_template: '',
 };
 
 export const TOKEN_REFRESH_MS = 180_000; // TokenBar cadence

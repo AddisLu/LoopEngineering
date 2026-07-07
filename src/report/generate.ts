@@ -11,6 +11,7 @@ import {
   type OpSnapshotItem,
   type SearchFn,
 } from './opdata.js';
+import { getReportTemplate, listReportTemplates, type ReportTemplateDef } from './templates.js';
 
 const execFileAsync = promisify(execFile);
 const TIMEOUT_MS = 3 * 60_000;
@@ -22,11 +23,16 @@ export interface ReportRequest {
   project?: string;
   topic?: string;
   templateInstructions?: string;
+  /** Reusable "boss persona" template name (see templates.ts) — its instructions
+   * replace DEFAULT_TEMPLATE_INSTRUCTIONS and its default_project/model fill in
+   * where the request leaves them unset. Unknown name falls back to the built-in
+   * default instead of throwing. */
+  template?: string;
 }
 
 export interface ReportResult {
   markdown: string;
-  meta: { source: 'live' | 'snapshot' | 'none'; project?: string; itemCount: number };
+  meta: { source: 'live' | 'snapshot' | 'none'; project?: string; itemCount: number; template?: string };
 }
 
 export interface ReportDeps {
@@ -38,6 +44,8 @@ export interface ReportDeps {
   synthExec?: ReportExec;
   /** Test injection for the snapshot-search fallback (see retrieve.ts's search). */
   searchFn?: SearchFn;
+  /** Test injection for the description-only "pick the best template" haiku call. */
+  templatePickExec?: ReportExec;
 }
 
 // Cached at module scope (computed once): mirrors src/knowledge/relate.ts's hasClaudeCli —
@@ -156,6 +164,49 @@ async function defaultParseExec(prompt: string): Promise<string | null> {
   }
 }
 
+/** Lists every stored template (name/description/audience) and asks the LLM to pick
+ * the single best match for a free-text description, or an empty string if none fit —
+ * used only when the caller gave a description without an explicit `template`. */
+function buildTemplatePickPrompt(description: string, templates: ReportTemplateDef[]): string {
+  const list = templates
+    .map((t) => `- ${t.name}：${[t.description, t.audience && `對象:${t.audience}`].filter(Boolean).join('，')}`)
+    .join('\n');
+  return `以下是可用的報告範本清單，請根據需求描述選出最合適的一個：
+${list}
+
+## 需求描述
+${description}
+
+Output STRICT JSON ONLY — no markdown code fences, no commentary — exactly this shape:
+{"template":"<最合適的範本 name，選不出來就填空字串>"}`;
+}
+
+function parseTemplatePickOutput(text: string, templates: ReportTemplateDef[]): ReportTemplateDef | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stripFences(text));
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== 'object') return null;
+  const name = typeof (parsed as Record<string, unknown>).template === 'string' ? ((parsed as Record<string, unknown>).template as string).trim() : '';
+  if (!name) return null;
+  return templates.find((t) => t.name === name) ?? null;
+}
+
+async function defaultTemplatePickExec(prompt: string): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync(
+      'claude',
+      ['-p', prompt, '--model', 'haiku', '--output-format', 'text'],
+      { timeout: TIMEOUT_MS, env: process.env, maxBuffer: 10 * 1024 * 1024 },
+    );
+    return stdout;
+  } catch {
+    return null;
+  }
+}
+
 async function defaultSynthExec(prompt: string, model: string): Promise<string | null> {
   try {
     const { stdout } = await execFileAsync(
@@ -214,13 +265,13 @@ function packItems(items: (OpWorkPackage | OpSnapshotItem)[], budget: number): s
 }
 
 function buildSynthPrompt(
-  req: ReportRequest,
+  instructions: string | undefined,
   project: string,
   topic: string,
   fetched: { source: 'live' | 'snapshot'; project: { name: string } | null },
   packed: string,
 ): string {
-  const parts = [`# 報告產生指示\n${req.templateInstructions?.trim() || DEFAULT_TEMPLATE_INSTRUCTIONS}`];
+  const parts = [`# 報告產生指示\n${instructions?.trim() || DEFAULT_TEMPLATE_INSTRUCTIONS}`];
   const ask = [project && `專案：${project}`, topic && `重點：${topic}`].filter(Boolean).join('；');
   if (ask) parts.push(`## 使用者需求\n${ask}`);
   const sourceLabel = fetched.source === 'live' ? '即時查詢' : '既有語料快照（可能非最新）';
@@ -245,9 +296,31 @@ export async function generateReport(
   if (readUsage().session.percent >= hardLimit) return null;
 
   try {
+    // Resolve a template: an explicit name wins (an unknown name falls through to the
+    // built-in default rather than throwing); otherwise, a bare description may let the
+    // LLM pick the best-fitting persona from the stored list (injectable, optional --
+    // skipped entirely when no templates exist or the pick call is unavailable/inconclusive);
+    // failing both, report_default_template (empty by default) is the last fallback.
+    let templateDef: ReportTemplateDef | undefined;
+    if (req.template?.trim()) {
+      templateDef = getReportTemplate(db, req.template.trim());
+    } else if (req.description?.trim()) {
+      const templates = listReportTemplates(db);
+      if (templates.length) {
+        const pickRun = deps.templatePickExec ?? defaultTemplatePickExec;
+        const pickedOut = await pickRun(buildTemplatePickPrompt(req.description, templates));
+        templateDef = pickedOut ? (parseTemplatePickOutput(pickedOut, templates) ?? undefined) : undefined;
+      }
+    }
+    if (!templateDef) {
+      const fallbackName = getSetting(db, 'report_default_template');
+      if (fallbackName) templateDef = getReportTemplate(db, fallbackName);
+    }
+
     let project = req.project?.trim() || '';
     let topic = req.topic?.trim() || '';
     let projectCandidates: string[] = [];
+    if (!project && templateDef?.default_project) project = templateDef.default_project;
 
     if (!project && req.description?.trim()) {
       const parseRun = deps.parseExec ?? defaultParseExec;
@@ -280,8 +353,10 @@ export async function generateReport(
     const summary = firstItem && isWorkPackage(firstItem) ? summarizeWorkPackages(fetched.items as OpWorkPackage[]) : '';
     const packed = summary ? `${summary}\n${packedItems}` : packedItems;
 
-    const synthRun: ReportExec = deps.synthExec ?? ((p) => defaultSynthExec(p, getSetting(db, 'report_model') || 'sonnet'));
-    const out = await synthRun(buildSynthPrompt(req, project, topic, fetched, packed));
+    const synthRun: ReportExec =
+      deps.synthExec ?? ((p) => defaultSynthExec(p, templateDef?.model || getSetting(db, 'report_model') || 'sonnet'));
+    const instructions = templateDef?.instructions || req.templateInstructions;
+    const out = await synthRun(buildSynthPrompt(instructions, project, topic, fetched, packed));
     if (!out) return null;
     const markdown = stripFences(out);
     if (!markdown) return null;
@@ -292,6 +367,7 @@ export async function generateReport(
         source: fetched.items.length ? fetched.source : 'none',
         project: fetched.project?.name || project || undefined,
         itemCount: fetched.items.length,
+        template: templateDef?.name,
       },
     };
   } catch {
