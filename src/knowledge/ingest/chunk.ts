@@ -84,7 +84,17 @@ export function chunkMarkdown(text: string): ChunkPiece[] {
   return out;
 }
 
-/** docKind 'md'/'markdown'/'mdx' -> heading-based chunking; anything else -> line-window. */
-export function chunkDocument(text: string, docKind: string): ChunkPiece[] {
-  return docKind === 'md' || docKind === 'markdown' || docKind === 'mdx' ? chunkMarkdown(text) : chunkCode(text);
+/** docKind 'md'/'markdown'/'mdx' -> heading-based chunking; anything else -> line-window.
+ * `title` (the owning document's title) is optional and, when given, is prefixed onto
+ * every piece's `text` — the field that both the embedder and chunks_fts index — so a
+ * term that only ever appears in the title (never in the body) is still reachable
+ * through vector and keyword search (see plan-RAG-title-recall.md). start_line/end_line
+ * keep referring to the original document text; only the embeddable/indexed `text`
+ * gains the prefix. */
+export function chunkDocument(text: string, docKind: string, title?: string): ChunkPiece[] {
+  const pieces =
+    docKind === 'md' || docKind === 'markdown' || docKind === 'mdx' ? chunkMarkdown(text) : chunkCode(text);
+  const trimmedTitle = title?.trim();
+  if (!trimmedTitle) return pieces;
+  return pieces.map((p) => ({ ...p, text: `${trimmedTitle}\n\n${p.text}` }));
 }

@@ -152,7 +152,7 @@ async function ingestOpenProjectDocs(
       result.documents_created++;
     }
 
-    const pieces = chunkDocument(doc.text, doc.doc_kind);
+    const pieces = chunkDocument(doc.text, doc.doc_kind, doc.title);
     const info = insertDoc.run({
       source_id: source.id,
       path: doc.ext_id,
@@ -236,7 +236,7 @@ export async function ingestSource(
     }
 
     const ext = extOf(file.path);
-    const pieces = chunkDocument(masked, ext);
+    const pieces = chunkDocument(masked, ext, path.basename(file.path));
 
     const info = insertDoc.run({
       source_id: source.id,

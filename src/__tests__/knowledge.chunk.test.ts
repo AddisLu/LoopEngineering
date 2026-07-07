@@ -83,4 +83,37 @@ describe('chunkDocument dispatch', () => {
     expect(chunkDocument(code, 'ts')).toEqual(chunkCode(code));
     expect(chunkDocument(code, '')).toEqual(chunkCode(code));
   });
+
+  it('with no title (or a blank one), leaves chunk text exactly as the underlying chunker produced', () => {
+    const md = '# H\nbody';
+    expect(chunkDocument(md, 'md', undefined)).toEqual(chunkMarkdown(md));
+    expect(chunkDocument(md, 'md', '')).toEqual(chunkMarkdown(md));
+    expect(chunkDocument(md, 'md', '   ')).toEqual(chunkMarkdown(md));
+  });
+
+  it('prefixes a document title onto every piece\'s embeddable/FTS text — the term "TGV檢測技術" only ever appears in the title, never the body, yet must still land in what gets embedded/indexed', () => {
+    const title = 'TGV檢測技術';
+    const md = ['# Section A', 'a1', 'a2', '# Section B', 'b1'].join('\n');
+    const pieces = chunkDocument(md, 'md', title);
+    const rawPieces = chunkMarkdown(md);
+
+    expect(pieces).toHaveLength(rawPieces.length);
+    for (const p of pieces) expect(p.text).toContain(title);
+    // metadata (section/start_line/end_line/ord) is untouched by the prefix
+    pieces.forEach((p, i) => {
+      expect(p.section).toBe(rawPieces[i]!.section);
+      expect(p.start_line).toBe(rawPieces[i]!.start_line);
+      expect(p.end_line).toBe(rawPieces[i]!.end_line);
+      expect(p.ord).toBe(rawPieces[i]!.ord);
+      expect(p.text).toBe(`${title}\n\n${rawPieces[i]!.text}`);
+    });
+  });
+
+  it('also prefixes the title for code (line-window) chunking', () => {
+    const title = 'config.ts';
+    const code = 'const x = 1;\nconst y = 2;';
+    const pieces = chunkDocument(code, 'ts', title);
+    expect(pieces).toHaveLength(1);
+    expect(pieces[0]!.text).toBe(`${title}\n\n${code}`);
+  });
 });
