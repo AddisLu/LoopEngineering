@@ -258,3 +258,20 @@ CREATE TABLE IF NOT EXISTS chunks (
   created_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_chunks_document ON chunks(document_id);
+
+-- RAG Phase 2 (src/knowledge/retrieve.ts): FTS5 trigram index over chunk text, mirroring
+-- knowledge_fts's external-content pattern so hybrid search can do keyword ranking over
+-- the corpus layer alongside vec0 KNN. Only AI/AD triggers: chunk rows are add-only
+-- (bi-temporal supersede inserts a new row, see ingest.ts) — no code path ever UPDATEs
+-- chunks.text, so no AU trigger is needed. A DB with chunks predating this table gets
+-- backfilled by db/index.ts (external-content FTS5 tables start empty, not auto-populated).
+CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
+  text, section, content='chunks', content_rowid='id', tokenize='trigram'
+);
+
+CREATE TRIGGER IF NOT EXISTS chunks_ai AFTER INSERT ON chunks BEGIN
+  INSERT INTO chunks_fts(rowid, text, section) VALUES (new.id, new.text, new.section);
+END;
+CREATE TRIGGER IF NOT EXISTS chunks_ad AFTER DELETE ON chunks BEGIN
+  INSERT INTO chunks_fts(chunks_fts, rowid, text, section) VALUES ('delete', old.id, old.text, old.section);
+END;

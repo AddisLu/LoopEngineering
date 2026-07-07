@@ -25,6 +25,7 @@ export function getDb(dbPath: string = paths.db): Database.Database {
   seedEnvironments(db);
   seedPipelines(db);
   loadVec(db, getNum(db, 'embed_dim', 1024));
+  backfillChunksFts(db);
 
   _db = db;
   return db;
@@ -42,7 +43,21 @@ export function openTestDb(): Database.Database {
   seedEnvironments(db);
   seedPipelines(db);
   loadVec(db, getNum(db, 'embed_dim', 1024));
+  backfillChunksFts(db);
   return db;
+}
+
+/**
+ * chunks_fts is an external-content FTS5 table (see schema.sql) — it starts empty even
+ * when the backing `chunks` table already has rows (a DB created before this table
+ * existed). One-time idempotent rebuild: only runs when the index is empty but chunks
+ * has data, so a normally-synced DB (triggers keep it current) pays nothing on startup.
+ */
+function backfillChunksFts(db: Database.Database): void {
+  const ftsCount = (db.prepare(`SELECT count(*) AS n FROM chunks_fts`).get() as { n: number }).n;
+  if (ftsCount > 0) return;
+  const chunkCount = (db.prepare(`SELECT count(*) AS n FROM chunks`).get() as { n: number }).n;
+  if (chunkCount > 0) db.exec(`INSERT INTO chunks_fts(chunks_fts) VALUES ('rebuild')`);
 }
 
 /**

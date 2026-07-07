@@ -37,6 +37,8 @@ export const BOOL_KEYS = new Set([
   'voice_intake_enabled', 'voice_warm_worker',
   // SSoT/RAG Phase 0 (src/knowledge/{vec,embed}.ts) — off = zero behavior change
   'rag_enabled',
+  // SSoT/RAG Phase 2 (src/knowledge/context.ts) — off = zero LOOP_TASK.md change
+  'rag_inject_task_context',
 ]);
 
 /** Accepted `integration_provider` values ('none' = the bridge is fully off). */

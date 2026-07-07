@@ -35,6 +35,11 @@ const DISCIPLINE_BLOCK = `
  * `extras.knowledge` (when non-null) is inserted as a `## Knowledge / Environment`
  * section between Goal and Plan; omitted entirely when null/absent, so an empty
  * knowledge base produces byte-identical output to before this option existed.
+ * `extras.rag` (when non-null) is inserted as its own `## 相關語料 (RAG)` section right
+ * after Knowledge — kept separate because it's uncurated corpus material (see
+ * knowledge/context.ts's ragTaskContext), not the small human-approved knowledge graph;
+ * omitted entirely when null/absent (the `rag_inject_task_context` setting's default), so
+ * default-off output is byte-identical to before this option existed.
  * `extras.discipline` (when true) appends the `## 執行紀律` block after Rules; omitted
  * entirely when false/absent (the `prompt_discipline` setting's default), so default-off
  * output is byte-identical to before this option existed.
@@ -42,13 +47,16 @@ const DISCIPLINE_BLOCK = `
 export function writeTaskFile(
   cwd: string,
   task: Task,
-  extras?: { knowledge?: string | null; discipline?: boolean },
+  extras?: { knowledge?: string | null; rag?: string | null; discipline?: boolean },
 ): string {
   const steps = parseSteps(task);
   const modes = parseVerifyMode(task);
   const file = path.join(cwd, 'LOOP_TASK.md');
   const knowledgeBlock = extras?.knowledge
     ? `\n## Knowledge / Environment\n（以下為使用者的長期環境／偏好／限制知識，執行本任務時必須遵守；若與 Plan 衝突，以 Plan 為準）\n${extras.knowledge}\n`
+    : '';
+  const ragBlock = extras?.rag
+    ? `\n## 相關語料 (RAG)\n（以下為本地語料庫混合檢索到的相關片段，僅供參考排序，不代表已核可的知識，若與 Plan/Knowledge 衝突以其他為準）\n${extras.rag}\n`
     : '';
   const acceptanceBlock = task.verify_rubric?.trim()
     ? `\n## 驗收標準 (Acceptance)\n${task.verify_rubric.trim()}\n`
@@ -61,7 +69,7 @@ export function writeTaskFile(
 
 ## Goal
 ${task.goal}
-${knowledgeBlock}
+${knowledgeBlock}${ragBlock}
 ## Plan
 ${planContent(task)}
 

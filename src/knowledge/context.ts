@@ -1,8 +1,11 @@
 import type Database from 'better-sqlite3';
+import fs from 'node:fs';
 import { getBool, getNum } from '../db/index.js';
 import type { Task } from '../types.js';
 import type { Kind, KnowledgeNode } from './types.js';
 import { repoScope, envScope } from './types.js';
+import { search } from './retrieve.js';
+import type { EmbedExec } from './embed.js';
 
 /** Injection priority within a tier — lower sorts first. Ties fall through to weight/recency. */
 const KIND_RANK: Record<Kind, number> = {
@@ -112,6 +115,64 @@ export function knowledgeContext(db: Database.Database, task: Task): string | nu
       continue;
     }
     const addLen = line.length + 1; // +1 for the joining newline
+    if (used + addLen > budget) break;
+    lines.push(line);
+    used += addLen;
+  }
+
+  return lines.join('\n');
+}
+
+function renderChunkLine(r: { path: string; start_line: number | null; end_line: number | null; text: string }): string {
+  const lineRef = r.start_line != null ? `:${r.start_line}-${r.end_line ?? r.start_line}` : '';
+  return `- **[${mdInline(r.path)}${lineRef}]**：${mdInline(r.text)}`;
+}
+
+/**
+ * Best-effort realpath so a symlinked repo_path dedups to the same corpus scope as its
+ * target (same idea as repoScope) — falls back to the raw path if it doesn't exist yet.
+ * NOT the same string as repoScope()'s 'repo:<realpath>' knowledge scope: retrieve.ts's
+ * `scope` is a plain path prefix matched against documents.uri, a separate convention.
+ */
+function ragScopePath(repoPath: string): string {
+  try {
+    return fs.realpathSync(repoPath);
+  } catch {
+    return repoPath;
+  }
+}
+
+/**
+ * Optional RAG-corpus addition to a dispatched task's prompt, gated by
+ * `rag_inject_task_context` (default false = never called for real work, matching the
+ * zero-impact invariant). When on, hybrid-searches the corpus layer (src/knowledge/retrieve.ts)
+ * scoped to the task's repo using its goal as the query, and greedy-packs citation-bearing
+ * chunks into knowledge_budget_chars. Returns null when the flag is off, the task has no
+ * repo_path, or nothing matched — callers must omit the section entirely in that case,
+ * exactly like knowledgeContext's own null contract. Kept as a SEPARATE section/function
+ * from knowledgeContext: this is uncurated corpus material, not the small, human-approved
+ * knowledge graph, and must never be confused with it in the rendered prompt.
+ */
+export async function ragTaskContext(db: Database.Database, task: Task, embedExec?: EmbedExec): Promise<string | null> {
+  if (!getBool(db, 'rag_inject_task_context', false)) return null;
+  if (!task.repo_path) return null;
+
+  const topK = getNum(db, 'rag_top_k', 8);
+  const results = await search(db, task.goal, { scope: ragScopePath(task.repo_path), topK, embedExec });
+  if (!results.length) return null;
+
+  const budget = getNum(db, 'knowledge_budget_chars', 2500);
+  const lines: string[] = [];
+  let used = 0;
+  for (const r of results) {
+    const line = renderChunkLine(r);
+    if (lines.length === 0) {
+      const first = line.length <= budget ? line : line.slice(0, Math.max(0, budget));
+      lines.push(first);
+      used = first.length;
+      continue;
+    }
+    const addLen = line.length + 1;
     if (used + addLen > budget) break;
     lines.push(line);
     used += addLen;

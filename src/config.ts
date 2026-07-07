@@ -256,6 +256,12 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // cap in KB — a file over this never reaches the chunker/embedder (binaries, huge logs,
   // generated dumps). Chunks/embeddings themselves still only happen when rag_enabled.
   ingest_max_file_kb: '1024',
+
+  // SSoT/RAG Phase 2 (src/knowledge/{retrieve,context}.ts): off by default = zero behavior
+  // change to LOOP_TASK.md. When on, dispatch additionally pulls top-K corpus chunks
+  // (hybrid FTS+vec search scoped to the task's repo) into their own `## 相關語料 (RAG)`
+  // section — separate from the curated `## Knowledge / Environment` block above.
+  rag_inject_task_context: 'false',
 };
 
 export const TOKEN_REFRESH_MS = 180_000; // TokenBar cadence

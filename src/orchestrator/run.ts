@@ -19,7 +19,8 @@ import { resolvePolicy } from '../scheduler/policy.js';
 import { addWorktree, isDirty, commitAll, diffstat, excludeLocal, worktreeInternalFile } from '../git/worktree.js';
 import { timeoutMinFor } from '../scheduler/timeout.js';
 import { writeTaskFile, writeResumeContext, collectResumeContext } from './prompt.js';
-import { knowledgeContext } from '../knowledge/context.js';
+import { knowledgeContext, ragTaskContext } from '../knowledge/context.js';
+import type { EmbedExec } from '../knowledge/embed.js';
 import { writeSettingsLocal } from './settingsLocal.js';
 import { runVerification, type VerifyResult } from './verify.js';
 import { resolveShell, runShell } from '../util/shell.js';
@@ -90,7 +91,14 @@ export async function runTask(
   // hermetic test drive the full coding_tool='generic' orchestration path (persistent
   // output dir, no worktree, no git close-out) with the zero-token mock adapter instead
   // of spawning a real `claude` process.
-  opts: { resume?: boolean; adapter?: Adapter; plannerExec?: PlannerExec; deployExec?: DeployExec } = {},
+  opts: {
+    resume?: boolean;
+    adapter?: Adapter;
+    plannerExec?: PlannerExec;
+    deployExec?: DeployExec;
+    /** Test injection for the optional RAG task-context pull (see knowledge/context.ts). */
+    ragEmbedExec?: EmbedExec;
+  } = {},
 ): Promise<void> {
   // An epic (coding_tool='plan') never touches a worktree/adapter — it's decomposed into
   // a child task chain by runPlanner and closes immediately. Entirely separate lifecycle
@@ -163,6 +171,7 @@ export async function runTask(
 
   const taskFilePath = writeTaskFile(worktreePath, task, {
     knowledge: knowledgeContext(db, task),
+    rag: await ragTaskContext(db, task, opts.ragEmbedExec),
     discipline: disciplineOn,
   });
   if (!isMock && !isGeneric) {

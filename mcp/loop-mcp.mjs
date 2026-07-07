@@ -150,7 +150,7 @@ function normSteps(v) {
   return [];
 }
 
-const server = new McpServer({ name: 'loop-engineering', version: '1.1.0' });
+const server = new McpServer({ name: 'loop-engineering', version: '1.2.0' });
 
 server.registerTool('loop_add_task', {
   title: 'Add a Loop Engineering task (minimal input)',
@@ -675,6 +675,88 @@ server.registerTool('loop_ingest', {
     return { content: [{ type: 'text', text: `Ingest failed: ${e.message}` }] };
   }
 });
+
+server.registerTool('loop_sources', {
+  title: 'List SSoT ingestion sources',
+  description:
+    'List registered SSoT ingestion sources (git repos / folders / Obsidian vaults): id, kind, uri, enabled, ' +
+    'last_ingested_at. Register new ones with `loop ingest add` on the server host (not exposed here); trigger a run ' +
+    'with loop_ingest, then search the ingested corpus with loop_search.',
+  inputSchema: {},
+}, async () => {
+  try {
+    const { sources } = await api('/api/sources');
+    if (!sources?.length) return { content: [{ type: 'text', text: '(no sources registered)' }] };
+    const rows = sources.map((s) =>
+      `${s.id}  [${s.kind}] ${s.enabled ? 'on ' : 'off'}  ${s.uri}  last=${s.last_ingested_at ?? '-'}`);
+    return { content: [{ type: 'text', text: rows.join('\n') }] };
+  } catch (e) {
+    return { content: [{ type: 'text', text: `Could not list sources: ${e.message}` }] };
+  }
+});
+
+// ---- SSoT hybrid RAG search (D-Phase2): src/knowledge/retrieve.ts via REST ----
+
+server.registerTool('loop_search', {
+  title: 'Hybrid RAG search over the SSoT corpus',
+  description:
+    '混合語義+全文檢索 SSoT 語料庫（documents/chunks，由 loop_ingest 擷取）— FTS5 trigram 全文與向量 KNN 語意檢索以 RRF ' +
+    '(Reciprocal Rank Fusion) 融合排序，回傳帶引用（來源路徑/行號/分數）的片段。用於「這段程式碼/決策在哪裡」之類的問題。' +
+    '若伺服器 rag_enabled 設定為 false（向量嵌入未啟用），自動退回純 FTS 全文檢索，仍可用。',
+  inputSchema: {
+    q: z.string().describe('REQUIRED. Search query (keywords or a natural-language question).'),
+    scope: z.string().optional().describe('Restrict to one ingested source/repo — an absolute path prefix matching a registered source uri (see loop_sources).'),
+    kind: z.string().optional().describe('Restrict to one document kind, e.g. "md" or "ts" (the file extension recorded at ingest time).'),
+    top_k: z.number().int().optional().describe('Max results (default: the server rag_top_k setting, usually 8).'),
+  },
+}, async (a) => {
+  try {
+    const qs = new URLSearchParams({ q: a.q });
+    if (a.scope) qs.set('scope', a.scope);
+    if (a.kind) qs.set('kind', a.kind);
+    if (a.top_k != null) qs.set('topK', String(a.top_k));
+    const { results } = await api(`/api/rag/search?${qs.toString()}`);
+    if (!results?.length) return { content: [{ type: 'text', text: `(no chunks match "${a.q}")` }] };
+    const lines = results.map((r) => {
+      const lineRef = r.start_line != null ? `:${r.start_line}-${r.end_line ?? r.start_line}` : '';
+      const excerpt = String(r.text ?? '').replace(/\s+/g, ' ').trim().slice(0, 240);
+      return `${r.path}${lineRef}  (score ${Number(r.score).toFixed(3)})\n  ${excerpt}`;
+    });
+    return { content: [{ type: 'text', text: lines.join('\n\n') }] };
+  } catch (e) {
+    return { content: [{ type: 'text', text: `Search failed: ${e.message}` }] };
+  }
+});
+
+// ---- MCP resources: let any MCP client browse the SSoT without calling a tool ----
+
+server.registerResource(
+  'ssot-sources',
+  'ssot://sources',
+  {
+    title: 'SSoT ingestion sources',
+    description: '已登錄的 SSoT 擷取來源（git/folder/vault）— 治理 walker 的輸入清單，含啟用狀態與最近擷取時間。',
+    mimeType: 'application/json',
+  },
+  async (uri) => {
+    const { sources } = await api('/api/sources');
+    return { contents: [{ uri: uri.href, mimeType: 'application/json', text: JSON.stringify(sources ?? [], null, 2) }] };
+  },
+);
+
+server.registerResource(
+  'ssot-graph',
+  'ssot://graph',
+  {
+    title: 'SSoT curated knowledge graph',
+    description: '策展知識圖譜（knowledge_nodes/edges）— 人工核可、會注入任務 prompt 的小量知識，與語料層 documents/chunks 分開。',
+    mimeType: 'application/json',
+  },
+  async (uri) => {
+    const graph = await api('/api/knowledge/graph');
+    return { contents: [{ uri: uri.href, mimeType: 'application/json', text: JSON.stringify(graph ?? {}, null, 2) }] };
+  },
+);
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
