@@ -38,28 +38,111 @@
     return j;
   }
 
+  // ---- Mermaid: loaded on demand from the local vendor bundle (never a CDN) ----
+  // securityLevel 'strict' sanitizes the SVG mermaid.render() returns — that sanitized
+  // SVG is the ONE controlled exception to this file's textContent-only rule (see
+  // appendMermaidBlock below); everything else stays DOM-API/textContent, no innerHTML.
+  let mermaidLoadPromise = null;
+  function loadMermaid() {
+    if (window.mermaid) return Promise.resolve(window.mermaid);
+    if (!mermaidLoadPromise) {
+      mermaidLoadPromise = new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = '/vendor/mermaid.min.js';
+        s.onload = () => {
+          if (!window.mermaid) { reject(new Error('mermaid.min.js loaded but window.mermaid is missing')); return; }
+          window.mermaid.initialize({ startOnLoad: false, securityLevel: 'strict' });
+          resolve(window.mermaid);
+        };
+        s.onerror = () => reject(new Error('failed to load /vendor/mermaid.min.js'));
+        document.head.appendChild(s);
+      });
+    }
+    return mermaidLoadPromise;
+  }
+
+  let mermaidSeq = 0;
+
+  async function appendMermaidBlock(container, mmd) {
+    const wrap = el('div', 'mmd-block');
+    const actions = el('div', 'mmd-actions no-print');
+    const copyBtn = el('button', 'btn sm', '複製 Mermaid 原始碼');
+    copyBtn.type = 'button';
+    copyBtn.onclick = async () => {
+      try {
+        await navigator.clipboard.writeText(mmd);
+        copyBtn.textContent = '已複製';
+      } catch (e) {
+        copyBtn.textContent = '複製失敗';
+      }
+      setTimeout(() => { copyBtn.textContent = '複製 Mermaid 原始碼'; }, 1500);
+    };
+    actions.appendChild(copyBtn);
+    wrap.appendChild(actions);
+
+    const target = el('div', 'mmd-render');
+    wrap.appendChild(target);
+    container.appendChild(wrap);
+
+    try {
+      const mermaid = await loadMermaid();
+      const id = `mmd-${Date.now()}-${mermaidSeq++}`;
+      const { svg } = await mermaid.render(id, mmd);
+      target.innerHTML = svg; // controlled exception — see comment above loadMermaid
+    } catch (err) {
+      target.replaceChildren();
+      const pre = el('pre', 'mmd-fallback');
+      pre.appendChild(el('code', null, mmd));
+      target.appendChild(pre);
+    }
+  }
+
   // ---- render generated markdown as DOM (DOM API only, no md->html package) ----
-  // Simple line-based structure recognizer: "# "/"## " headings, "- "/"* " bullet
-  // lists, blank-line-separated paragraphs. Good enough for the fixed report shape
-  // (heading + bullet sections) this feature always produces.
-  function renderMarkdown(container, md) {
+  // Simple line-based structure recognizer: "#"/"##"/"###" headings, "- "/"* " bullet
+  // lists, blank-line-separated paragraphs, and ```mermaid fenced blocks (rendered via
+  // Mermaid — see appendMermaidBlock; any other fenced block renders as plain <pre><code>
+  // text). Good enough for the fixed report shape this feature always produces.
+  async function renderMarkdown(container, md) {
     container.replaceChildren();
+    const lines = md.split('\n');
     let list = null;
-    for (const raw of md.split('\n')) {
-      const line = raw.trimEnd();
-      if (!line.trim()) { list = null; continue; }
+    let i = 0;
+    while (i < lines.length) {
+      const line = lines[i].trimEnd();
+      const fence = line.match(/^```(\w*)\s*$/);
+      if (fence) {
+        const lang = fence[1];
+        const body = [];
+        i++;
+        while (i < lines.length && lines[i].trimEnd() !== '```') { body.push(lines[i]); i++; }
+        i++; // skip the closing fence (or run off the end if unterminated)
+        list = null;
+        if (lang === 'mermaid') {
+          await appendMermaidBlock(container, body.join('\n'));
+        } else {
+          const pre = el('pre');
+          pre.appendChild(el('code', null, body.join('\n')));
+          container.appendChild(pre);
+        }
+        continue;
+      }
+      if (!line.trim()) { list = null; i++; continue; }
       const h1 = line.match(/^#\s+(.*)/);
       const h2 = line.match(/^##\s+(.*)/);
+      const h3 = line.match(/^###\s+(.*)/);
       const li = line.match(/^[-*]\s+(.*)/);
-      if (h2) { list = null; container.appendChild(el('h3', null, h2[1])); continue; }
-      if (h1) { list = null; container.appendChild(el('h2', null, h1[1])); continue; }
+      if (h3) { list = null; container.appendChild(el('h4', null, h3[1])); i++; continue; }
+      if (h2) { list = null; container.appendChild(el('h3', null, h2[1])); i++; continue; }
+      if (h1) { list = null; container.appendChild(el('h2', null, h1[1])); i++; continue; }
       if (li) {
         if (!list) { list = el('ul'); container.appendChild(list); }
         list.appendChild(el('li', null, li[1]));
+        i++;
         continue;
       }
       list = null;
       container.appendChild(el('p', null, line));
+      i++;
     }
   }
 
@@ -87,7 +170,7 @@
     note.className = 'rpt-note' + (isError ? ' danger' : '');
   }
 
-  function renderMeta(meta) {
+  function renderMeta(meta, files) {
     const chips = $('rpt-meta-chips');
     chips.replaceChildren();
     if (!meta) return;
@@ -95,6 +178,8 @@
     if (meta.project) chips.appendChild(el('span', 'chip', `專案：${meta.project}`));
     if (typeof meta.itemCount === 'number') chips.appendChild(el('span', 'chip mono', `項目數：${meta.itemCount}`));
     if (meta.template) chips.appendChild(el('span', 'chip', `範本：${meta.template}`));
+    if (meta.charts && meta.charts.length) chips.appendChild(el('span', 'chip', `圖表：${meta.charts.join('/')}`));
+    if (files && files.length) chips.appendChild(el('span', 'chip', `已存檔：${files.length} 個檔案`));
   }
 
   const genBtn = $('gen-btn');
@@ -109,13 +194,14 @@
     if (project) body.project = project;
     const template = $('f-template').value;
     if (template) body.template = template;
+    if ($('f-save').checked) body.save = true;
 
     genBtn.disabled = true;
     setNote('產生中…', false);
     try {
       const res = await api('/api/report', { method: 'POST', body });
-      renderMarkdown($('rpt-output'), res.markdown || '（無內容）');
-      renderMeta(res.meta);
+      await renderMarkdown($('rpt-output'), res.markdown || '（無內容）');
+      renderMeta(res.meta, res.files);
       printBtn.hidden = !res.markdown;
       setNote('', false);
     } catch (err) {

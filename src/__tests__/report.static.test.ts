@@ -12,9 +12,34 @@ describe('report page: static assets', () => {
     expect(fs.existsSync(path.join(WEB_DIR, 'report.js'))).toBe(true);
   });
 
-  it('report.js contains no innerHTML usage (cheap XSS guard) — markdown renders via DOM API', () => {
+  it('report.js only uses innerHTML for the mermaid-render controlled exception, with securityLevel strict', () => {
     const js = fs.readFileSync(path.join(WEB_DIR, 'report.js'), 'utf8');
-    expect(js).not.toMatch(/innerHTML/);
+    const innerHtmlLines = js.split('\n').filter((l) => /innerHTML/.test(l) && !l.trim().startsWith('//'));
+    expect(innerHtmlLines).toHaveLength(1);
+    expect(innerHtmlLines[0]).toMatch(/target\.innerHTML\s*=\s*svg/);
+    expect(js).toMatch(/securityLevel:\s*'strict'/);
+  });
+
+  it('mermaid.min.js is vendored locally under web/vendor (no CDN reference in report.js)', () => {
+    expect(fs.existsSync(path.join(WEB_DIR, 'vendor', 'mermaid.min.js'))).toBe(true);
+    const js = fs.readFileSync(path.join(WEB_DIR, 'report.js'), 'utf8');
+    expect(js).toMatch(/\/vendor\/mermaid\.min\.js/);
+    expect(js).not.toMatch(/https?:\/\//); // no external script URL of any kind
+  });
+
+  it('report.js renders ```mermaid fenced blocks and offers a copy-source button', () => {
+    const js = fs.readFileSync(path.join(WEB_DIR, 'report.js'), 'utf8');
+    expect(js).toMatch(/mermaid/);
+    expect(js).toMatch(/複製 Mermaid 原始碼/);
+    expect(js).toMatch(/navigator\.clipboard\.writeText/);
+  });
+
+  it('report.html has a save-to-disk checkbox wired to POST /api/report\'s save field', () => {
+    const html = fs.readFileSync(path.join(WEB_DIR, 'report.html'), 'utf8');
+    expect(html).toMatch(/id="f-save"/);
+    const js = fs.readFileSync(path.join(WEB_DIR, 'report.js'), 'utf8');
+    expect(js).toMatch(/f-save/);
+    expect(js).toMatch(/body\.save\s*=\s*true/);
   });
 
   it('index.html has a topbar link to /report.html', () => {

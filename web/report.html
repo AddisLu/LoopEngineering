@@ -36,7 +36,16 @@
   .rpt-output p { font-size: 13.5px; line-height: 1.6; margin: 6px 0; color: var(--text); }
   .rpt-output ul { margin: 4px 0 10px; padding-left: 22px; }
   .rpt-output li { font-size: 13.5px; line-height: 1.6; margin: 3px 0; }
+  .rpt-output pre { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 10px 12px; overflow-x: auto; font-size: 12.5px; }
   .rpt-meta { margin-bottom: 14px; }
+  .f-save-label { display: flex !important; align-items: center; gap: 6px; }
+  .f-save-label input { width: auto !important; margin: 0 !important; }
+
+  .mmd-block { margin: 14px 0 20px; border: 1px solid var(--border); border-radius: var(--r-sm); padding: 12px; background: var(--surface-2); }
+  .mmd-actions { display: flex; justify-content: flex-end; margin-bottom: 8px; }
+  .mmd-render { overflow-x: auto; }
+  .mmd-render svg { max-width: 100%; height: auto; }
+  .mmd-fallback { white-space: pre-wrap; word-break: break-word; }
 
   @media print {
     .topbar, .rpt-form, .no-print { display: none !important; }
@@ -67,6 +76,7 @@
         <select id="f-template"><option value="">（自動 / 內建預設）</option></select>
       </label>
       <label>專案（選填）<input id="f-project" type="text" placeholder="不填則從描述解析" autocomplete="off" /></label>
+      <label class="f-save-label"><input id="f-save" type="checkbox" /> 同時存檔（報告 + 資料 + 圖表存到 git 分類目錄）</label>
       <div class="rpt-actions">
         <button id="gen-btn" class="btn primary" type="button">產生報告</button>
         <button id="print-btn" class="btn no-print" type="button" hidden>列印 / 存 PDF</button>

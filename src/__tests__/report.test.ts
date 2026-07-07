@@ -418,6 +418,115 @@ describe('generateReport', () => {
   });
 });
 
+// ---- generate.ts: charts (see report/charts.ts) ----
+
+describe('generateReport: chart embedding', () => {
+  it('embeds gantt + status-pie Mermaid blocks after the LLM markdown when live WP data is available; meta.charts lists them', async () => {
+    setSetting(db, 'report_enabled', 'true');
+    makeOpenProjectSource();
+    const dataExec: OpDataExec = async (_bin, args) => {
+      if (args.includes('--list-projects')) return LIST_PROJECTS_LINE;
+      return WP_LINE;
+    };
+    const synthExec: ReportExec = async () => '# 報告內容';
+    const result = await generateReport(db, { project: '大型AOI' }, { dataExec, synthExec });
+    expect(result).not.toBeNull();
+    expect(result!.markdown).toContain('# 報告內容');
+    expect(result!.markdown).toContain('## 圖表');
+    expect(result!.markdown).toContain('```mermaid\ngantt');
+    expect(result!.markdown).toContain('```mermaid\npie title');
+    expect(result!.meta.charts).toEqual(['gantt', 'pie']);
+  });
+
+  it('a snapshot-source report (no structured WP data) never gets charts — meta.charts is empty, no mermaid fence', async () => {
+    setSetting(db, 'report_enabled', 'true');
+    setSetting(db, 'report_live_first', 'false');
+    const searchFn: SearchFn = async () => [fakeChunk()];
+    const synthExec: ReportExec = async () => '# 報告內容';
+    const result = await generateReport(db, { project: 'x' }, { searchFn, synthExec });
+    expect(result).not.toBeNull();
+    expect(result!.markdown).toBe('# 報告內容');
+    expect(result!.markdown).not.toContain('```mermaid');
+    expect(result!.meta.charts).toEqual([]);
+  });
+
+  it('a phase-flow chart is added only when more than one distinct WP type is present', async () => {
+    setSetting(db, 'report_enabled', 'true');
+    makeOpenProjectSource();
+    const items = [
+      { ...JSON.parse(WP_LINE), id: 'a', type: 'Task', due_date: '2099-01-01' },
+      { ...JSON.parse(WP_LINE), id: 'b', type: 'Milestone', due_date: '2099-02-01' },
+    ];
+    const dataExec: OpDataExec = async (_bin, args) => {
+      if (args.includes('--list-projects')) return LIST_PROJECTS_LINE;
+      if (args.includes('--structured')) return items.map((w) => JSON.stringify(w)).join('\n');
+      throw new Error(`unexpected args: ${args.join(' ')}`);
+    };
+    const synthExec: ReportExec = async () => '# ok';
+    const result = await generateReport(db, { project: '大型AOI' }, { dataExec, synthExec });
+    expect(result).not.toBeNull();
+    expect(result!.meta.charts).toEqual(['gantt', 'pie', 'flow']);
+    expect(result!.markdown).toContain('```mermaid\nflowchart LR');
+  });
+});
+
+// ---- generate.ts: persistence (see report/persist.ts) ----
+
+describe('generateReport: persistence (report_persist / save)', () => {
+  function fakePersistFns() {
+    const written: Record<string, string> = {};
+    const mkdirs: string[] = [];
+    return {
+      written,
+      mkdirs,
+      persistFns: {
+        mkdir: (d: string) => mkdirs.push(d),
+        writeFile: (p: string, content: string) => {
+          written[p] = content;
+        },
+      },
+    };
+  }
+
+  it('report_persist=false (default) and no save flag -> never writes, no files field on the result', async () => {
+    setSetting(db, 'report_enabled', 'true');
+    setSetting(db, 'report_live_first', 'false');
+    const { written, persistFns } = fakePersistFns();
+    const searchFn: SearchFn = async () => [];
+    const synthExec: ReportExec = async () => '# ok';
+    const result = await generateReport(db, { project: 'x' }, { searchFn, synthExec, persistFns });
+    expect(result).not.toBeNull();
+    expect(result!.files).toBeUndefined();
+    expect(Object.keys(written)).toHaveLength(0);
+  });
+
+  it('report_persist=true writes via the injected fns and returns the file paths', async () => {
+    setSetting(db, 'report_enabled', 'true');
+    setSetting(db, 'report_live_first', 'false');
+    setSetting(db, 'report_persist', 'true');
+    const { written, persistFns } = fakePersistFns();
+    const searchFn: SearchFn = async () => [];
+    const synthExec: ReportExec = async () => '# ok';
+    const result = await generateReport(db, { project: 'x', topic: 'y' }, { searchFn, synthExec, persistFns });
+    expect(result).not.toBeNull();
+    expect(result!.files).toBeDefined();
+    expect(result!.files!.length).toBeGreaterThan(0);
+    expect(Object.keys(written).length).toBeGreaterThan(0);
+  });
+
+  it('req.save=true forces persistence for a single call even when report_persist is off', async () => {
+    setSetting(db, 'report_enabled', 'true');
+    setSetting(db, 'report_live_first', 'false');
+    const { written, persistFns } = fakePersistFns();
+    const searchFn: SearchFn = async () => [];
+    const synthExec: ReportExec = async () => '# ok';
+    const result = await generateReport(db, { project: 'x', save: true }, { searchFn, synthExec, persistFns });
+    expect(result).not.toBeNull();
+    expect(result!.files).toBeDefined();
+    expect(Object.keys(written).length).toBeGreaterThan(0);
+  });
+});
+
 // ---- src/server/reportRoutes.ts ----
 
 describe('POST /api/report', () => {
@@ -443,6 +552,29 @@ describe('POST /api/report', () => {
     const body = res.json();
     expect(body.markdown).toBe('# 專案報告');
     expect(body.meta.source).toBe('snapshot');
+    expect(body.meta.charts).toEqual([]); // snapshot source -- no structured WP data to chart
+    expect(body.files).toBeUndefined();
+  });
+
+  it('surfaces files when report_persist is on, via injected reportPersistFns', async () => {
+    setSetting(db, 'report_enabled', 'true');
+    setSetting(db, 'report_persist', 'true');
+    const written: Record<string, string> = {};
+    const searchFn: SearchFn = async () => [];
+    const synthExec: ReportExec = async () => '# 專案報告';
+    app = buildApp({
+      db,
+      apiToken: null,
+      reportSearchFn: searchFn,
+      reportSynthExec: synthExec,
+      reportPersistFns: { mkdir: () => {}, writeFile: (p, c) => { written[p] = c; } },
+    });
+    const res = await app.inject({ method: 'POST', url: '/api/report', payload: { project: 'x', save: true } });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(Array.isArray(body.files)).toBe(true);
+    expect(body.files.length).toBeGreaterThan(0);
+    expect(Object.keys(written).length).toBeGreaterThan(0);
   });
 });
 
