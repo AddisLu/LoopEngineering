@@ -76,4 +76,18 @@ describe('report page: static assets', () => {
     const js = fs.readFileSync(path.join(WEB_DIR, 'report.js'), 'utf8');
     expect(js).toMatch(/window\.print\(\)/);
   });
+
+  it('report.js shows an elapsed-seconds counter with staged progress hints while generating', () => {
+    const js = fs.readFileSync(path.join(WEB_DIR, 'report.js'), 'utf8');
+    expect(js).toMatch(/setInterval/);
+    expect(js).toMatch(/已等待/);
+    expect(js).toMatch(/STAGE_HINTS/);
+  });
+
+  it('report.js aborts the request past a client-side timeout and shows an error instead of hanging', () => {
+    const js = fs.readFileSync(path.join(WEB_DIR, 'report.js'), 'utf8');
+    expect(js).toMatch(/AbortController/);
+    expect(js).toMatch(/CLIENT_TIMEOUT_MS/);
+    expect(js).toMatch(/逾時/);
+  });
 });

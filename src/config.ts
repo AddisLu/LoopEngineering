@@ -288,6 +288,12 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // try a live OpenProject query (spawns scripts/openproject_dump.py) before falling back
   // to the ingested corpus snapshot; false skips straight to the snapshot search.
   report_live_first: 'true',
+  // POST /api/report always responds within this many ms, even when generateReport is
+  // still running (haiku/sonnet calls can legitimately take a minute+) -- past this, the
+  // route replies 504 {timedOut:true} instead of leaving the connection open with no
+  // response at all. generateReport itself keeps running to completion in the background;
+  // this only bounds how long the HTTP caller waits.
+  report_timeout_ms: '100000',
 
   // 報告生成 B（src/report/templates.ts）：reusable "boss persona" report templates.
   // Empty (default) = generateReport falls back to its built-in one-page instructions

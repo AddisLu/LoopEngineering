@@ -57,7 +57,6 @@ export interface AppOptions {
   reportDataExec?: OpDataExec;
   reportSynthExec?: ReportExec;
   reportSearchFn?: SearchFn;
-  reportTemplatePickExec?: ReportExec;
   reportPersistFns?: PersistWriteFns;
 }
 
@@ -431,7 +430,6 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
     dataExec: opts.reportDataExec,
     synthExec: opts.reportSynthExec,
     searchFn: opts.reportSearchFn,
-    templatePickExec: opts.reportTemplatePickExec,
     persistFns: opts.reportPersistFns,
   });
 
