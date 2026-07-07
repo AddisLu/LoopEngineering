@@ -171,7 +171,8 @@
     <a href="#integrations">21 · ADO/GitHub 整合橋接</a>
     <a href="#voice">22 · 語音加 task（手機）</a>
     <a href="#report">23 · 報告生成（描述式 + 老闆範本）</a>
-    <a href="#appendix">24 · 附錄（API / 檔案位置）</a>
+    <a href="#report-charts">24 · 報告圖表（Mermaid）與存檔</a>
+    <a href="#appendix">25 · 附錄（API / 檔案位置）</a>
   </nav>
 
   <main>
@@ -965,14 +966,27 @@ npm run loop -- pipeline run ship \
         <li><b>老闆範本（persona）</b>：<code>report_templates</code> 表（<code>name</code> 主鍵、<code>def</code> JSON：<code>{name, description, audience, format, instructions, sections?, default_project?, model?}</code>），首次啟動從 <code>seed/report-templates/*.json</code> 播種（<code>INSERT OR IGNORE</code>，不覆蓋你自己的修改，作法同第 20 章的 pipeline 模板）。<code>instructions</code> 是自由敘述（格式、語氣、老闆偏好、詳略），會直接取代內建預設注入合成 prompt。內建三個 persona：<code>plant-manager-onepage</code>（廠長一頁綜覽，極精簡，只看風險/里程碑/紅燈）、<code>manager-pr-weekly</code>（經理 PR/備料週報，交期/待簽核/到料表 + 進度%）、<code>pm-detailed</code>（PM 詳細進度，逐 work package 狀態/交期/負責人/卡點，可多頁）。</li>
         <li><b>沒指定範本時的挑選邏輯</b>：只給描述、沒指定 <code>template</code> 時，會讓 LLM 從目前登錄的範本清單挑一個最合適的（挑不到就繼續往下退）；再退到 <code>report_default_template</code> 設定；最後才用內建一頁式預設——不論哪一層，指定了不存在的範本名稱一律優雅退回內建，不會報錯。</li>
         <li><b>自訂範本</b>：<code>loop report templates</code> 列出目前有哪些；<code>loop report templates add --file &lt;json&gt;</code>（<code>{"items":[...]}</code>）批次匯入，或 <code>POST /api/report/templates</code>（單筆新增/更新）、<code>POST /api/report/templates/import</code>（批次）——壞掉的範本（缺 <code>name</code>/<code>instructions</code> 等）該筆會被拒絕並回報原因，不影響其他筆匯入成功。</li>
-        <li><b>看板頁</b>：<code>report.html</code> 用 <code>el()</code> 把回傳的 markdown 結構化成標題／段落／條列 DOM（textContent-only，無 innerHTML、無 md→html 套件）；「列印 / 存 PDF」按鈕呼叫 <code>window.print()</code>，頁面內建 <code>@media print</code> 樣式（隱藏頂欄/表單、A4 版面）——存 PDF 就是瀏覽器內建的列印另存。</li>
-        <li><b>測試</b>：<code>src/__tests__/report.test.ts</code>——範本 store 的播種/匯入 idempotent、upsert、壞 def 拒絕不炸；<code>generateReport</code> 帶 <code>template</code> 時斷言選中範本的 instructions 進了合成 prompt（取代內建預設）、未知範本優雅退回內建、<code>meta.template</code> 正確；路由的 templates CRUD；<code>report.test.ts</code>/<code>report.static.test.ts</code> 涵蓋 <code>report_enabled=false</code> 的零行為變化與 <code>report.js</code> 無 innerHTML。全程零網路/GPU/token。</li>
+        <li><b>看板頁</b>：<code>report.html</code> 用 <code>el()</code> 把回傳的 markdown 結構化成標題／段落／條列 DOM（textContent-only，無 md→html 套件；Mermaid 圖表容器是唯一的 innerHTML 例外，見第 24 章）；「列印 / 存 PDF」按鈕呼叫 <code>window.print()</code>，頁面內建 <code>@media print</code> 樣式（隱藏頂欄/表單、A4 版面）——存 PDF 就是瀏覽器內建的列印另存。</li>
+        <li><b>測試</b>：<code>src/__tests__/report.test.ts</code>——範本 store 的播種/匯入 idempotent、upsert、壞 def 拒絕不炸；<code>generateReport</code> 帶 <code>template</code> 時斷言選中範本的 instructions 進了合成 prompt（取代內建預設）、未知範本優雅退回內建、<code>meta.template</code> 正確；路由的 templates CRUD；<code>report.test.ts</code>/<code>report.static.test.ts</code> 涵蓋 <code>report_enabled=false</code> 的零行為變化。全程零網路/GPU/token。</li>
       </ul>
       <div class="note info"><span class="ic">📋</span><span>範本只換「怎麼寫」——資料來源、即時/快照退語料、預算守護、guard 邏輯全部沿用第一版報告功能，沒有另外發明一套語意。</span></div>
     </section>
 
+    <section id="report-charts">
+      <h2><span class="num">24</span>報告圖表（Mermaid）與存檔</h2>
+      <p>使用者回饋報告純文字太多——這一版把甘特圖／狀態圓餅圖（可選相位流程圖）加進報告，並可選擇把報告連同原始資料、圖表存到本機目錄，讓你直接抓圖貼簡報，或用自己的 git 追蹤歷史。<b>圖表資料一律由 <code>src/report/charts.ts</code> 的純函式從結構化 work package 資料程式化產生，LLM 完全不碰數字</b>——LLM 只負責寫「摘要 / 風險與落後 / 下一步」的敘述文字，不再重述甘特圖已經呈現的逐筆進度/交期表格。存檔功能預設關閉（<code>report_persist=false</code>），零行為影響。</p>
+      <ul>
+        <li><b>圖表怎麼來</b>：只要 <code>generateReport</code> 抓到即時 OpenProject 的結構化 work package（<code>source=live</code>）就會自動附圖，不需要另開關；查不到、退回既有語料快照（<code>source=snapshot</code>，純文字片段沒有結構化欄位）時沒有圖可畫，<code>meta.charts</code> 會是空陣列。附的圖固定是甘特圖（<code>ganttChart</code>，依狀態或相位分 section，已結案標 <code>done</code>、逾期未結案標 <code>crit</code>，沒有任何日期的項目略過）＋狀態圓餅圖（<code>statusPie</code>，把每筆項目歸到「進行中／已結案／逾期／未開始」四個互斥類別中，數量為 0 的類別不畫），有兩種以上 work package 類型時再加一張相位流程圖（<code>phaseFlow</code>，逾期的相位標紅）。圖表以 <code>```mermaid</code> 區塊附加在報告文字最後的「## 圖表」小節，回傳的 <code>meta.charts</code> 會列出實際附了哪些（例：<code>["gantt","pie"]</code>）。</li>
+        <li><b>看板頁怎麼畫</b>：<code>report.html</code>／<code>report.js</code> 本機 vendor 了 <code>web/vendor/mermaid.min.js</code>（<b>絕不連 CDN</b>），第一次遇到 <code>```mermaid</code> 區塊才動態載入；用 <code>mermaid.render()</code>（<code>securityLevel: 'strict'</code>，只渲染我方程式化產生、經 mermaid 自身淨化過的圖）把結果 SVG 插進專屬容器——這是整個看板<b>唯一</b>用 <code>innerHTML</code> 的地方，其餘全部維持 <code>textContent</code>-only（有靜態測試守著這條界線）。每張圖下面都有「複製 Mermaid 原始碼」鈕，方便貼到別的地方重新渲染或編輯。</li>
+        <li><b>存檔（<code>report_persist</code> / <code>report_output_dir</code>）</b>：預設 <code>report_persist=false</code>——不開就完全不寫檔。開啟後（或單次呼叫加 <code>save</code>），每次成功產生報告都會把 (a) 報告 markdown、(b) 這次的結構化 work package 快照 JSON、(c) 每張圖表各自的 <code>.mmd</code> 原始碼，分層寫到 <code>report_output_dir/&lt;專案&gt;/&lt;YYYY-MM-DD-主題&gt;/</code>（<code>report_output_dir</code> 預設 <code>&lt;資料目錄&gt;/reports</code>，即 <code>~/.local/share/loop-engineering/reports</code>）。純寫檔，<b>不會自動 git commit</b>——目錄結構是為了讓你自己的 git 好追蹤/好找；寫檔失敗只會記一筆錯誤，不影響報告本身的產生與回傳。</li>
+        <li><b>怎麼觸發存檔</b>：<code>loop config set report_persist true</code> 讓之後每次產報告都自動存；或不改設定、單次 CLI 加 <code>--save</code>：<code>loop report generate "大型AOI PR 最新進度" --save</code>（印出寫了哪些檔案路徑）；看板頁表單也有「同時存檔」勾選框；<code>POST /api/report</code> 的 body 加 <code>{"save": true}</code> 效果相同。有實際寫檔時，CLI/API 回傳都會多一個 <code>files</code>（絕對路徑陣列）。</li>
+        <li><b>測試</b>：<code>src/__tests__/report.charts.test.ts</code>（純函式：合法 Mermaid 語法、逾期標 <code>crit</code>、已結案標 <code>done</code>、特殊字元跳脫、空輸入回空字串）、<code>report.persist.test.ts</code>（注入假 <code>mkdir</code>/<code>writeFile</code>：分層路徑、三種檔案、寫檔失敗回 <code>null</code> 不炸）、<code>report.test.ts</code>（<code>generateReport</code> 附圖與 <code>meta.charts</code>、<code>report_persist</code>/<code>save</code> 的持久化開關）、<code>report.static.test.ts</code>（<code>report.js</code> 除 mermaid 容器外無 <code>innerHTML</code>、<code>securityLevel: 'strict'</code>、本機 vendor 無 CDN 參照）。全程零網路/GPU/token。</li>
+      </ul>
+      <div class="note info"><span class="ic">📊</span><span>圖表只是把已經在算的資料（甘特/狀態計數）換一種呈現方式——沒有另外呼叫 OpenProject 或另外花 token，也不影響第一版報告功能（即時查詢/快照退語料/老闆範本）的任何邏輯。</span></div>
+    </section>
+
     <section id="appendix">
-      <h2><span class="num">24</span>附錄</h2>
+      <h2><span class="num">25</span>附錄</h2>
       <h3>REST / SSE 端點</h3>
       <p>除 <code>/</code> 靜態頁外，<code>/api/*</code> 需帶 bearer（<code>Authorization: Bearer &lt;token&gt;</code>）或 <code>?token=</code>。</p>
       <div class="tbl-wrap">
@@ -1013,7 +1027,7 @@ npm run loop -- pipeline run ship \
           <tr><td>POST</td><td><code>/api/pipelines/:name/run</code></td><td>實體化為一條 <code>depends_on</code> 任務鏈並回傳 task ids</td></tr>
           <tr><td>POST</td><td><code>/api/integrations/import</code></td><td>拉取 work items 建成任務（見第 21 章；<code>integration_provider=none</code> 回 409，零外部呼叫）</td></tr>
           <tr><td>POST</td><td><code>/api/voice/intake</code></td><td>上傳一段語音（multipart），回傳逐字稿＋（盡力而為的）結構化任務欄位；<code>voice_intake_enabled=false</code>（預設）回 404（見第 22 章）</td></tr>
-          <tr><td>POST</td><td><code>/api/report</code></td><td>用描述（＋選填 <code>project</code>/<code>topic</code>/<code>template</code>）生成 OpenProject 專案報告；<code>report_enabled=false</code>（預設）回 404（見第 23 章）</td></tr>
+          <tr><td>POST</td><td><code>/api/report</code></td><td>用描述（＋選填 <code>project</code>/<code>topic</code>/<code>template</code>/<code>save</code>）生成 OpenProject 專案報告，回傳含程式化產生的 Mermaid 圖表（<code>meta.charts</code>）；<code>save=true</code> 或 <code>report_persist=true</code> 時多回傳 <code>files</code>（見第 24 章）；<code>report_enabled=false</code>（預設）回 404（見第 23 章）</td></tr>
           <tr><td>GET</td><td><code>/api/report/templates</code></td><td>列出老闆範本（persona）</td></tr>
           <tr><td>GET</td><td><code>/api/report/templates/:name</code></td><td>單一範本定義</td></tr>
           <tr><td>POST</td><td><code>/api/report/templates</code></td><td>新增／更新單一範本</td></tr>
