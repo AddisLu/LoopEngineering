@@ -761,16 +761,33 @@ server.registerTool('loop_report', {
   title: 'Generate an OpenProject project report from a description',
   description:
     '用一句自然語言描述生成 OpenProject 專案報告（例：「大型AOI PR 最新進度 one page」）— 伺服器會盡量即時查詢 OpenProject，' +
-    '查不到才退回既有語料快照，套用內建一頁式繁中範本產生報告。若伺服器 report_enabled 設定為 false（預設），回傳空報告。',
+    '查不到才退回既有語料快照，套用範本（見 loop_report_templates）或內建一頁式繁中範本產生報告。若伺服器 report_enabled 設定為 false（預設），回傳空報告。',
   inputSchema: {
     description: z.string().describe('用描述下報告，例：大型AOI PR 最新進度 one page'),
+    template: z.string().optional().describe('選填。指定要套用的老闆範本名稱（見 loop_report_templates），例如 "plant-manager-onepage"；省略則自動挑選或用內建預設。'),
   },
-}, async ({ description }) => {
+}, async ({ description, template }) => {
   try {
-    const r = await api('/api/report', { method: 'POST', body: { description } });
+    const body = { description };
+    if (template) body.template = template;
+    const r = await api('/api/report', { method: 'POST', body });
     return { content: [{ type: 'text', text: r.markdown || '(無內容)' }] };
   } catch (e) {
     return { content: [{ type: 'text', text: `Report generation failed: ${e.message}` }] };
+  }
+});
+
+server.registerTool('loop_report_templates', {
+  title: 'List reusable report (boss persona) templates',
+  description: '列出目前登錄的報告範本（老闆 persona）：名稱 + 描述，供 loop_report 的 template 參數挑選。若伺服器 report_enabled 設定為 false（預設），回傳空清單。',
+  inputSchema: {},
+}, async () => {
+  try {
+    const { templates } = await api('/api/report/templates');
+    const rows = (templates || []).map((t) => `${t.name}  ${t.description ?? ''}`);
+    return { content: [{ type: 'text', text: rows.join('\n') || '(no report templates)' }] };
+  } catch (e) {
+    return { content: [{ type: 'text', text: `Could not list report templates: ${e.message}` }] };
   }
 });
 
