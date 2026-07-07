@@ -162,14 +162,15 @@
     <a href="#mcp">12 · MCP：編輯器一句話派工</a>
     <a href="#autoflow">13 · 自動化：Git 收尾與任務鏈</a>
     <a href="#knowledge">14 · 知識庫：越跑越聰明</a>
-    <a href="#metrics">15 · 儀表板：自主產出</a>
-    <a href="#forecast">16 · Backlog 用量預估</a>
-    <a href="#discipline">17 · 執行紀律（實驗性，預設關）</a>
-    <a href="#envdeploy">18 · 環境與部署（Environments + Deploy）</a>
-    <a href="#pipelines">19 · 交付 pipeline 模板</a>
-    <a href="#integrations">20 · ADO/GitHub 整合橋接</a>
-    <a href="#voice">21 · 語音加 task（手機）</a>
-    <a href="#appendix">22 · 附錄（API / 檔案位置）</a>
+    <a href="#ssot">15 · SSoT／RAG／擷取管線</a>
+    <a href="#metrics">16 · 儀表板：自主產出</a>
+    <a href="#forecast">17 · Backlog 用量預估</a>
+    <a href="#discipline">18 · 執行紀律（實驗性，預設關）</a>
+    <a href="#envdeploy">19 · 環境與部署（Environments + Deploy）</a>
+    <a href="#pipelines">20 · 交付 pipeline 模板</a>
+    <a href="#integrations">21 · ADO/GitHub 整合橋接</a>
+    <a href="#voice">22 · 語音加 task（手機）</a>
+    <a href="#appendix">23 · 附錄（API / 檔案位置）</a>
   </nav>
 
   <main>
@@ -304,8 +305,8 @@
           <tr><td>⚙ 設定</td><td>開啟排程設定面板，直接調整日夜門檻等（見第 8 章）；儲存後下一個 tick 生效、免重啟。Mac/手機皆可改。</td></tr>
           <tr><td>☾ / ☀ 主題鈕</td><td>切換亮/暗佈景，記憶於 localStorage。</td></tr>
           <tr><td>＋ 新增 task</td><td>開啟新增任務對話框。</td></tr>
-          <tr><td>儀表板</td><td>開啟 <code>/metrics.html</code>——自主產出儀表板（見第 15 章）。</td></tr>
-          <tr><td>Backlog 預估 chip</td><td><code>weekly +N%・剩 M%・可加~K</code>——待處理任務吃掉的 weekly 額度、剩餘可加碼空間、粗估還能加幾個 M 任務；依 verdict 變色（見第 16 章）。</td></tr>
+          <tr><td>儀表板</td><td>開啟 <code>/metrics.html</code>——自主產出儀表板（見第 16 章）。</td></tr>
+          <tr><td>Backlog 預估 chip</td><td><code>weekly +N%・剩 M%・可加~K</code>——待處理任務吃掉的 weekly 額度、剩餘可加碼空間、粗估還能加幾個 M 任務；依 verdict 變色（見第 17 章）。</td></tr>
         </tbody>
       </table>
       </div>
@@ -338,7 +339,7 @@
           <tr><td>Title</td><td>是</td><td>任務標題。</td></tr>
           <tr><td>Goal</td><td>是</td><td>目標描述，不可空白。</td></tr>
           <tr><td>Plan</td><td>是</td><td>計畫參照：存在的 <code>.md</code>/<code>.html</code> 檔路徑，或合法 URL。</td></tr>
-          <tr><td>Tool</td><td>是</td><td><code>claude-code</code>／<code>mock</code>（零 token 測試用）／<code>generic</code>（無 git、產出檔案的非編碼任務）／<code>plan</code>（Epic 自主規劃——見下方「任務類型與驗證模式」與第 13 章）／<code>deploy</code>（部署任務，不派工給 agent——見第 18 章）。</td></tr>
+          <tr><td>Tool</td><td>是</td><td><code>claude-code</code>／<code>mock</code>（零 token 測試用）／<code>generic</code>（無 git、產出檔案的非編碼任務）／<code>plan</code>（Epic 自主規劃——見下方「任務類型與驗證模式」與第 13 章）／<code>deploy</code>（部署任務，不派工給 agent——見第 19 章）。</td></tr>
           <tr><td>Verify steps</td><td>是*</td><td>至少一條驗證指令（逗號分隔），例：<code>npm run lint, npm test</code>。<span class="pill">verify mode 含 manual／llm 或 tool=plan／deploy 時可免</span></td></tr>
           <tr><td>Repo path</td><td>是*</td><td>存在的 git repo 目錄。<span class="pill">mock／generic 略過</span></td></tr>
           <tr><td>Base branch</td><td>是*</td><td>存在的基底分支。<span class="pill">mock／generic 略過</span></td></tr>
@@ -346,7 +347,7 @@
           <tr><td>Priority</td><td>—</td><td>整數，預設 2。</td></tr>
           <tr><td>Model</td><td>—</td><td>留空＝用<b>全域預設模型</b>（<code>default_model</code>，預設 <code>sonnet</code> = Sonnet 5）。要對單一任務加碼可選 <code>opus</code>／<code>haiku</code>／<code>fable-5</code>。</td></tr>
           <tr><td>Setup cmd</td><td>—</td><td>派工前在 worktree 執行的準備指令（如 <code>npm ci</code>）。未填只是警告。</td></tr>
-          <tr><td>Environment</td><td>—（<code>deploy</code> 必填）</td><td>套用對應 <code>env:&lt;name&gt;</code> 知識；<code>tool=deploy</code> 時同時是部署目標，必須是已存在的 environment（見第 18 章）。</td></tr>
+          <tr><td>Environment</td><td>—（<code>deploy</code> 必填）</td><td>套用對應 <code>env:&lt;name&gt;</code> 知識；<code>tool=deploy</code> 時同時是部署目標，必須是已存在的 environment（見第 19 章）。</td></tr>
         </tbody>
       </table>
       </div>
@@ -362,7 +363,7 @@
           <tr><td><code>mock</code></td><td>暫存目錄（每次 run 全新建立，用完即棄）</td><td>無（零 token 測試/演練用，不代表真實產出）</td><td>排程器/斷路器/watchdog 的零 token 測試。</td></tr>
           <tr><td><code>generic</code></td><td><b>持久化</b>產出目錄 <code>~/.local/share/loop-engineering/outputs/&lt;id&gt;</code>（跨 resume 保留，結案也<b>不會</b>被清掉）</td><td><b>完全略過</b>——不建 worktree、不 commit、不 push、不併回、不開 PR</td><td>非編碼工作：報告、資料分析、一次性腳本、設計產出等。真的呼叫 Claude Code（非 mock），只是不碰 git。</td></tr>
           <tr><td><code>plan</code>（Epic）</td><td>不執行任何工作區——AI 規劃器把目標拆成子任務，子任務才各自建 worktree</td><td><b>無</b>（本身不改任何程式碼；子任務照常走完整收尾）</td><td>一句話丟一個大目標，自動拆成 2–6 個子任務並依序自主執行——見第 13 章「Epic 自主規劃」。</td></tr>
-          <tr><td><code>deploy</code></td><td>不派工給 agent——直接在 <code>repo_path</code> 執行 <code>deploy_cmd</code>（環境 <code>auto_deploy=1</code>），或產出 <code>outputs/deploy-&lt;id&gt;/DEPLOY.md</code> 部署包（<code>auto_deploy=0</code>）</td><td><b>無</b>（不是編碼任務，沒有 diff 可併）</td><td>把 <code>environment</code> 從知識標籤升級成真正的部署目標——見第 18 章「環境與部署」。</td></tr>
+          <tr><td><code>deploy</code></td><td>不派工給 agent——直接在 <code>repo_path</code> 執行 <code>deploy_cmd</code>（環境 <code>auto_deploy=1</code>），或產出 <code>outputs/deploy-&lt;id&gt;/DEPLOY.md</code> 部署包（<code>auto_deploy=0</code>）</td><td><b>無</b>（不是編碼任務，沒有 diff 可併）</td><td>把 <code>environment</code> 從知識標籤升級成真正的部署目標——見第 19 章「環境與部署」。</td></tr>
         </tbody>
       </table>
       </div>
@@ -400,14 +401,14 @@
           <tr><td><code>prune [--status &lt;list&gt;] [--older-than &lt;days&gt;] [--yes]</code></td><td>批次清理終態任務＋產物（預設 dry-run，加 <code>--yes</code> 才真刪）。</td></tr>
           <tr><td><code>config [list｜get｜set] [key] [value]</code></td><td>檢視 / 即時修改排程設定（門檻、模型、Git 收尾旗標）。例：<code>loop config set default_model sonnet</code>。改完下一個 tick 生效、免重啟；含防呆。</td></tr>
           <tr><td><code>set-usage --session &lt;%&gt; [--weekly &lt;%&gt;]</code></td><td><b>開發用</b>：強制寫入共享用量快取（斷路器演練）。</td></tr>
-          <tr><td><code>forecast</code></td><td>Backlog 用量預估（見第 16 章）；若有可比較資料，尾端再附一行執行紀律 A/B 摘要（見第 17 章）。</td></tr>
-          <tr><td><code>env list｜add &lt;name&gt;｜remove &lt;name&gt;</code></td><td>管理部署環境（見第 18 章）。<code>add</code> 旗標：<code>--kind</code> <code>--host</code> <code>--capabilities</code> <code>--deploy-cmd</code> <code>--auto-deploy</code>。</td></tr>
-          <tr><td><code>deploy --env &lt;name&gt; --repo &lt;path&gt; --base &lt;branch&gt;</code></td><td>建立並排入一個 <code>tool=deploy</code> 任務（見第 18 章）。</td></tr>
+          <tr><td><code>forecast</code></td><td>Backlog 用量預估（見第 17 章）；若有可比較資料，尾端再附一行執行紀律 A/B 摘要（見第 18 章）。</td></tr>
+          <tr><td><code>env list｜add &lt;name&gt;｜remove &lt;name&gt;</code></td><td>管理部署環境（見第 19 章）。<code>add</code> 旗標：<code>--kind</code> <code>--host</code> <code>--capabilities</code> <code>--deploy-cmd</code> <code>--auto-deploy</code>。</td></tr>
+          <tr><td><code>deploy --env &lt;name&gt; --repo &lt;path&gt; --base &lt;branch&gt;</code></td><td>建立並排入一個 <code>tool=deploy</code> 任務（見第 19 章）。</td></tr>
           <tr><td><code>deploy rollback &lt;env&gt;</code></td><td>把該環境回滾到上一次成功部署的 commit。</td></tr>
-          <tr><td><code>pipeline list</code></td><td>列出 pipeline 模板（內建 <code>feature</code>／<code>fix</code>／<code>ship</code>，見第 19 章）與各自的 stage。</td></tr>
-          <tr><td><code>pipeline run &lt;name&gt; --goal* [--repo] [--base] [--env] [--title] [--verify]</code></td><td>實體化模板為一條 <code>depends_on</code> 任務鏈（見第 19 章）。</td></tr>
+          <tr><td><code>pipeline list</code></td><td>列出 pipeline 模板（內建 <code>feature</code>／<code>fix</code>／<code>ship</code>，見第 20 章）與各自的 stage。</td></tr>
+          <tr><td><code>pipeline run &lt;name&gt; --goal* [--repo] [--base] [--env] [--title] [--verify]</code></td><td>實體化模板為一條 <code>depends_on</code> 任務鏈（見第 20 章）。</td></tr>
           <tr><td><code>pipeline import [file]</code></td><td>批次匯入／更新模板（不給檔案就重匯內建 <code>seed/pipelines/*.json</code>）。</td></tr>
-          <tr><td><code>pull --provider &lt;github|ado&gt; --query &lt;q&gt; [--repo] [--base] [--verify]</code></td><td>拉取 work items 建成 Loop 任務，依 <code>source_ref</code> 冪等（見第 20 章）。<code>--provider</code> 須符合已設定的 <code>integration_provider</code>。</td></tr>
+          <tr><td><code>pull --provider &lt;github|ado&gt; --query &lt;q&gt; [--repo] [--base] [--verify]</code></td><td>拉取 work items 建成 Loop 任務，依 <code>source_ref</code> 冪等（見第 21 章）。<code>--provider</code> 須符合已設定的 <code>integration_provider</code>。</td></tr>
         </tbody>
       </table>
       </div>
@@ -450,7 +451,7 @@ npm run loop -- list --status review</code></pre>
           <tr><td><code>max_resumes</code></td><td>2</td><td>一個任務可自動續跑的次數上限；用盡後轉 <code>attention</code>。</td></tr>
           <tr><td><code>usage_refresh_sec</code></td><td>180</td><td>用量抓取週期。</td></tr>
           <tr><td><code>ntfy_server</code> / <code>ntfy_topic</code></td><td>（空）</td><td>ntfy 推播設定。</td></tr>
-          <tr><td><code>prompt_discipline</code></td><td>false</td><td>派工時附加「執行紀律」提示區塊（實驗性，見第 17 章）；預設關＝零影響。</td></tr>
+          <tr><td><code>prompt_discipline</code></td><td>false</td><td>派工時附加「執行紀律」提示區塊（實驗性，見第 18 章）；預設關＝零影響。</td></tr>
         </tbody>
       </table>
       </div>
@@ -484,7 +485,7 @@ npm run loop -- list --status review</code></pre>
         </tbody>
       </table></div>
 
-      <h3>ADO/GitHub 整合橋接（見第 20 章）</h3>
+      <h3>ADO/GitHub 整合橋接（見第 21 章）</h3>
       <div class="tbl-wrap"><table>
         <thead><tr><th>鍵</th><th>預設</th><th>說明</th></tr></thead>
         <tbody>
@@ -493,7 +494,7 @@ npm run loop -- list --status review</code></pre>
         </tbody>
       </table></div>
 
-      <h3>語音加 task（見第 21 章）</h3>
+      <h3>語音加 task（見第 22 章）</h3>
       <div class="tbl-wrap"><table>
         <thead><tr><th>鍵</th><th>預設</th><th>說明</th></tr></thead>
         <tbody>
@@ -531,9 +532,9 @@ npm run loop -- list --status review</code></pre>
           <tr><td><code>TOKENBAR_TOKEN_CACHE</code> / <code>TOKENBAR_HISTORY</code></td><td>共享 token 快取 / 歷史 ledger 路徑。</td></tr>
           <tr><td><code>NTFY_SERVER</code> / <code>NTFY_TOPIC</code></td><td>ntfy 推播（含一鍵暫停動作）。</td></tr>
           <tr><td><code>LOOP_PUBLIC_URL</code></td><td>ntfy 暫停動作用的公開網址。</td></tr>
-          <tr><td><code>GITHUB_TOKEN</code> / <code>GITHUB_API_URL</code></td><td>GitHub PAT；<code>GITHUB_API_URL</code> 選填，指向 GHES 時覆寫預設的 <code>api.github.com</code>（見第 20 章）。</td></tr>
-          <tr><td><code>ADO_PAT</code> / <code>ADO_ORG</code> / <code>ADO_PROJECT</code></td><td>Azure DevOps PAT ＋ 組織／專案；三者需同時存在才會啟用 <code>ado</code> provider（見第 20 章）。</td></tr>
-          <tr><td><code>LOOP_VOICE_PYTHON</code></td><td>faster-whisper venv 的 python 執行檔路徑；預設 <code>~/.local/share/loop-engineering/voice-venv/bin/python</code>（見第 21 章）。</td></tr>
+          <tr><td><code>GITHUB_TOKEN</code> / <code>GITHUB_API_URL</code></td><td>GitHub PAT；<code>GITHUB_API_URL</code> 選填，指向 GHES 時覆寫預設的 <code>api.github.com</code>（見第 21 章）。</td></tr>
+          <tr><td><code>ADO_PAT</code> / <code>ADO_ORG</code> / <code>ADO_PROJECT</code></td><td>Azure DevOps PAT ＋ 組織／專案；三者需同時存在才會啟用 <code>ado</code> provider（見第 21 章）。</td></tr>
+          <tr><td><code>LOOP_VOICE_PYTHON</code></td><td>faster-whisper venv 的 python 執行檔路徑；預設 <code>~/.local/share/loop-engineering/voice-venv/bin/python</code>（見第 22 章）。</td></tr>
         </tbody>
       </table>
       </div>
@@ -626,16 +627,20 @@ systemctl --user disable loop-engineering</code></pre>
           <tr><td><code>loop_add_task</code></td><td>最小輸入建立（預設直接排程）任務，回傳自動填入值與 gate 結果。可帶 <code>depends_on</code>（串行鏈）、<code>model</code>（覆寫全域預設）。</td></tr>
           <tr><td><code>loop_queue_task</code></td><td>把某個 draft 入列執行</td></tr>
           <tr><td><code>loop_list_tasks</code></td><td>看板摘要（可依狀態過濾）</td></tr>
-          <tr><td><code>loop_status</code></td><td>排程 / 用量狀態，並附一行 Backlog 用量預估（「Loop 還能加幾個任務？」直接問這個工具即可，見第 16 章）</td></tr>
+          <tr><td><code>loop_status</code></td><td>排程 / 用量狀態，並附一行 Backlog 用量預估（「Loop 還能加幾個任務？」直接問這個工具即可，見第 17 章）</td></tr>
           <tr><td><code>loop_task_result</code></td><td>取某任務的結果：PR 連結、gap-review、失敗原因、log 尾巴</td></tr>
           <tr><td><code>loop_wait_task</code></td><td>輪詢等待任務到終態（review／attention／failed／closed）後回傳</td></tr>
           <tr><td><code>loop_delete_task</code></td><td>永久刪除任務＋磁碟產物</td></tr>
           <tr><td><code>loop_cleanup</code></td><td>批次清理終態任務（含 dryRun 預覽）</td></tr>
-          <tr><td><code>loop_list_environments</code></td><td>列出部署環境（見第 18 章）</td></tr>
+          <tr><td><code>loop_list_environments</code></td><td>列出部署環境（見第 19 章）</td></tr>
           <tr><td><code>loop_deploy</code></td><td>建立並排入一個部署任務（<code>tool=deploy</code>）</td></tr>
           <tr><td><code>loop_rollback_deployment</code></td><td>把某環境回滾到上一次成功部署的 commit</td></tr>
-          <tr><td><code>loop_run_pipeline</code></td><td>一次實體化一個 pipeline 模板（<code>feature</code>／<code>fix</code>／<code>ship</code>）為一條任務鏈（見第 19 章）</td></tr>
-          <tr><td><code>loop_pull_workitems</code></td><td>拉取 GitHub issue／ADO work item 建成任務，依 <code>source_ref</code> 冪等；需伺服器已設定 <code>integration_provider</code> 與憑證（見第 20 章）</td></tr>
+          <tr><td><code>loop_run_pipeline</code></td><td>一次實體化一個 pipeline 模板（<code>feature</code>／<code>fix</code>／<code>ship</code>）為一條任務鏈（見第 20 章）</td></tr>
+          <tr><td><code>loop_pull_workitems</code></td><td>拉取 GitHub issue／ADO work item 建成任務，依 <code>source_ref</code> 冪等；需伺服器已設定 <code>integration_provider</code> 與憑證（見第 21 章）</td></tr>
+          <tr><td><code>loop_ingest</code></td><td>觸發 SSoT 擷取管線（單一來源或全部已啟用來源），增量由內容 sha256 判斷（見第 15 章）</td></tr>
+          <tr><td><code>loop_sources</code></td><td>列出已登錄的擷取來源（git/folder/vault）</td></tr>
+          <tr><td><code>loop_search</code></td><td>混合 RAG 檢索語料庫（FTS ⊕ 向量 KNN，RRF 融合），回帶引用的片段</td></tr>
+          <tr><td><code>loop_capture</code></td><td>快速記錄一則 markdown 筆記進 SSoT vault 並立即索引（語料層，不注入 prompt——跟 <code>loop_remember</code> 是兩回事）</td></tr>
         </tbody>
       </table></div>
       <div class="note info"><span class="ic">🔗</span><span><b>用 MCP 串成鏈：</b>先建任務 A，再建 B 時說「依賴 A」（帶 <code>depends_on</code>）——A 結案後 B 自動放行，避免多個任務同時從舊 base 切分支而互相衝突。</span></div>
@@ -745,21 +750,94 @@ npm run loop -- add --title "Epic: 上線通知系統" \
       </ul>
     </section>
 
+    <section id="ssot">
+      <h2><span class="num">15</span>SSoT／RAG／擷取管線</h2>
+      <p>第 14 章的知識庫是<b>策展層</b>——小量、人工核可、會注入任務 prompt。這一章是它的擴充：一個<b>語料層</b>（<code>documents</code>／<code>chunks</code>），把整個 codebase、筆記 vault 甚至 GitHub issues 都<b>受治理地</b>擷取進同一個 <code>loop.sqlite</code>，支援<b>混合語意檢索（RAG）</b>與可追溯的引用——但<b>只在被查詢時才選擇性拉出</b>，絕不整段塞進任務 prompt（維持第 14 章「零影響」的策展層不變）。</p>
+      <div class="note info"><span class="ic">🗂️</span><span><b>兩個資料平面。</b>策展圖譜層（<code>knowledge_nodes/edges</code>，第 14 章）＝小量、人工核可、注入 prompt；語料層（<code>documents/chunks</code>，這一章）＝大量原始擷取內容，只供 RAG 檢索、選擇性拉 top-K。兩層以 <code>doc_links</code>／<code>node_chunk_links</code> 連結（例如 vault 筆記的 <code>[[wikilink]]</code>、或蒸餾草稿的語料佐證）。</span></div>
+
+      <h3>來源登錄與擷取管線</h3>
+      <p>先登錄一個<b>來源</b>（<code>sources</code> 表），再觸發擷取：</p>
+      <pre><code># 登錄：git repo（受 .gitignore、只取已追蹤檔）／folder／Obsidian 風格 vault
+loop ingest add --git ~/Coding/LoopEngineering
+loop ingest add --vault ~/SSoT
+loop ingest list
+loop ingest rm &lt;source_id&gt;
+
+# 擷取：全部已啟用來源，或指定一個
+loop ingest run
+loop ingest run &lt;source_id&gt;</code></pre>
+      <ul>
+        <li><b>受治理 walker</b>：git 來源用 <code>git ls-files</code>（尊重 .gitignore）；folder/vault 用遞迴 walk。一律排除 <code>node_modules/dist/.git</code>、二進位、鎖檔；<code>.env*</code>／<code>.pem</code>／<code>id_rsa</code> 等金鑰檔名整檔跳過；檔案大小超過 <code>ingest_max_file_kb</code> 也跳過。就算檔案通過了這層，內文裡看起來像私鑰區塊／AWS／OpenAI／GitHub／Slack token／<code>key=&quot;...&quot;</code> 這類樣式，也會被逐一遮蔽成 <code>[REDACTED]</code> 才進索引。</li>
+        <li><b>chunker</b>：markdown 依標題切塊、程式碼依函式/行窗切塊，每個片段都記 <code>start_line/end_line</code> 供之後的引用。</li>
+        <li><b>增量、bi-temporal</b>：以檔案內容 sha256 比對——沒變的檔案整個略過（<code>skipped_unchanged</code>），變了的檔案舊版標記 <code>invalid_at</code>（保留歷史，不刪除）並產生新版文件／片段；來源裡消失的檔案同樣被標記失效，而不是砍掉重練。</li>
+        <li><b>觸發方式</b>：CLI <code>loop ingest run [source]</code>、MCP <code>loop_ingest</code>／<code>loop_sources</code>、REST <code>POST /api/ingest</code>／<code>GET /api/sources</code>。</li>
+      </ul>
+
+      <h3>混合 RAG 檢索</h3>
+      <p>語料層可用<b>混合檢索</b>查：FTS5 trigram 全文（跟第 14 章知識庫搜尋同一套中文友善索引）⊕ 向量 KNN 語意搜尋，兩路排名以 <b>RRF（Reciprocal Rank Fusion）</b>融合，回傳帶引用（來源路徑／行號／分數）的片段。</p>
+      <ul>
+        <li><b>本機 GPU 嵌入</b>：<code>rag_enabled=false</code>（預設）時完全不會嵌入、不會載入模型——自動退回<b>純 FTS 全文檢索</b>，一樣可用，只是少了語意召回。開啟後用 <code>embed_model</code>（預設 <code>BAAI/bge-m3</code>，1024 維、多語含中文）透過 voice-venv 的常駐 worker 嵌入，同一顆 GPU 與語音 whisper worker <b>共用、互斥、閒置自動釋放 VRAM</b>（<code>embed_worker_idle_min</code>）。</li>
+        <li><b>sqlite-vec</b>：向量存在 <code>vec_chunks</code>／<code>vec_nodes</code> 兩個 vec0 虛擬表；<code>loadExtension</code> 失敗（例如平台沒有對應的 <code>.so</code>）會安靜降級為 FTS-only，不會讓伺服器起不來。</li>
+        <li><b>怎麼查</b>：MCP <code>loop_search</code>（回帶引用的片段，適合問「這段邏輯在哪裡」）、REST <code>GET /api/rag/search?q=...</code>。</li>
+        <li><b>任務內自動帶語料（旗標，預設關）</b>：<code>rag_inject_task_context=true</code> 時，派工除了第 14 章的策展知識，還會額外拉該 repo scope 的 top-K 語料片段，附進 LOOP_TASK.md 一個獨立的「相關語料 (RAG)」段（有 char 預算上限）；關閉＝完全不影響 prompt。</li>
+      </ul>
+
+      <h3>快速記錄（capture）：一句話寫進 SSoT vault</h3>
+      <p>不想手動開 Obsidian 建檔時，用<b>擷取</b>：寫一則 markdown 筆記進已登錄的 SSoT vault，並<b>立即索引</b>，馬上就能被 <code>loop_search</code> 搜到。跟第 14 章「＋ 新增」的策展知識節點是<b>完全分開的兩層</b>——擷取寫進語料層（<code>documents/chunks</code>），<b>不會</b>注入任何任務 prompt；要留一條「以後每個任務都要遵守」的長期事實，還是用 <code>loop_remember</code>／知識庫頁的「＋ 新增」。</p>
+      <ul>
+        <li><b>MCP</b>：<code>loop_capture</code>（<code>text</code> 必填，<code>title</code> 留白則取內文第一句，<code>tags</code> 選填）。</li>
+        <li><b>看板</b>：知識庫頁（<code>/brain.html</code>）頂欄「📥 擷取」開一個輕量對話框，寫完按「寫入」，成功後顯示新增了幾份文件／幾個片段。</li>
+        <li><b>REST</b>：<code>POST /api/capture</code>（<code>{"body":"...","title":"...","tags":[...]}</code>）。</li>
+        <li>寫入的目的地是<b>第一個已啟用的 <code>kind=vault</code> 來源</b>——先用 <code>loop ingest add --vault ~/SSoT</code> 登錄一個，擷取才有地方寫；沒登錄會回 400 錯誤說明原因。</li>
+      </ul>
+
+      <h3>週期性 re-ingest</h3>
+      <p>不想每次改完 vault／repo 都手動 <code>loop ingest run</code>，可開啟排程器自動幫你重跑：</p>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>鍵</th><th>預設</th><th>說明</th></tr></thead>
+        <tbody>
+          <tr><td><code>ingest_auto_pump</code></td><td>false</td><td>開啟後，伺服器 tick loop 會依 <code>ingest_pump_interval_min</code> 週期自動對<b>每個已啟用來源</b>做一次增量 <code>loop ingest run</code>（背景執行、不擋 tick，失敗下次照樣重試）；沒改的檔案增量略過，成本很低。關閉＝完全不會自動觸發，維持手動／MCP／REST 觸發的舊行為。</td></tr>
+          <tr><td><code>ingest_pump_interval_min</code></td><td>30</td><td>兩次自動 re-ingest 之間至少間隔幾分鐘。伺服器（重）啟動後第一個 tick 會先跑一次，補上停機期間的變更。</td></tr>
+        </tbody>
+      </table></div>
+
+      <h3>蒸餾 ↔ 語料佐證（可追溯）</h3>
+      <p>第 14 章的自動蒸餾在任務結案時萃取候選知識草稿；現在多一步：草稿產生的當下，會用它的標題對語料庫做一次混合檢索，把<b>支持這個草稿的原始片段</b>記下來（<code>node_chunk_links</code>，relation=<code>evidences</code>）。知識庫頁的草稿列多一顆「佐證」鈕，點開可看到這些片段的路徑／行號／摘錄——核可前先看它是不是真的有根據。查無片段（語料庫是空的、或標題找不到對應內容）就完全沒有佐證區塊，不影響原本的核可／退回流程。</p>
+
+      <h3>設定一覽</h3>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>鍵</th><th>預設</th><th>說明</th></tr></thead>
+        <tbody>
+          <tr><td><code>rag_enabled</code></td><td>false</td><td>總開關：關閉時語料層完全不嵌入、不建向量索引，檢索退回純 FTS——零影響。</td></tr>
+          <tr><td><code>embed_model</code></td><td>BAAI/bge-m3</td><td>本機嵌入模型名稱（1024 維、多語含中文）。</td></tr>
+          <tr><td><code>embed_dim</code></td><td>1024</td><td>向量維度，決定 <code>vec_chunks</code>/<code>vec_nodes</code> 建表時的欄位大小。</td></tr>
+          <tr><td><code>embed_python</code></td><td>voice-venv 的 python</td><td>嵌入 daemon 用的 python 執行檔（沿用語音的 torch/sentence-transformers venv）。</td></tr>
+          <tr><td><code>rag_top_k</code></td><td>8</td><td>混合檢索融合後回傳的最大筆數（<code>loop_search</code>/<code>rag_inject_task_context</code> 皆可個別覆寫）。</td></tr>
+          <tr><td><code>rag_hybrid_alpha</code></td><td>0.5</td><td>保留給未來加權融合用的係數（目前 RRF 融合本身不吃這個值）。</td></tr>
+          <tr><td><code>embed_worker_idle_min</code></td><td>10</td><td>嵌入常駐 worker 閒置幾分鐘後自動關閉釋放 VRAM（跟語音 worker 共用 GPU、互斥執行）。</td></tr>
+          <tr><td><code>ingest_max_file_kb</code></td><td>1024</td><td>單檔超過此大小（KB）就不進 chunker/embedder。</td></tr>
+          <tr><td><code>rag_inject_task_context</code></td><td>false</td><td>派工時是否額外拉該 repo 的 top-K 語料片段進 LOOP_TASK.md 的獨立段落。</td></tr>
+          <tr><td><code>ingest_auto_pump</code></td><td>false</td><td>是否由排程器週期性自動 re-ingest 全部已啟用來源。</td></tr>
+          <tr><td><code>ingest_pump_interval_min</code></td><td>30</td><td>自動 re-ingest 的週期（分）。</td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
     <section id="metrics">
-      <h2><span class="num">15</span>儀表板：自主產出</h2>
+      <h2><span class="num">16</span>儀表板：自主產出</h2>
       <p>看板頂欄的「儀表板」開啟 <code>/metrics.html</code>：ADO 只看得到<b>人</b>的 velocity，這頁補上 ADO 產不出來的數字——<b>AI 自主跑掉了多少</b>。純讀取既有資料（<code>tasks</code>／<code>task_events</code>／<code>token_snapshots</code>），對排程/執行零影響。</p>
       <ul>
         <li><b>統計磚</b>：已結案總數、結案／天、成功率、平均週期（建立→結案）、平均 token %／任務、引擎自我更新次數、自動合併次數。</li>
         <li><b>用量趨勢折線圖</b>：session／weekly 用量百分比隨時間變化（取自 <code>token_snapshots</code>）。</li>
         <li><b>每日結案長條圖</b>：closed/day，天數視右上角「天數」下拉（7／14／30／90）而定。</li>
         <li><b>狀態漏斗</b>：建立 → 進入 Review → 結案／待確認／失敗，各自佔建立總數的比率。</li>
-        <li><b>執行紀律 A/B 表</b>：<code>prompt_discipline</code> 開／關兩組的任務數、平均 session %、待確認率、續跑次數、週期比較（實驗性功能，見第 17 章）。</li>
+        <li><b>執行紀律 A/B 表</b>：<code>prompt_discipline</code> 開／關兩組的任務數、平均 session %、待確認率、續跑次數、週期比較（實驗性功能，見第 18 章）。</li>
       </ul>
       <div class="note info"><span class="ic">📊</span><span>頁面每 30 秒自動刷新一次（非 SSE，用量夠低不需要即時）；換「天數」立即重抓。</span></div>
     </section>
 
     <section id="forecast">
-      <h2><span class="num">16</span>Backlog 用量預估</h2>
+      <h2><span class="num">17</span>Backlog 用量預估</h2>
       <p>回答「還能不能再加任務？」：把既有的每任務估計（<code>est_pct_*</code> / <code>est_weekly_pct_*</code>）加總成一個 backlog 預測，純讀取、<b>不影響</b>排程或預算行為。「pending」= 非終態任務（<code>draft/ready/queued/running/verifying/blocked</code>，排除 <code>closed/failed/review/attention</code>）。</p>
       <ul>
         <li><b>Weekly 是累加約束</b>（整週不會中途歸零）：<code>weekly_backlog_pct</code> = 所有 pending 任務的 <code>estimateWeeklyPct</code> 加總；<code>weekly_headroom</code> = <code>max(0, weekly_max − weekly_now − weekly_backlog_pct)</code>。</li>
@@ -771,7 +849,7 @@ npm run loop -- add --title "Epic: 上線通知系統" \
     </section>
 
     <section id="discipline">
-      <h2><span class="num">17</span>執行紀律（實驗性，預設關）</h2>
+      <h2><span class="num">18</span>執行紀律（實驗性，預設關）</h2>
       <p>社群傳的「Superpowers 6.0 = 速度 2 倍／token −50%」是誤讀了 Superpowers 自己 6.0 對比 5.x 的 changelog（不是對比原生 Claude Code）；獨立測試顯示平均省 ~14%、簡單任務反而更貴，而且它的工作流程本來就偏吃 token。把整個 plugin 裝進 Loop 是<b>淨負面</b>：Loop 無頭派工的 <code>--allowed-tools</code> 沒有 <code>Skill</code>/<code>Task</code>，它的技能大多根本不會被觸發（描述注入的 token 白花）；<code>brainstorming</code> 技能會反問使用者，對無人值守是致命的；worktree／plan／code-review／subagent 相關技能還會跟 Loop 自己的 worktree.ts／planner／gapReviewer／verify 重複＋衝突。</p>
       <p><b>所以：不安裝 plugin。</b>唯一真正可搬、不衝突、便宜的部分，是三個「純提示詞」紀律：test-driven-development、systematic-debugging、verification-before-completion。這裡把它們濃縮成一段選配的 <code>## 執行紀律</code> 提示（見 <code>src/orchestrator/prompt.ts</code>），完全不含 subagent、不含反問，由 <code>prompt_discipline</code> 開關控制（預設 <code>false</code> ＝ 對 <code>LOOP_TASK.md</code> 零影響）。</p>
       <ul>
@@ -783,7 +861,7 @@ npm run loop -- add --title "Epic: 上線通知系統" \
     </section>
 
     <section id="envdeploy">
-      <h2><span class="num">18</span>環境與部署（Environments + Deploy）</h2>
+      <h2><span class="num">19</span>環境與部署（Environments + Deploy）</h2>
       <p><code>environment</code> 欄位原本只是套用 <code>env:&lt;name&gt;</code> 知識的標籤；現在額外對到一張真正的 <code>environments</code> 表，把「環境」升級成一個可執行的部署目標——服務「在家開發、帶去公司部署」：<b>home</b> 設 <code>auto_deploy</code>，本機直接跑 <code>deploy_cmd</code>；<b>company</b> 不設 <code>deploy_cmd</code>（<code>auto_deploy=0</code>），改產出一份部署包＋人工檢查清單，帶去公司照做。</p>
       <div class="tbl-wrap">
       <table>
@@ -811,13 +889,13 @@ npm run loop -- add --title "Epic: 上線通知系統" \
     </section>
 
     <section id="pipelines">
-      <h2><span class="num">19</span>交付 pipeline 模板</h2>
-      <p>ADO 的 multi-stage pipeline 是人工寫的 YAML（build→test→deploy）、推 push 觸發；Loop 的自主版是<b>預定義模板</b>——一個動作就把「implement → verify → deploy」這種固定分解，實體化成一條第 13 章的 <code>depends_on</code> 任務鏈，每個 stage 沿用既有的驗證模式（command／llm／manual，見第 6 章）與第 18 章的部署當作自己的關卡。這不是新的執行語意，只是 <code>depends_on</code> + verify + deploy 的一個方便組合。</p>
+      <h2><span class="num">20</span>交付 pipeline 模板</h2>
+      <p>ADO 的 multi-stage pipeline 是人工寫的 YAML（build→test→deploy）、推 push 觸發；Loop 的自主版是<b>預定義模板</b>——一個動作就把「implement → verify → deploy」這種固定分解，實體化成一條第 13 章的 <code>depends_on</code> 任務鏈，每個 stage 沿用既有的驗證模式（command／llm／manual，見第 6 章）與第 19 章的部署當作自己的關卡。這不是新的執行語意，只是 <code>depends_on</code> + verify + deploy 的一個方便組合。</p>
       <ul>
-        <li><b>模板存哪</b>：<code>pipelines</code> 表（<code>name</code> 主鍵、<code>def</code> JSON），首次啟動即從 <code>seed/pipelines/*.json</code> 播種（<code>INSERT OR IGNORE</code>，不覆蓋你自己的修改，作法同第 18 章的 <code>environments</code> 播種）。內建三個：<code>feature</code>（implement → llm-gate → deploy home）、<code>fix</code>（implement → command-verify）、<code>ship</code>（implement → verify → deploy home → deploy company〔人工〕）。</li>
+        <li><b>模板存哪</b>：<code>pipelines</code> 表（<code>name</code> 主鍵、<code>def</code> JSON），首次啟動即從 <code>seed/pipelines/*.json</code> 播種（<code>INSERT OR IGNORE</code>，不覆蓋你自己的修改，作法同第 19 章的 <code>environments</code> 播種）。內建三個：<code>feature</code>（implement → llm-gate → deploy home）、<code>fix</code>（implement → command-verify）、<code>ship</code>（implement → verify → deploy home → deploy company〔人工〕）。</li>
         <li><b>怎麼跑</b>：<code>loop pipeline run &lt;name&gt; --goal "…" --repo /path --base main [--env home] [--title "…"] [--verify "npm run typecheck,npm test"]</code>，或 <code>POST /api/pipelines/:name/run</code>，或 MCP 的 <code>loop_run_pipeline</code>。<code>goal</code>／<code>repo</code>／<code>base</code>／<code>verify</code> 由每個 stage <b>共用</b>（因為改的是同一份 code），各 stage 自己的 <code>verify_mode</code>／<code>environment</code>／<code>complexity</code> 則照模板固定。</li>
         <li><b>實體化</b>：依模板順序建出一串任務，用 <code>depends_on</code> 串成鏈，共享一個新的 <code>pipeline_id</code>（+ 各自的 <code>stage_name</code>，如 <code>implement</code>／<code>deploy-home</code>）；第一個 stage 通過 gate 就直接 <code>queued</code>，其餘留 <code>draft</code>，交給第 13 章既有的任務鏈機制依序放行。</li>
-        <li><b>關卡＝既有驗證模式</b>：command stage 要跑過驗證指令；llm stage 要過 rubric（模板的 <code>rubric_hint</code> 會變成該任務的 <code>verify_rubric</code>）；deploy stage 走第 18 章的部署（環境是 <code>auto_deploy</code> 就自動部署，否則產出人工部署包）。<b>任一 stage 失敗</b>（<code>failed</code>）就停在原地——下一棒的 <code>depends_on</code> 判定為 <code>dep-failed</code>，永遠不會被自動派工，跟第 13 章第 3 節的任務鏈規則完全一樣，沒有另外發明失敗處理。</li>
+        <li><b>關卡＝既有驗證模式</b>：command stage 要跑過驗證指令；llm stage 要過 rubric（模板的 <code>rubric_hint</code> 會變成該任務的 <code>verify_rubric</code>）；deploy stage 走第 19 章的部署（環境是 <code>auto_deploy</code> 就自動部署，否則產出人工部署包）。<b>任一 stage 失敗</b>（<code>failed</code>）就停在原地——下一棒的 <code>depends_on</code> 判定為 <code>dep-failed</code>，永遠不會被自動派工，跟第 13 章第 3 節的任務鏈規則完全一樣，沒有另外發明失敗處理。</li>
         <li><b>看板</b>：頂欄下方多一條 pipeline 進度列，例如「<code>feature: implement ✓ → review-gate ⏳ → deploy-home ○</code>」，點任一 stage 開該任務詳情；卡片本身也會多一顆「🚦 stage 名稱」徽章，詳情視窗列出整條 pipeline 各 stage 的狀態。</li>
         <li><b>自訂模板</b>：<code>loop pipeline list</code> 看目前有哪些；<code>loop pipeline import [file]</code>（不給檔案就重新匯入內建 <code>seed/pipelines/*.json</code>）或 <code>POST /api/pipelines/import</code> 批次匯入——壞掉的 stage（缺 name、<code>coding_tool</code> 不合法等）該筆會被拒絕並回報原因，不影響其他筆匯入成功。</li>
       </ul>
@@ -829,7 +907,7 @@ npm run loop -- pipeline run ship \
     </section>
 
     <section id="integrations">
-      <h2><span class="num">20</span>ADO/GitHub 整合橋接</h2>
+      <h2><span class="num">21</span>ADO/GitHub 整合橋接</h2>
       <p>D5：Loop 不取代公司的 ADO/GitHub，而是<b>插在它上面當自主執行層</b>——從 ADO/GitHub 拉一張 work item/issue → 建成 Loop 任務 → Loop 自主實作 → 把結果（PR 連結＋狀態）推回原 work item 留言。<b>預設整個功能全關、零外部呼叫</b>；只有明確設定 provider 並在環境檔案填妥憑證後才會動作。</p>
       <ul>
         <li><b>啟用</b>：<code>loop config set integration_provider github</code>（或 <code>ado</code>；預設 <code>none</code>＝完全關閉，不論憑證是否存在都不會呼叫外部）。憑證只放在 <code>~/.config/loop-engineering/env</code>（絕不進 SQLite、絕不進 log）：GitHub 用 <code>GITHUB_TOKEN</code>（＋選填 <code>GITHUB_API_URL</code>，支援 GHES）；ADO 用 <code>ADO_PAT</code> / <code>ADO_ORG</code> / <code>ADO_PROJECT</code>（三者缺一即視為未設定）。</li>
@@ -842,7 +920,7 @@ npm run loop -- pipeline run ship \
     </section>
 
     <section id="voice">
-      <h2><span class="num">21</span>語音加 task（手機）</h2>
+      <h2><span class="num">22</span>語音加 task（手機）</h2>
       <p>手機上打字不方便，於是加了語音入口：錄一段話（中英文夾雜、有停頓都沒關係）→ 這台主機（RTX 2080）上的 faster-whisper 轉成逐字稿 → 一支 LLM 把口語逐字稿清理成任務欄位 → <b>只會帶入</b>新增任務表單，你確認無誤才按送出——語音不會直接建立任務。<b>預設整個功能關閉（<code>voice_intake_enabled=false</code>），零行為影響。</b>手機實測回饋後追加了 4 項改進：獨立大按鈕、常駐 worker＋haiku 加速、問答式確認＋缺漏檢查、詞表由知識庫維護可持續學習。</p>
       <ul>
         <li><b>怎麼用</b>：看板 topbar 有一顆獨立的大按鈕「🎤 語音加 task」（不是小圖示），點了直接開 <code>voice.html</code>；手機瀏覽器也可直接開 <code>http://&lt;主機&gt;:4711/voice.html?token=…</code>（跟看板同一個 bearer token）。錄音鈕本身做成大尺寸、全寬，狀態文字（待命／錄音中…／處理中…／完成）＋計時（mm:ss）＋錄音中變紅色，手機單手可按。iOS Safari／Android Chrome 都支援（<code>MediaRecorder</code> 會挑瀏覽器實際支援的格式，如 <code>audio/mp4</code> 或 <code>audio/webm</code>）；「+ 新增 task」對話框裡標題旁的小 🎤 仍保留（桌機備用，點擊區已加大）。</li>
@@ -856,7 +934,7 @@ npm run loop -- pipeline run ship \
     </section>
 
     <section id="appendix">
-      <h2><span class="num">22</span>附錄</h2>
+      <h2><span class="num">23</span>附錄</h2>
       <h3>REST / SSE 端點</h3>
       <p>除 <code>/</code> 靜態頁外，<code>/api/*</code> 需帶 bearer（<code>Authorization: Bearer &lt;token&gt;</code>）或 <code>?token=</code>。</p>
       <div class="tbl-wrap">
@@ -867,8 +945,8 @@ npm run loop -- pipeline run ship \
           <tr><td>GET</td><td><code>/api/board</code></td><td>完整看板狀態（卡片、用量、政策、計數）</td></tr>
           <tr><td>GET</td><td><code>/api/token</code></td><td>詳細用量讀數</td></tr>
           <tr><td>GET</td><td><code>/api/history?limit=</code></td><td>用量歷史快照</td></tr>
-          <tr><td>GET</td><td><code>/api/metrics?days=</code></td><td>自主產出儀表板快照（1..90 天，預設 14），含執行紀律 A/B（見第 17 章）</td></tr>
-          <tr><td>GET</td><td><code>/api/forecast</code></td><td>Backlog 用量預估（見第 16 章）</td></tr>
+          <tr><td>GET</td><td><code>/api/metrics?days=</code></td><td>自主產出儀表板快照（1..90 天，預設 14），含執行紀律 A/B（見第 18 章）</td></tr>
+          <tr><td>GET</td><td><code>/api/forecast</code></td><td>Backlog 用量預估（見第 17 章）</td></tr>
           <tr><td>GET</td><td><code>/api/stream</code></td><td>SSE：每秒推送完整看板</td></tr>
           <tr><td>POST</td><td><code>/api/tasks</code></td><td>建立任務（JSON body）</td></tr>
           <tr><td>POST</td><td><code>/api/tasks/:id/queue</code></td><td>審核 + 入列</td></tr>
@@ -886,17 +964,24 @@ npm run loop -- pipeline run ship \
           <tr><td>POST</td><td><code>/api/resume-scheduler</code></td><td>恢復排程</td></tr>
           <tr><td>GET</td><td><code>/api/settings</code></td><td>取得可調的日夜門檻等設定</td></tr>
           <tr><td>POST</td><td><code>/api/settings</code></td><td>更新設定（含驗證，看板 ⚙ 面板使用）</td></tr>
-          <tr><td>GET</td><td><code>/api/environments</code></td><td>列出部署環境（見第 18 章）</td></tr>
+          <tr><td>GET</td><td><code>/api/environments</code></td><td>列出部署環境（見第 19 章）</td></tr>
           <tr><td>POST</td><td><code>/api/environments</code></td><td>新增／更新環境（依 <code>name</code> upsert）</td></tr>
           <tr><td>DELETE</td><td><code>/api/environments/:name</code></td><td>刪除環境</td></tr>
           <tr><td>GET</td><td><code>/api/deployments?env=</code></td><td>部署歷史（可依環境過濾）</td></tr>
           <tr><td>POST</td><td><code>/api/deployments/:id/rollback</code></td><td>回滾到該環境上一次成功部署的 commit</td></tr>
-          <tr><td>GET</td><td><code>/api/pipelines</code></td><td>列出 pipeline 模板（見第 19 章）</td></tr>
+          <tr><td>GET</td><td><code>/api/pipelines</code></td><td>列出 pipeline 模板（見第 20 章）</td></tr>
           <tr><td>GET</td><td><code>/api/pipelines/:name</code></td><td>單一模板定義</td></tr>
           <tr><td>POST</td><td><code>/api/pipelines/import</code></td><td>批次匯入／更新模板（<code>{"items":[...]}</code>）</td></tr>
           <tr><td>POST</td><td><code>/api/pipelines/:name/run</code></td><td>實體化為一條 <code>depends_on</code> 任務鏈並回傳 task ids</td></tr>
-          <tr><td>POST</td><td><code>/api/integrations/import</code></td><td>拉取 work items 建成任務（見第 20 章；<code>integration_provider=none</code> 回 409，零外部呼叫）</td></tr>
-          <tr><td>POST</td><td><code>/api/voice/intake</code></td><td>上傳一段語音（multipart），回傳逐字稿＋（盡力而為的）結構化任務欄位；<code>voice_intake_enabled=false</code>（預設）回 404（見第 21 章）</td></tr>
+          <tr><td>POST</td><td><code>/api/integrations/import</code></td><td>拉取 work items 建成任務（見第 21 章；<code>integration_provider=none</code> 回 409，零外部呼叫）</td></tr>
+          <tr><td>POST</td><td><code>/api/voice/intake</code></td><td>上傳一段語音（multipart），回傳逐字稿＋（盡力而為的）結構化任務欄位；<code>voice_intake_enabled=false</code>（預設）回 404（見第 22 章）</td></tr>
+          <tr><td>GET</td><td><code>/api/sources</code></td><td>列出 SSoT 擷取來源（見第 15 章）</td></tr>
+          <tr><td>POST</td><td><code>/api/sources</code></td><td>登錄一個擷取來源（<code>kind</code>: git/folder/vault/github-issues）</td></tr>
+          <tr><td>DELETE</td><td><code>/api/sources/:id</code></td><td>移除來源（連帶失效其 documents/chunks）</td></tr>
+          <tr><td>POST</td><td><code>/api/ingest</code></td><td>觸發擷取管線（<code>source_id</code> 選填；省略＝跑全部已啟用來源）</td></tr>
+          <tr><td>GET</td><td><code>/api/rag/search?q=</code></td><td>混合 RAG 檢索語料庫（FTS ⊕ 向量 KNN，RRF 融合）；<code>scope</code>/<code>kind</code>/<code>topK</code> 選填</td></tr>
+          <tr><td>POST</td><td><code>/api/capture</code></td><td>快速記錄一則 markdown 筆記進 SSoT vault 並立即索引；未登錄 vault 來源回 400</td></tr>
+          <tr><td>GET</td><td><code>/api/knowledge/:id/evidence</code></td><td>某知識節點（通常是蒸餾草稿）的支持語料片段，見第 15 章「蒸餾 ↔ 語料佐證」</td></tr>
         </tbody>
       </table>
       </div>
@@ -911,7 +996,7 @@ npm run loop -- pipeline run ship \
           <tr><td><code>~/.config/loop-engineering/env</code></td><td>環境設定（token、port、TokenBar、ntfy）</td></tr>
           <tr><td><code>~/.config/systemd/user/loop-engineering.service</code></td><td>systemd 使用者服務單元</td></tr>
           <tr><td><code>~/.claude/.credentials.json</code></td><td>Claude Code 訂閱登入憑證（勿設 API key，否則按量計費）</td></tr>
-          <tr><td><code>~/.local/share/loop-engineering/voice-venv</code></td><td>faster-whisper venv（RTX 2080，<code>scripts/transcribe.py</code> 用；見第 21 章）</td></tr>
+          <tr><td><code>~/.local/share/loop-engineering/voice-venv</code></td><td>faster-whisper venv（RTX 2080，<code>scripts/transcribe.py</code> 用；見第 22 章）</td></tr>
           <tr><td><code>~/.local/share/loop-engineering/voice</code></td><td>上傳的語音暫存檔（轉錄完即刪除）</td></tr>
         </tbody>
       </table>
