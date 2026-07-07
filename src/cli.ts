@@ -44,6 +44,8 @@ import { importWorkItems } from './integrations/import.js';
 import { createSource, listSources, deleteSource, getSource } from './knowledge/ingest/sources.js';
 import type { SourceKind, SourceConfig } from './knowledge/ingest/types.js';
 import { ingestSource, ingestAll } from './knowledge/ingest/ingest.js';
+import { generateReport } from './report/generate.js';
+import { listReportTemplates, importReportTemplates } from './report/templates.js';
 
 const program = new Command();
 program.name('loop').description('Loop Engineering — token-aware coding-task scheduler').version('0.1.0');
@@ -564,6 +566,54 @@ pipeline
         .map((f) => JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')));
     }
     const result = importPipelineDefs(db, items);
+    console.log(`import: created=${result.created} updated=${result.updated} rejected=${result.rejected.length}`);
+    for (const r of result.rejected) console.log(`  [${r.index}] ${r.error}`);
+  });
+
+const report = program
+  .command('report')
+  .description('OpenProject reports from a natural-language description, with reusable boss-persona templates');
+
+report
+  .command('generate <description>')
+  .description('generate an OpenProject project report from a description (prints markdown to stdout)')
+  .option('--project <name>', 'project name/keyword (skips description -> project parsing)')
+  .option('--template <name>', 'named report template to use (see: loop report templates)')
+  .action(async (description: string, o) => {
+    const db = getDb();
+    if (!getBool(db, 'report_enabled', false)) {
+      return fail('report_enabled is false — enable it first: loop config set report_enabled true');
+    }
+    const result = await generateReport(db, { description, project: o.project, template: o.template });
+    if (!result) return fail('report generation failed (check report_enabled / hard_limit_pct / claude CLI availability)');
+    console.log(result.markdown);
+    console.error(
+      `\n[meta] source=${result.meta.source} project=${result.meta.project ?? '-'} items=${result.meta.itemCount}` +
+        (result.meta.template ? ` template=${result.meta.template}` : ''),
+    );
+  });
+
+const reportTemplates = report
+  .command('templates')
+  .description('list report templates')
+  .action(() => {
+    const defs = listReportTemplates(getDb());
+    if (!defs.length) {
+      console.log('(no report templates — seeded personas should exist by default)');
+      return;
+    }
+    for (const d of defs) console.log(`${pad(d.name, 24)} ${d.description ?? ''}`);
+  });
+
+reportTemplates
+  .command('add')
+  .description('bulk-import report templates from a JSON file ({"items":[...]})')
+  .requiredOption('--file <path>', 'JSON file path')
+  .action((o) => {
+    const db = getDb();
+    const data = JSON.parse(fs.readFileSync(o.file, 'utf8'));
+    const items = Array.isArray(data) ? data : Array.isArray(data.items) ? data.items : [data];
+    const result = importReportTemplates(db, items);
     console.log(`import: created=${result.created} updated=${result.updated} rejected=${result.rejected.length}`);
     for (const r of result.rejected) console.log(`  [${r.index}] ${r.error}`);
   });
