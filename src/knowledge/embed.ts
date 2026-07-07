@@ -43,8 +43,15 @@ function getWarmWorkerSingleton(db: Database.Database): WarmWorker {
       path.join(ENGINE_REPO_ROOT, 'scripts', 'embed_daemon.py'),
       () => getNum(db, 'embed_worker_idle_min', 10),
       TIMEOUT_MS,
+      () => ['--model', getSetting(db, 'embed_model') || 'BAAI/bge-m3'],
     );
   }
+  return warmWorkerSingleton;
+}
+
+/** Current warm-worker singleton, or null if it's never been spawned. Never creates one —
+ * used only by src/server.ts's graceful shutdown (see shutdownWarmWorkers in daemon.ts). */
+export function getEmbedWarmWorkerSingleton(): WarmWorker | null {
   return warmWorkerSingleton;
 }
 

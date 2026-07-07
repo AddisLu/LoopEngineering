@@ -44,8 +44,15 @@ function getWarmWorkerSingleton(db: Database.Database): WarmWorker {
       path.join(ENGINE_REPO_ROOT, 'scripts', 'transcribe_daemon.py'),
       () => getNum(db, 'voice_worker_idle_min', 10),
       TIMEOUT_MS,
+      () => ['--model', getSetting(db, 'voice_model') || 'large-v3'],
     );
   }
+  return warmWorkerSingleton;
+}
+
+/** Current warm-worker singleton, or null if it's never been spawned. Never creates one —
+ * used only by src/server.ts's graceful shutdown (see shutdownWarmWorkers in daemon.ts). */
+export function getTranscribeWarmWorkerSingleton(): WarmWorker | null {
   return warmWorkerSingleton;
 }
 

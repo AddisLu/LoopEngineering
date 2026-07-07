@@ -8,7 +8,7 @@ import { transcribe, type TranscribeExec } from '../voice/transcribe.js';
 import { structureTranscript, parseStructured, type StructureExec } from '../voice/structure.js';
 import { seedGlossaryTerms, glossaryTermsForPrompt } from '../voice/glossary.js';
 import { listNodes, upsertNode, invalidateNode } from '../knowledge/store.js';
-import { WarmWorker, type ChildLike, type SpawnFn } from '../voice/daemon.js';
+import { WarmWorker, shutdownWarmWorkers, type ChildLike, type SpawnFn } from '../voice/daemon.js';
 
 let db: Database.Database;
 let app: FastifyInstance;
@@ -554,6 +554,66 @@ describe('WarmWorker', () => {
     expect(fakes[0].removedEvents).toContain('proc:exit');
     expect(fakes[0].removedEvents).toContain('proc:error');
     expect(fakes[0].removedEvents).toContain('stdout:data');
+  });
+
+  // ---- review #2: warm daemon carries the configured model, recomputed on every (re)spawn ----
+
+  it('spawns the daemon with --model from the injected spawnArgs, refreshed after a respawn', async () => {
+    const fakes: FakeChild[] = [];
+    const seenArgs: string[][] = [];
+    const spawnFn: SpawnFn = (_bin, _script, args) => {
+      seenArgs.push(args);
+      const f = makeFakeChild();
+      fakes.push(f);
+      return f.child;
+    };
+    let model = 'large-v3';
+    const worker = new WarmWorker(spawnFn, '/fake/python', '/fake/daemon.py', () => 10, 5000, () => ['--model', model]);
+
+    const p1 = worker.transcribe('/a.webm', '/terms.txt');
+    fakes[0].emitData(JSON.stringify({ text: 'ok' }) + '\n');
+    await p1;
+    expect(seenArgs[0]).toEqual(['--model', 'large-v3']);
+
+    worker.killChild();
+    model = 'small'; // setting changed after the daemon was already warm
+
+    const p2 = worker.transcribe('/b.webm', '/terms.txt'); // respawns -> picks up the new model
+    fakes[1].emitData(JSON.stringify({ text: 'ok2' }) + '\n');
+    await p2;
+    expect(seenArgs[1]).toEqual(['--model', 'small']);
+  });
+
+  // ---- review #3: graceful shutdown kills both warm-worker singletons ----
+
+  describe('shutdownWarmWorkers', () => {
+    it('kills every given warm worker', async () => {
+      const fakes: FakeChild[] = [];
+      const spawnFn: SpawnFn = () => {
+        const f = makeFakeChild();
+        fakes.push(f);
+        return f.child;
+      };
+      const voiceWorker = new WarmWorker(spawnFn, '/fake/python', '/fake/voice.py', () => 10, 5000);
+      const embedWorker = new WarmWorker(spawnFn, '/fake/python', '/fake/embed.py', () => 10, 5000);
+      const p1 = voiceWorker.transcribe('/a.webm', '/terms.txt');
+      fakes[0].emitData(JSON.stringify({ text: 'ok' }) + '\n');
+      await p1;
+      const p2 = embedWorker.embed(['x']);
+      fakes[1].emitData(JSON.stringify({ embeddings: [[1]] }) + '\n');
+      await p2;
+      expect(voiceWorker.isAlive()).toBe(true);
+      expect(embedWorker.isAlive()).toBe(true);
+
+      shutdownWarmWorkers([voiceWorker, embedWorker]);
+
+      expect(voiceWorker.isAlive()).toBe(false);
+      expect(embedWorker.isAlive()).toBe(false);
+    });
+
+    it('skips null/undefined entries (a singleton that was never spawned)', () => {
+      expect(() => shutdownWarmWorkers([null, undefined])).not.toThrow();
+    });
   });
 });
 

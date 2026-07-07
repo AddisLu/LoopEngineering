@@ -14,10 +14,13 @@ export interface ChildLike {
   killed?: boolean;
 }
 
-export type SpawnFn = (pythonBin: string, scriptPath: string) => ChildLike;
+export type SpawnFn = (pythonBin: string, scriptPath: string, args: string[]) => ChildLike;
 
-/** Real spawn of scripts/transcribe_daemon.py, kept alive across requests. */
-export const realSpawn: SpawnFn = (pythonBin, scriptPath) => spawn(pythonBin, [scriptPath], { stdio: ['pipe', 'pipe', 'pipe'] });
+/** Real spawn of scripts/transcribe_daemon.py or embed_daemon.py, kept alive across requests.
+ * `args` (e.g. `['--model', name]`) are appended after scriptPath so a changed voice_model/
+ * embed_model setting takes effect the next time the daemon (re)spawns. */
+export const realSpawn: SpawnFn = (pythonBin, scriptPath, args) =>
+  spawn(pythonBin, [scriptPath, ...args], { stdio: ['pipe', 'pipe', 'pipe'] });
 
 interface PendingRequest {
   resolve: (value: unknown) => void;
@@ -51,6 +54,10 @@ export class WarmWorker {
     private readonly scriptPath: string,
     private readonly idleMinutes: () => number,
     private readonly timeoutMs: number,
+    /** Extra argv appended after scriptPath, recomputed on every (re)spawn — e.g.
+     * `['--model', getSetting(db, 'voice_model')]` — so a model setting changed after the
+     * daemon is already warm takes effect on its next respawn (idle-kill/timeout/death). */
+    private readonly spawnArgs: () => string[] = () => [],
   ) {}
 
   isAlive(): boolean {
@@ -117,7 +124,7 @@ export class WarmWorker {
 
   private ensureSpawned(): void {
     if (this.isAlive()) return;
-    const c = this.spawnFn(this.pythonBin, this.scriptPath);
+    const c = this.spawnFn(this.pythonBin, this.scriptPath, this.spawnArgs());
     this.child = c;
     this.buf = '';
     c.stdout.on('data', (chunk) => this.onData(c, chunk));
@@ -183,4 +190,12 @@ export class WarmWorker {
       this.idleTimer = null;
     }
   }
+}
+
+/** Kill any already-spawned warm-worker singletons (voice transcription + embedding) so a
+ * graceful shutdown never orphans the python subprocess / leaks VRAM. Callers pass the
+ * current singleton handles (getTranscribeWarmWorkerSingleton/getEmbedWarmWorkerSingleton);
+ * a worker that was never spawned (still null) is simply skipped. */
+export function shutdownWarmWorkers(workers: Array<Pick<WarmWorker, 'killChild'> | null | undefined>): void {
+  for (const w of workers) w?.killChild();
 }

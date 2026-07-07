@@ -7,6 +7,9 @@ import { readUsage } from './token/usage.js';
 import { paths } from './config.js';
 import { pumpPushback } from './integrations/pushback.js';
 import { pumpIngest } from './knowledge/ingest/pump.js';
+import { shutdownWarmWorkers } from './voice/daemon.js';
+import { getTranscribeWarmWorkerSingleton } from './voice/transcribe.js';
+import { getEmbedWarmWorkerSingleton } from './knowledge/embed.js';
 
 /** Production entry: runs the scheduling loop AND serves the API/board. systemd runs this. */
 export async function main(): Promise<void> {
@@ -68,6 +71,7 @@ export async function main(): Promise<void> {
   const shutdown = async () => {
     clearInterval(iv);
     engine.stop();
+    shutdownWarmWorkers([getTranscribeWarmWorkerSingleton(), getEmbedWarmWorkerSingleton()]);
     await app.close().catch(() => {});
     process.exit(0);
   };
