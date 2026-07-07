@@ -191,6 +191,17 @@ CREATE TABLE IF NOT EXISTS pipelines (
   created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Reusable "boss persona" report templates (see src/report/templates.ts): a stored
+-- instructions/format/audience blob that generateReport injects in place of its
+-- built-in default one-page instructions. Same shape/idiom as pipelines above; seeded
+-- from seed/report-templates/*.json at first startup.
+CREATE TABLE IF NOT EXISTS report_templates (
+  name        TEXT PRIMARY KEY,
+  description TEXT,
+  def         TEXT NOT NULL,   -- JSON: { name, description, audience, format, instructions, sections?, default_project?, model? }
+  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- MUST use the trigram tokenizer: default unicode61 cannot segment Chinese
 -- ("只能" would never match "公司只能用"). Requires SQLite >= 3.34 (better-sqlite3
 -- 11.x bundles >= 3.45), verified with a runtime probe in knowledge.store.test.ts.
