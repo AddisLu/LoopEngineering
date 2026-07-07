@@ -730,7 +730,7 @@ npm run loop -- add --title "Epic: 上線通知系統" \
         <li><b>MCP 一句話</b>：任何 Claude Code 對話說「記住：公司只能用 Python 3.8.10」→ <code>loop_remember</code> 入庫；<code>loop_recall</code> 搜尋、<code>loop_link</code> 建關聯。</li>
         <li><b>知識庫頁</b>：搜尋（中文 FTS）／kind 篩選／新增編輯／建關聯／「關聯」鈕開多跳知識圖譜。</li>
         <li><b>自動蒸餾</b>：任務結案時用 haiku 從 HANDOFF 萃取候選知識 →<b>草稿</b>（琥珀徽章），你在知識庫頁<b>核可後才會注入</b>（<code>knowledge_distill</code> 可關）。</li>
-        <li><b>CLI</b>：<code>loop knowledge &lt;list|search|add|import|export&gt;</code>。</li>
+        <li><b>CLI</b>：<code>loop knowledge &lt;list|search|add|import|export|relate&gt;</code>（<code>relate</code> 見本章「知識圖譜關聯」）。</li>
       </ul>
       <h3>知識怎麼被用</h3>
       <ul>
@@ -747,6 +747,15 @@ npm run loop -- add --title "Epic: 上線通知系統" \
         <li><b>操作</b>：拖曳空白處平移、滾輪縮放、拖曳節點喬位置、點一下節點（不拖曳）會即時向伺服器多要一跳鄰居併入目前的圖（既有節點位置不會被打斷）。</li>
         <li><b>篩選</b>：面板內有 kind 篩選、來源篩選（節點的 <code>source</code>／文件所屬的 ingest 來源）、標籤與 scope 關鍵字過濾，以及「顯示文件節點」開關（關掉只看策展知識，不看語料文件）。</li>
         <li><b>純 vanilla 實作</b>：整張圖是手刻 canvas 2D force-directed（<code>web/graph-layout.js</code> 純運算＋<code>web/brain.js</code> 畫面／互動），沒有外部圖表庫、沒有 CDN，符合看板一貫的 <code>textContent</code>-only（canvas 文字是像素，本來就不是 HTML，不會有注入風險）。</li>
+      </ul>
+
+      <h3>知識圖譜關聯（auto-relate）：自動推斷節點間的關係</h3>
+      <p>手動建關聯很容易越積越少——這功能用<b>混合策略</b>幫知識庫補關聯，同樣<b>草稿制</b>、永不自動核准：先用既有的向量索引（<code>vec_nodes</code>，<code>sqlite-vec</code>，cosine 距離）取每個節點嵌入空間裡最近的 5 個鄰居當候選配對（避免 N² 全配對），再用一次 haiku 呼叫幫候選配對判斷關係型別（<code>runs-on</code>／<code>constrains</code>／<code>deployed-at</code>／<code>uses</code>／<code>part-of</code>／<code>related</code>）並濾掉沒有實質關聯的配對——輸出的邊一律以<b>草稿關聯</b>入庫，跟既有邊（同來源、去向、關係型別）重複的一律略過，不會產生重複邊。</p>
+      <ul>
+        <li><b>怎麼觸發</b>：知識庫頁頂欄「🔗 推斷關聯」鈕；或 CLI <code>loop knowledge relate [--limit N]</code>（<code>--limit</code> 控制單次最多評估幾組候選配對，離越近的配對優先，預設 20）；或 API <code>POST /api/knowledge/relate</code>。</li>
+        <li><b>怎麼審核</b>：知識庫頁「草稿關聯」區塊列出所有待審核的建議邊（來源／關係／去向＋理由），逐條「核可」或「退回」——核可後才會出現在圖譜與任務注入裡；退回不會刪除紀錄，只是不再視為待審。</li>
+        <li><b>絕不自動生效</b>：草稿關聯在核可前<b>不會</b>出現在「🕸 圖譜」畫面，也<b>不會</b>被派工時的知識注入（<code>knowledgeContext</code>）當成一跳關聯使用——跟草稿節點的審核邏輯完全對稱。</li>
+        <li><b>零 token 前提</b>：沒裝 <code>claude</code> CLI，或本節 session 用量已達 <code>hard_limit_pct</code>，都不會呼叫 LLM（也不會消耗嵌入運算）；沒有觸發前，圖譜與任務注入行為完全不變。</li>
       </ul>
     </section>
 
@@ -995,6 +1004,10 @@ npm run loop -- pipeline run ship \
           <tr><td>GET</td><td><code>/api/rag/search?q=</code></td><td>混合 RAG 檢索語料庫（FTS ⊕ 向量 KNN，RRF 融合）；<code>scope</code>/<code>kind</code>/<code>topK</code> 選填</td></tr>
           <tr><td>POST</td><td><code>/api/capture</code></td><td>快速記錄一則 markdown 筆記進 SSoT vault 並立即索引；未登錄 vault 來源回 400</td></tr>
           <tr><td>GET</td><td><code>/api/knowledge/:id/evidence</code></td><td>某知識節點（通常是蒸餾草稿）的支持語料片段，見第 15 章「蒸餾 ↔ 語料佐證」</td></tr>
+          <tr><td>POST</td><td><code>/api/knowledge/relate</code></td><td>觸發自動關聯推斷（<code>{"limit":N}</code> 選填），回傳新建的草稿邊，見第 14 章「知識圖譜關聯」</td></tr>
+          <tr><td>GET</td><td><code>/api/knowledge/edges/drafts</code></td><td>列出待審核的草稿關聯（含來源／去向標題）</td></tr>
+          <tr><td>POST</td><td><code>/api/knowledge/edges/:id/approve</code></td><td>核可一條草稿關聯</td></tr>
+          <tr><td>POST</td><td><code>/api/knowledge/edges/:id/reject</code></td><td>退回一條草稿關聯（保留紀錄，不刪除）</td></tr>
         </tbody>
       </table>
       </div>
