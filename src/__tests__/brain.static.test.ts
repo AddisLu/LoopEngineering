@@ -7,19 +7,40 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WEB_DIR = path.join(__dirname, '..', '..', 'web');
 
 describe('brain page: static assets', () => {
-  it('web/brain.html and web/brain.js exist', () => {
+  it('web/brain.html, web/brain.js, and web/graph-layout.js exist', () => {
     expect(fs.existsSync(path.join(WEB_DIR, 'brain.html'))).toBe(true);
     expect(fs.existsSync(path.join(WEB_DIR, 'brain.js'))).toBe(true);
+    expect(fs.existsSync(path.join(WEB_DIR, 'graph-layout.js'))).toBe(true);
   });
 
-  it('brain.js contains no innerHTML usage (cheap XSS guard)', () => {
-    const js = fs.readFileSync(path.join(WEB_DIR, 'brain.js'), 'utf8');
-    expect(js).not.toMatch(/innerHTML/);
+  it('brain.js and graph-layout.js contain no innerHTML usage (cheap XSS guard)', () => {
+    expect(fs.readFileSync(path.join(WEB_DIR, 'brain.js'), 'utf8')).not.toMatch(/innerHTML/);
+    expect(fs.readFileSync(path.join(WEB_DIR, 'graph-layout.js'), 'utf8')).not.toMatch(/innerHTML/);
   });
 
-  it('brain.js builds the relation view with createElementNS (SVG, no innerHTML)', () => {
+  it('graph-layout.js is DOM-free (no document/window/canvas references) so it stays hermetically testable', () => {
+    const js = fs.readFileSync(path.join(WEB_DIR, 'graph-layout.js'), 'utf8');
+    expect(js).not.toMatch(/\bdocument\./);
+    expect(js).not.toMatch(/\bwindow\./);
+    expect(js).not.toMatch(/getContext/);
+  });
+
+  it('brain.js is an ES module that imports graph-layout.js and renders the knowledge graph on <canvas> (SSoT Phase 3, no CDN/library)', () => {
     const js = fs.readFileSync(path.join(WEB_DIR, 'brain.js'), 'utf8');
-    expect(js).toMatch(/createElementNS/);
+    expect(js).toMatch(/from ['"]\/graph-layout\.js['"]/);
+    expect(js).toMatch(/getContext\(['"]2d['"]\)/);
+    expect(js).toMatch(/requestAnimationFrame/);
+    // pan/zoom/drag/expand interactions
+    expect(js).toMatch(/addEventListener\(\s*['"]wheel['"]/);
+    expect(js).toMatch(/addEventListener\(\s*['"]mousedown['"]/);
+    expect(js).toMatch(/expandVertex/);
+  });
+
+  it('brain.html loads brain.js as a module and has a canvas-based graph panel, not the old SVG relation view', () => {
+    const html = fs.readFileSync(path.join(WEB_DIR, 'brain.html'), 'utf8');
+    expect(html).toMatch(/<script type="module" src="\/brain\.js">/);
+    expect(html).toMatch(/<canvas id="graph-canvas"/);
+    expect(html).not.toContain('relation-svg');
   });
 
   it('brain.html references /styles.css and /brain.js, and has its own <main class="brain">', () => {
