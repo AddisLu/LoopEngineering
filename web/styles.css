@@ -840,6 +840,10 @@ dialog menu { display: flex; justify-content: flex-end; gap: 10px; margin: 18px 
 
 .node-list { display: flex; flex-direction: column; gap: 10px; flex: 1 1 auto; }
 
+/* auto-relate draft-edge review panel (see src/knowledge/relate.ts) — rows reuse .node-row */
+.draft-edges-panel { margin-bottom: 16px; }
+.edge-suggestion { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+
 .node-row {
   display: flex;
   align-items: flex-start;

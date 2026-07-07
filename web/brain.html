@@ -34,6 +34,7 @@
         <button id="theme-btn" class="btn icon-btn" type="button" title="切換佈景" aria-label="切換佈景"></button>
         <button id="graph-btn" class="btn" type="button">🕸 圖譜</button>
         <button id="capture-btn" class="btn" type="button">📥 擷取</button>
+        <button id="relate-btn" class="btn" type="button">🔗 推斷關聯</button>
         <button id="new-node-btn" class="btn primary" type="button">＋ 新增</button>
       </div>
     </header>
@@ -72,6 +73,11 @@
         <div id="graph-empty" class="empty" hidden>此節點尚無關聯</div>
         <canvas id="graph-canvas" class="graph-canvas" width="880" height="560"></canvas>
         <p class="graph-hint">拖曳空白處平移、滾輪縮放、拖曳節點調整位置、點一下節點展開鄰居。</p>
+      </section>
+
+      <section id="draft-edges-panel" class="draft-edges-panel" hidden>
+        <div class="settings-group">草稿關聯（待審核）</div>
+        <div id="draft-edges-list" class="node-list"></div>
       </section>
 
       <div id="node-list" class="node-list"></div>

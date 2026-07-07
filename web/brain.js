@@ -46,6 +46,11 @@ async function act(path, method = 'POST') {
   try { await api(path, method); await fetchAndRender(); }
   catch (e) { alert('操作失敗: ' + e); }
 }
+// same shape as act(), but refetches the draft-edges panel instead of the node list
+async function actEdge(path, method = 'POST') {
+  try { await api(path, method); await fetchDraftEdges(); }
+  catch (e) { alert('操作失敗: ' + e); }
+}
 
 // ---- theme -------------------------------------------------------------
 const themeBtn = $('theme-btn');
@@ -218,6 +223,77 @@ async function fetchAndRender() {
   }
   renderNodes(nodes);
 }
+
+// ---- auto-relate: draft-edge review panel --------------------------------
+// Suggestions from POST /api/knowledge/relate (see src/knowledge/relate.ts) land as
+// status='draft' edges — shown here (never in the force graph or task prompts) until a
+// human approves/rejects them, mirroring the draft-node review flow above.
+const draftEdgesPanel = $('draft-edges-panel');
+const draftEdgesList = $('draft-edges-list');
+
+function buildDraftEdgeRow(e) {
+  const row = el('div', 'node-row');
+  row.dataset.id = e.id;
+
+  const main = el('div', 'node-main');
+  const title = el('div', 'node-title edge-suggestion');
+  title.appendChild(el('span', '', e.src_title));
+  title.appendChild(el('span', 'chip mono', e.relation));
+  title.appendChild(el('span', '', e.dst_title));
+  main.appendChild(title);
+
+  const meta = el('div', 'node-meta');
+  meta.appendChild(el('span', 'badge draft-badge', '草稿關聯'));
+  main.appendChild(meta);
+
+  if (e.note) main.appendChild(el('div', 'node-body', e.note));
+  row.appendChild(main);
+
+  const actions = el('div', 'node-actions');
+  const btn = (label, cls, fn) => {
+    const b = el('button', `btn sm ${cls || ''}`.trim(), label);
+    b.type = 'button';
+    b.onclick = fn;
+    return b;
+  };
+  actions.appendChild(btn('核可', 'primary', () => actEdge(`/api/knowledge/edges/${e.id}/approve`)));
+  actions.appendChild(btn('退回', 'danger-ghost', () => actEdge(`/api/knowledge/edges/${e.id}/reject`)));
+  row.appendChild(actions);
+
+  return row;
+}
+
+async function fetchDraftEdges() {
+  let edges;
+  try {
+    const res = await api('/api/knowledge/edges/drafts', 'GET');
+    edges = res.edges || [];
+  } catch (e) {
+    draftEdgesPanel.hidden = true;
+    return;
+  }
+  draftEdgesList.replaceChildren();
+  draftEdgesPanel.hidden = edges.length === 0;
+  for (const e of edges) draftEdgesList.appendChild(buildDraftEdgeRow(e));
+}
+
+$('relate-btn').onclick = async () => {
+  const btn = $('relate-btn');
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '推斷中…';
+  try {
+    const r = await postJSON('/api/knowledge/relate', {});
+    const n = (r.edges || []).length;
+    alert(n ? `產生 ${n} 條草稿關聯，請於下方審核` : '沒有找到新的關聯建議');
+    await fetchDraftEdges();
+  } catch (e) {
+    alert('推斷關聯失敗: ' + e);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = original;
+  }
+};
 
 // ---- force-directed knowledge graph (SSoT Phase 3) ----------------------
 // Hand-rolled canvas 2D: pan/zoom/drag/click-to-expand + kind/tag/scope/source filters,
@@ -674,3 +750,4 @@ captureForm.addEventListener('submit', async (e) => {
 
 // ---- initial load ------------------------------------------------------
 fetchAndRender();
+fetchDraftEdges();
