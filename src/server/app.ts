@@ -27,12 +27,15 @@ import { registerDeployRoutes } from './deployRoutes.js';
 import { registerPipelineRoutes } from './pipelineRoutes.js';
 import { registerIntegrationRoutes } from './integrationRoutes.js';
 import { registerVoiceRoutes } from './voiceRoutes.js';
+import { registerReportRoutes } from './reportRoutes.js';
 import { environmentMap } from '../deploy/store.js';
 import { collectDistillMaterial, runDistiller, type DistillExec } from '../knowledge/distill.js';
 import type { RelateExec } from '../knowledge/relate.js';
 import type { EmbedExec } from '../knowledge/embed.js';
 import type { TranscribeExec } from '../voice/transcribe.js';
 import type { StructureExec } from '../voice/structure.js';
+import type { ReportExec } from '../report/generate.js';
+import type { OpDataExec, SearchFn } from '../report/opdata.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WEB_DIR = path.resolve(__dirname, '..', '..', 'web');
@@ -48,6 +51,11 @@ export interface AppOptions {
   /** Test-only injection points for POST /api/voice/intake (zero audio/GPU/tokens). */
   voiceTranscribeExec?: TranscribeExec;
   voiceStructureExec?: StructureExec;
+  /** Test-only injection points for POST /api/report (zero network/tokens). */
+  reportParseExec?: ReportExec;
+  reportDataExec?: OpDataExec;
+  reportSynthExec?: ReportExec;
+  reportSearchFn?: SearchFn;
 }
 
 interface CreateTaskBody {
@@ -414,6 +422,12 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
   registerVoiceRoutes(app, db, {
     transcribeExec: opts.voiceTranscribeExec,
     structureExec: opts.voiceStructureExec,
+  });
+  registerReportRoutes(app, db, {
+    parseExec: opts.reportParseExec,
+    dataExec: opts.reportDataExec,
+    synthExec: opts.reportSynthExec,
+    searchFn: opts.reportSearchFn,
   });
 
   app.register(fastifyStatic, { root: WEB_DIR, prefix: '/' });
