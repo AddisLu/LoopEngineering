@@ -55,7 +55,9 @@ export interface ReportResult {
 }
 
 export interface ReportDeps {
-  /** Test injection for the description -> {project, topic} haiku parse (see structure.ts). */
+  /** Test injection for the description -> {project, topic, template?} haiku parse — one
+   * merged call that also picks the best-fitting stored template when none was given
+   * explicitly (see buildParsePrompt). */
   parseExec?: ReportExec;
   /** Test injection for the OpenProject live/snapshot data fetch (see opdata.ts). */
   dataExec?: OpDataExec;
@@ -63,8 +65,6 @@ export interface ReportDeps {
   synthExec?: ReportExec;
   /** Test injection for the snapshot-search fallback (see retrieve.ts's search). */
   searchFn?: SearchFn;
-  /** Test injection for the description-only "pick the best template" haiku call. */
-  templatePickExec?: ReportExec;
   /** Test injection for persist.ts's mkdir/writeFile (see PersistWriteFns). */
   persistFns?: PersistWriteFns;
 }
@@ -104,16 +104,27 @@ const DEFAULT_TEMPLATE_INSTRUCTIONS = `用以下結構產生一頁式繁體中�
 ## 下一步
 （條列建議的下一步行動）`;
 
-function buildParsePrompt(description: string): string {
-  return `從下面這句描述擷取「專案名稱關鍵詞」與「主題/重點」，用於產生 OpenProject 專案報告。
+/** One haiku call covers both the project/topic parse and (when no explicit template was
+ * given) picking the best-fitting stored template — folded into a single prompt/JSON
+ * shape instead of two separate round trips (see generateReport's needsProjectParse /
+ * needsTemplatePick). `templates` is only ever non-empty when a template pick is actually
+ * needed, so an explicit-template request's prompt never even mentions templates. */
+function buildParsePrompt(description: string, templates: ReportTemplateDef[]): string {
+  const parts = [
+    `從下面這句描述擷取「專案名稱關鍵詞」與「主題/重點」，用於產生 OpenProject 專案報告。
 project 欄位只填「專案名稱」本身的關鍵詞（例如公司內部代號、產品/專案代稱），要去除 PR、進度、週報、report、one page、彙整、摘要、現況、狀態 等與專案名稱無關的通用詞；看不出明確專案名稱就把 project 留空字串。
-topic 欄位放這句描述裡除了專案名稱以外的重點/主題。
-
-## 描述
-${description}
-
-Output STRICT JSON ONLY — no markdown code fences, no commentary — exactly this shape:
-{"project":"...","topic":"..."}`;
+topic 欄位放這句描述裡除了專案名稱以外的重點/主題。`,
+  ];
+  if (templates.length) {
+    const list = templates
+      .map((t) => `- ${t.name}：${[t.description, t.audience && `對象:${t.audience}`].filter(Boolean).join('，')}`)
+      .join('\n');
+    parts.push(`同時，以下是可用的報告範本清單，若這句描述明顯適合其中一個就在 template 欄位填該範本的 name，選不出來就留空字串：\n${list}`);
+  }
+  parts.push(`## 描述\n${description}`);
+  const shape = templates.length ? `{"project":"...","topic":"...","template":"..."}` : `{"project":"...","topic":"..."}`;
+  parts.push(`Output STRICT JSON ONLY — no markdown code fences, no commentary — exactly this shape:\n${shape}`);
+  return parts.join('\n\n');
 }
 
 // Generic reporting/PR boilerplate that carries no project-identifying signal — stripped
@@ -151,9 +162,10 @@ function extractSalientKeyword(description: string): string {
 interface ParsedDescription {
   project: string;
   topic: string;
+  templateDef?: ReportTemplateDef;
 }
 
-function parseDescriptionOutput(text: string): ParsedDescription | null {
+function parseDescriptionOutput(text: string, templates: ReportTemplateDef[]): ParsedDescription | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(stripFences(text));
@@ -164,54 +176,13 @@ function parseDescriptionOutput(text: string): ParsedDescription | null {
   const o = parsed as Record<string, unknown>;
   const project = typeof o.project === 'string' ? o.project.trim() : '';
   const topic = typeof o.topic === 'string' ? o.topic.trim() : '';
-  if (!project && !topic) return null;
-  return { project, topic };
+  const templateName = typeof o.template === 'string' ? o.template.trim() : '';
+  if (!project && !topic && !templateName) return null;
+  const templateDef = templateName ? templates.find((t) => t.name === templateName) : undefined;
+  return { project, topic, templateDef };
 }
 
 async function defaultParseExec(prompt: string): Promise<string | null> {
-  try {
-    const { stdout } = await execFileAsync(
-      'claude',
-      ['-p', prompt, '--model', 'haiku', '--output-format', 'text'],
-      { timeout: TIMEOUT_MS, env: process.env, maxBuffer: 10 * 1024 * 1024 },
-    );
-    return stdout;
-  } catch {
-    return null;
-  }
-}
-
-/** Lists every stored template (name/description/audience) and asks the LLM to pick
- * the single best match for a free-text description, or an empty string if none fit —
- * used only when the caller gave a description without an explicit `template`. */
-function buildTemplatePickPrompt(description: string, templates: ReportTemplateDef[]): string {
-  const list = templates
-    .map((t) => `- ${t.name}：${[t.description, t.audience && `對象:${t.audience}`].filter(Boolean).join('，')}`)
-    .join('\n');
-  return `以下是可用的報告範本清單，請根據需求描述選出最合適的一個：
-${list}
-
-## 需求描述
-${description}
-
-Output STRICT JSON ONLY — no markdown code fences, no commentary — exactly this shape:
-{"template":"<最合適的範本 name，選不出來就填空字串>"}`;
-}
-
-function parseTemplatePickOutput(text: string, templates: ReportTemplateDef[]): ReportTemplateDef | null {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(stripFences(text));
-  } catch {
-    return null;
-  }
-  if (!parsed || typeof parsed !== 'object') return null;
-  const name = typeof (parsed as Record<string, unknown>).template === 'string' ? ((parsed as Record<string, unknown>).template as string).trim() : '';
-  if (!name) return null;
-  return templates.find((t) => t.name === name) ?? null;
-}
-
-async function defaultTemplatePickExec(prompt: string): Promise<string | null> {
   try {
     const { stdout } = await execFileAsync(
       'claude',
@@ -346,25 +317,11 @@ export async function generateReport(
   if (readUsage().session.percent >= hardLimit) return null;
 
   try {
-    // Resolve a template: an explicit name wins (an unknown name falls through to the
-    // built-in default rather than throwing); otherwise, a bare description may let the
-    // LLM pick the best-fitting persona from the stored list (injectable, optional --
-    // skipped entirely when no templates exist or the pick call is unavailable/inconclusive);
-    // failing both, report_default_template (empty by default) is the last fallback.
+    // Resolve an explicit template up front (an unknown name falls through to the
+    // built-in default rather than throwing).
     let templateDef: ReportTemplateDef | undefined;
     if (req.template?.trim()) {
       templateDef = getReportTemplate(db, req.template.trim());
-    } else if (req.description?.trim()) {
-      const templates = listReportTemplates(db);
-      if (templates.length) {
-        const pickRun = deps.templatePickExec ?? defaultTemplatePickExec;
-        const pickedOut = await pickRun(buildTemplatePickPrompt(req.description, templates));
-        templateDef = pickedOut ? (parseTemplatePickOutput(pickedOut, templates) ?? undefined) : undefined;
-      }
-    }
-    if (!templateDef) {
-      const fallbackName = getSetting(db, 'report_default_template');
-      if (fallbackName) templateDef = getReportTemplate(db, fallbackName);
     }
 
     let project = req.project?.trim() || '';
@@ -372,25 +329,38 @@ export async function generateReport(
     let projectCandidates: string[] = [];
     if (!project && templateDef?.default_project) project = templateDef.default_project;
 
-    if (!project && req.description?.trim()) {
+    // One merged haiku call covers both the project/topic parse and (when no explicit
+    // template was given) picking the best-fitting stored template — previously two
+    // separate round trips, now at most one.
+    const needsProjectParse = !project && !!req.description?.trim();
+    const needsTemplatePick = !templateDef && !!req.description?.trim();
+    if (needsProjectParse || needsTemplatePick) {
+      const templates = needsTemplatePick ? listReportTemplates(db) : [];
       const parseRun = deps.parseExec ?? defaultParseExec;
-      const parsedOut = await parseRun(buildParsePrompt(req.description));
-      const parsed = parsedOut ? parseDescriptionOutput(parsedOut) : null;
-      if (parsed) {
-        project = parsed.project;
-        topic = parsed.topic;
-      } else {
-        topic = req.description.trim();
+      const parsedOut = await parseRun(buildParsePrompt(req.description!, templates));
+      const parsed = parsedOut ? parseDescriptionOutput(parsedOut, templates) : null;
+      if (needsProjectParse) {
+        if (parsed) {
+          project = parsed.project;
+          topic = parsed.topic;
+        } else {
+          topic = req.description!.trim();
+        }
+        // The haiku-parsed project string may not match any live project name (or parsing
+        // may have failed outright) -- offer the description's remaining salient keyword
+        // (generic report/PR words stripped) as a second resolveProject candidate, so a
+        // description-only request still resolves live instead of giving up to snapshot.
+        const salient = extractSalientKeyword(req.description!);
+        if (salient && salient !== project) projectCandidates = [salient];
       }
-      // The haiku-parsed project string may not match any live project name (or parsing
-      // may have failed outright) -- offer the description's remaining salient keyword
-      // (generic report/PR words stripped) as a second resolveProject candidate, so a
-      // description-only request still resolves live instead of giving up to snapshot.
-      const salient = extractSalientKeyword(req.description);
-      if (salient && salient !== project) projectCandidates = [salient];
+      if (needsTemplatePick && parsed?.templateDef) templateDef = parsed.templateDef;
     }
-    // project was given explicitly (haiku parse skipped above) but topic wasn't -- still
-    // use the description text as the topic rather than silently dropping it.
+    if (!templateDef) {
+      const fallbackName = getSetting(db, 'report_default_template');
+      if (fallbackName) templateDef = getReportTemplate(db, fallbackName);
+    }
+    // project was given explicitly (parse skipped above) but topic wasn't -- still use
+    // the description text as the topic rather than silently dropping it.
     if (!topic && req.description?.trim()) topic = req.description.trim();
 
     const fetched = await fetchProjectWorkPackages(db, { project, topic, projectCandidates }, deps.dataExec, deps.searchFn);

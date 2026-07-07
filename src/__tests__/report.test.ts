@@ -784,16 +784,18 @@ describe('generateReport: template support', () => {
     expect(result!.meta.project).toBe('預設專案X');
   });
 
-  it('a description without an explicit template lets the injected templatePickExec choose the best-fitting one', async () => {
+  it('a description without an explicit template lets one merged parseExec call also pick the best-fitting template', async () => {
     setSetting(db, 'report_enabled', 'true');
     setSetting(db, 'report_live_first', 'false');
     upsertReportTemplate(db, CUSTOM_TEMPLATE);
     upsertReportTemplate(db, { name: 'custom-b', instructions: '【另一個範本 B】' });
-    const parseExec: ReportExec = async () => JSON.stringify({ project: '', topic: '隨便' });
-    const templatePickExec: ReportExec = async (prompt) => {
+    // Project/topic parse and template pick are folded into ONE haiku call: the same
+    // prompt lists the templates AND asks for project/topic, and its single JSON
+    // response carries all three fields -- this replaces what used to be two round trips.
+    const parseExec: ReportExec = async (prompt) => {
       expect(prompt).toContain('custom-a');
       expect(prompt).toContain('custom-b');
-      return JSON.stringify({ template: 'custom-b' });
+      return JSON.stringify({ project: '', topic: '隨便', template: 'custom-b' });
     };
     const searchFn: SearchFn = async () => [];
     let seenPrompt = '';
@@ -804,25 +806,24 @@ describe('generateReport: template support', () => {
     const result = await generateReport(
       db,
       { description: '幫我出一份報告' },
-      { parseExec, templatePickExec, searchFn, synthExec },
+      { parseExec, searchFn, synthExec },
     );
     expect(result).not.toBeNull();
     expect(seenPrompt).toContain('另一個範本 B');
     expect(result!.meta.template).toBe('custom-b');
   });
 
-  it('templatePickExec returning an unmatched/empty name falls back to the built-in default (never throws)', async () => {
+  it('the merged parseExec call returning an unmatched/empty template name falls back to the built-in default (never throws)', async () => {
     setSetting(db, 'report_enabled', 'true');
     setSetting(db, 'report_live_first', 'false');
     upsertReportTemplate(db, CUSTOM_TEMPLATE);
-    const parseExec: ReportExec = async () => JSON.stringify({ project: '', topic: '隨便' });
-    const templatePickExec: ReportExec = async () => JSON.stringify({ template: '' });
+    const parseExec: ReportExec = async () => JSON.stringify({ project: '', topic: '隨便', template: '' });
     const searchFn: SearchFn = async () => [];
     const synthExec: ReportExec = async () => '# ok';
     const result = await generateReport(
       db,
       { description: '幫我出一份報告' },
-      { parseExec, templatePickExec, searchFn, synthExec },
+      { parseExec, searchFn, synthExec },
     );
     expect(result).not.toBeNull();
     expect(result!.meta.template).toBeUndefined();
@@ -832,15 +833,16 @@ describe('generateReport: template support', () => {
     setSetting(db, 'report_enabled', 'true');
     setSetting(db, 'report_live_first', 'false');
     upsertReportTemplate(db, CUSTOM_TEMPLATE);
-    const templatePickExec: ReportExec = async () => {
-      throw new Error('must never be called when template is explicit');
+    const parseExec: ReportExec = async (prompt) => {
+      expect(prompt).not.toContain('範本'); // template already explicit -- never solicited
+      return JSON.stringify({ project: '', topic: '幫我出一份報告' });
     };
     const searchFn: SearchFn = async () => [];
     const synthExec: ReportExec = async () => '# ok';
     const result = await generateReport(
       db,
       { description: '幫我出一份報告', template: 'custom-a' },
-      { templatePickExec, searchFn, synthExec },
+      { parseExec, searchFn, synthExec },
     );
     expect(result).not.toBeNull();
     expect(result!.meta.template).toBe('custom-a');
