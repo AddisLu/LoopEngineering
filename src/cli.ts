@@ -41,7 +41,7 @@ import { materializePipeline } from './pipeline/materialize.js';
 import { resolveProvider } from './integrations/config.js';
 import { importWorkItems } from './integrations/import.js';
 import { createSource, listSources, deleteSource, getSource } from './knowledge/ingest/sources.js';
-import type { SourceKind } from './knowledge/ingest/types.js';
+import type { SourceKind, SourceConfig } from './knowledge/ingest/types.js';
 import { ingestSource, ingestAll } from './knowledge/ingest/ingest.js';
 
 const program = new Command();
@@ -580,18 +580,60 @@ const ingest = program.command('ingest').description('SSoT ingestion: register s
 
 ingest
   .command('add')
-  .description('register an ingestion source (exactly one of --git/--folder/--vault)')
+  .description('register an ingestion source (exactly one of --git/--folder/--vault/--openproject)')
   .option('--git <path>', 'git repo — tracked files via `git ls-files` (respects .gitignore)')
   .option('--folder <path>', 'plain folder — recursive walk')
   .option('--vault <path>', 'Obsidian-style markdown vault — recursive walk')
+  .option('--openproject <path>', 'OpenProject connector — local path to the OpenProject_Exec_Report repo (reuses its op_api.py + config.json)')
+  .option('--op-config <path>', 'openproject only: override path to config.json (default: <openproject-repo>/config.json)')
+  .option('--kinds <csv>', 'openproject only: comma-separated work_packages,projects (default: both)')
   .option('--include <csv>', 'comma-separated include globs')
   .option('--exclude <csv>', 'comma-separated exclude globs')
   .option('--branch <name>', 'git ref to list from (git sources only; default: working tree)')
   .option('--disabled', 'register disabled (skipped by `loop ingest run` with no source id)')
   .action((o) => {
-    const kind: SourceKind | null = o.git ? 'git' : o.folder ? 'folder' : o.vault ? 'vault' : null;
+    const kind: SourceKind | null = o.git ? 'git' : o.folder ? 'folder' : o.vault ? 'vault' : o.openproject ? 'openproject' : null;
+    if (!kind) return fail('usage: loop ingest add --git|--folder|--vault|--openproject <path>');
+
+    if (kind === 'openproject') {
+      const opRepo = path.resolve(o.openproject);
+      const opConfigPath = o.opConfig ? path.resolve(o.opConfig) : path.join(opRepo, 'config.json');
+      let raw: string;
+      try {
+        raw = fs.readFileSync(opConfigPath, 'utf8');
+      } catch (e) {
+        return fail(`could not read OpenProject config at ${opConfigPath}: ${(e as Error).message}`);
+      }
+      let parsedConfig: unknown;
+      try {
+        parsedConfig = JSON.parse(raw);
+      } catch {
+        return fail(`OpenProject config at ${opConfigPath} is not valid JSON`);
+      }
+      const baseUrl =
+        parsedConfig && typeof parsedConfig === 'object'
+          ? (parsedConfig as Record<string, unknown>).op_base_url
+          : undefined;
+      if (typeof baseUrl !== 'string' || !baseUrl) {
+        return fail(`OpenProject config at ${opConfigPath} has no "op_base_url" field`);
+      }
+      const config: SourceConfig = {
+        op_repo: opRepo,
+        op_config: o.opConfig ? opConfigPath : undefined,
+        kinds: o.kinds ? String(o.kinds).split(',').map((s: string) => s.trim()).filter(Boolean) : undefined,
+      };
+      const source = createSource(getDb(), {
+        kind,
+        uri: baseUrl.replace(/\/+$/, ''),
+        config,
+        enabled: !o.disabled,
+      });
+      console.log(`${source.id}  [${source.kind}] ${source.uri}`);
+      return;
+    }
+
     const uri = o.git ?? o.folder ?? o.vault;
-    if (!kind || !uri) return fail('usage: loop ingest add --git|--folder|--vault <path>');
+    if (!uri) return fail('usage: loop ingest add --git|--folder|--vault <path>');
     const source = createSource(getDb(), {
       kind,
       uri: path.resolve(uri),

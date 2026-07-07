@@ -9,6 +9,7 @@ import { walkSource, maskSecrets, realGitExec, type GitListExec } from './walk.j
 import { chunkDocument, type ChunkPiece } from './chunk.js';
 import type { SourceRow, DocumentRow } from './types.js';
 import { resyncDocumentWikilinks } from '../wikilink.js';
+import { dumpOpenProjectSource, type OpenProjectDumpExec, type OpenProjectDoc } from './openproject.js';
 
 function sha256(text: string): string {
   return crypto.createHash('sha256').update(text, 'utf8').digest('hex');
@@ -25,6 +26,8 @@ export interface IngestOptions {
   gitExec?: GitListExec;
   /** Test injection for embedding (see embed.ts) — only reached when rag_enabled. */
   embedExec?: EmbedExec;
+  /** Test injection for the OpenProject dump script exec (see openproject.ts). */
+  openProjectExec?: OpenProjectDumpExec;
 }
 
 export interface IngestSourceResult {
@@ -102,17 +105,100 @@ async function embedAndStoreChunks(
 }
 
 /**
+ * OpenProject documents arrive pre-extracted (ext_id/title/text/uri/doc_kind/updated_at)
+ * from the dump script rather than as on-disk files, so incremental comparison keys off
+ * the external `updated_at` timestamp (authoritative when present) instead of walk.ts's
+ * content-sha256-only approach — falling back to sha256 for a doc with no updated_at.
+ * `documents.path` doubles as the external id here, mirroring how walk.ts uses it as a
+ * source-relative file path for git/folder/vault sources.
+ */
+async function ingestOpenProjectDocs(
+  db: Database.Database,
+  source: SourceRow,
+  docs: OpenProjectDoc[],
+  embedExec?: EmbedExec,
+): Promise<IngestSourceResult> {
+  const existing = activeDocumentsByPath(db, source.id);
+  const seenPaths = new Set<string>();
+
+  const result: IngestSourceResult = {
+    source_id: source.id,
+    documents_created: 0,
+    documents_replaced: 0,
+    documents_invalidated: 0,
+    chunks_created: 0,
+    skipped_unchanged: 0,
+  };
+
+  const insertDoc = db.prepare(
+    `INSERT INTO documents (source_id, path, uri, title, doc_kind, sha256, bytes, mtime)
+     VALUES (@source_id, @path, @uri, @title, @doc_kind, @sha256, @bytes, @mtime)`,
+  );
+
+  for (const doc of docs) {
+    seenPaths.add(doc.ext_id);
+    const digest = sha256(doc.text);
+    const prior = existing.get(doc.ext_id);
+    const unchanged = prior ? (doc.updated_at ? prior.mtime === doc.updated_at : prior.sha256 === digest) : false;
+
+    if (unchanged) {
+      result.skipped_unchanged++;
+      continue;
+    }
+    if (prior) {
+      invalidateDocument(db, prior);
+      result.documents_replaced++;
+    } else {
+      result.documents_created++;
+    }
+
+    const pieces = chunkDocument(doc.text, doc.doc_kind);
+    const info = insertDoc.run({
+      source_id: source.id,
+      path: doc.ext_id,
+      uri: doc.uri,
+      title: doc.title,
+      doc_kind: doc.doc_kind,
+      sha256: digest,
+      bytes: Buffer.byteLength(doc.text, 'utf8'),
+      mtime: doc.updated_at,
+    });
+    const documentId = Number(info.lastInsertRowid);
+    result.chunks_created += await embedAndStoreChunks(db, documentId, pieces, embedExec);
+  }
+
+  for (const [p, doc] of existing) {
+    if (!seenPaths.has(p)) {
+      invalidateDocument(db, doc);
+      result.documents_invalidated++;
+    }
+  }
+
+  touchSourceIngested(db, source.id);
+  resyncDocumentWikilinks(db);
+  return result;
+}
+
+/**
  * Ingest one source: walk -> (per new/changed file) mask secrets -> chunk -> store
  * documents/chunks -> embed(Phase0). Incremental by sha256 of the (masked) file content;
  * a changed file bi-temporally supersedes its prior document version, an unchanged file
  * is skipped entirely, and a file no longer present in the walk invalidates its document
  * (delete-as-invalidate — history is never dropped).
+ *
+ * 'openproject' sources are not a file-tree walk — they dispatch to
+ * ingestOpenProjectDocs (see openproject.ts for the dump/parse side).
  */
 export async function ingestSource(
   db: Database.Database,
   source: SourceRow,
   opts: IngestOptions = {},
 ): Promise<IngestSourceResult> {
+  if (source.kind === 'openproject') {
+    const docs = await dumpOpenProjectSource(db, source, opts.openProjectExec);
+    return ingestOpenProjectDocs(db, source, docs, opts.embedExec);
+  }
+
   const maxFileKb = getNum(db, 'ingest_max_file_kb', 1024);
   const files = walkSource(source, maxFileKb, opts.gitExec ?? realGitExec);
   const existing = activeDocumentsByPath(db, source.id);

@@ -270,6 +270,12 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // (hybrid FTS+vec search scoped to the task's repo) into their own `## 相關語料 (RAG)`
   // section — separate from the curated `## Knowledge / Environment` block above.
   rag_inject_task_context: 'false',
+
+  // OpenProject connector (src/knowledge/ingest/openproject.ts, scripts/openproject_dump.py):
+  // stdlib-only, no venv needed (unlike embed_python) — overridable for hosts where the
+  // interpreter isn't on PATH as 'python3' (e.g. the Windows company deployment, which
+  // uses 'python').
+  ingest_openproject_python: 'python3',
 };
 
 export const TOKEN_REFRESH_MS = 180_000; // TokenBar cadence
