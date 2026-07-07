@@ -22,7 +22,10 @@ function selfUpdate(): void {
   const log = `${paths.logsDir}/self-update.log`;
   const cmd =
     `echo "=== self-update $(date -Iseconds) ===" >> ${log}; ` +
-    `sleep 2 && npm run build >> ${log} 2>&1 ` +
+    // install first: a merged commit may add a dependency (e.g. sqlite-vec); building
+    // without installing it fails tsc and leaves the engine silently on old code.
+    `sleep 2 && npm install --no-audit --no-fund --no-progress >> ${log} 2>&1 ` +
+    `&& npm run build >> ${log} 2>&1 ` +
     `&& { echo "build OK -> restarting" >> ${log}; systemctl --user restart loop-engineering; } ` +
     `|| echo "SELF-UPDATE BUILD FAILED — engine still on OLD code, restart skipped (see above)" >> ${log}`;
   const child = spawn('bash', ['-lc', cmd], {
