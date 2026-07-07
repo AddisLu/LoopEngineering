@@ -7,7 +7,7 @@ import path from 'node:path';
 import type Database from 'better-sqlite3';
 import { getBool, getNum, getSetting } from '../db/index.js';
 import { ENGINE_REPO_ROOT, getVoicePython } from '../config.js';
-import { seedGlossaryTerms, mergedGlossaryTerms } from './glossary.js';
+import { seedGlossaryTerms, glossaryTermsForPrompt } from './glossary.js';
 import { WarmWorker, realSpawn } from './daemon.js';
 
 const execFileAsync = promisify(execFile);
@@ -49,10 +49,12 @@ function getWarmWorkerSingleton(db: Database.Database): WarmWorker {
   return warmWorkerSingleton;
 }
 
-/** Merge terms.txt with knowledge-base glossary nodes and write the result to a fresh
- * temp file — this is what's actually handed to the transcriber (daemon or one-shot)
- * via `--terms`/`terms_file`. Also (idempotently) seeds terms.txt into the knowledge
- * base on first use, so it becomes part of the learnable glossary going forward. */
+/** Idempotently seed terms.txt into the knowledge base (first use only — a no-op once
+ * every term already exists there), then write the knowledge-base glossary out to a
+ * fresh temp file — this is what's actually handed to the transcriber (daemon or
+ * one-shot) via `--terms`/`terms_file`. The knowledge base is the sole source of truth
+ * for the prompt; terms.txt is only read again here as a fallback if the knowledge base
+ * has no glossary nodes at all. */
 function buildMergedTermsFile(
   db: Database.Database,
   readFile?: (p: string) => string,
@@ -60,7 +62,7 @@ function buildMergedTermsFile(
 ): string {
   const termsPath = getSetting(db, 'voice_terms_path') || '';
   seedGlossaryTerms(db, termsPath, readFile);
-  const terms = mergedGlossaryTerms(db, termsPath, readFile);
+  const terms = glossaryTermsForPrompt(db, termsPath, readFile);
   const tmpPath = path.join(os.tmpdir(), `loop-voice-terms-${randomUUID()}.txt`);
   const write = writeFile ?? ((p: string, content: string) => fs.writeFileSync(p, content, 'utf8'));
   write(tmpPath, terms.join('\n'));
@@ -68,8 +70,10 @@ function buildMergedTermsFile(
 }
 
 /**
- * Transcribe one audio file. Terms are merged (terms.txt UNION knowledge-base glossary)
- * before every call. When `voice_warm_worker` is on (default), the singleton daemon is
+ * Transcribe one audio file. The glossary prompt is built from the knowledge base alone
+ * (terms.txt is a one-time seed plus an empty-knowledge-base fallback — see
+ * glossaryTermsForPrompt) before every call. When `voice_warm_worker` is on (default), the
+ * singleton daemon is
  * tried first — any failure (dead process, timeout, bad response) falls back to the
  * one-shot `scripts/transcribe.py` via `exec` transparently. `exec`/`deps` are injectable
  * so tests never spawn the real venv/GPU/daemon: the real `getWarmWorkerSingleton` is only

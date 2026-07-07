@@ -6,8 +6,8 @@ import { buildApp } from '../server/app.js';
 import { setCachedUsage } from '../token/usage.js';
 import { transcribe, type TranscribeExec } from '../voice/transcribe.js';
 import { structureTranscript, parseStructured, type StructureExec } from '../voice/structure.js';
-import { seedGlossaryTerms, mergedGlossaryTerms } from '../voice/glossary.js';
-import { listNodes, upsertNode } from '../knowledge/store.js';
+import { seedGlossaryTerms, glossaryTermsForPrompt } from '../voice/glossary.js';
+import { listNodes, upsertNode, invalidateNode } from '../knowledge/store.js';
 import { WarmWorker, type ChildLike, type SpawnFn } from '../voice/daemon.js';
 
 let db: Database.Database;
@@ -314,26 +314,47 @@ describe('seedGlossaryTerms', () => {
   });
 });
 
-describe('mergedGlossaryTerms', () => {
-  it('unions terms.txt content with approved glossary knowledge nodes, de-duped', () => {
+describe('glossaryTermsForPrompt', () => {
+  it('uses the knowledge base only when it has glossary nodes, ignoring terms.txt content entirely', () => {
     upsertNode(db, { title: 'CPO', kind: 'tech', tags: ['glossary'], scope: 'global', status: 'approved' });
     upsertNode(db, { title: '學到的新詞', kind: 'tech', tags: ['glossary'], scope: 'global', status: 'approved' });
-    const readFile = () => 'TGV, CPO\n';
-    const terms = mergedGlossaryTerms(db, '/fake/terms.txt', readFile);
-    expect(terms).toEqual(['TGV', 'CPO', '學到的新詞']);
+    const readFile = () => 'TGV, only-in-file\n';
+    const terms = glossaryTermsForPrompt(db, '/fake/terms.txt', readFile);
+    expect(terms).toEqual(['CPO', '學到的新詞']);
+    expect(terms).not.toContain('TGV');
+    expect(terms).not.toContain('only-in-file');
   });
 
   it('ignores non-glossary or non-approved knowledge nodes', () => {
     upsertNode(db, { title: 'not-glossary', kind: 'tech', tags: ['other'], scope: 'global', status: 'approved' });
     upsertNode(db, { title: 'draft-glossary', kind: 'tech', tags: ['glossary'], scope: 'global', status: 'draft' });
-    const terms = mergedGlossaryTerms(db, '', () => '');
+    const terms = glossaryTermsForPrompt(db, '', () => '');
     expect(terms).toEqual([]);
   });
 
-  it('tolerates a missing terms file, falling back to knowledge-base terms only', () => {
-    upsertNode(db, { title: 'CPO', kind: 'tech', tags: ['glossary'], scope: 'global', status: 'approved' });
+  it('drops a term once its knowledge node is invalidated', () => {
+    const node = upsertNode(db, { title: 'CPO', kind: 'tech', tags: ['glossary'], scope: 'global', status: 'approved' });
+    upsertNode(db, { title: 'TGV', kind: 'tech', tags: ['glossary'], scope: 'global', status: 'approved' });
+    expect(glossaryTermsForPrompt(db, '', () => '')).toEqual(['CPO', 'TGV']);
+    invalidateNode(db, node.id);
+    expect(glossaryTermsForPrompt(db, '', () => '')).toEqual(['TGV']);
+  });
+
+  it('falls back to terms.txt when the knowledge base has no glossary nodes at all', () => {
+    const readFile = () => 'TGV, CPO\n';
+    expect(glossaryTermsForPrompt(db, '/fake/terms.txt', readFile)).toEqual(['TGV', 'CPO']);
+  });
+
+  it('falls back to empty when the knowledge base is empty and terms.txt is missing/unreadable', () => {
     const readFile = () => { throw new Error('ENOENT'); };
-    expect(mergedGlossaryTerms(db, '/nope.txt', readFile)).toEqual(['CPO']);
+    expect(glossaryTermsForPrompt(db, '/nope.txt', readFile)).toEqual([]);
+  });
+
+  it('falls back to empty when the knowledge base is empty and every glossary node has been invalidated', () => {
+    const node = upsertNode(db, { title: 'CPO', kind: 'tech', tags: ['glossary'], scope: 'global', status: 'approved' });
+    invalidateNode(db, node.id);
+    const readFile = () => 'TGV\n';
+    expect(glossaryTermsForPrompt(db, '/fake/terms.txt', readFile)).toEqual(['TGV']);
   });
 });
 
@@ -453,8 +474,8 @@ describe('WarmWorker', () => {
 
 // ---- 7. transcribe.ts: merged terms + warm-worker fallback (all hermetic) ----
 
-describe('transcribe: merged terms + warm worker', () => {
-  it('writes the merged (file ∪ knowledge-base) glossary to the terms file passed to exec', async () => {
+describe('transcribe: knowledge-base glossary + warm worker', () => {
+  it('seeds terms.txt into the knowledge base, then writes the KB glossary to the terms file passed to exec', async () => {
     upsertNode(db, { title: 'CPO', kind: 'tech', tags: ['glossary'], scope: 'global', status: 'approved' });
     setSetting(db, 'voice_terms_path', '/fake/terms.txt');
     setSetting(db, 'voice_warm_worker', 'false');

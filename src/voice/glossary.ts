@@ -71,35 +71,34 @@ export function seedGlossaryTerms(
 }
 
 /**
- * The glossary whisper `initial_prompt` should be built from: terms.txt content UNION
- * approved, non-invalidated 'glossary'-tagged knowledge_nodes titles (learned via the
- * voice page's "加入詞表" or the knowledge base directly) — de-duped, file order first.
+ * The glossary whisper `initial_prompt` is built from the knowledge base alone — approved,
+ * non-invalidated 'glossary'-tagged knowledge_nodes titles (learned via the voice page's
+ * "加入詞表" or the knowledge base directly) — so the knowledge base is the single source
+ * of truth and terms.txt/KB copies of the same term can't drift apart. terms.txt is only
+ * consulted as a one-off fallback when the knowledge base has no glossary nodes at all
+ * (e.g. seeding hasn't run yet, or every seeded node has since been invalidated).
  */
-export function mergedGlossaryTerms(
+export function glossaryTermsForPrompt(
   db: Database.Database,
   termsPath: string,
   readFile: ReadFileFn = defaultReadFile,
 ): string[] {
-  let fromFile: string[] = [];
-  if (termsPath) {
-    try {
-      fromFile = splitTerms(readFile(termsPath));
-    } catch {
-      fromFile = [];
-    }
-  }
-  const fromKb = listNodes(db, { kind: 'tech', status: 'approved' })
-    .filter((n) => isGlossaryTags(n.tags))
-    .map((n) => n.title.trim())
-    .filter(Boolean);
-
   const seen = new Set<string>();
-  const merged: string[] = [];
-  for (const t of [...fromFile, ...fromKb]) {
-    if (!seen.has(t)) {
-      seen.add(t);
-      merged.push(t);
+  const fromKb: string[] = [];
+  for (const n of listNodes(db, { status: 'approved' })) {
+    if (!isGlossaryTags(n.tags)) continue;
+    const title = n.title.trim();
+    if (title && !seen.has(title)) {
+      seen.add(title);
+      fromKb.push(title);
     }
   }
-  return merged;
+  if (fromKb.length > 0) return fromKb;
+
+  if (!termsPath) return [];
+  try {
+    return splitTerms(readFile(termsPath));
+  } catch {
+    return [];
+  }
 }
