@@ -16,6 +16,8 @@ import {
   decayAlpha,
   shouldStep,
   shouldShowLabel,
+  categoryTree,
+  categoryFocusVertices,
   LOD,
 } from '../../web/graph-layout.js';
 
@@ -206,6 +208,17 @@ describe('graph-layout: matchesFilter', () => {
     expect(matchesFilter(docVertex, { showDocuments: false })).toBe(false);
     expect(matchesFilter(nodeVertex, { showDocuments: false })).toBe(true);
   });
+
+  it('GRAPH G4: category filter matches top (and optionally sub), regardless of vertex type', () => {
+    const catNode = { type: 'node', kind: 'tech', category: { top: '程式碼', sub: 'repoA' }, raw: {} };
+    const catDoc = { type: 'document', category: { top: '筆記', sub: 'notes' }, raw: {} };
+    expect(matchesFilter(catNode, { category: { top: '程式碼' } })).toBe(true);
+    expect(matchesFilter(catNode, { category: { top: '筆記' } })).toBe(false);
+    expect(matchesFilter(catNode, { category: { top: '程式碼', sub: 'repoA' } })).toBe(true);
+    expect(matchesFilter(catNode, { category: { top: '程式碼', sub: 'repoB' } })).toBe(false);
+    expect(matchesFilter(catDoc, { category: { top: '筆記' } })).toBe(true);
+    expect(matchesFilter(nodeVertex, { category: { top: '程式碼' } })).toBe(false); // no category on this vertex
+  });
 });
 
 describe('graph-layout: coordinate transforms + hit-testing', () => {
@@ -304,6 +317,53 @@ describe('graph-layout: categoryCentroids + stepForceClustered (GRAPH G3)', () =
     stepForceClustered(state);
     expect(state.vertices.get('a1')!.x).toBe(-500);
     expect(state.vertices.get('a1')!.y).toBe(0);
+  });
+});
+
+describe('graph-layout: categoryTree + categoryFocusVertices (GRAPH G4)', () => {
+  function treeState() {
+    return {
+      vertices: new Map([
+        ['a1', { id: 'a1', type: 'node', category: { top: 'X', sub: '1' } }],
+        ['a2', { id: 'a2', type: 'node', category: { top: 'X', sub: '2' } }],
+        ['a3', { id: 'a3', type: 'node', category: { top: 'X', sub: '1' } }],
+        ['b1', { id: 'b1', type: 'node', category: { top: 'Y', sub: '1' } }],
+        ['n1', { id: 'n1', type: 'node', category: null }],
+      ]),
+      edges: [
+        { src: 'a1', dst: 'b1', relation: 'related' }, // cross-category edge -- b1 should fade in when focused on X
+        { src: 'a1', dst: 'a2', relation: 'related' },
+      ],
+    };
+  }
+
+  it('categoryTree counts vertices per top category and per sub-category, ignoring uncategorized vertices', () => {
+    const tree = categoryTree(treeState());
+    expect(tree.get('X')!.count).toBe(3);
+    expect(tree.get('X')!.subs.get('1')).toBe(2);
+    expect(tree.get('X')!.subs.get('2')).toBe(1);
+    expect(tree.get('Y')!.count).toBe(1);
+    expect(tree.has(undefined as any)).toBe(false);
+  });
+
+  it('categoryFocusVertices with no category returns null (the "全部" reset)', () => {
+    expect(categoryFocusVertices(treeState(), null)).toBeNull();
+    expect(categoryFocusVertices(treeState(), { top: null })).toBeNull();
+  });
+
+  it('categoryFocusVertices: focused is the exact top match; visible additionally includes direct neighbors outside it', () => {
+    const focus = categoryFocusVertices(treeState(), { top: 'X' })!;
+    expect(focus.focused).toEqual(new Set(['a1', 'a2', 'a3']));
+    // b1 is not category X, but is a direct neighbor of a1 -- included in visible (faded in), not focused
+    expect(focus.visible.has('b1')).toBe(true);
+    expect(focus.focused.has('b1')).toBe(false);
+    expect(focus.visible.has('n1')).toBe(false); // unrelated, uncategorized vertex stays hidden
+  });
+
+  it('categoryFocusVertices narrows to a sub-category when given', () => {
+    const focus = categoryFocusVertices(treeState(), { top: 'X', sub: '1' })!;
+    expect(focus.focused).toEqual(new Set(['a1', 'a3']));
+    expect(focus.focused.has('a2')).toBe(false);
   });
 });
 
