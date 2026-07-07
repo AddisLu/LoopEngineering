@@ -347,3 +347,98 @@ describe('knowledge: graph() documents (SSoT Phase 3 wikilink-derived)', () => {
     expect(far.documents).toEqual([]);
   });
 });
+
+// ---- GRAPH G1: view='brain'/'brain-full' -- all-category documents + category ----
+
+describe('knowledge: graph() view=brain / brain-full', () => {
+  function insertSource(id: string, uri: string): void {
+    db.prepare(`INSERT OR IGNORE INTO sources (id, kind, uri) VALUES (?, 'git', ?)`).run(id, uri);
+  }
+  function insertRawDoc(opts: { path: string; title: string; doc_kind: string; sourceId: string }): number {
+    const info = db
+      .prepare(`INSERT INTO documents (source_id, path, title, doc_kind) VALUES (?, ?, ?, ?)`)
+      .run(opts.sourceId, opts.path, opts.title, opts.doc_kind);
+    return Number(info.lastInsertRowid);
+  }
+
+  it('default view is byte-identical to before this feature: unaffected by unrelated brain-only documents, no category field anywhere', () => {
+    insertSource('src_code', '/repo-a');
+    insertRawDoc({ path: 'a.ts', title: 'a.ts', doc_kind: 'ts', sourceId: 'src_code' });
+    insertSource('src_op', 'http://op.example');
+    insertRawDoc({ path: 'op:1', title: '【Display】Project A', doc_kind: 'op_project', sourceId: 'src_op' });
+    insertRawDoc({ path: 'wp:1', title: '#1 subject', doc_kind: 'op_work_package', sourceId: 'src_op' });
+    const node = upsertNode(db, { title: 'Curated node', kind: 'tech', scope: 'global' });
+
+    const g = graph(db);
+    // none of the brain-only documents are markdown+wikilink-connected -- default filtering unchanged
+    expect(g.documents).toEqual([]);
+    expect(g.nodes.map((n) => n.id)).toEqual([node.id]);
+    for (const n of g.nodes) expect(Object.prototype.hasOwnProperty.call(n, 'category')).toBe(false);
+  });
+
+  it("view='brain' widens to code/op_project/notes documents with category, excludes op_work_package, and skips the wikilink requirement", () => {
+    insertSource('src_code', '/repo-a');
+    const tsDoc = insertRawDoc({ path: 'a.ts', title: 'a.ts', doc_kind: 'ts', sourceId: 'src_code' });
+    insertSource('src_op', 'http://op.example');
+    const projectDoc = insertRawDoc({
+      path: 'op:1',
+      title: '【Display】Project A',
+      doc_kind: 'op_project',
+      sourceId: 'src_op',
+    });
+    const wpDoc = insertRawDoc({ path: 'wp:1', title: '#1 subject', doc_kind: 'op_work_package', sourceId: 'src_op' });
+    insertSource('src_notes', '/vault');
+    const noteDoc = insertRawDoc({ path: 'n.md', title: 'Note', doc_kind: 'md', sourceId: 'src_notes' });
+    const node = upsertNode(db, { title: 'Curated node', kind: 'tech', scope: 'global' });
+
+    const g = graph(db, { view: 'brain' });
+    const byId = new Map(g.documents.map((d) => [d.id, d]));
+    expect(byId.has(wpDoc)).toBe(false); // op_work_package excluded from 'brain' (too voluminous)
+    expect(byId.get(tsDoc)?.category).toEqual({ top: '程式碼', sub: 'repo-a' });
+    expect(byId.get(projectDoc)?.category).toEqual({ top: 'OpenProject', sub: 'Display' });
+    expect(byId.get(noteDoc)?.category).toEqual({ top: '筆記', sub: 'notes' });
+
+    const curated = g.nodes.find((n) => n.id === node.id)!;
+    expect(curated.category).toEqual({ top: '策展', sub: 'tech' });
+  });
+
+  it("view='brain-full' also includes op_work_package, categorized under OpenProject", () => {
+    insertSource('src_op', 'http://op.example');
+    const wpDoc = insertRawDoc({ path: 'wp:1', title: '#1 subject', doc_kind: 'op_work_package', sourceId: 'src_op' });
+
+    const brain = graph(db, { view: 'brain' });
+    expect(brain.documents.map((d) => d.id)).not.toContain(wpDoc);
+
+    const full = graph(db, { view: 'brain-full' });
+    expect(full.documents.find((d) => d.id === wpDoc)?.category).toEqual({ top: 'OpenProject', sub: 'work_package' });
+  });
+
+  it("op_project category derivation: a '【Category】' title prefix becomes sub, missing prefix falls back to '其他'", () => {
+    insertSource('src_op', 'http://op.example');
+    const withPrefix = insertRawDoc({
+      path: 'op:1',
+      title: '【Mobility】Some Project',
+      doc_kind: 'op_project',
+      sourceId: 'src_op',
+    });
+    const withoutPrefix = insertRawDoc({ path: 'op:2', title: 'Plain Project', doc_kind: 'op_project', sourceId: 'src_op' });
+
+    const g = graph(db, { view: 'brain' });
+    expect(g.documents.find((d) => d.id === withPrefix)?.category).toEqual({ top: 'OpenProject', sub: 'Mobility' });
+    expect(g.documents.find((d) => d.id === withoutPrefix)?.category).toEqual({ top: 'OpenProject', sub: '其他' });
+  });
+
+  it('code category derivation: falls back to the file extension when the source has no usable uri', () => {
+    insertSource('src_no_uri', '');
+    const docId = insertRawDoc({ path: 'orphan.py', title: 'orphan.py', doc_kind: 'py', sourceId: 'src_no_uri' });
+    const g = graph(db, { view: 'brain' });
+    expect(g.documents.find((d) => d.id === docId)?.category).toEqual({ top: '程式碼', sub: 'py' });
+  });
+
+  it('an unlinked markdown document is included in brain view (the resolved-wikilink requirement is skipped)', () => {
+    insertSource('src_notes', '/vault');
+    const docId = insertRawDoc({ path: 'lonely.md', title: 'Lonely', doc_kind: 'md', sourceId: 'src_notes' });
+    const g = graph(db, { view: 'brain' });
+    expect(g.documents.map((d) => d.id)).toContain(docId);
+  });
+});

@@ -65,6 +65,16 @@ describe('graph-layout: buildGraphState', () => {
   it('docVertexId namespaces a raw document id', () => {
     expect(docVertexId(7)).toBe('doc_7');
   });
+
+  it('GRAPH G1: carries category onto the vertex when present (view=brain), null otherwise (default view)', () => {
+    const g = sampleGraph();
+    (g.nodes[0] as any).category = { top: '策展', sub: 'tech' };
+    (g.documents[0] as any).category = { top: '筆記', sub: 'notes' };
+    const state = buildGraphState(g);
+    expect(state.vertices.get('k_a')!.category).toEqual({ top: '策展', sub: 'tech' });
+    expect(state.vertices.get('doc_7')!.category).toEqual({ top: '筆記', sub: 'notes' });
+    expect(state.vertices.get('k_b')!.category).toBeNull(); // default view: no category on the response
+  });
 });
 
 describe('graph-layout: mergeGraphState (expand-on-click)', () => {

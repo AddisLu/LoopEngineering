@@ -280,6 +280,21 @@ describe('knowledge REST: graph payload', () => {
     expect(oneHop.statusCode).toBe(200);
     expect(oneHop.json().nodes.map((n: any) => n.id).sort()).toEqual([a.id, b.id].sort());
   });
+
+  it('GRAPH G1: ?view=brain attaches category to nodes; an invalid view value falls back to default (no category)', async () => {
+    app = buildApp({ db, apiToken: null });
+    const node = upsertNode(db, { title: 'Brain node', kind: 'tech', scope: 'global' });
+
+    const brain = await app.inject({ method: 'GET', url: '/api/knowledge/graph?view=brain' });
+    expect(brain.statusCode).toBe(200);
+    const brainNode = brain.json().nodes.find((n: any) => n.id === node.id);
+    expect(brainNode.category).toEqual({ top: '策展', sub: 'tech' });
+
+    const bogus = await app.inject({ method: 'GET', url: '/api/knowledge/graph?view=not-a-real-view' });
+    expect(bogus.statusCode).toBe(200);
+    const bogusNode = bogus.json().nodes.find((n: any) => n.id === node.id);
+    expect(bogusNode.category).toBeUndefined();
+  });
 });
 
 // ---- 5. import idempotency ----
