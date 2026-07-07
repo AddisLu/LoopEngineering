@@ -534,6 +534,44 @@ describe('generateReport: chart embedding', () => {
   });
 });
 
+// ---- generate.ts: deck stats/items (meta.stats + meta.items) ----
+
+describe('generateReport: deck stats/items', () => {
+  it('live WP data -> meta.stats (counts + donePercent) and meta.items (overdue-first projection)', async () => {
+    setSetting(db, 'report_enabled', 'true');
+    makeOpenProjectSource();
+    const items = [
+      { ...JSON.parse(WP_LINE), id: 'closed', subject: '已結案項目', is_closed: true, due_date: '2020-01-01', percent_done: 100 },
+      { ...JSON.parse(WP_LINE), id: 'future', subject: '未來項目', is_closed: false, due_date: '2099-01-01', percent_done: 40 },
+      { ...JSON.parse(WP_LINE), id: 'overdue', subject: '逾期項目', is_closed: false, due_date: '2020-01-01', percent_done: 20 },
+    ];
+    const dataExec: OpDataExec = async (_bin, args) => {
+      if (args.includes('--list-projects')) return LIST_PROJECTS_LINE;
+      if (args.includes('--structured')) return items.map((w) => JSON.stringify(w)).join('\n');
+      throw new Error(`unexpected args: ${args.join(' ')}`);
+    };
+    const synthExec: ReportExec = async () => '# ok';
+    const result = await generateReport(db, { project: '大型AOI' }, { dataExec, synthExec });
+    expect(result).not.toBeNull();
+    expect(result!.meta.stats).toEqual({ total: 3, open: 2, closed: 1, overdue: 1, donePercent: 53 });
+    // overdue-first sort (opdata sortRank) puts the overdue item first
+    expect(result!.meta.items!.map((i) => i.subject)).toEqual(['逾期項目', '未來項目', '已結案項目']);
+    expect(result!.meta.items![0]).toMatchObject({ overdue: true, closed: false, percent: 20 });
+    expect(result!.meta.items![2]).toMatchObject({ overdue: false, closed: true, percent: 100 });
+  });
+
+  it('snapshot-source report has no stats/items (zero-impact: no structured WP data)', async () => {
+    setSetting(db, 'report_enabled', 'true');
+    setSetting(db, 'report_live_first', 'false');
+    const searchFn: SearchFn = async () => [fakeChunk()];
+    const synthExec: ReportExec = async () => '# ok';
+    const result = await generateReport(db, { project: 'x' }, { searchFn, synthExec });
+    expect(result).not.toBeNull();
+    expect(result!.meta.stats).toBeUndefined();
+    expect(result!.meta.items).toBeUndefined();
+  });
+});
+
 // ---- generate.ts: persistence (see report/persist.ts) ----
 
 describe('generateReport: persistence (report_persist / save)', () => {

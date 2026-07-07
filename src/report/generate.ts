@@ -37,6 +37,31 @@ export interface ReportRequest {
   save?: boolean;
 }
 
+/** Aggregate counts for the deck's KPI tiles — always derived programmatically from the
+ * structured WP[] data (never the LLM), same source of truth as summarizeWorkPackages /
+ * charts.ts. Present in meta only for a live/structured fetch. */
+export interface ReportStats {
+  total: number;
+  open: number;
+  closed: number;
+  overdue: number;
+  /** Mean percent_done across all items, rounded to an integer (0–100). */
+  donePercent: number;
+}
+
+/** A trimmed, presentation-ready projection of one work package for the deck's native
+ * progress panel (the signature `.gline` bars) — precise numbers straight from the data,
+ * so the panel never depends on parsing the LLM's prose. */
+export interface ReportDeckItem {
+  subject: string;
+  status: string;
+  percent: number;
+  closed: boolean;
+  overdue: boolean;
+  due: string;
+  assignee: string;
+}
+
 export interface ReportResult {
   markdown: string;
   meta: {
@@ -48,6 +73,12 @@ export interface ReportResult {
      * subset, in the order they appear in the markdown. Empty when the fetch wasn't
      * structured WP data (e.g. a snapshot-search fallback) or produced no chartable items. */
     charts: string[];
+    /** Programmatic aggregate KPIs — present only for a live/structured WP fetch, absent
+     * for a snapshot-search report (zero-impact: no structured data → no stats). */
+    stats?: ReportStats;
+    /** Top-N work packages (overdue-first, same sort as the packed data) for the deck's
+     * native progress panel. Capped at DECK_ITEM_CAP; present only for a live fetch. */
+    items?: ReportDeckItem[];
   };
   /** Paths written by persist.ts — present only when `report_persist` is on or the
    * request set `save`, and the write actually succeeded. */
@@ -223,13 +254,52 @@ function renderItemLine(item: OpWorkPackage | OpSnapshotItem): string {
   return `- **[${mdInline(item.path)}]**：${mdInline(item.text)}`;
 }
 
+/** How many work packages the deck's native progress panel shows (overdue-first). Keeps
+ * the API response small while covering a single slide's worth of rows. */
+const DECK_ITEM_CAP = 14;
+
+function isOverdue(item: OpWorkPackage, today: string): boolean {
+  return !item.is_closed && !!item.due_date && item.due_date < today && item.percent_done < 100;
+}
+
 /** One aggregate stats line (counts + overdue) so the LLM knows the true totals even when
  * a large parent project's work packages get truncated by the char budget below. */
 function summarizeWorkPackages(items: OpWorkPackage[]): string {
   const today = new Date().toISOString().slice(0, 10);
   const closed = items.filter((i) => i.is_closed).length;
-  const overdue = items.filter((i) => !i.is_closed && i.due_date && i.due_date < today && i.percent_done < 100).length;
+  const overdue = items.filter((i) => isOverdue(i, today)).length;
   return `**整體彙整**：共 ${items.length} 筆（未結案 ${items.length - closed}、已結案 ${closed}、逾期 ${overdue}）`;
+}
+
+/** Aggregate KPIs for the deck (see ReportStats) — same today/overdue definition as
+ * summarizeWorkPackages and charts.ts, computed from the full item set (never truncated). */
+function buildStats(items: OpWorkPackage[]): ReportStats {
+  const today = new Date().toISOString().slice(0, 10);
+  const closed = items.filter((i) => i.is_closed).length;
+  const overdue = items.filter((i) => isOverdue(i, today)).length;
+  const sumPercent = items.reduce((acc, i) => acc + (Number.isFinite(i.percent_done) ? i.percent_done : 0), 0);
+  return {
+    total: items.length,
+    open: items.length - closed,
+    closed,
+    overdue,
+    donePercent: items.length ? Math.round(sumPercent / items.length) : 0,
+  };
+}
+
+/** Top-N (overdue-first, the incoming sort) presentation projection for the deck's native
+ * progress panel — precise fields only, so the panel never parses the LLM's prose. */
+function buildDeckItems(items: OpWorkPackage[]): ReportDeckItem[] {
+  const today = new Date().toISOString().slice(0, 10);
+  return items.slice(0, DECK_ITEM_CAP).map((i) => ({
+    subject: i.subject,
+    status: i.status,
+    percent: Number.isFinite(i.percent_done) ? i.percent_done : 0,
+    closed: i.is_closed,
+    overdue: isOverdue(i, today),
+    due: i.due_date || '',
+    assignee: i.assignee_name || '',
+  }));
 }
 
 /** Greedy-pack items into report_budget_chars, mirroring context.ts's ragTaskContext loop. */
@@ -413,6 +483,9 @@ export async function generateReport(
         itemCount: fetched.items.length,
         template: templateDef?.name,
         charts: charts.map((c) => c.kind),
+        // KPI tiles + native progress panel come from structured WP data only; a
+        // snapshot-search report has neither (zero-impact: fields simply absent).
+        ...(workItems.length ? { stats: buildStats(workItems), items: buildDeckItems(workItems) } : {}),
       },
       ...(files ? { files } : {}),
     };

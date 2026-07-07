@@ -1,94 +1,101 @@
 <!doctype html>
-<html lang="zh-Hant" data-mode="light">
+<html lang="zh-Hant">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Loop Engineering — 報告</title>
-<script>
-  (function () {
-    try {
-      var m = localStorage.getItem('loop_mode');
-      if (m !== 'light' && m !== 'dark')
-        m = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-      document.documentElement.setAttribute('data-mode', m);
-    } catch (e) {}
-  })();
-</script>
-<link rel="stylesheet" href="/styles.css" />
-<style>
-  main.report { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 22px clamp(16px, 4vw, 40px); max-width: 900px; margin: 0 auto; width: 100%; }
-  .report .lead { color: var(--text-2); font-size: 14px; margin: 0 0 18px; }
-  .rpt-form { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); padding: 16px 18px; box-shadow: var(--shadow-1); margin-bottom: 18px; }
-  .rpt-form label { display: block; margin: 10px 0; font-size: 13.5px; }
-  .rpt-form textarea, .rpt-form input, .rpt-form select {
-    width: 100%; margin-top: 4px; padding: 8px 10px; border: 1px solid var(--border-2);
-    border-radius: var(--r-sm); background: var(--surface-2); color: var(--text); font: inherit; resize: vertical;
-  }
-  .rpt-form textarea { min-height: 70px; }
-  .rpt-actions { display: flex; gap: 10px; margin-top: 12px; align-items: center; }
-  .rpt-note { font-size: 13px; margin-top: 10px; }
-  .rpt-note.danger { color: var(--danger); }
-  .rpt-output-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); padding: 20px 24px; box-shadow: var(--shadow-1); }
-  .rpt-output-wrap:empty { display: none; }
-  .rpt-output h2 { font-size: 19px; margin: 0 0 10px; }
-  .rpt-output h3 { font-size: 15.5px; margin: 18px 0 8px; }
-  .rpt-output h3:first-child { margin-top: 0; }
-  .rpt-output p { font-size: 13.5px; line-height: 1.6; margin: 6px 0; color: var(--text); }
-  .rpt-output ul { margin: 4px 0 10px; padding-left: 22px; }
-  .rpt-output li { font-size: 13.5px; line-height: 1.6; margin: 3px 0; }
-  .rpt-output pre { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 10px 12px; overflow-x: auto; font-size: 12.5px; }
-  .rpt-meta { margin-bottom: 14px; }
-  .f-save-label { display: flex !important; align-items: center; gap: 6px; }
-  .f-save-label input { width: auto !important; margin: 0 !important; }
-
-  .mmd-block { margin: 14px 0 20px; border: 1px solid var(--border); border-radius: var(--r-sm); padding: 12px; background: var(--surface-2); }
-  .mmd-actions { display: flex; justify-content: flex-end; margin-bottom: 8px; }
-  .mmd-render { overflow-x: auto; }
-  .mmd-render svg { max-width: 100%; height: auto; }
-  .mmd-fallback { white-space: pre-wrap; word-break: break-word; }
-
-  @media print {
-    .topbar, .rpt-form, .no-print { display: none !important; }
-    main.report { max-width: none; padding: 0; overflow: visible; }
-    .rpt-output-wrap { box-shadow: none; border: none; padding: 0; }
-    @page { size: A4; margin: 14mm; }
-  }
-</style>
+<title>Loop Engineering — 報告 Deck</title>
+<link rel="stylesheet" href="/report.css" />
 </head>
 <body>
-  <header class="topbar">
-    <div class="brand"><div class="brand-mark"></div>
-      <div class="brand-text"><span class="brand-name">報告</span><span class="brand-sub">Loop Engineering</span></div>
-    </div>
-    <span class="spacer" style="margin-left:auto"></span>
-    <div class="controls">
-      <a class="btn" href="/">← 看板</a>
-      <a class="btn" href="/help.html">說明</a>
-      <button id="theme-btn" class="btn icon-btn" type="button" title="切換佈景">☾</button>
-    </div>
-  </header>
-  <main class="report">
-    <p class="lead">用一句描述產生 OpenProject 專案報告，可選擇套用老闆範本（廠長一頁綜覽／經理 PR 週報／PM 詳細進度）。也可用 CLI <code>loop report generate "…" --template …</code> 或 MCP <code>loop_report</code>。</p>
+  <div class="app" id="app">
+    <!-- ===== Control rail ===== -->
+    <aside class="rail">
+      <div class="rail-inner">
+        <div class="brand">
+          <div class="brand-mark"></div>
+          <div>
+            <div class="brand-name">報告 Deck</div>
+            <div class="brand-sub">Loop Engineering</div>
+          </div>
+        </div>
 
-    <div class="rpt-form">
-      <label>描述<textarea id="f-description" placeholder="例：大型AOI PR 最新進度 one page" required></textarea></label>
-      <label>範本（選填，不選則自動挑選或用內建預設）
-        <select id="f-template"><option value="">（自動 / 內建預設）</option></select>
-      </label>
-      <label>專案（選填）<input id="f-project" type="text" placeholder="不填則從描述解析" autocomplete="off" /></label>
-      <label class="f-save-label"><input id="f-save" type="checkbox" /> 同時存檔（報告 + 資料 + 圖表存到 git 分類目錄）</label>
-      <div class="rpt-actions">
-        <button id="gen-btn" class="btn primary" type="button">產生報告</button>
-        <button id="print-btn" class="btn no-print" type="button" hidden>列印 / 存 PDF</button>
+        <label class="fld">
+          <span>用一句話描述你要的報告</span>
+          <textarea id="f-description" placeholder="例：大型AOI PR 最新進度 一頁綜覽" required></textarea>
+        </label>
+
+        <h2 class="sec">選老闆範本</h2>
+        <div class="persona-grid" id="persona-grid">
+          <button type="button" class="persona on" data-p="auto" data-template="">
+            <div class="ptop"><span class="dot"></span><span class="pn">自動挑選</span></div>
+            <span class="pd">依描述自動配範本</span>
+          </button>
+          <button type="button" class="persona" data-p="plant" data-template="plant-manager-onepage">
+            <div class="ptop"><span class="dot"></span><span class="pn">廠長</span></div>
+            <span class="pd">一頁綜覽 · 只看紅燈</span>
+          </button>
+          <button type="button" class="persona" data-p="manager" data-template="manager-pr-weekly">
+            <div class="ptop"><span class="dot"></span><span class="pn">經理</span></div>
+            <span class="pd">PR 週報 · 交期/簽核</span>
+          </button>
+          <button type="button" class="persona" data-p="pm" data-template="pm-detailed">
+            <div class="ptop"><span class="dot"></span><span class="pn">PM</span></div>
+            <span class="pd">逐項細節 · 卡點</span>
+          </button>
+        </div>
+
+        <label class="fld">
+          <span>或選其他範本</span>
+          <select id="f-template"><option value="">（自動挑選 / 內建預設）</option></select>
+        </label>
+
+        <label class="fld">
+          <span>專案（選填，不填則從描述解析）</span>
+          <input id="f-project" type="text" placeholder="不填則從描述解析" autocomplete="off" />
+        </label>
+
+        <label class="save-row"><input id="f-save" type="checkbox" /> 同時存檔（報告＋資料＋圖表到 git 分類目錄）</label>
+
+        <button id="gen-btn" class="btn primary block" type="button">產生報告</button>
+        <p class="note" id="note"></p>
+
+        <h2 class="sec">匯出</h2>
+        <div class="export-grid">
+          <button id="print-btn" class="btn" type="button" disabled title="以瀏覽器列印，另存為 PDF">PDF</button>
+          <button id="png-btn"   class="btn" type="button" disabled title="把目前這張投影片存成 PNG">PNG 圖檔</button>
+          <button id="html-btn"  class="btn" type="button" disabled title="下載可離線開啟的單檔 HTML Deck">HTML</button>
+          <button id="pptx-btn"  class="btn" type="button" disabled title="每張投影片一頁的 PowerPoint">PPTX</button>
+        </div>
+
+        <p class="hint">也可用 CLI <code>loop report generate "…" --template …</code> 或 MCP <code>loop_report</code>。資料來源為 OpenProject／知識庫。</p>
+
+        <div class="rail-links">
+          <a href="/">← 看板</a>
+          <a href="/help.html">說明</a>
+        </div>
       </div>
-      <p class="rpt-note" id="rpt-note" hidden></p>
-    </div>
+    </aside>
 
-    <div class="rpt-output-wrap">
-      <div class="meta rpt-meta" id="rpt-meta-chips"></div>
-      <div class="rpt-output" id="rpt-output"></div>
-    </div>
-  </main>
+    <!-- ===== Deck stage ===== -->
+    <main class="stage" id="stage">
+      <button class="rail-toggle" id="rail-toggle" type="button" title="收合／展開側欄" aria-label="收合或展開側欄">‹</button>
+      <div class="deck-viewport" id="viewport">
+        <div class="empty" id="empty">
+          <div class="glyph">🗂️</div>
+          <div class="big">產生一份滿版 16:9 專案報告</div>
+          <div class="sub">在左側輸入一句描述、挑一個老闆範本，按「產生報告」。系統會即時抓 OpenProject 資料，排成一份可翻頁、可匯出 PDF／PNG／HTML／PPTX 的簡報。</div>
+        </div>
+      </div>
+      <div class="deck-ui" id="deck-ui" hidden>
+        <div class="deck-dots" id="deck-dots"></div>
+        <div class="deck-nav">
+          <button class="deck-btn" id="deck-prev" type="button" aria-label="上一頁">‹</button>
+          <span class="deck-count" id="deck-count">0 / 0</span>
+          <button class="deck-btn" id="deck-next" type="button" aria-label="下一頁">›</button>
+        </div>
+      </div>
+    </main>
+  </div>
   <script src="/report.js"></script>
 </body>
 </html>
