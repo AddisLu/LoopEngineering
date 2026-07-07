@@ -119,6 +119,13 @@ function buildArgs(opConfig: { op_repo: string; op_config?: string }, extra: str
   return args;
 }
 
+/** Strips whitespace (incl. full-width 　) and half/full-width brackets so that
+ * "大型AOI" still matches a registered project name like "【大型AOI】" or "大型 AOI" even
+ * after description noise-stripping leaves stray spaces around the keyword. */
+function normalizeForMatch(s: string): string {
+  return s.replace(/[\s　()（）【】\[\]{}]/g, '');
+}
+
 /**
  * Resolve a human-typed project name/identifier (or a registered source's project) to
  * `{id, name}` by spawning `--list-projects` and fuzzy-matching. Never throws: a missing
@@ -138,6 +145,7 @@ export async function resolveProject(
     const rows = parseJsonLines(stdout);
     const query = name.trim().toLowerCase();
     if (!query) return null;
+    const queryNorm = normalizeForMatch(query);
 
     let best: { id: unknown; name: unknown } | null = null;
     let bestScore = -1;
@@ -147,6 +155,12 @@ export async function resolveProject(
       let score = -1;
       if (query === rName || query === rIdent) score = 2;
       else if (rName.includes(query) || rIdent.includes(query)) score = 1;
+      else if (queryNorm) {
+        const rNameNorm = normalizeForMatch(rName);
+        const rIdentNorm = normalizeForMatch(rIdent);
+        if (queryNorm === rNameNorm || queryNorm === rIdentNorm) score = 2;
+        else if (rNameNorm.includes(queryNorm) || rIdentNorm.includes(queryNorm)) score = 1;
+      }
       if (score > bestScore) {
         bestScore = score;
         best = { id: r.id, name: r.name };
@@ -159,15 +173,40 @@ export async function resolveProject(
   }
 }
 
+/** Overdue-and-unfinished items sort before other open items, which sort before closed
+ * ones — see compareWorkPackages. */
+function sortRank(item: OpWorkPackage, today: string): number {
+  if (item.is_closed) return 2;
+  const overdue = Boolean(item.due_date) && item.due_date < today && item.percent_done < 100;
+  return overdue ? 0 : 1;
+}
+
+/** Priority order for packing into a limited char budget: not-closed before closed,
+ * overdue-and-unfinished first among those, then ascending due_date / percent_done —
+ * so the important handful survives truncation on large (100s-of-item) parent-project
+ * fetches instead of whatever happened to come back from the API first. */
+function compareWorkPackages(a: OpWorkPackage, b: OpWorkPackage, today: string): number {
+  const rankDiff = sortRank(a, today) - sortRank(b, today);
+  if (rankDiff !== 0) return rankDiff;
+  const dueA = a.due_date || '9999-12-31';
+  const dueB = b.due_date || '9999-12-31';
+  if (dueA !== dueB) return dueA < dueB ? -1 : 1;
+  return a.percent_done - b.percent_done;
+}
+
 /**
  * Fetch a project's work packages: try live first (`resolveProject` + `--project
  * --structured`, both spawns timeout+try/catch-guarded), falling back to a fuzzy
  * corpus search (src/knowledge/retrieve.ts's `search`) over the ingested SSoT snapshot
- * when live is off, unconfigured, offline, or the spawn/parse fails. Never throws.
+ * when live is off, unconfigured, offline, or the spawn/parse fails. `req.projectCandidates`
+ * lets a caller offer alternate names to resolve against (e.g. a salient keyword pulled
+ * from a free-text description) — each is tried in order before conceding to the
+ * snapshot, so a haiku-parsed project string that doesn't match a live project no longer
+ * gives up immediately. Never throws.
  */
 export async function fetchProjectWorkPackages(
   db: Database.Database,
-  req: { project: string; topic?: string },
+  req: { project: string; topic?: string; projectCandidates?: string[] },
   exec: OpDataExec = defaultExec,
   searchFn: SearchFn = search,
 ): Promise<FetchWorkPackagesResult> {
@@ -176,14 +215,22 @@ export async function fetchProjectWorkPackages(
   if (liveFirst) {
     try {
       const opConfig = findOpenProjectConfig(db);
-      const resolved = opConfig ? await resolveProject(db, req.project, exec) : null;
-      if (opConfig && resolved) {
+      if (opConfig) {
+        const candidates = [req.project, ...(req.projectCandidates ?? [])]
+          .map((c) => c.trim())
+          .filter((c, idx, arr) => c && arr.indexOf(c) === idx);
         const pythonBin = getSetting(db, 'ingest_openproject_python') || 'python3';
-        const stdout = await exec(pythonBin, buildArgs(opConfig, ['--project', resolved.id, '--structured']));
-        const items = parseJsonLines(stdout)
-          .map(toWorkPackage)
-          .filter((wp): wp is OpWorkPackage => wp !== null);
-        return { source: 'live', project: resolved, items };
+        const today = new Date().toISOString().slice(0, 10);
+        for (const candidate of candidates) {
+          const resolved = await resolveProject(db, candidate, exec);
+          if (!resolved) continue;
+          const stdout = await exec(pythonBin, buildArgs(opConfig, ['--project', resolved.id, '--structured']));
+          const items = parseJsonLines(stdout)
+            .map(toWorkPackage)
+            .filter((wp): wp is OpWorkPackage => wp !== null)
+            .sort((a, b) => compareWorkPackages(a, b, today));
+          return { source: 'live', project: resolved, items };
+        }
       }
     } catch {
       // fall through to the snapshot search below
