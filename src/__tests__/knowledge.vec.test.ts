@@ -5,7 +5,7 @@ import RawDatabase from 'better-sqlite3';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type Database from 'better-sqlite3';
 import { openTestDb } from '../db/index.js';
-import { loadVec, isVecAvailable, vecUpsert, vecKnn, type VecLoader } from '../knowledge/vec.js';
+import { loadVec, isVecAvailable, vecUpsert, vecKnn, realVecLoader, type VecLoader } from '../knowledge/vec.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -125,6 +125,36 @@ describe('vec: vecUpsert + vecKnn round trip', () => {
 
     expect(vecKnn(db, 'vec_chunks', vec([0, 1]), 1)).toEqual([{ rowid: 7, refId: 707, distance: 0 }]);
     expect(vecKnn(db, 'vec_nodes', vec([1, 1]), 1)).toEqual([{ rowid: 7, refId: 'node-7', distance: 0 }]);
+  });
+});
+
+// ---- 3b. vec_nodes distance_metric migration (auto-relate needs cosine ranking) ----
+
+describe('vec: vec_nodes self-heals to distance_metric=cosine', () => {
+  it('a pre-existing (pre-migration) vec_nodes table is dropped and recreated with cosine on the next loadVec call', () => {
+    const fresh = freshUnloadedDb();
+    try {
+      realVecLoader(fresh); // load the native extension directly, bypassing loadVec's memoization
+      fresh.exec(`CREATE VIRTUAL TABLE vec_nodes USING vec0(embedding float[${DIM}], node_id TEXT)`); // old shape, no cosine
+      fresh.prepare(`INSERT INTO vec_nodes(rowid, embedding, node_id) VALUES (?, ?, ?)`).run(1n, JSON.stringify(vec([0, 1])), 'stale-node');
+
+      expect(loadVec(fresh, DIM)).toBe(true);
+
+      const row = fresh
+        .prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'vec_nodes'`)
+        .get() as { sql: string };
+      expect(row.sql).toContain('distance_metric=cosine');
+      expect((fresh.prepare(`SELECT count(*) AS n FROM vec_nodes`).get() as { n: number }).n).toBe(0); // dropped, not altered
+    } finally {
+      fresh.close();
+    }
+  });
+
+  it('is a no-op once already migrated (re-running loadVec never drops a cosine vec_nodes)', () => {
+    expect(isVecAvailable(db)).toBe(true); // openTestDb() already ran the real migration once
+    vecUpsert(db, 'vec_nodes', 1, vec([0, 1]), 'kept');
+    expect(loadVec(db, DIM)).toBe(true);
+    expect(vecKnn(db, 'vec_nodes', vec([0, 1]), 1)).toEqual([{ rowid: 1, refId: 'kept', distance: 0 }]);
   });
 });
 

@@ -13,6 +13,9 @@ import {
   invalidateNode,
   deleteNode,
   addEdge,
+  getEdge,
+  setEdgeStatus,
+  listDraftEdges,
   edgesFor,
   graph,
 } from '../knowledge/store.js';
@@ -101,6 +104,58 @@ describe('knowledge: edge cascade + UNIQUE(src,dst,relation) idempotency', () =>
     deleteNode(db, a.id);
     expect(edgesFor(db, [a.id, b.id])).toHaveLength(0);
     expect(getNode(db, b.id)).toBeDefined(); // only the edge cascades, not the other node
+  });
+});
+
+describe('knowledge: edge status (auto-relate review workflow)', () => {
+  it('addEdge defaults to status=approved; an explicit draft status round-trips', () => {
+    const a = upsertNode(db, { title: 'Status A', scope: 'global' });
+    const b = upsertNode(db, { title: 'Status B', scope: 'global' });
+
+    const approved = addEdge(db, { src: a.id, dst: b.id, relation: 'uses' });
+    expect(approved?.status).toBe('approved');
+
+    const draft = addEdge(db, { src: a.id, dst: b.id, relation: 'related', status: 'draft' });
+    expect(draft?.status).toBe('draft');
+  });
+
+  it('listDraftEdges returns only drafts, joined with both endpoint titles', () => {
+    const a = upsertNode(db, { title: 'Draft src', scope: 'global' });
+    const b = upsertNode(db, { title: 'Draft dst', scope: 'global' });
+    addEdge(db, { src: a.id, dst: b.id, relation: 'uses' }); // approved -- excluded
+    const draft = addEdge(db, { src: a.id, dst: b.id, relation: 'related', status: 'draft' })!;
+
+    const drafts = listDraftEdges(db);
+    expect(drafts).toHaveLength(1);
+    expect(drafts[0]).toMatchObject({ id: draft.id, src_title: 'Draft src', dst_title: 'Draft dst' });
+  });
+
+  it('setEdgeStatus approves/rejects a draft without deleting the row', () => {
+    const a = upsertNode(db, { title: 'Review A', scope: 'global' });
+    const b = upsertNode(db, { title: 'Review B', scope: 'global' });
+    const draft = addEdge(db, { src: a.id, dst: b.id, relation: 'related', status: 'draft' })!;
+
+    setEdgeStatus(db, draft.id, 'approved');
+    expect(getEdge(db, draft.id)?.status).toBe('approved');
+
+    setEdgeStatus(db, draft.id, 'rejected');
+    expect(getEdge(db, draft.id)?.status).toBe('rejected');
+  });
+
+  it('edgesFor({status}) filters by status; graph() only ever returns approved edges', () => {
+    const a = upsertNode(db, { title: 'Graph status A', scope: 'global' });
+    const b = upsertNode(db, { title: 'Graph status B', scope: 'global' });
+    addEdge(db, { src: a.id, dst: b.id, relation: 'uses' });
+    addEdge(db, { src: a.id, dst: b.id, relation: 'related', status: 'draft' });
+
+    expect(edgesFor(db, [a.id, b.id])).toHaveLength(2); // no status filter -- both
+    expect(edgesFor(db, [a.id, b.id], { status: 'approved' })).toHaveLength(1);
+    expect(edgesFor(db, [a.id, b.id], { status: 'draft' })).toHaveLength(1);
+
+    const g = graph(db);
+    const edgesBetween = g.edges.filter((e) => e.src === a.id && e.dst === b.id);
+    expect(edgesBetween).toHaveLength(1);
+    expect(edgesBetween[0].relation).toBe('uses');
   });
 });
 

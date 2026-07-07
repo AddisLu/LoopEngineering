@@ -89,6 +89,19 @@ describe('knowledgeContext: edge-hop expansion', () => {
     expect(out).toMatch(/Linked environment/);
     expect(out).not.toMatch(/Too far/);
   });
+
+  it('never hops across a draft edge (see src/knowledge/relate.ts) — only approved edges are followed', () => {
+    const task = getTask(db, createTask(db, { title: 't', goal: 'g', repo_path: '/tmp/some-repo-draft' }).id)!;
+    const seedScope = repoScope('/tmp/some-repo-draft');
+
+    const seedNode = upsertNode(db, { title: 'Draft-hop seed', body: 'seed', scope: seedScope });
+    const viaDraft = upsertNode(db, { title: 'Only via draft edge', body: 'must not leak', scope: 'env:unrelated' });
+    addEdge(db, { src: seedNode.id, dst: viaDraft.id, relation: 'related', status: 'draft' });
+
+    const out = knowledgeContext(db, task);
+    expect(out).toMatch(/Draft-hop seed/);
+    expect(out).not.toMatch(/Only via draft edge/);
+  });
 });
 
 // ---- 3. ordering + status filtering ----
