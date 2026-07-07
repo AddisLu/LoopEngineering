@@ -11,7 +11,11 @@ export const NONNEG_KEYS = new Set([
   'timeout_S', 'timeout_M', 'timeout_L', 'usage_refresh_sec', 'ledger_fallback_after_min',
   'age_step_min', 'starve_min', 'knowledge_budget_chars', 'verify_step_timeout_min',
   'voice_worker_idle_min',
+  // SSoT/RAG Phase 0
+  'embed_dim', 'rag_top_k', 'embed_worker_idle_min',
 ]);
+// values must be a number in [0, 1] (a fraction/weight, unlike the 0-100 PERCENT_KEYS)
+export const UNIT_INTERVAL_KEYS = new Set(['rag_hybrid_alpha']);
 // Phase 3 feature flags: stored as 'true'/'false'.
 export const BOOL_KEYS = new Set([
   'scheduler_paused',
@@ -29,6 +33,8 @@ export const BOOL_KEYS = new Set([
   'integration_pushback',
   // mobile voice -> task intake
   'voice_intake_enabled', 'voice_warm_worker',
+  // SSoT/RAG Phase 0 (src/knowledge/{vec,embed}.ts) — off = zero behavior change
+  'rag_enabled',
 ]);
 
 /** Accepted `integration_provider` values ('none' = the bridge is fully off). */
@@ -70,6 +76,9 @@ export function validateSetting(key: string, value: string): string | null {
   } else if (NONNEG_KEYS.has(key)) {
     const n = Number(value);
     if (!Number.isFinite(n) || n < 0) return `${key} must be a non-negative number`;
+  } else if (UNIT_INTERVAL_KEYS.has(key)) {
+    const n = Number(value);
+    if (!Number.isFinite(n) || n < 0 || n > 1) return `${key} must be a number between 0 and 1`;
   } else if (key === 'day_window') {
     if (!/^\d{2}:\d{2}-\d{2}:\d{2}$/.test(value)) return 'day_window must be HH:MM-HH:MM (e.g. 08:00-23:00)';
   } else if (BOOL_KEYS.has(key)) {

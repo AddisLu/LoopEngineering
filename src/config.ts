@@ -235,6 +235,22 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // model used to clean a transcript into structured task fields (src/voice/structure.ts).
   // haiku is fast/cheap and plenty for this cleanup task; overrides default_model for voice only.
   voice_structure_model: 'haiku',
+
+  // SSoT/RAG Phase 0 (src/knowledge/{vec,embed}.ts): local vector search foundation.
+  // Off by default = zero behavior change — nothing calls embed()/vec KNN yet (Phase 1/2
+  // ingest+retrieve wire it up). Embeddings run fully on-device (bge-m3, voice-venv);
+  // no data leaves the host.
+  rag_enabled: 'false',
+  embed_model: 'BAAI/bge-m3',
+  embed_dim: '1024',
+  // shares the voice-venv python (torch + sentence-transformers installed alongside
+  // faster-whisper — see plan-SSoT-master.md's out-of-band setup steps).
+  embed_python: path.join(os.homedir(), '.local', 'share', 'loop-engineering', 'voice-venv', 'bin', 'python'),
+  rag_top_k: '8',
+  rag_hybrid_alpha: '0.5',
+  // warm embed worker (scripts/embed_daemon.py, reuses src/voice/daemon.ts's WarmWorker):
+  // idle minutes before the daemon self-terminates to free VRAM (shared GPU with whisper).
+  embed_worker_idle_min: '10',
 };
 
 export const TOKEN_REFRESH_MS = 180_000; // TokenBar cadence

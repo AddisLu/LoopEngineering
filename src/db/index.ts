@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { paths, ensureDirs, DEFAULT_SETTINGS } from '../config.js';
 import { seedPipelines } from '../pipeline/store.js';
+import { loadVec } from '../knowledge/vec.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -23,6 +24,7 @@ export function getDb(dbPath: string = paths.db): Database.Database {
   seedSettings(db);
   seedEnvironments(db);
   seedPipelines(db);
+  loadVec(db, getNum(db, 'embed_dim', 1024));
 
   _db = db;
   return db;
@@ -39,6 +41,7 @@ export function openTestDb(): Database.Database {
   seedSettings(db);
   seedEnvironments(db);
   seedPipelines(db);
+  loadVec(db, getNum(db, 'embed_dim', 1024));
   return db;
 }
 
