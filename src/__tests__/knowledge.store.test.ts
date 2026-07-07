@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type Database from 'better-sqlite3';
 import { openTestDb } from '../db/index.js';
+import { vecUpsert } from '../knowledge/vec.js';
 import { createTask, getTask } from '../tasks.js';
 import {
   upsertNode,
@@ -440,5 +441,55 @@ describe('knowledge: graph() view=brain / brain-full', () => {
     const docId = insertRawDoc({ path: 'lonely.md', title: 'Lonely', doc_kind: 'md', sourceId: 'src_notes' });
     const g = graph(db, { view: 'brain' });
     expect(g.documents.map((d) => d.id)).toContain(docId);
+  });
+});
+
+// ---- GRAPH G2: brain view merges draft node<->node edges + synthesized cross-layer edges ----
+
+describe('knowledge: graph() view=brain merges draft edges + bridge.ts cross-layer edges', () => {
+  const DIM = 1024;
+  function oneHot(dim: number): number[] {
+    const v = new Array(DIM).fill(0);
+    v[dim] = 1;
+    return v;
+  }
+
+  it('a draft node<->node edge is absent from the default view but present in brain view', () => {
+    const a = upsertNode(db, { title: 'Brain draft A', scope: 'global' });
+    const b = upsertNode(db, { title: 'Brain draft B', scope: 'global' });
+    addEdge(db, { src: a.id, dst: b.id, relation: 'related', status: 'draft' });
+
+    const def = graph(db);
+    expect(def.edges.some((e) => e.src === a.id && e.dst === b.id)).toBe(false);
+
+    const brain = graph(db, { view: 'brain' });
+    expect(brain.edges.some((e) => e.src === a.id && e.dst === b.id)).toBe(true);
+  });
+
+  it('brain view includes a synthesized node<->document bridge edge (default view does not)', () => {
+    const node = upsertNode(db, { title: 'Bridge node', kind: 'tech', scope: 'global' });
+    const rowid = (
+      db.prepare(`SELECT rowid AS rowid FROM knowledge_nodes WHERE id = ?`).get(node.id) as { rowid: number }
+    ).rowid;
+    vecUpsert(db, 'vec_nodes', rowid, oneHot(0), node.id);
+
+    db.prepare(`INSERT OR IGNORE INTO sources (id, kind, uri) VALUES ('src_op', 'git', 'http://op.example')`).run();
+    const docInfo = db
+      .prepare(`INSERT INTO documents (source_id, path, title, doc_kind) VALUES ('src_op', 'op:1', '【X】P1', 'op_project')`)
+      .run();
+    const docId = Number(docInfo.lastInsertRowid);
+    const chunkInfo = db.prepare(`INSERT INTO chunks (document_id, ord, text) VALUES (?, 0, 'chunk text')`).run(docId);
+    const chunkId = Number(chunkInfo.lastInsertRowid);
+    vecUpsert(db, 'vec_chunks', chunkId, oneHot(0), chunkId); // same vector as the node -- nearest neighbor
+
+    const def = graph(db);
+    expect(def.edges.some((e) => e.dst === `doc_${docId}` || e.src === `doc_${docId}`)).toBe(false);
+
+    const brain = graph(db, { view: 'brain' });
+    expect(
+      brain.edges.some(
+        (e) => (e.src === node.id && e.dst === `doc_${docId}`) || (e.src === `doc_${docId}` && e.dst === node.id),
+      ),
+    ).toBe(true);
   });
 });

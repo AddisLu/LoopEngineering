@@ -3,6 +3,7 @@ import type Database from 'better-sqlite3';
 import { nanoid } from 'nanoid';
 import type { KnowledgeNode, KnowledgeEdge, Kind, Source, Status } from './types.js';
 import { resyncNodeWikilinks } from './wikilink.js';
+import { bridgeEdges, type BridgeEdge } from './bridge.js';
 
 // ---- nodes ----
 
@@ -313,6 +314,10 @@ export function evidenceForNode(db: Database.Database, nodeId: string): NodeEvid
  * 'brain-full' also includes op_work_package. Only 'brain'/'brain-full' attach `category`. */
 export type GraphView = 'default' | 'brain' | 'brain-full';
 
+/** default view's edges are always curated KnowledgeEdge rows; brain/brain-full additionally
+ * synthesize cross-layer BridgeEdge entries (see bridge.ts) that were never persisted. */
+export type GraphEdge = KnowledgeEdge | BridgeEdge;
+
 export interface GraphOpts {
   kind?: Kind;
   scope?: string;
@@ -456,7 +461,7 @@ function loadGraphDocuments(db: Database.Database, view: GraphView = 'default'):
  * only for multi-hop BFS — relation direction doesn't matter for "what's near this node". */
 function buildGraphAdjacency(
   nodeIds: string[],
-  edges: KnowledgeEdge[],
+  edges: GraphEdge[],
   documents: GraphDocument[],
 ): Map<string, Set<string>> {
   const adj = new Map<string, Set<string>>();
@@ -510,7 +515,7 @@ function bfsVisited(adj: Map<string, Set<string>>, start: string, depth: number)
 export function graph(
   db: Database.Database,
   opts: GraphOpts = {},
-): { nodes: KnowledgeNode[]; edges: KnowledgeEdge[]; documents: GraphDocument[] } {
+): { nodes: KnowledgeNode[]; edges: GraphEdge[]; documents: GraphDocument[] } {
   const clauses = [`invalid_at IS NULL`, `status IN ('approved', 'draft')`];
   const params: unknown[] = [];
   if (opts.kind) {
@@ -531,7 +536,7 @@ export function graph(
   // auto-relate drafts (src/knowledge/relate.ts) are reviewed via a separate list, never
   // rendered in the graph until approved.
   const baseNodeIds = new Set(nodes.map((n) => n.id));
-  let edges = edgesFor(db, [...baseNodeIds], { status: 'approved' }).filter(
+  let edges: GraphEdge[] = edgesFor(db, [...baseNodeIds], { status: 'approved' }).filter(
     (e) => baseNodeIds.has(e.src) && baseNodeIds.has(e.dst),
   );
   const view = opts.view ?? 'default';
@@ -539,6 +544,13 @@ export function graph(
   // shape byte-identical to before this feature (zero regression, see plan-GRAPH-G1.md).
   if (view !== 'default') {
     nodes = nodes.map((n) => ({ ...n, category: { top: '策展', sub: n.kind } }));
+    // Draft node<->node edges (see relate.ts's suggestRelations) plus synthesized
+    // cross-layer node<->document edges (see bridge.ts) -- unifies every relation source
+    // the brain UI needs into this one response, never touching the default view.
+    const draftEdges = edgesFor(db, [...baseNodeIds], { status: 'draft' }).filter(
+      (e) => baseNodeIds.has(e.src) && baseNodeIds.has(e.dst),
+    );
+    edges = [...edges, ...draftEdges, ...bridgeEdges(db)];
   }
   let documents = loadGraphDocuments(db, view);
 
@@ -551,14 +563,13 @@ export function graph(
     );
     const visited = bfsVisited(adj, opts.nodeId, depth);
     nodes = nodes.filter((n) => visited.has(n.id));
-    const nodeIdSet = new Set(nodes.map((n) => n.id));
-    edges = edges.filter((e) => nodeIdSet.has(e.src) && nodeIdSet.has(e.dst));
+    edges = edges.filter((e) => visited.has(e.src) && visited.has(e.dst));
     documents = documents
       .filter((d) => visited.has(`doc_${d.id}`))
       .map((d) => ({
         ...d,
         links: d.links.filter((l) =>
-          l.target_kind === 'node' ? nodeIdSet.has(String(l.target_id)) : visited.has(`doc_${l.target_id}`),
+          l.target_kind === 'node' ? visited.has(String(l.target_id)) : visited.has(`doc_${l.target_id}`),
         ),
       }));
   }
