@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="zh-Hant" data-mode="light">
+<html lang="zh-Hant" data-mode="dark">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>知識庫 · Loop Engineering</title>
+    <title>知識星圖 · Loop Engineering</title>
     <script>
       // Set theme before first paint to avoid a flash of the wrong mode.
       (function () {
@@ -18,92 +18,90 @@
     </script>
     <link rel="stylesheet" href="/styles.css" />
   </head>
-  <body>
-    <header class="topbar">
-      <div class="brand">
-        <span class="brand-mark" aria-hidden="true"></span>
-        <span class="brand-text">
-          <strong class="brand-name">Loop Engineering</strong>
-          <span class="brand-sub">知識庫</span>
-        </span>
+  <body class="brain-page">
+    <!-- The immersive knowledge graph is the whole page: a full-viewport dark canvas with
+         floating glass chrome over it. The curated-node management UI lives in a slide-in
+         drawer (☰ 清單). -->
+    <main id="graph-stage" class="graph-stage">
+      <canvas id="graph-canvas" class="graph-canvas" width="1280" height="800"></canvas>
+      <div id="graph-tooltip" class="graph-tooltip" hidden></div>
+      <div id="graph-empty" class="graph-empty" hidden>知識庫目前沒有節點</div>
+
+      <!-- top command bar -->
+      <header class="gbar gbar-top">
+        <div class="gbar-brand">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <span class="gbar-titles">
+            <strong class="gbar-name">知識星圖</strong>
+            <span id="graph-title" class="gbar-sub">整體知識圖譜</span>
+          </span>
+        </div>
+        <div class="gbar-actions">
+          <a class="gbtn" href="/">← 看板</a>
+          <a class="gbtn" href="/metrics.html">儀表板</a>
+          <button id="theme-btn" class="gbtn icon" type="button" title="切換佈景" aria-label="切換佈景"></button>
+          <button id="capture-btn" class="gbtn" type="button">📥 擷取</button>
+          <button id="relate-btn" class="gbtn" type="button">🔗 推斷關聯</button>
+          <button id="new-node-btn" class="gbtn primary" type="button">＋ 新增</button>
+          <button id="manage-toggle" class="gbtn" type="button" aria-controls="manage-drawer">☰ 清單</button>
+        </div>
+      </header>
+
+      <!-- left dock: category legend + filters -->
+      <aside class="gdock" id="gdock">
+        <div class="gdock-head">
+          <span class="gdock-title">分類 · 星系</span>
+          <button id="dock-collapse" class="gdock-collapse" type="button" title="收合面板" aria-label="收合面板">‹</button>
+        </div>
+        <div class="gdock-scroll">
+          <div id="graph-legend" class="glegend" role="group" aria-label="分類圖例"></div>
+          <div class="gdock-group">
+            <div class="gdock-label">知識類型</div>
+            <div id="graph-kind-chips" class="chip-row" role="group" aria-label="知識類型篩選"></div>
+          </div>
+          <div class="gdock-group">
+            <div class="gdock-label">來源</div>
+            <div id="graph-source-chips" class="chip-row" role="group" aria-label="來源篩選"></div>
+          </div>
+          <div class="gdock-group">
+            <input id="graph-tag-filter" class="gfield" type="search" placeholder="依標籤過濾…" autocomplete="off" />
+            <input id="graph-scope-filter" class="gfield" type="search" placeholder="依 scope 過濾…" autocomplete="off" />
+            <label class="gcheck"><input id="graph-show-documents" type="checkbox" checked /> 顯示文件節點</label>
+          </div>
+        </div>
+      </aside>
+
+      <!-- bottom-right view controls -->
+      <div class="gcontrols">
+        <label class="gdepth">展開跳數<input id="graph-depth" type="number" min="1" max="6" value="2" /></label>
+        <button id="graph-zoom-out" class="gbtn icon" type="button" title="縮小" aria-label="縮小">－</button>
+        <button id="graph-zoom-in" class="gbtn icon" type="button" title="放大" aria-label="放大">＋</button>
+        <button id="graph-reset" class="gbtn" type="button">重置視圖</button>
       </div>
 
-      <div class="controls">
-        <a class="btn" href="/">← 看板</a>
-        <a class="btn" href="/metrics.html">儀表板</a>
-        <button id="theme-btn" class="btn icon-btn" type="button" title="切換佈景" aria-label="切換佈景"></button>
-        <button id="graph-btn" class="btn" type="button">🕸 圖譜</button>
-        <button id="capture-btn" class="btn" type="button">📥 擷取</button>
-        <button id="relate-btn" class="btn" type="button">🔗 推斷關聯</button>
-        <button id="new-node-btn" class="btn primary" type="button">＋ 新增</button>
-      </div>
-    </header>
+      <p class="ghint">拖曳平移 · 滾輪縮放 · 拖曳節點 · 懸停高亮鄰居 · 點節點聚焦展開</p>
+    </main>
 
-    <main class="brain" aria-live="polite">
-      <div class="brain-toolbar">
+    <!-- management drawer: curated-node list, search, draft-edge review -->
+    <div id="drawer-scrim" class="drawer-scrim" hidden></div>
+    <aside id="manage-drawer" class="manage-drawer" hidden aria-label="知識清單管理">
+      <div class="drawer-head">
+        <strong>知識清單</strong>
+        <button id="manage-close" class="gbtn icon" type="button" title="關閉清單" aria-label="關閉清單">✕</button>
+      </div>
+      <div class="drawer-body">
         <input id="search-input" class="brain-search" type="search" placeholder="搜尋知識…" autocomplete="off" />
         <div id="kind-chips" class="chip-row" role="group" aria-label="kind 篩選"></div>
         <div id="status-chips" class="chip-row" role="group" aria-label="狀態篩選"></div>
+
+        <section id="draft-edges-panel" class="draft-edges-panel" hidden>
+          <div class="settings-group">草稿關聯（待審核）</div>
+          <div id="draft-edges-list" class="node-list"></div>
+        </section>
+
+        <div id="node-list" class="node-list"></div>
       </div>
-
-      <section id="graph-panel" class="graph-panel" hidden>
-        <div class="graph-header">
-          <span id="graph-title" class="graph-title"></span>
-          <span id="graph-counts" class="graph-counts"></span>
-          <div class="graph-header-actions">
-            <label class="graph-density-label">展示程度
-              <input id="graph-density" type="range" min="1" max="10" value="5" />
-            </label>
-            <label class="graph-depth-label">展開跳數
-              <input id="graph-depth" type="number" min="1" max="6" value="2" />
-            </label>
-            <button id="graph-zoom-out" class="btn sm icon-btn" type="button" title="縮小" aria-label="縮小">－</button>
-            <button id="graph-zoom-in" class="btn sm icon-btn" type="button" title="放大" aria-label="放大">＋</button>
-            <button id="graph-fullscreen" class="btn sm icon-btn" type="button" title="全螢幕" aria-label="全螢幕">⛶</button>
-            <button id="graph-reset" class="btn sm" type="button">重置視圖</button>
-            <button id="graph-close" class="btn sm" type="button">關閉</button>
-          </div>
-        </div>
-
-        <div class="graph-filters">
-          <div id="graph-kind-chips" class="chip-row" role="group" aria-label="圖譜 kind 篩選"></div>
-          <div id="graph-source-chips" class="chip-row" role="group" aria-label="圖譜來源篩選"></div>
-          <div class="graph-filter-row">
-            <input id="graph-tag-filter" type="search" placeholder="依標籤過濾…" autocomplete="off" />
-            <input id="graph-scope-filter" type="search" placeholder="依 scope 過濾…" autocomplete="off" />
-            <label class="graph-doc-toggle"><input id="graph-show-documents" type="checkbox" checked /> 顯示文件節點</label>
-          </div>
-        </div>
-
-        <div class="graph-body">
-          <aside id="graph-category-tree" class="graph-category-tree" aria-label="分類樹" hidden></aside>
-
-          <div class="graph-main">
-            <div id="graph-empty" class="empty" hidden>此節點尚無關聯</div>
-            <div class="graph-canvas-wrap">
-              <canvas id="graph-canvas" class="graph-canvas" width="880" height="560"></canvas>
-              <div id="graph-tooltip" class="graph-tooltip" hidden></div>
-            </div>
-            <p class="graph-hint">拖曳空白處平移、滾輪縮放、拖曳節點調整位置、懸停高亮鄰居、點一下節點聚焦展開並查看詳情。</p>
-          </div>
-
-          <aside id="graph-detail-panel" class="graph-detail-panel" hidden>
-            <div class="graph-detail-header">
-              <span id="graph-detail-title" class="graph-detail-title"></span>
-              <button id="graph-detail-close" class="btn sm icon-btn" type="button" title="關閉詳情" aria-label="關閉詳情">×</button>
-            </div>
-            <div id="graph-detail-body" class="graph-detail-body"></div>
-          </aside>
-        </div>
-      </section>
-
-      <section id="draft-edges-panel" class="draft-edges-panel" hidden>
-        <div class="settings-group">草稿關聯（待審核）</div>
-        <div id="draft-edges-list" class="node-list"></div>
-      </section>
-
-      <div id="node-list" class="node-list"></div>
-    </main>
+    </aside>
 
     <dialog id="node-dialog">
       <form id="node-form" method="dialog">
@@ -114,14 +112,14 @@
         <div class="row">
           <label>Kind
             <select name="kind">
-              <option value="environment">environment</option>
-              <option value="project">project</option>
-              <option value="constraint">constraint</option>
-              <option value="preference">preference</option>
-              <option value="tech">tech</option>
-              <option value="fact" selected>fact</option>
-              <option value="person">person</option>
-              <option value="repo">repo</option>
+              <option value="environment">環境 (environment)</option>
+              <option value="project">專案 (project)</option>
+              <option value="constraint">限制 (constraint)</option>
+              <option value="preference">偏好 (preference)</option>
+              <option value="tech">技術 (tech)</option>
+              <option value="fact" selected>事實 (fact)</option>
+              <option value="person">人物 (person)</option>
+              <option value="repo">儲存庫 (repo)</option>
             </select>
           </label>
           <label>Weight <input name="weight" type="number" min="1" max="5" value="3" /></label>

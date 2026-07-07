@@ -43,11 +43,15 @@ describe('brain page: static assets', () => {
     expect(html).not.toContain('relation-svg');
   });
 
-  it('brain.html references /styles.css and /brain.js, and has its own <main class="brain">', () => {
+  it('brain.html references /styles.css and /brain.js, and is the full-screen immersive graph stage (G5)', () => {
     const html = fs.readFileSync(path.join(WEB_DIR, 'brain.html'), 'utf8');
     expect(html).toContain('/styles.css');
     expect(html).toContain('/brain.js');
-    expect(html).toMatch(/<main class="brain"/);
+    // graph-first: a full-viewport <main class="graph-stage"> holds the canvas; the curated
+    // node list lives in a slide-in management drawer, not a narrow centered column.
+    expect(html).toMatch(/<main[^>]*class="[^"]*graph-stage/);
+    expect(html).toMatch(/id="manage-drawer"/);
+    expect(html).toMatch(/id="graph-legend"/);
     expect(html).not.toMatch(/<main[^>]*class="board"/);
   });
 

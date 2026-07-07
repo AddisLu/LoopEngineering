@@ -2,6 +2,7 @@ import {
   buildGraphState,
   mergeGraphState,
   stepForceClustered,
+  categoryAnchors,
   computeDegrees,
   reheat,
   decayAlpha,
@@ -12,8 +13,6 @@ import {
   worldToScreen,
   hitTestVertex,
   vertexRadius,
-  categoryTree,
-  categoryFocusVertices,
 } from '/graph-layout.js';
 
 // ---- auth / token ----------------------------------------------------
@@ -77,10 +76,42 @@ themeBtn.onclick = () => {
 };
 paintThemeBtn();
 
+// ---- Chinese label maps (fixes the garbled English/src_ chips) -----------
+// kind -> 中文 (curated-node kinds). Covers the 6 filter chips plus person/repo used elsewhere.
+const KIND_ZH = {
+  environment: '環境', constraint: '限制', preference: '偏好',
+  project: '專案', tech: '技術', fact: '事實', person: '人物', repo: '儲存庫',
+};
+// curated-node provenance (knowledge_nodes.source) -> 中文
+const NODE_SOURCE_ZH = { seed: '種子', distilled: 'AI 草稿', manual: '手動', mcp: 'MCP' };
+// friendly overrides for a registered source's uri basename (else the basename is used as-is)
+const SOURCE_BASENAME_ZH = { SSoT: 'SSoT 筆記', OpenProject_Exec_Report: 'OpenProject 報表' };
+
+// id -> {kind, uri} for every registered ingest source, loaded once from /api/sources so the
+// graph can show a human name for each src_xxx (survives a knowledge-base rebuild, which
+// regenerates the ids: the name is derived from the still-stable uri, never hard-coded).
+let sourceMeta = new Map();
+async function loadSourceMeta() {
+  try {
+    const res = await api('/api/sources', 'GET');
+    sourceMeta = new Map((res.sources || []).map((s) => [s.id, s]));
+  } catch { /* leave empty — friendlySource() falls back to a short id */ }
+}
+/** Resolve a raw source token to a readable 中文/product name. Handles both curated-node
+ * provenance (seed/distilled/manual) and ingest source ids (src_xxx -> uri basename). */
+function friendlySource(id) {
+  if (NODE_SOURCE_ZH[id]) return NODE_SOURCE_ZH[id];
+  const s = sourceMeta.get(id);
+  if (!s) return String(id).startsWith('src_') ? '來源 ' + String(id).slice(4, 10) : id;
+  if (s.kind === 'openproject' || s.kind === 'github-issues') return 'OpenProject';
+  const base = String(s.uri || '').replace(/[/\\]+$/, '').split(/[/\\]/).pop() || id;
+  return SOURCE_BASENAME_ZH[base] || base;
+}
+
 // ---- filter chips --------------------------------------------------------
 const KIND_CHIPS = [
-  ['all', '全部'], ['environment', 'environment'], ['constraint', 'constraint'],
-  ['preference', 'preference'], ['project', 'project'], ['tech', 'tech'], ['fact', 'fact'],
+  ['all', '全部'], ['environment', '環境'], ['constraint', '限制'],
+  ['preference', '偏好'], ['project', '專案'], ['tech', '技術'], ['fact', '事實'],
 ];
 const STATUS_CHIPS = [['all', '全部'], ['approved', '核可'], ['draft', '草稿']];
 
@@ -150,7 +181,7 @@ function buildRow(n) {
     const evBtn = btn('佐證', '', () => toggleEvidence(n.id, main, evBtn));
     actions.appendChild(evBtn);
   }
-  actions.appendChild(btn('關聯', '', () => openGraphView(n.id)));
+  actions.appendChild(btn('關聯', '', () => { closeDrawer(); openGraphView(n.id); }));
   actions.appendChild(btn('編輯', '', () => openNodeDialog(n)));
   actions.appendChild(btn('刪除', 'danger-ghost', () => delNode(n.id, n.title)));
   row.appendChild(actions);
@@ -306,7 +337,7 @@ $('relate-btn').onclick = async () => {
 // Hand-rolled canvas 2D: pan/zoom/drag/click-to-expand + kind/tag/scope/source filters,
 // documents rendered as a distinct (square) node type. No CDN/library — see
 // web/graph-layout.js for the DOM-free state/physics/filter logic this wires up.
-const graphPanel = $('graph-panel');
+const graphStage = $('graph-stage');
 const graphTitle = $('graph-title');
 const graphEmpty = $('graph-empty');
 const graphCanvas = $('graph-canvas');
@@ -318,14 +349,7 @@ const graphScopeFilter = $('graph-scope-filter');
 const graphShowDocuments = $('graph-show-documents');
 const graphKindChips = $('graph-kind-chips');
 const graphSourceChips = $('graph-source-chips');
-const graphCounts = $('graph-counts');
-const graphDensityInput = $('graph-density');
-const graphFullscreenBtn = $('graph-fullscreen');
-const graphCategoryTree = $('graph-category-tree');
-const graphDetailPanel = $('graph-detail-panel');
-const graphDetailTitle = $('graph-detail-title');
-const graphDetailBody = $('graph-detail-body');
-const graphDetailClose = $('graph-detail-close');
+const graphLegend = $('graph-legend');
 
 let graphState = null; // { vertices: Map<id, Vertex>, edges: Edge[] } — see graph-layout.js
 let graphView = { offsetX: 0, offsetY: 0, scale: 1 };
@@ -340,40 +364,42 @@ const ALL_KINDS = KIND_CHIPS.slice(1).map(([v]) => v);
 let selectedGraphKinds = new Set(ALL_KINDS); // opt-out: all kinds shown by default
 let selectedGraphSources = new Set(); // opt-in: empty = no source filter applied
 
-// ---- G3 immersive visual tunables --------------------------------------
-// Baseline dark-immersive numbers, deliberately centralized so Claude Design can retune
-// the look later without touching rendering/interaction logic. Category hue/sat/lightness
-// mirror the four view=brain top-level buckets (see src/knowledge/store.ts::categorizeDocument);
-// sub-category only varies lightness (subLightnessOffset below), never hue, so a category's
-// members always read as one family of color.
+// ---- G5 "Quiet Observatory" immersive tunables -------------------------
+// Dark-immersive numbers, centralized so the look retunes without touching rendering logic.
+// Category hue mirrors the four view=brain top-level buckets (see store.ts::categorizeDocument);
+// saturation is pulled to 45-70% (not neon) so four categories separate on the dark field yet
+// read as premium restraint. Sub-category varies lightness only (subLightnessOffset), never
+// hue, so a category's members always read as one family of color.
 const CATEGORY_HSL = {
-  策展: { h: 217, s: 88, l: 66 },
-  程式碼: { h: 158, s: 60, l: 56 },
-  OpenProject: { h: 32, s: 90, l: 60 },
-  筆記: { h: 280, s: 65, l: 70 },
+  策展: { h: 217, s: 70, l: 64 },       // hero = the product's blue accent family
+  程式碼: { h: 165, s: 45, l: 54 },     // teal
+  OpenProject: { h: 34, s: 60, l: 58 }, // amber, deliberately the calmest surface (296 nodes)
+  筆記: { h: 270, s: 45, l: 70 },       // violet
 };
 const CATEGORY_DEFAULT_HSL = { h: 220, s: 8, l: 60 };
+// legend / KPI-strip order (top -> bottom)
+const CATEGORY_ORDER = ['策展', '程式碼', 'OpenProject', '筆記'];
 
 const GRAPH_VISUAL = Object.freeze({
-  glowBlur: 12,
-  glowBlurHi: 22,
-  edgeWidth: 1.1,
-  edgeAlphaBase: 0.22,
-  edgeAlphaHi: 0.9,
-  edgeAlphaDim: 0.05,
-  nodeAlphaDim: 0.22,
-  curveAmount: 0.14, // fraction of edge length the bezier control point offsets by
-  curveMax: 46,
-  zoomFocusScale: 1.9,
-  zoomAnimMs: 420,
+  glowBlur: 5,       // restrained node halo (shadowBlur only — never 'lighter'/additive)
+  glowBlurHi: 15,    // hub / selected halo
+  edgeWidth: 0.6,    // hair-thin: 1062 lines read as a density gradient, not a sheet of mud
+  edgeAlphaBase: 0.10,
+  edgeAlphaHi: 0.55,
+  edgeAlphaDim: 0.03,
+  nodeAlphaDim: 0.14,
+  curveAmount: 0.12, // fraction of edge length the bezier control point offsets by
+  curveMax: 40,
+  zoomFocusScale: 2.2,
+  zoomAnimMs: 460,
+  focusEase: 0.14,   // per-frame lerp of the global spotlight dim (0..1)
+  wellAlpha: 0.14,   // click-lock gravity-well bloom peak alpha
+  starCount: 70,
 });
 
-let graphLabelDensity = 0; // G4: driven by the 展示程度 slider, biases the LoD zoom threshold
-
-// ---- G4: category tree (left) + node detail panel (right) --------------
-let selectedCategory = null; // { top, sub: string|null } | null -- null = "全部" (no focus)
-let categoryFocus = null; // categoryFocusVertices(graphState, selectedCategory) result, or null
-let currentDetailVertexId = null; // guards against a stale async evidence fetch clobbering the panel
+let graphFocus = 0; // eased 0..1 spotlight strength: 0 = full sky, 1 = one lineage lit
+let starfield = null; // cached {w,h,dots:[{x,y,a}]} regenerated only on canvas resize
+let soloCategory = null; // legend click-to-isolate: when set, only this top-category is shown
 
 function currentGraphFilters() {
   return {
@@ -387,9 +413,9 @@ function currentGraphFilters() {
 function visibleGraphVertices() {
   if (!graphState) return [];
   const filters = currentGraphFilters();
-  let vertices = [...graphState.vertices.values()].filter((v) => matchesFilter(v, filters));
-  if (categoryFocus) vertices = vertices.filter((v) => categoryFocus.visible.has(v.id));
-  return vertices;
+  return [...graphState.vertices.values()].filter(
+    (v) => matchesFilter(v, filters) && (!soloCategory || v.category?.top === soloCategory),
+  );
 }
 
 function cssVar(name, fallback) {
@@ -406,18 +432,57 @@ function subLightnessOffset(sub) {
   return (h % 21) - 10;
 }
 
-/** view=brain/brain-full vertices carry `category` (see src/knowledge/store.ts) and are
- * colored by it; the node-centric 關聯 relation view (default GraphView) never has
- * category and keeps the original per-kind coloring so that flow is unaffected by G3. */
-function vertexColor(v) {
+/** #rrggbb (the --k-* kind swatches) -> {h,s,l}, so per-kind colors flow through the same
+ * hue-based canvas builders as category colors. Falls back to a neutral grey on a bad value. */
+function hexToHSL(hex) {
+  const m = /^#?([\da-f]{2})([\da-f]{2})([\da-f]{2})$/i.exec(String(hex).trim());
+  if (!m) return { h: 220, s: 8, l: 60 };
+  const r = parseInt(m[1], 16) / 255, g = parseInt(m[2], 16) / 255, b = parseInt(m[3], 16) / 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
+  const l = (max + min) / 2;
+  let h = 0, s = 0;
+  if (d) {
+    s = d / (1 - Math.abs(2 * l - 1));
+    if (max === r) h = ((g - b) / d) % 6;
+    else if (max === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+    h *= 60;
+    if (h < 0) h += 360;
+  }
+  return { h: Math.round(h), s: Math.round(s * 100), l: Math.round(l * 100) };
+}
+
+/** {h,s,l} for a vertex — the single source of truth every canvas color builder derives from.
+ * view=brain/brain-full vertices carry `category` and are colored by it (sub-category rides
+ * lightness only, never hue); the node-centric 關聯 relation view keeps the per-kind swatch. */
+function vertexHSL(v) {
   const top = v.category?.top;
   if (top) {
     const base = CATEGORY_HSL[top] ?? CATEGORY_DEFAULT_HSL;
     const l = Math.min(85, Math.max(28, base.l + subLightnessOffset(v.category.sub)));
-    return `hsl(${base.h} ${base.s}% ${l}%)`;
+    return { h: base.h, s: base.s, l };
   }
-  return v.type === 'document' ? cssVar('--k-document', '#888') : cssVar(`--k-${v.kind}`, cssVar('--k-fact', '#888'));
+  const swatch = v.type === 'document' ? cssVar('--k-document', '#8892a0') : cssVar(`--k-${v.kind}`, cssVar('--k-fact', '#8892a0'));
+  return hexToHSL(swatch);
 }
+/** Node fill; `dim` desaturates to a quiet grey-blue (not merely fades) for the spotlight. */
+function vertexColor(v, dim = false) {
+  const c = vertexHSL(v);
+  return `hsl(${c.h} ${dim ? c.s * 0.25 : c.s}% ${c.l}%)`;
+}
+/** Edge endpoint stop: desaturated + fixed mid-lightness so a same-category edge is a near-
+ * solid quiet line and a cross-category bridge a subtle two-tone — structure without rainbow. */
+function edgeStop(v, a) { const c = vertexHSL(v); return `hsla(${c.h}, 22%, 58%, ${a})`; }
+/** Inner glass bead: same hue, lifted lightness — reads as lit-from-within, not a flat sticker. */
+function beadColor(v) { const c = vertexHSL(v); return `hsl(${c.h} ${c.s}% ${Math.min(96, c.l + 16)}%)`; }
+/** White-hot pinpoint core for structural hubs. */
+function hubCore(v) { const c = vertexHSL(v); return `hsl(${c.h} 90% 96%)`; }
+/** Faint watermark ink for a category's zone title drawn out in the sky. */
+function watermarkColor(top, a) { const c = CATEGORY_HSL[top] ?? CATEGORY_DEFAULT_HSL; return `hsla(${c.h}, 40%, 72%, ${a})`; }
+/** Per-zone nebula glow center color. */
+function nebulaColor(top, a) { const c = CATEGORY_HSL[top] ?? CATEGORY_DEFAULT_HSL; return `hsla(${c.h}, 45%, 45%, ${a})`; }
+/** Gravity-well bloom color under a click-locked node. */
+function wellColor(v, a) { const c = vertexHSL(v); return `hsla(${c.h}, 55%, 50%, ${a})`; }
 
 /** { id -> true } for `id` itself plus every vertex directly connected to it — used to
  * highlight a hovered/focused node's neighborhood and dim everything else. */
@@ -446,20 +511,56 @@ function resizeGraphCanvas() {
   return { cssW: rect.width, cssH: rect.height, dpr };
 }
 
-/** Dark immersive background: a solid base plus a soft off-center glow that falls off
- * into a vignette at the edges — the "night sky" the graph floats in, independent of the
- * page's light/dark theme (see the --graph-bg-1/--graph-bg-2/--graph-vignette custom
- * properties in styles.css). */
+/** Seeds a deterministic starfield sized to the canvas — recomputed only when the CSS size
+ * changes, never per frame. Static and faint: the void isn't dead flat, but nothing twinkles
+ * or blends additively. */
+function ensureStarfield(cssW, cssH) {
+  if (starfield && starfield.w === cssW && starfield.h === cssH) return starfield;
+  let seed = (0x9e3779b1 ^ (Math.round(cssW) * 73856093) ^ (Math.round(cssH) * 19349663)) >>> 0;
+  const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+  const dots = [];
+  for (let i = 0; i < GRAPH_VISUAL.starCount; i++) dots.push({ x: rnd() * cssW, y: rnd() * cssH, a: 0.04 + rnd() * 0.04 });
+  starfield = { w: cssW, h: cssH, dots };
+  return starfield;
+}
+
+/** Dark immersive "night sky": warm charcoal base, a center-biased vignette, one faint nebula
+ * per category glowing at its ring zone, and a sparse static starfield. Independent of the
+ * page's light/dark theme; strictly source-over (additive blending is the neon/mud trap). */
 function drawBackground(cssW, cssH) {
-  gctx.fillStyle = cssVar('--graph-bg-1', '#05070d');
+  gctx.fillStyle = cssVar('--graph-bg-1', '#080b10');
   gctx.fillRect(0, 0, cssW, cssH);
-  const r = Math.max(cssW, cssH) * 0.8;
+
+  const r = Math.max(cssW, cssH) * 0.85;
   const grad = gctx.createRadialGradient(cssW / 2, cssH * 0.4, 0, cssW / 2, cssH * 0.4, r);
-  grad.addColorStop(0, cssVar('--graph-bg-2', '#111a30'));
-  grad.addColorStop(1, cssVar('--graph-vignette', 'rgba(2,4,10,0.92)'));
+  grad.addColorStop(0, 'hsl(220 26% 11%)');
+  grad.addColorStop(0.6, 'hsl(222 30% 6%)');
+  grad.addColorStop(1, 'hsl(224 42% 3%)');
   gctx.fillStyle = grad;
   gctx.fillRect(0, 0, cssW, cssH);
+
+  // one faint nebula per category, centered on its ring anchor projected to the screen
+  if (graphState) {
+    const nr = Math.max(cssW, cssH) * 0.42 * Math.min(1.6, Math.max(0.4, graphView.scale));
+    for (const [top, a] of categoryAnchors(graphState)) {
+      const p = worldToScreen(graphView, a.x, a.y, cssW, cssH);
+      const ng = gctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, nr);
+      ng.addColorStop(0, nebulaColor(top, 0.05));
+      ng.addColorStop(1, nebulaColor(top, 0));
+      gctx.fillStyle = ng;
+      gctx.fillRect(0, 0, cssW, cssH);
+    }
+  }
+
+  const sf = ensureStarfield(cssW, cssH);
+  for (const d of sf.dots) {
+    gctx.fillStyle = `rgba(233, 228, 218, ${d.a})`;
+    gctx.fillRect(d.x, d.y, 1, 1);
+  }
 }
+
+const lerp = (a, b, t) => a + (b - a) * t;
+const isHub = (v) => (v.degree ?? 0) >= 6;
 
 function drawGraph() {
   const { cssW, cssH, dpr } = resizeGraphCanvas();
@@ -471,71 +572,134 @@ function drawGraph() {
 
   const vertices = visibleGraphVertices();
   const visibleIds = new Set(vertices.map((v) => v.id));
-  const textColor = cssVar('--graph-text', '#e8ecf5');
-  const textDim = cssVar('--graph-text-dim', 'rgba(232,236,245,0.55)');
-  // hover wins over the (rarer) click-focus ring when both are set, since it's the more
-  // immediate signal of what the user's looking at right now.
+  const textColor = cssVar('--graph-text', '#e9e4da');
+  // hover wins over the (rarer) click-focus lock when both are set — it's the more immediate
+  // signal of what the user is looking at right now.
   const highlightId = hoveredVertexId ?? graphFocusId;
   const highlight = highlightId ? neighborIds(graphState, highlightId) : null;
+  const focus = highlight ? graphFocus : 0; // eased 0..1 planetarium "lights-down" strength
+  const zoom = Math.sqrt(graphView.scale);
 
-  gctx.lineWidth = GRAPH_VISUAL.edgeWidth * Math.sqrt(graphView.scale);
+  // ---- gravity-well bloom under a click-locked node (grafted from the Atlas direction) ----
+  if (graphFocusId && focus > 0.01) {
+    const fv = graphState?.vertices.get(graphFocusId);
+    if (fv && visibleIds.has(graphFocusId)) {
+      const p = worldToScreen(graphView, fv.x, fv.y, cssW, cssH);
+      const wr = 180 * Math.min(1.5, Math.max(0.5, zoom)) * focus;
+      const wg = gctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, wr);
+      wg.addColorStop(0, wellColor(fv, GRAPH_VISUAL.wellAlpha * focus));
+      wg.addColorStop(1, wellColor(fv, 0));
+      gctx.fillStyle = wg;
+      gctx.fillRect(0, 0, cssW, cssH);
+    }
+  }
+
+  // ---- edges (draw before nodes; source-over only, never additive) ----
   for (const e of graphState ? graphState.edges : []) {
     if (!visibleIds.has(e.src) || !visibleIds.has(e.dst)) continue;
     const a = graphState.vertices.get(e.src);
     const b = graphState.vertices.get(e.dst);
     const pa = worldToScreen(graphView, a.x, a.y, cssW, cssH);
     const pb = worldToScreen(graphView, b.x, b.y, cssW, cssH);
-    const inCategoryFocus = categoryFocus && (categoryFocus.focused.has(e.src) || categoryFocus.focused.has(e.dst));
-    const related = (highlight && (e.src === highlightId || e.dst === highlightId)) || inCategoryFocus;
-    const dimSource = highlight || categoryFocus;
-    gctx.globalAlpha = !dimSource ? GRAPH_VISUAL.edgeAlphaBase : related ? GRAPH_VISUAL.edgeAlphaHi : GRAPH_VISUAL.edgeAlphaDim;
+    const related = highlight && (e.src === highlightId || e.dst === highlightId);
+    const alpha = related
+      ? lerp(GRAPH_VISUAL.edgeAlphaBase, GRAPH_VISUAL.edgeAlphaHi, focus)
+      : lerp(GRAPH_VISUAL.edgeAlphaBase, GRAPH_VISUAL.edgeAlphaDim, focus);
+    gctx.lineWidth = GRAPH_VISUAL.edgeWidth * Math.min(1.7, zoom) + (related ? 0.15 * focus : 0);
     const grad = gctx.createLinearGradient(pa.x, pa.y, pb.x, pb.y);
-    grad.addColorStop(0, vertexColor(a));
-    grad.addColorStop(1, vertexColor(b));
+    grad.addColorStop(0, edgeStop(a, alpha));
+    grad.addColorStop(1, edgeStop(b, alpha));
     gctx.strokeStyle = grad;
-    // gentle quadratic curve (Obsidian-style) instead of a straight line -- offset the
-    // control point perpendicular to the edge, capped so long edges don't bow wildly.
+    // gentle quadratic bow (Obsidian-style): offset the control point perpendicular, capped.
     const dx = pb.x - pa.x;
     const dy = pb.y - pa.y;
     const len = Math.hypot(dx, dy) || 1;
     const bow = Math.min(len * GRAPH_VISUAL.curveAmount, GRAPH_VISUAL.curveMax);
-    const cx = (pa.x + pb.x) / 2 + (-dy / len) * bow;
-    const cy = (pa.y + pb.y) / 2 + (dx / len) * bow;
     gctx.beginPath();
     gctx.moveTo(pa.x, pa.y);
-    gctx.quadraticCurveTo(cx, cy, pb.x, pb.y);
+    gctx.quadraticCurveTo((pa.x + pb.x) / 2 + (-dy / len) * bow, (pa.y + pb.y) / 2 + (dx / len) * bow, pb.x, pb.y);
     gctx.stroke();
   }
   gctx.globalAlpha = 1;
 
+  // ---- zone-title watermarks: the four 中文 category names living in the sky ----
+  if (graphState && graphView.scale >= 0.6 && graphView.scale <= 2.4) {
+    gctx.textAlign = 'center';
+    gctx.textBaseline = 'middle';
+    gctx.font = '600 30px "PingFang TC","Noto Sans TC","Microsoft JhengHei",system-ui,sans-serif';
+    for (const [top, a] of categoryAnchors(graphState)) {
+      const p = worldToScreen(graphView, a.x, a.y, cssW, cssH);
+      gctx.fillStyle = watermarkColor(top, 0.12 * (1 - 0.6 * focus));
+      gctx.fillText(top, p.x, p.y);
+    }
+  }
+
+  // ---- nodes ----
   gctx.textAlign = 'center';
   gctx.textBaseline = 'top';
-  gctx.font = '11px system-ui, sans-serif';
   for (const v of vertices) {
     const p = worldToScreen(graphView, v.x, v.y, cssW, cssH);
-    const r = vertexRadius(v) * Math.sqrt(graphView.scale);
+    const r = vertexRadius(v) * zoom;
     const selected = v.id === graphCenterId || v.id === graphFocusId || v.id === hoveredVertexId;
-    const dimmed = (highlight && !highlight.has(v.id)) || (categoryFocus && !categoryFocus.focused.has(v.id));
+    const dimmed = highlight && !highlight.has(v.id);
+    const hub = isHub(v);
+    const doc = v.type === 'document';
 
-    gctx.globalAlpha = dimmed ? GRAPH_VISUAL.nodeAlphaDim : 1;
-    const color = vertexColor(v);
+    gctx.globalAlpha = dimmed ? lerp(1, GRAPH_VISUAL.nodeAlphaDim, focus) : 1;
+    const color = vertexColor(v, dimmed && focus > 0.5);
+    const shape = () => { gctx.beginPath(); doc ? gctx.rect(p.x - r, p.y - r, r * 2, r * 2) : gctx.arc(p.x, p.y, r, 0, Math.PI * 2); };
+
     gctx.shadowColor = color;
-    gctx.shadowBlur = selected ? GRAPH_VISUAL.glowBlurHi : GRAPH_VISUAL.glowBlur;
+    gctx.shadowBlur = (selected || hub) && !dimmed ? GRAPH_VISUAL.glowBlurHi : GRAPH_VISUAL.glowBlur;
     gctx.fillStyle = color;
-    gctx.beginPath();
-    if (v.type === 'document') gctx.rect(p.x - r, p.y - r, r * 2, r * 2);
-    else gctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+    shape();
     gctx.fill();
     gctx.shadowBlur = 0;
+
+    if (!dimmed) {
+      // inner glass bead — lit-from-within depth
+      gctx.globalAlpha = 0.9;
+      gctx.fillStyle = beadColor(v);
+      gctx.beginPath();
+      doc ? gctx.rect(p.x - r * 0.42, p.y - r * 0.42, r * 0.84, r * 0.84) : gctx.arc(p.x, p.y, r * 0.42, 0, Math.PI * 2);
+      gctx.fill();
+      if (hub) {
+        // white-hot pinpoint core + hue ring
+        gctx.fillStyle = hubCore(v);
+        gctx.beginPath();
+        gctx.arc(p.x, p.y, Math.max(1.2, r * 0.28), 0, Math.PI * 2);
+        gctx.fill();
+        gctx.globalAlpha = 1;
+        gctx.lineWidth = 1;
+        gctx.strokeStyle = vertexColor(v);
+        shape();
+        gctx.stroke();
+      }
+      gctx.globalAlpha = 1;
+    }
+
     if (selected) {
-      gctx.lineWidth = 2;
+      gctx.lineWidth = 1.5;
       gctx.strokeStyle = textColor;
+      shape();
       gctx.stroke();
     }
 
-    if (shouldShowLabel(v, { scale: graphView.scale + graphLabelDensity, hoveredId: hoveredVertexId, focusId: graphFocusId })) {
-      gctx.fillStyle = dimmed ? textDim : textColor;
-      gctx.fillText(String(v.label ?? '').slice(0, 22), p.x, p.y + r + 3);
+    // labels: LoD-gated; during a spotlight only the lit lineage is labeled; doc labels only
+    // when hovered/focused (keeps 503 squares from becoming a mush of text).
+    const lit = v.id === hoveredVertexId || v.id === graphFocusId;
+    const labelOK = shouldShowLabel(v, { scale: graphView.scale, hoveredId: hoveredVertexId, focusId: graphFocusId });
+    const suppressed = focus > 0.05 && highlight && !highlight.has(v.id);
+    if (labelOK && !suppressed && (!doc || lit)) {
+      gctx.globalAlpha = 1;
+      gctx.font = `${hub ? 12 : 11}px "PingFang TC","Noto Sans TC","Microsoft JhengHei",system-ui,sans-serif`;
+      const text = String(v.label ?? '').slice(0, 22);
+      const ty = p.y + r + 4;
+      gctx.lineWidth = 3;
+      gctx.strokeStyle = 'hsla(222, 30%, 5%, 0.85)'; // halo so a label survives crossing an edge
+      gctx.strokeText(text, p.x, ty);
+      gctx.fillStyle = textColor;
+      gctx.fillText(text, p.x, ty);
     }
   }
   gctx.globalAlpha = 1;
@@ -565,6 +729,9 @@ function graphLoop() {
     }
     tickViewAnim();
   }
+  // ease the spotlight dim in/out so the sky fades like a planetarium instead of snapping
+  const focusTarget = (hoveredVertexId ?? graphFocusId) ? 1 : 0;
+  graphFocus += (focusTarget - graphFocus) * GRAPH_VISUAL.focusEase;
   drawGraph();
   graphRaf = requestAnimationFrame(graphLoop);
 }
@@ -574,11 +741,13 @@ function stopGraphLoop() {
 }
 
 function populateGraphFilterChips() {
+  // kind chips — 中文 label (KIND_ZH), raw kind kept as the filter value/dataset
   graphKindChips.replaceChildren();
   for (const kind of ALL_KINDS) {
-    const chip = el('button', 'chip-btn', kind);
+    const chip = el('button', 'chip-btn', KIND_ZH[kind] ?? kind);
     chip.type = 'button';
     chip.dataset.value = kind;
+    chip.title = kind;
     chip.classList.toggle('active', selectedGraphKinds.has(kind));
     chip.onclick = () => {
       if (selectedGraphKinds.has(kind)) selectedGraphKinds.delete(kind);
@@ -588,14 +757,15 @@ function populateGraphFilterChips() {
     graphKindChips.appendChild(chip);
   }
 
+  // source chips — friendly 中文/product name (friendlySource), never the raw src_xxx id
   const sources = new Set();
   for (const v of graphState ? graphState.vertices.values() : []) {
     if (v.type === 'node' && v.raw.source) sources.add(v.raw.source);
     if (v.type === 'document' && v.raw.source_id) sources.add(v.raw.source_id);
   }
   graphSourceChips.replaceChildren();
-  for (const s of [...sources].sort()) {
-    const chip = el('button', 'chip-btn', s);
+  for (const s of [...sources].sort((a, b) => friendlySource(a).localeCompare(friendlySource(b), 'zh-Hant'))) {
+    const chip = el('button', 'chip-btn', friendlySource(s));
     chip.type = 'button';
     chip.dataset.value = s;
     chip.classList.toggle('active', selectedGraphSources.has(s));
@@ -606,72 +776,61 @@ function populateGraphFilterChips() {
     };
     graphSourceChips.appendChild(chip);
   }
+
+  renderLegend();
 }
 
-/** Top「實體 N・關係 M」 counts (GRAPH G4): the full live graph state, not just what
- * passes the current filters -- filtering hides vertices, it doesn't shrink the graph. */
-function updateGraphCounts() {
-  graphCounts.textContent = graphState ? `實體 ${graphState.vertices.size} · 關係 ${graphState.edges.length}` : '';
-}
-
-function categorySwatchColor(top) {
-  const c = CATEGORY_HSL[top] ?? CATEGORY_DEFAULT_HSL;
-  return `hsl(${c.h} ${c.s}% ${c.l}%)`;
-}
-
-/** Recomputes categoryFocus from the current selectedCategory (see categoryFocusVertices
- * in graph-layout.js) -- call after selectedCategory changes or graphState is rebuilt. */
-function updateCategoryFocus() {
-  categoryFocus = graphState && selectedCategory ? categoryFocusVertices(graphState, selectedCategory) : null;
-}
-
-/** GRAPH G4: left category tree/legend -- built from the live graphState's categories
- * (only view=brain vertices carry `category`, so this stays empty/hidden for a
- * node-centered 關聯 view). Clicking a bucket sets selectedCategory (focus-filter, see
- * visibleGraphVertices/drawGraph); "全部" clears it back to showing everything. */
-function renderCategoryTree() {
-  graphCategoryTree.replaceChildren();
-  const tree = graphState ? categoryTree(graphState) : new Map();
-  if (!tree.size) {
-    graphCategoryTree.hidden = true;
-    return;
+/** The 中文 category legend / KPI strip in the left dock: a color key (fixes the demand for a
+ * readable category map that raw ids never gave) with live per-category counts, plus click-
+ * to-isolate (solo one category; click again to release). Counts are totals from the whole
+ * graph so the strip reads as a stable KPI, not a filtered subset. */
+function renderLegend() {
+  if (!graphLegend) return;
+  graphLegend.replaceChildren();
+  const counts = new Map();
+  for (const v of graphState ? graphState.vertices.values() : []) {
+    const top = v.category?.top;
+    if (top) counts.set(top, (counts.get(top) || 0) + 1);
   }
-  graphCategoryTree.hidden = false;
-
-  const select = (next) => {
-    selectedCategory = next;
-    updateCategoryFocus();
-    renderCategoryTree();
+  // the node-centered 關聯 view has no categories (nodes are colored per-kind there) — showing
+  // four "0" rows would be misleading, so drop the category key and keep only the shape key.
+  const categorized = counts.size > 0;
+  for (const top of categorized ? CATEGORY_ORDER : []) {
+    const c = CATEGORY_HSL[top] ?? CATEGORY_DEFAULT_HSL;
+    const col = `hsl(${c.h} ${c.s}% ${c.l}%)`;
+    const row = el('div', 'glegend-item');
+    if (soloCategory === top) row.classList.add('active');
+    else if (soloCategory) row.classList.add('dimmed');
+    const sw = el('span', 'glegend-swatch');
+    sw.style.background = col;
+    sw.style.boxShadow = `0 0 9px ${col}`;
+    row.appendChild(sw);
+    row.appendChild(el('span', 'glegend-label', top));
+    row.appendChild(el('span', 'glegend-count', String(counts.get(top) || 0)));
+    row.title = soloCategory === top ? '顯示全部' : `只看「${top}」`;
+    row.onclick = () => toggleSoloCategory(top);
+    graphLegend.appendChild(row);
+  }
+  // shape-encoding key
+  const key = el('div', 'glegend-key');
+  const mk = (sq, label) => {
+    const k = el('span', 'k');
+    k.appendChild(el('span', 'kd' + (sq ? ' sq' : '')));
+    k.appendChild(el('span', '', label));
+    return k;
   };
+  key.appendChild(mk(false, '節點'));
+  key.appendChild(mk(true, '文件'));
+  graphLegend.appendChild(key);
+}
 
-  const allBtn = el('button', 'chip-btn category-tree-all', '全部');
-  allBtn.type = 'button';
-  allBtn.classList.toggle('active', !selectedCategory);
-  allBtn.onclick = () => select(null);
-  graphCategoryTree.appendChild(allBtn);
-
-  for (const [top, info] of [...tree.entries()].sort((a, b) => b[1].count - a[1].count)) {
-    const topBtn = el('button', 'chip-btn category-tree-top');
-    topBtn.type = 'button';
-    const swatch = el('span', 'category-swatch');
-    swatch.style.background = categorySwatchColor(top);
-    topBtn.appendChild(swatch);
-    topBtn.appendChild(el('span', 'category-tree-label', top));
-    topBtn.appendChild(el('span', 'chip mono category-count', String(info.count)));
-    topBtn.classList.toggle('active', selectedCategory?.top === top && !selectedCategory.sub);
-    topBtn.onclick = () => select({ top, sub: null });
-    graphCategoryTree.appendChild(topBtn);
-
-    for (const [sub, count] of [...info.subs.entries()].sort((a, b) => b[1] - a[1])) {
-      const subBtn = el('button', 'chip-btn category-tree-sub');
-      subBtn.type = 'button';
-      subBtn.appendChild(el('span', 'category-tree-label', sub));
-      subBtn.appendChild(el('span', 'chip mono category-count', String(count)));
-      subBtn.classList.toggle('active', selectedCategory?.top === top && selectedCategory?.sub === sub);
-      subBtn.onclick = () => select({ top, sub });
-      graphCategoryTree.appendChild(subBtn);
-    }
-  }
+function toggleSoloCategory(top) {
+  // no-op unless some visible vertex actually carries this category — otherwise soloing would
+  // blank the canvas (e.g. the node-centered 關聯 view has no categories at all).
+  if (soloCategory !== top && !(graphState && [...graphState.vertices.values()].some((v) => v.category?.top === top))) return;
+  soloCategory = soloCategory === top ? null : top;
+  renderLegend();
+  if (graphState) { reheat(graphState); fitGraphView(); }
 }
 
 async function fetchGraph(nodeId, depth, view) {
@@ -687,18 +846,18 @@ async function fetchGraph(nodeId, depth, view) {
  * curated graph, which fetches `view=brain` (GRAPH G3) so vertices carry `category` for
  * the immersive grouped/colored rendering below. */
 async function openGraphView(nodeId) {
-  graphPanel.hidden = false;
   graphEmpty.hidden = true;
-  graphDetailPanel.hidden = true;
-  currentDetailVertexId = null;
+  // reset every per-view filter so a chip/legend/solo selected in one view can't persist as
+  // an invisible active filter into the next (which could blank the graph with no chip to clear).
+  soloCategory = null;
+  selectedGraphKinds = new Set(ALL_KINDS);
+  selectedGraphSources = new Set();
   graphCenterId = nodeId ?? null;
   graphFocusId = null;
   hoveredVertexId = null;
   viewAnim = null;
   graphView = { offsetX: 0, offsetY: 0, scale: 1 };
   graphViewMode = nodeId ? 'default' : 'brain';
-  selectedCategory = null;
-  categoryFocus = null;
 
   let g;
   try {
@@ -706,7 +865,6 @@ async function openGraphView(nodeId) {
   } catch (e) {
     graphState = null;
     graphTitle.textContent = '';
-    graphCounts.textContent = '';
     graphEmpty.hidden = false;
     graphEmpty.textContent = '載入圖譜失敗：' + e;
     return;
@@ -716,8 +874,6 @@ async function openGraphView(nodeId) {
   computeDegrees(graphState);
   reheat(graphState);
   populateGraphFilterChips();
-  renderCategoryTree();
-  updateGraphCounts();
 
   graphTitle.textContent = nodeId
     ? (graphState.vertices.get(nodeId)?.label ?? '')
@@ -733,6 +889,34 @@ async function openGraphView(nodeId) {
 
   stopGraphLoop();
   graphLoop();
+  // The force layout keeps spreading for a few seconds after open; re-frame the whole
+  // graph a few times so a large view=brain graph (which settles taller than the canvas)
+  // ends fully in view instead of clipped off the top/bottom. See fitGraphView.
+  for (const ms of [250, 1500, 3500, 6000, 9000]) setTimeout(() => { if (graphState) fitGraphView(); }, ms);
+}
+
+/** Frame every current vertex into the canvas with padding (pan + zoom together). Called
+ * right after a graph opens (the layout is still settling then) and by the 重置視圖 button,
+ * so a 500+ vertex brain graph is actually visible instead of scattered off-canvas. */
+function fitGraphView() {
+  if (!graphState || graphState.vertices.size === 0) return;
+  const { cssW, cssH } = resizeGraphCanvas();
+  const vs = visibleGraphVertices();
+  if (!vs.length) return;
+  let minx = Infinity;
+  let miny = Infinity;
+  let maxx = -Infinity;
+  let maxy = -Infinity;
+  for (const v of vs) {
+    if (v.x < minx) minx = v.x;
+    if (v.x > maxx) maxx = v.x;
+    if (v.y < miny) miny = v.y;
+    if (v.y > maxy) maxy = v.y;
+  }
+  const w = (maxx - minx) || 1;
+  const h = (maxy - miny) || 1;
+  const s = Math.max(0.15, Math.min(Math.min(cssW / w, cssH / h) * 0.82, 2));
+  graphView = { scale: s, offsetX: -((minx + maxx) / 2) * s, offsetY: -((miny + maxy) / 2) * s };
 }
 
 /** Click-to-expand: pull a 1-hop neighborhood around the clicked vertex and merge it
@@ -751,9 +935,6 @@ async function expandVertex(vertex) {
   computeDegrees(graphState);
   reheat(graphState);
   populateGraphFilterChips();
-  renderCategoryTree();
-  updateCategoryFocus();
-  updateGraphCounts();
   graphEmpty.hidden = true;
 }
 
@@ -772,142 +953,12 @@ function animateViewTo(target, duration = GRAPH_VISUAL.zoomAnimMs) {
   viewAnim = { from: { ...graphView }, to: target, start: performance.now(), duration };
 }
 
-/** GRAPH G4: right detail panel for a clicked node -- title/category/source, a clickable
- * neighbor list (jumps focus to that neighbor), and evidence: curated nodes fetch
- * GET /api/knowledge/:id/evidence (same citations as the list's 佐證 button); documents
- * show their uri/doc_kind directly (no evidence endpoint for them). Ends with the
- * "用此脈絡問 AI" action (see askAiAboutVertex). */
-async function showNodeDetail(vertex) {
-  currentDetailVertexId = vertex.id;
-  graphDetailPanel.hidden = false;
-  graphDetailTitle.textContent = vertex.label ?? '';
-  graphDetailBody.replaceChildren();
-
-  const meta = el('div', 'graph-detail-meta');
-  if (vertex.category?.top) meta.appendChild(el('span', 'chip mono', vertex.category.top));
-  if (vertex.category?.sub) meta.appendChild(el('span', 'chip mono', vertex.category.sub));
-  const source = vertex.type === 'document' ? vertex.raw.source_id : vertex.raw.source;
-  if (source) meta.appendChild(el('span', 'chip', String(source)));
-  graphDetailBody.appendChild(meta);
-
-  const neighborsSection = el('div', 'graph-detail-section');
-  neighborsSection.appendChild(el('div', 'settings-group', '關聯'));
-  const neighborIdList = [...neighborIds(graphState, vertex.id)].filter((id) => id !== vertex.id);
-  if (!neighborIdList.length) {
-    neighborsSection.appendChild(el('div', 'muted', '（尚無關聯）'));
-  } else {
-    for (const nid of neighborIdList) {
-      const nv = graphState.vertices.get(nid);
-      if (!nv) continue;
-      const btn = el('button', 'btn sm graph-detail-neighbor', nv.label ?? nid);
-      btn.type = 'button';
-      btn.onclick = () => {
-        focusVertex(nv);
-        showNodeDetail(nv);
-      };
-      neighborsSection.appendChild(btn);
-    }
-  }
-  graphDetailBody.appendChild(neighborsSection);
-
-  const evSection = el('div', 'graph-detail-section');
-  evSection.appendChild(el('div', 'settings-group', '證據'));
-  if (vertex.type === 'document') {
-    const line = `${vertex.raw.doc_kind ?? ''} ${vertex.raw.uri ?? vertex.raw.path ?? ''}`.trim();
-    evSection.appendChild(el('div', 'muted', line || '（無來源資訊）'));
-  } else {
-    evSection.appendChild(el('div', 'muted', '載入中…'));
-  }
-  graphDetailBody.appendChild(evSection);
-
-  appendAskAiSection(vertex);
-
-  if (vertex.type !== 'document') {
-    let evidence = null;
-    try {
-      const res = await api(`/api/knowledge/${vertex.id}/evidence`, 'GET');
-      evidence = res.evidence || [];
-    } catch (e) {
-      evidence = null;
-    }
-    if (currentDetailVertexId !== vertex.id) return; // panel moved on while this was in flight
-    evSection.replaceChildren(el('div', 'settings-group', '證據'));
-    if (evidence === null) {
-      evSection.appendChild(el('div', 'muted', '（載入佐證失敗）'));
-    } else if (!evidence.length) {
-      evSection.appendChild(el('div', 'muted', '（尚無語料佐證）'));
-    } else {
-      for (const ev of evidence) {
-        const row = el('div', 'evidence-row');
-        const lineRef = ev.start_line != null ? `:${ev.start_line}-${ev.end_line ?? ev.start_line}` : '';
-        row.appendChild(el('span', 'chip mono', `${ev.path}${lineRef}`));
-        row.appendChild(el('div', 'evidence-text', String(ev.text || '').replace(/\s+/g, ' ').trim().slice(0, 200)));
-        evSection.appendChild(row);
-      }
-    }
-  }
-}
-
-/** "用此脈絡問 AI" (GRAPH G4): POSTs the node + its neighbors as context to the existing
- * POST /api/report endpoint (see src/server/reportRoutes.ts) and shows the markdown reply
- * as plain text (no md->html). That endpoint 404s while `report_enabled` is off (its
- * default) -- treated as "feature not available" and disabled after the first failure,
- * rather than surfaced as a hard error. */
-function appendAskAiSection(vertex) {
-  const section = el('div', 'graph-detail-section graph-ask-ai');
-  const btn = el('button', 'btn sm primary', '用此脈絡問 AI');
-  btn.type = 'button';
-  const out = el('div', 'graph-ask-ai-out muted');
-  out.hidden = true;
-  btn.onclick = () => askAiAboutVertex(vertex, btn, out);
-  section.appendChild(btn);
-  section.appendChild(out);
-  graphDetailBody.appendChild(section);
-}
-
-async function askAiAboutVertex(vertex, btn, out) {
-  const original = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = '詢問中…';
-  out.hidden = false;
-  out.className = 'graph-ask-ai-out muted';
-  out.textContent = '';
-
-  const neighborLabels = [...neighborIds(graphState, vertex.id)]
-    .filter((id) => id !== vertex.id)
-    .map((id) => graphState.vertices.get(id)?.label)
-    .filter(Boolean)
-    .slice(0, 8);
-  const topic = vertex.category?.top ?? vertex.kind ?? '';
-  const description = `請針對知識圖節點「${vertex.label}」（${topic}）提供脈絡摘要與建議。相關節點：${neighborLabels.join('、') || '（無）'}`;
-
-  try {
-    const r = await postJSON('/api/report', { description });
-    out.className = 'graph-ask-ai-out';
-    out.textContent = r.markdown || '（無回應內容）';
-    btn.disabled = false;
-    btn.textContent = original;
-  } catch (e) {
-    out.className = 'graph-ask-ai-out muted';
-    out.textContent = '此功能目前未啟用';
-    btn.textContent = original;
-    // leave the button disabled: the endpoint isn't available, so retrying would just fail again
-  }
-}
-
-graphDetailClose.onclick = () => { graphDetailPanel.hidden = true; currentDetailVertexId = null; };
-
-$('graph-close').onclick = () => {
-  graphPanel.hidden = true;
-  graphDetailPanel.hidden = true;
-  currentDetailVertexId = null;
-  stopGraphLoop();
-};
-$('graph-btn').onclick = () => openGraphView(null);
 $('graph-reset').onclick = () => {
   viewAnim = null;
   graphFocusId = null;
-  graphView = { offsetX: 0, offsetY: 0, scale: 1 };
+  soloCategory = null;
+  renderLegend();
+  fitGraphView();
 };
 $('graph-zoom-in').onclick = () => { graphView.scale = Math.min(graphView.scale * 1.25, 4); };
 $('graph-zoom-out').onclick = () => { graphView.scale = Math.max(graphView.scale / 1.25, 0.15); };
@@ -915,19 +966,54 @@ graphDepthInput.addEventListener('change', () => {
   if (graphCenterId) openGraphView(graphCenterId);
 });
 
-// GRAPH G4: 展示程度 slider (1..10, default 5 = unbiased) -- biases graphLabelDensity, the
-// existing LoD hook consumed by shouldShowLabel's `scale` in drawGraph.
-graphDensityInput.addEventListener('input', () => {
-  graphLabelDensity = (Number(graphDensityInput.value) - 5) * 0.25;
-});
+// ---- management drawer (☰ 清單): curated-node list over the immersive graph ----
+const manageDrawer = $('manage-drawer');
+const drawerScrim = $('drawer-scrim');
+function openDrawer() {
+  manageDrawer.hidden = false;
+  drawerScrim.hidden = false;
+  fetchAndRender();
+  fetchDraftEdges();
+}
+function closeDrawer() { manageDrawer.hidden = true; drawerScrim.hidden = true; }
+$('manage-toggle').onclick = openDrawer;
+$('manage-close').onclick = closeDrawer;
+drawerScrim.onclick = closeDrawer;
 
-// GRAPH G4: fullscreen immersion -- resizeGraphCanvas() already reads the canvas's CSS
-// box size every frame (see drawGraph), so no extra resize wiring is needed here; the
-// fullscreen CSS (styles.css .graph-panel:fullscreen) just gives that box more room.
-graphFullscreenBtn.onclick = () => {
-  if (document.fullscreenElement) document.exitFullscreen?.();
-  else graphPanel.requestFullscreen?.();
+// ---- left dock collapse ----
+const gdock = $('gdock');
+$('dock-collapse').onclick = () => {
+  const collapsed = gdock.classList.toggle('collapsed');
+  $('dock-collapse').textContent = collapsed ? '›' : '‹';
 };
+
+// ---- idle-fade chrome: instruments recede when you're just watching the sky ----
+let chromeIdleTimer = null;
+function wakeChrome() {
+  graphStage.classList.remove('chrome-idle');
+  clearTimeout(chromeIdleTimer);
+  chromeIdleTimer = setTimeout(() => graphStage.classList.add('chrome-idle'), 2500);
+}
+for (const ev of ['mousemove', 'keydown', 'focusin', 'wheel', 'mousedown']) {
+  window.addEventListener(ev, wakeChrome, { passive: true });
+}
+wakeChrome();
+
+// ---- keyboard: 1-4 isolate a category, Esc clears focus/solo, / opens the list search ----
+window.addEventListener('keydown', (e) => {
+  if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) {
+    if (e.key === 'Escape') e.target.blur();
+    return;
+  }
+  // a modal dialog (add/edit node, capture) owns its own keys — never solo/clear behind it
+  if (document.querySelector('dialog[open]')) return;
+  if (e.key === 'Escape') {
+    if (!manageDrawer.hidden) closeDrawer();
+    else { graphFocusId = null; soloCategory = null; renderLegend(); }
+  } else if (e.key >= '1' && e.key <= '4') {
+    toggleSoloCategory(CATEGORY_ORDER[Number(e.key) - 1]);
+  }
+});
 
 // ---- canvas interaction: pan (drag empty space) / zoom (wheel) / drag node / click to expand ----
 let dragTarget = null; // a vertex object, or the string 'pan'
@@ -973,10 +1059,7 @@ window.addEventListener('mousemove', (evt) => {
 window.addEventListener('mouseup', () => {
   if (dragTarget && dragTarget !== 'pan') {
     dragTarget.fixed = false;
-    if (!dragMoved) {
-      focusVertex(dragTarget);
-      showNodeDetail(dragTarget);
-    }
+    if (!dragMoved) focusVertex(dragTarget);
   }
   dragTarget = null;
   panStart = null;
@@ -1008,12 +1091,22 @@ function updateTooltip(vertex, evt) {
   }
   graphTooltip.replaceChildren();
   graphTooltip.appendChild(el('div', 'graph-tooltip-title', vertex.label));
-  const sub = vertex.type === 'document' ? '文件' : (vertex.category?.sub ?? vertex.kind ?? '');
-  if (sub) graphTooltip.appendChild(el('div', 'graph-tooltip-meta', sub));
+  // meta line: type/category + a readable source name (never a raw src_ id)
+  const bits = [];
+  if (vertex.type === 'document') {
+    bits.push('文件');
+    if (vertex.raw?.source_id) bits.push(friendlySource(vertex.raw.source_id));
+  } else {
+    bits.push(vertex.category?.sub ?? KIND_ZH[vertex.kind] ?? vertex.kind ?? '節點');
+    if (vertex.raw?.source) bits.push(friendlySource(vertex.raw.source));
+  }
+  const meta = bits.filter(Boolean).join(' · ');
+  if (meta) graphTooltip.appendChild(el('div', 'graph-tooltip-meta', meta));
   graphTooltip.hidden = false;
-  const rect = graphCanvas.getBoundingClientRect();
-  graphTooltip.style.left = `${evt.clientX - rect.left + 14}px`;
-  graphTooltip.style.top = `${evt.clientY - rect.top + 14}px`;
+  // position:fixed → viewport coords; flip left of the cursor near the right edge
+  const flip = evt.clientX + 260 > window.innerWidth;
+  graphTooltip.style.left = `${flip ? evt.clientX - 254 : evt.clientX + 14}px`;
+  graphTooltip.style.top = `${Math.min(evt.clientY + 14, window.innerHeight - 70)}px`;
 }
 graphCanvas.addEventListener(
   'wheel',
@@ -1197,5 +1290,10 @@ captureForm.addEventListener('submit', async (e) => {
 });
 
 // ---- initial load ------------------------------------------------------
-fetchAndRender();
-fetchDraftEdges();
+// Graph-first: the immersive whole-graph view opens immediately (the page IS the graph);
+// the curated list is fetched lazily when the ☰ 清單 drawer is first opened. Source metadata
+// is loaded up front so source chips/tooltips show friendly names from the very first paint.
+(async () => {
+  await loadSourceMeta();
+  await openGraphView(null);
+})();
