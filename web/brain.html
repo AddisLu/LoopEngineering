@@ -32,6 +32,7 @@
         <a class="btn" href="/">← 看板</a>
         <a class="btn" href="/metrics.html">儀表板</a>
         <button id="theme-btn" class="btn icon-btn" type="button" title="切換佈景" aria-label="切換佈景"></button>
+        <button id="graph-btn" class="btn" type="button">🕸 圖譜</button>
         <button id="new-node-btn" class="btn primary" type="button">＋ 新增</button>
       </div>
     </header>
@@ -43,13 +44,33 @@
         <div id="status-chips" class="chip-row" role="group" aria-label="狀態篩選"></div>
       </div>
 
-      <section id="relation-panel" class="relation-panel" hidden>
-        <div class="relation-header">
-          <span id="relation-title" class="relation-title"></span>
-          <button id="relation-close" class="btn sm" type="button">關閉</button>
+      <section id="graph-panel" class="graph-panel" hidden>
+        <div class="graph-header">
+          <span id="graph-title" class="graph-title"></span>
+          <div class="graph-header-actions">
+            <label class="graph-depth-label">展開跳數
+              <input id="graph-depth" type="number" min="1" max="6" value="2" />
+            </label>
+            <button id="graph-zoom-out" class="btn sm icon-btn" type="button" title="縮小" aria-label="縮小">－</button>
+            <button id="graph-zoom-in" class="btn sm icon-btn" type="button" title="放大" aria-label="放大">＋</button>
+            <button id="graph-reset" class="btn sm" type="button">重置視圖</button>
+            <button id="graph-close" class="btn sm" type="button">關閉</button>
+          </div>
         </div>
-        <div id="relation-empty" class="empty" hidden>此節點尚無關聯</div>
-        <svg id="relation-svg" class="relation-svg" viewBox="0 0 480 480" xmlns="http://www.w3.org/2000/svg"></svg>
+
+        <div class="graph-filters">
+          <div id="graph-kind-chips" class="chip-row" role="group" aria-label="圖譜 kind 篩選"></div>
+          <div id="graph-source-chips" class="chip-row" role="group" aria-label="圖譜來源篩選"></div>
+          <div class="graph-filter-row">
+            <input id="graph-tag-filter" type="search" placeholder="依標籤過濾…" autocomplete="off" />
+            <input id="graph-scope-filter" type="search" placeholder="依 scope 過濾…" autocomplete="off" />
+            <label class="graph-doc-toggle"><input id="graph-show-documents" type="checkbox" checked /> 顯示文件節點</label>
+          </div>
+        </div>
+
+        <div id="graph-empty" class="empty" hidden>此節點尚無關聯</div>
+        <canvas id="graph-canvas" class="graph-canvas" width="880" height="560"></canvas>
+        <p class="graph-hint">拖曳空白處平移、滾輪縮放、拖曳節點調整位置、點一下節點展開鄰居。</p>
       </section>
 
       <div id="node-list" class="node-list"></div>
@@ -111,6 +132,6 @@
       </form>
     </dialog>
 
-    <script src="/brain.js"></script>
+    <script type="module" src="/brain.js"></script>
   </body>
 </html>

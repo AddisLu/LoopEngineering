@@ -772,6 +772,7 @@ dialog menu { display: flex; justify-content: flex-end; gap: 10px; margin: 18px 
   --k-fact:        #78705f;
   --k-person:      #2f8f5b;
   --k-repo:        #7d6bbf;
+  --k-document:    #5b6470;
 }
 [data-mode="dark"] {
   --k-environment: #7fa9dd;
@@ -782,6 +783,7 @@ dialog menu { display: flex; justify-content: flex-end; gap: 10px; margin: 18px 
   --k-fact:        #b3ab9d;
   --k-person:      #5cc98e;
   --k-repo:        #a595e0;
+  --k-document:    #9aa4b2;
 }
 
 /* own layout — NOT .board (that's a horizontal flex row of kanban columns) */
@@ -897,39 +899,64 @@ dialog menu { display: flex; justify-content: flex-end; gap: 10px; margin: 18px 
 .edge-add-row { align-items: flex-end; }
 .edge-add-row .btn { flex: 0 0 auto; }
 
-/* relation view (lightweight SVG one-hop neighbor graph, no physics) */
-.relation-panel {
+/* force-directed knowledge graph (SSoT Phase 3): hand-rolled canvas 2D, no CDN/library —
+ * pan/zoom/drag/expand + kind/tag/scope/source filters, documents rendered as a distinct
+ * node type (see web/graph-layout.js for the DOM-free physics/state logic). */
+.graph-panel {
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: var(--r);
   padding: 14px 16px;
   box-shadow: var(--shadow-1);
   flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
-.relation-header {
+.graph-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 8px;
+  flex-wrap: wrap;
+  gap: 8px;
 }
-.relation-title { font-size: 14.5px; font-weight: 600; color: var(--text); }
-.relation-svg { width: 100%; max-width: 480px; height: auto; display: block; margin: 0 auto; }
-.relation-line { stroke: var(--border-2); stroke-width: 1.5; }
-.relation-label { font-size: 10px; fill: var(--text-3); }
-.relation-node { stroke: var(--surface-2); stroke-width: 2; }
-.relation-node.k-environment { fill: var(--k-environment); }
-.relation-node.k-project     { fill: var(--k-project); }
-.relation-node.k-constraint  { fill: var(--k-constraint); }
-.relation-node.k-preference  { fill: var(--k-preference); }
-.relation-node.k-tech        { fill: var(--k-tech); }
-.relation-node.k-fact        { fill: var(--k-fact); }
-.relation-node.k-person      { fill: var(--k-person); }
-.relation-node.k-repo        { fill: var(--k-repo); }
-.relation-node-label { font-size: 11px; fill: var(--text-2); }
-.relation-node-group { cursor: pointer; }
+.graph-title { font-size: 14.5px; font-weight: 600; color: var(--text); }
+.graph-header-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.graph-depth-label {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12.5px; color: var(--text-2);
+}
+.graph-depth-label input {
+  width: 48px; font: inherit; font-size: 13px;
+  padding: 4px 6px; border-radius: var(--r-sm);
+  border: 1px solid var(--border-2); background: var(--surface); color: var(--text);
+}
+.graph-filters { display: flex; flex-direction: column; gap: 8px; }
+.graph-filter-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.graph-filter-row input[type="search"] {
+  font: inherit; font-size: 13px;
+  padding: 6px 12px; border-radius: 999px;
+  border: 1px solid var(--border-2); background: var(--surface); color: var(--text);
+  flex: 1 1 160px; min-width: 0;
+}
+.graph-doc-toggle {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12.5px; color: var(--text-2); white-space: nowrap;
+}
+.graph-canvas {
+  width: 100%; height: 460px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-sunk);
+  touch-action: none;
+  cursor: grab;
+}
+.graph-canvas:active { cursor: grabbing; }
+.graph-hint { font-size: 11.5px; color: var(--text-3); margin: 0; }
 
 @media (max-width: 720px) {
   .brain { padding: 16px; }
+  .graph-canvas { height: 340px; }
 }
 
 /* ---- Metrics dashboard (autonomous velocity) --------------- */
