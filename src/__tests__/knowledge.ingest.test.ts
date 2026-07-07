@@ -9,6 +9,7 @@ import { ingestSource, ingestAll, ingestOne } from '../knowledge/ingest/ingest.j
 import type { EmbedExec } from '../knowledge/embed.js';
 import { vecKnn } from '../knowledge/vec.js';
 import type { DocumentRow, ChunkRow } from '../knowledge/ingest/types.js';
+import { upsertNode } from '../knowledge/store.js';
 
 let db: Database.Database;
 let tmpRoots: string[] = [];
@@ -234,5 +235,91 @@ describe('ingestAll / ingestOne', () => {
     expect(getSource(db, source.id)?.last_ingested_at).toBeNull();
     await ingestSource(db, source);
     expect(getSource(db, source.id)?.last_ingested_at).not.toBeNull();
+  });
+});
+
+function docLinksFor(documentId: number) {
+  return db.prepare(`SELECT * FROM doc_links WHERE document_id = ?`).all(documentId) as {
+    id: number;
+    document_id: number;
+    target_title: string;
+    target_document_id: number | null;
+    target_node_id: string | null;
+  }[];
+}
+
+describe('ingestSource: SSoT Phase 3 — [[wikilink]] resolution into doc_links', () => {
+  it('resolves a [[title]] wikilink to another ingested vault document (extension-agnostic title match)', async () => {
+    const root = mkTmpDir('vault-wiki');
+    fs.writeFileSync(path.join(root, 'LoopEngineering.md'), '# Loop Engineering\nthe scheduler itself.\n');
+    fs.writeFileSync(path.join(root, 'Notes.md'), '# Notes\nsee [[LoopEngineering]] for context.\n');
+    const source = createSource(db, { kind: 'vault', uri: root });
+
+    await ingestSource(db, source);
+    const notes = activeDocs(source.id).find((d) => d.path === 'Notes.md')!;
+    const target = activeDocs(source.id).find((d) => d.path === 'LoopEngineering.md')!;
+
+    const links = docLinksFor(notes.id);
+    expect(links).toHaveLength(1);
+    expect(links[0]!.target_document_id).toBe(target.id);
+    expect(links[0]!.target_node_id).toBeNull();
+  });
+
+  it('resolves a [[title]] wikilink to a curated knowledge node when no document matches', async () => {
+    const node = upsertNode(db, { title: 'Company env', scope: 'global' });
+    const root = mkTmpDir('vault-node-link');
+    fs.writeFileSync(path.join(root, 'Notes.md'), '# Notes\nsee [[Company env]] for the constraint.\n');
+    const source = createSource(db, { kind: 'vault', uri: root });
+
+    await ingestSource(db, source);
+    const notes = activeDocs(source.id).find((d) => d.path === 'Notes.md')!;
+    const links = docLinksFor(notes.id);
+    expect(links).toHaveLength(1);
+    expect(links[0]!.target_node_id).toBe(node.id);
+    expect(links[0]!.target_document_id).toBeNull();
+  });
+
+  it('keeps an unresolved wikilink (both targets null) and resolves it once the target is ingested later', async () => {
+    const root = mkTmpDir('vault-forward');
+    fs.writeFileSync(path.join(root, 'Notes.md'), '# Notes\nsee [[Later Doc]].\n');
+    const source = createSource(db, { kind: 'vault', uri: root });
+    await ingestSource(db, source);
+
+    const notes = activeDocs(source.id).find((d) => d.path === 'Notes.md')!;
+    let links = docLinksFor(notes.id);
+    expect(links).toHaveLength(1);
+    expect(links[0]!.target_document_id).toBeNull();
+    expect(links[0]!.target_node_id).toBeNull();
+
+    fs.writeFileSync(path.join(root, 'Later Doc.md'), '# Later Doc\nnow it exists.\n');
+    await ingestSource(db, source);
+    const laterDoc = activeDocs(source.id).find((d) => d.path === 'Later Doc.md')!;
+    links = docLinksFor(notes.id);
+    expect(links).toHaveLength(1);
+    expect(links[0]!.target_document_id).toBe(laterDoc.id);
+  });
+
+  it('a second ingest run with no content changes still keeps doc_links in sync (wholesale rebuild)', async () => {
+    const root = mkTmpDir('vault-rebuild');
+    fs.writeFileSync(path.join(root, 'A.md'), '# A\n[[B]]\n');
+    fs.writeFileSync(path.join(root, 'B.md'), '# B\nstable\n');
+    const source = createSource(db, { kind: 'vault', uri: root });
+    await ingestSource(db, source);
+    await ingestSource(db, source); // second run: A/B unchanged (skipped_unchanged)
+
+    const a = activeDocs(source.id).find((d) => d.path === 'A.md')!;
+    const b = activeDocs(source.id).find((d) => d.path === 'B.md')!;
+    const links = docLinksFor(a.id);
+    expect(links).toHaveLength(1);
+    expect(links[0]!.target_document_id).toBe(b.id);
+  });
+
+  it('does not create doc_links rows for a non-markdown source (code files are not wikilink-parsed)', async () => {
+    const root = mkTmpDir('vault-code');
+    fs.writeFileSync(path.join(root, 'a.ts'), 'export const a = "[[not a real link context]]";\n');
+    const source = createSource(db, { kind: 'folder', uri: root });
+    await ingestSource(db, source);
+    const doc = activeDocs(source.id).find((d) => d.path === 'a.ts')!;
+    expect(docLinksFor(doc.id)).toHaveLength(0);
   });
 });

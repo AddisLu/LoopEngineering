@@ -225,6 +225,24 @@ describe('knowledge REST: graph payload', () => {
     const del404 = await app.inject({ method: 'DELETE', url: `/api/knowledge/edges/${edgeId}` });
     expect(del404.statusCode).toBe(404);
   });
+
+  it('SSoT Phase 3: ?nodeId=&depth= restricts the graph to a multi-hop neighborhood, and the payload always includes documents', async () => {
+    app = buildApp({ db, apiToken: null });
+    const a = upsertNode(db, { title: 'Hop A', scope: 'global' });
+    const b = upsertNode(db, { title: 'Hop B', scope: 'global' });
+    const c = upsertNode(db, { title: 'Hop C', scope: 'global' });
+    await app.inject({ method: 'POST', url: '/api/knowledge/edges', payload: { src: a.id, dst: b.id, relation: 'related' } });
+    await app.inject({ method: 'POST', url: '/api/knowledge/edges', payload: { src: b.id, dst: c.id, relation: 'related' } });
+
+    const whole = await app.inject({ method: 'GET', url: '/api/knowledge/graph' });
+    expect(whole.statusCode).toBe(200);
+    expect(Array.isArray(whole.json().documents)).toBe(true);
+    expect(whole.json().nodes.map((n: any) => n.id).sort()).toEqual([a.id, b.id, c.id].sort());
+
+    const oneHop = await app.inject({ method: 'GET', url: `/api/knowledge/graph?nodeId=${a.id}&depth=1` });
+    expect(oneHop.statusCode).toBe(200);
+    expect(oneHop.json().nodes.map((n: any) => n.id).sort()).toEqual([a.id, b.id].sort());
+  });
 });
 
 // ---- 5. import idempotency ----

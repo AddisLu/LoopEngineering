@@ -14,6 +14,7 @@ import {
   deleteNode,
   addEdge,
   edgesFor,
+  graph,
 } from '../knowledge/store.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -158,5 +159,136 @@ describe('knowledge: tasks.environment + migrate idempotency', () => {
     } finally {
       db2.close();
     }
+  });
+});
+
+// ---- SSoT Phase 3: graph() kind/scope filter, multi-hop BFS, documents ----
+
+function ensureSource(id = 'src_test'): void {
+  db.prepare(`INSERT OR IGNORE INTO sources (id, kind, uri) VALUES (?, 'vault', '/tmp/vault')`).run(id);
+}
+function insertDoc(p: string, sourceId = 'src_test'): number {
+  ensureSource(sourceId);
+  const info = db
+    .prepare(`INSERT INTO documents (source_id, path, title, doc_kind) VALUES (?, ?, ?, 'md')`)
+    .run(sourceId, p, p);
+  return Number(info.lastInsertRowid);
+}
+function insertDocLink(
+  documentId: number,
+  targetTitle: string,
+  opts: { targetDocumentId?: number; targetNodeId?: string } = {},
+): void {
+  db.prepare(
+    `INSERT INTO doc_links (document_id, target_title, target_document_id, target_node_id) VALUES (?, ?, ?, ?)`,
+  ).run(documentId, targetTitle, opts.targetDocumentId ?? null, opts.targetNodeId ?? null);
+}
+
+describe('knowledge: graph() kind/scope filter', () => {
+  it('kind filters the returned nodes, and drops an edge whose other endpoint is filtered out', () => {
+    const tech = upsertNode(db, { title: 'Tech node', kind: 'tech', scope: 'global' });
+    const fact = upsertNode(db, { title: 'Fact node', kind: 'fact', scope: 'global' });
+    addEdge(db, { src: tech.id, dst: fact.id, relation: 'uses' });
+
+    const g = graph(db, { kind: 'tech' });
+    expect(g.nodes.map((n) => n.id)).toEqual([tech.id]);
+    expect(g.edges).toHaveLength(0); // fact endpoint isn't in the filtered node set
+  });
+
+  it('scope filters the returned nodes', () => {
+    upsertNode(db, { title: 'Global node', scope: 'global' });
+    const repoNode = upsertNode(db, { title: 'Repo node', scope: 'repo:/tmp/x' });
+
+    const g = graph(db, { scope: 'repo:/tmp/x' });
+    expect(g.nodes.map((n) => n.id)).toEqual([repoNode.id]);
+  });
+});
+
+describe('knowledge: graph() multi-hop (nodeId + depth)', () => {
+  it('depth=1 returns only the immediate neighbor, depth=2 reaches the second hop', () => {
+    const a = upsertNode(db, { title: 'A', scope: 'global' });
+    const b = upsertNode(db, { title: 'B', scope: 'global' });
+    const c = upsertNode(db, { title: 'C', scope: 'global' });
+    addEdge(db, { src: a.id, dst: b.id, relation: 'related' });
+    addEdge(db, { src: b.id, dst: c.id, relation: 'related' });
+
+    const depth1 = graph(db, { nodeId: a.id, depth: 1 });
+    expect(depth1.nodes.map((n) => n.id).sort()).toEqual([a.id, b.id].sort());
+
+    const depth2 = graph(db, { nodeId: a.id, depth: 2 });
+    expect(depth2.nodes.map((n) => n.id).sort()).toEqual([a.id, b.id, c.id].sort());
+  });
+
+  it('treats edges as undirected for traversal (can expand against the edge direction)', () => {
+    const a = upsertNode(db, { title: 'A2', scope: 'global' });
+    const b = upsertNode(db, { title: 'B2', scope: 'global' });
+    addEdge(db, { src: b.id, dst: a.id, relation: 'related' }); // edge points b -> a
+    const g = graph(db, { nodeId: a.id, depth: 1 });
+    expect(g.nodes.map((n) => n.id).sort()).toEqual([a.id, b.id].sort());
+  });
+
+  it('an unknown nodeId degrades to an empty result (no throw)', () => {
+    const g = graph(db, { nodeId: 'k_doesnotexist', depth: 2 });
+    expect(g.nodes).toEqual([]);
+    expect(g.edges).toEqual([]);
+    expect(g.documents).toEqual([]);
+  });
+
+  it('a node with no relations returns itself alone with zero edges', () => {
+    const lonely = upsertNode(db, { title: 'Lonely', scope: 'global' });
+    const g = graph(db, { nodeId: lonely.id, depth: 2 });
+    expect(g.nodes.map((n) => n.id)).toEqual([lonely.id]);
+    expect(g.edges).toEqual([]);
+  });
+});
+
+describe('knowledge: graph() documents (SSoT Phase 3 wikilink-derived)', () => {
+  it('only includes markdown documents that participate in a resolved link (unlinked documents are omitted)', () => {
+    insertDoc('Unlinked.md'); // no doc_links row at all -- not graph-worthy
+    const g = graph(db);
+    expect(g.documents).toEqual([]);
+  });
+
+  it('includes a document->node link, with the target node title carried as target_title', () => {
+    const node = upsertNode(db, { title: 'Target Node', scope: 'global' });
+    const docId = insertDoc('Notes.md');
+    insertDocLink(docId, 'Target Node', { targetNodeId: node.id });
+
+    const g = graph(db);
+    expect(g.documents).toHaveLength(1);
+    expect(g.documents[0]!.path).toBe('Notes.md');
+    expect(g.documents[0]!.links).toEqual([{ target_title: 'Target Node', target_kind: 'node', target_id: node.id }]);
+  });
+
+  it('includes a document->document link and surfaces the target document even if it has no outbound links itself', () => {
+    const srcDoc = insertDoc('Source.md');
+    const targetDoc = insertDoc('Target.md');
+    insertDocLink(srcDoc, 'Target', { targetDocumentId: targetDoc });
+
+    const g = graph(db);
+    const ids = g.documents.map((d) => d.id).sort((x, y) => x - y);
+    expect(ids).toEqual([srcDoc, targetDoc].sort((x, y) => x - y));
+    const target = g.documents.find((d) => d.id === targetDoc)!;
+    expect(target.links).toEqual([]);
+  });
+
+  it('omits an unresolved link (both targets null) from the output', () => {
+    const docId = insertDoc('Notes2.md');
+    insertDocLink(docId, 'Nowhere');
+    const g = graph(db);
+    expect(g.documents).toEqual([]);
+  });
+
+  it('multi-hop BFS reaches a document through a node, and prunes documents outside the requested depth', () => {
+    const node = upsertNode(db, { title: 'Bridge Node', scope: 'global' });
+    const docId = insertDoc('Linked.md');
+    insertDocLink(docId, 'Bridge Node', { targetNodeId: node.id });
+
+    const near = graph(db, { nodeId: node.id, depth: 1 });
+    expect(near.documents.map((d) => d.id)).toEqual([docId]);
+
+    const other = upsertNode(db, { title: 'Far Node', scope: 'global' });
+    const far = graph(db, { nodeId: other.id, depth: 1 });
+    expect(far.documents).toEqual([]);
   });
 });
