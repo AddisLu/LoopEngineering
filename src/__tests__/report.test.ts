@@ -620,6 +620,21 @@ describe('POST /api/report', () => {
     expect(body.files).toBeUndefined();
   });
 
+  it('responds within report_timeout_ms instead of hanging when generateReport is still running', async () => {
+    setSetting(db, 'report_enabled', 'true');
+    setSetting(db, 'report_timeout_ms', '20');
+    const searchFn: SearchFn = async () => [];
+    // Never resolves within the test's lifetime -- simulates a slow synth call the route
+    // must not wait out.
+    const synthExec: ReportExec = () => new Promise(() => {});
+    app = buildApp({ db, apiToken: null, reportSearchFn: searchFn, reportSynthExec: synthExec });
+    const started = Date.now();
+    const res = await app.inject({ method: 'POST', url: '/api/report', payload: { project: 'x' } });
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(res.statusCode).toBe(504);
+    expect(res.json()).toEqual({ error: 'report generation timed out', timedOut: true });
+  });
+
   it('surfaces files when report_persist is on, via injected reportPersistFns', async () => {
     setSetting(db, 'report_enabled', 'true');
     setSetting(db, 'report_persist', 'true');

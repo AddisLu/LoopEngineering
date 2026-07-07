@@ -18,7 +18,7 @@ export const NONNEG_KEYS = new Set([
   // SSoT/RAG Phase 4
   'ingest_pump_interval_min',
   // report generation A
-  'report_budget_chars',
+  'report_budget_chars', 'report_timeout_ms',
 ]);
 // values must be a number in [0, 1] (a fraction/weight, unlike the 0-100 PERCENT_KEYS)
 export const UNIT_INTERVAL_KEYS = new Set(['rag_hybrid_alpha']);

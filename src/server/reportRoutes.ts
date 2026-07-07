@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type Database from 'better-sqlite3';
-import { getBool } from '../db/index.js';
+import { getBool, getNum } from '../db/index.js';
 import { generateReport, type ReportDeps } from '../report/generate.js';
 import {
   listReportTemplates,
@@ -11,6 +11,21 @@ import {
 } from '../report/templates.js';
 
 const DISABLED = { error: 'report disabled' };
+const TIMED_OUT = Symbol('report route timed out');
+
+/** Races a promise against `ms` -- resolves to TIMED_OUT instead of leaving the caller
+ * waiting forever when the promise itself has no (or a much longer) timeout of its own.
+ * The raced-away promise keeps running to completion in the background; only the wait
+ * is bounded, not the underlying work. */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | typeof TIMED_OUT> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(TIMED_OUT), ms);
+    promise.then(
+      (v) => { clearTimeout(timer); resolve(v); },
+      () => { clearTimeout(timer); resolve(TIMED_OUT); },
+    );
+  });
+}
 
 /**
  * `POST /api/report` — generate an OpenProject project report from a natural-language
@@ -29,11 +44,15 @@ export function registerReportRoutes(app: FastifyInstance, db: Database.Database
       template?: string;
       save?: boolean;
     };
-    const result = await generateReport(db, body, deps);
+    const timeoutMs = getNum(db, 'report_timeout_ms', 100_000);
+    const outcome = await withTimeout(generateReport(db, body, deps), timeoutMs);
+    if (outcome === TIMED_OUT) {
+      return reply.code(504).send({ error: 'report generation timed out', timedOut: true });
+    }
     return {
-      markdown: result?.markdown ?? '',
-      meta: result?.meta,
-      ...(result?.files ? { files: result.files } : {}),
+      markdown: outcome?.markdown ?? '',
+      meta: outcome?.meta,
+      ...(outcome?.files ? { files: outcome.files } : {}),
     };
   });
 
