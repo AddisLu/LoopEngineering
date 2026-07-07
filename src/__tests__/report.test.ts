@@ -106,6 +106,21 @@ describe('resolveProject', () => {
     const resolved = await resolveProject(db, '大型  AOI', exec);
     expect(resolved).toEqual({ id: '3', name: '【大型 AOI】' });
   });
+
+  it('when several projects share a generic substring, resolves to the closest name by edit distance -- not whichever sorts first', async () => {
+    makeOpenProjectSource();
+    // "L5C/6A AOI 油氣類" and "AOI 品保專案" both merely *contain* "AOI"; "【大型AOI】" is what
+    // a bare "AOI" query should resolve to -- listed first here to prove list order no
+    // longer decides the tie (a naive first-`score>bestScore`-wins comparison used to).
+    const rows = [
+      { id: 6, name: 'L5C/6A AOI 油氣類', identifier: 'l5c-6a-aoi-oilgas' },
+      { id: 7, name: 'AOI 品保專案', identifier: 'qa-aoi' },
+      { id: 5, name: '【大型AOI】', identifier: 'proj-5' },
+    ];
+    const exec: OpDataExec = async () => rows.map((r) => JSON.stringify(r)).join('\n');
+    const resolved = await resolveProject(db, 'AOI', exec);
+    expect(resolved).toEqual({ id: '5', name: '【大型AOI】' });
+  });
 });
 
 describe('fetchProjectWorkPackages', () => {
@@ -181,6 +196,29 @@ describe('fetchProjectWorkPackages', () => {
     );
     expect(result.source).toBe('live');
     expect(result.project).toEqual({ id: '1', name: '大型AOI' });
+  });
+
+  it('a haiku-parsed candidate that over-strips to a generic keyword ("AOI") still resolves the bracketed project it actually named, not another project that merely contains the keyword', async () => {
+    makeOpenProjectSource();
+    const rows = [
+      { id: 6, name: 'L5C/6A AOI 油氣類', identifier: 'l5c-6a-aoi-oilgas' },
+      { id: 5, name: '【大型AOI】', identifier: 'proj-5' },
+    ];
+    const exec: OpDataExec = async (_bin, args) => {
+      if (args.includes('--list-projects')) return rows.map((r) => JSON.stringify(r)).join('\n');
+      if (args.includes('--structured')) {
+        expect(args).toContain('5');
+        return WP_LINE;
+      }
+      throw new Error(`unexpected args: ${args.join(' ')}`);
+    };
+    const result = await fetchProjectWorkPackages(
+      db,
+      { project: 'AOI', projectCandidates: ['大型AOI最近狀況更新'] },
+      exec,
+    );
+    expect(result.source).toBe('live');
+    expect(result.project).toEqual({ id: '5', name: '【大型AOI】' });
   });
 
   it('sorts live work packages: overdue+open first, then open, then closed, tie-broken by due_date/percent_done', async () => {
@@ -285,6 +323,32 @@ describe('generateReport', () => {
     expect(result).not.toBeNull();
     expect(result!.meta.source).toBe('live');
     expect(result!.meta.project).toBe('大型AOI');
+  });
+
+  it('regression: "大型AOI最近狀況更新" resolves 【大型AOI】even when the haiku parse over-strips "大型" down to a bare "AOI" that also matches an unrelated project', async () => {
+    setSetting(db, 'report_enabled', 'true');
+    makeOpenProjectSource();
+    const rows = [
+      { id: 6, name: 'L5C/6A AOI 油氣類', identifier: 'l5c-6a-aoi-oilgas' },
+      { id: 5, name: '【大型AOI】', identifier: 'proj-5' },
+    ];
+    // Simulates the real-world failure: haiku treated "大型" as a generic size adjective
+    // rather than part of the project name and over-stripped it, leaving just "AOI".
+    const parseExec: ReportExec = async () => JSON.stringify({ project: 'AOI', topic: '最近狀況更新' });
+    const dataExec: OpDataExec = async (_bin, args) => {
+      if (args.includes('--list-projects')) return rows.map((r) => JSON.stringify(r)).join('\n');
+      if (args.includes('--structured')) return WP_LINE;
+      throw new Error(`unexpected args: ${args.join(' ')}`);
+    };
+    const synthExec: ReportExec = async () => '# ok';
+    const result = await generateReport(
+      db,
+      { description: '大型AOI最近狀況更新' },
+      { parseExec, dataExec, synthExec },
+    );
+    expect(result).not.toBeNull();
+    expect(result!.meta.source).toBe('live');
+    expect(result!.meta.project).toBe('【大型AOI】');
   });
 
   it('falls back to snapshot only when neither the parsed project nor the salient keyword resolves live', async () => {

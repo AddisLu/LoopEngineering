@@ -126,10 +126,93 @@ function normalizeForMatch(s: string): string {
   return s.replace(/[\s　()（）【】\[\]{}]/g, '');
 }
 
+/** Plain Levenshtein edit distance -- no external dep, inputs are always short (candidate
+ * keywords / project names, at most a few dozen chars). Used only to tie-break
+ * bestRowMatch below, never as a primary match signal. */
+function editDistance(a: string, b: string): number {
+  if (a === b) return 0;
+  if (!a.length) return b.length;
+  if (!b.length) return a.length;
+  let prev: number[] = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const cur: number[] = [i];
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      cur.push(Math.min((prev[j] ?? Infinity) + 1, (cur[j - 1] ?? Infinity) + 1, (prev[j - 1] ?? Infinity) + cost));
+    }
+    prev = cur;
+  }
+  return prev[b.length] ?? Math.max(a.length, b.length);
+}
+
+/** Tiers a candidate query against one project row's name/identifier, higher wins:
+ * 3 = exact raw match; 2 = exact once whitespace/brackets are normalized away (this is
+ * what makes a bare "大型AOI" query equal a registered "【大型AOI】", not merely a substring
+ * of it); 1 = a plain substring relationship either direction, raw or normalized (so a
+ * haiku-parsed keyword that over-strips down to something generic like "AOI" still only
+ * *ties* with every other project whose name happens to contain "AOI", instead of
+ * silently outranking one of them by dint of list order); 0 = no relationship at all. */
+function matchTier(query: string, queryNorm: string, rName: string, rIdent: string): number {
+  if (query && (query === rName || query === rIdent)) return 3;
+  const rNameNorm = normalizeForMatch(rName);
+  const rIdentNorm = normalizeForMatch(rIdent);
+  if (queryNorm && (queryNorm === rNameNorm || queryNorm === rIdentNorm)) return 2;
+  const eitherWayIncludes = (a: string, b: string) => !!a && !!b && (a.includes(b) || b.includes(a));
+  if (
+    eitherWayIncludes(query, rName) ||
+    eitherWayIncludes(query, rIdent) ||
+    eitherWayIncludes(queryNorm, rNameNorm) ||
+    eitherWayIncludes(queryNorm, rIdentNorm)
+  ) {
+    return 1;
+  }
+  return 0;
+}
+
+interface RowMatch {
+  id: unknown;
+  name: unknown;
+  tier: number;
+}
+
+/** Best-matching --list-projects row for one candidate string: ranked by matchTier, ties
+ * broken by editDistance to whichever of name/identifier is closer -- so an ambiguous,
+ * over-generic candidate (e.g. a haiku parse that over-strips "大型AOI" down to just "AOI")
+ * resolves to the project it's actually closest to, not whichever "*AOI*" project happened
+ * to sort first in the API response. Shared by resolveProject (one candidate) and
+ * fetchProjectWorkPackages (the haiku-parsed project plus salient-keyword-fallback
+ * candidates, scored against one shared --list-projects fetch). */
+function bestRowMatch(rows: Record<string, unknown>[], name: string): RowMatch | null {
+  const query = name.trim().toLowerCase();
+  if (!query) return null;
+  const queryNorm = normalizeForMatch(query);
+
+  let best: RowMatch | null = null;
+  let bestTier = 0;
+  let bestDist = Infinity;
+  for (const r of rows) {
+    const rName = typeof r.name === 'string' ? r.name.toLowerCase() : '';
+    const rIdent = typeof r.identifier === 'string' ? r.identifier.toLowerCase() : '';
+    const tier = matchTier(query, queryNorm, rName, rIdent);
+    if (tier === 0) continue;
+    const dist = Math.min(
+      editDistance(queryNorm, normalizeForMatch(rName)),
+      editDistance(queryNorm, normalizeForMatch(rIdent)),
+    );
+    if (tier > bestTier || (tier === bestTier && dist < bestDist)) {
+      bestTier = tier;
+      bestDist = dist;
+      best = { id: r.id, name: r.name, tier };
+    }
+  }
+  return best;
+}
+
 /**
  * Resolve a human-typed project name/identifier (or a registered source's project) to
- * `{id, name}` by spawning `--list-projects` and fuzzy-matching. Never throws: a missing
- * openproject source, a spawn failure/timeout, or no match all resolve to null.
+ * `{id, name}` by spawning `--list-projects` and fuzzy-matching (see bestRowMatch). Never
+ * throws: a missing openproject source, a spawn failure/timeout, or no match all resolve
+ * to null.
  */
 export async function resolveProject(
   db: Database.Database,
@@ -143,30 +226,8 @@ export async function resolveProject(
   try {
     const stdout = await exec(pythonBin, buildArgs(opConfig, ['--list-projects']));
     const rows = parseJsonLines(stdout);
-    const query = name.trim().toLowerCase();
-    if (!query) return null;
-    const queryNorm = normalizeForMatch(query);
-
-    let best: { id: unknown; name: unknown } | null = null;
-    let bestScore = -1;
-    for (const r of rows) {
-      const rName = typeof r.name === 'string' ? r.name.toLowerCase() : '';
-      const rIdent = typeof r.identifier === 'string' ? r.identifier.toLowerCase() : '';
-      let score = -1;
-      if (query === rName || query === rIdent) score = 2;
-      else if (rName.includes(query) || rIdent.includes(query)) score = 1;
-      else if (queryNorm) {
-        const rNameNorm = normalizeForMatch(rName);
-        const rIdentNorm = normalizeForMatch(rIdent);
-        if (queryNorm === rNameNorm || queryNorm === rIdentNorm) score = 2;
-        else if (rNameNorm.includes(queryNorm) || rIdentNorm.includes(queryNorm)) score = 1;
-      }
-      if (score > bestScore) {
-        bestScore = score;
-        best = { id: r.id, name: r.name };
-      }
-    }
-    if (!best || bestScore < 0 || best.id === undefined || best.id === null) return null;
+    const best = bestRowMatch(rows, name);
+    if (!best || best.id === undefined || best.id === null) return null;
     return { id: String(best.id), name: typeof best.name === 'string' ? best.name : String(best.id) };
   } catch {
     return null;
@@ -219,17 +280,33 @@ export async function fetchProjectWorkPackages(
         const candidates = [req.project, ...(req.projectCandidates ?? [])]
           .map((c) => c.trim())
           .filter((c, idx, arr) => c && arr.indexOf(c) === idx);
-        const pythonBin = getSetting(db, 'ingest_openproject_python') || 'python3';
-        const today = new Date().toISOString().slice(0, 10);
-        for (const candidate of candidates) {
-          const resolved = await resolveProject(db, candidate, exec);
-          if (!resolved) continue;
-          const stdout = await exec(pythonBin, buildArgs(opConfig, ['--project', resolved.id, '--structured']));
-          const items = parseJsonLines(stdout)
-            .map(toWorkPackage)
-            .filter((wp): wp is OpWorkPackage => wp !== null)
-            .sort((a, b) => compareWorkPackages(a, b, today));
-          return { source: 'live', project: resolved, items };
+        if (candidates.length) {
+          const pythonBin = getSetting(db, 'ingest_openproject_python') || 'python3';
+          // One shared --list-projects fetch for every candidate (was one spawn per
+          // candidate) -- fewer round trips, and every candidate is ranked against the
+          // same snapshot instead of racing separate fetches.
+          const listStdout = await exec(pythonBin, buildArgs(opConfig, ['--list-projects']));
+          const rows = parseJsonLines(listStdout);
+
+          let resolved: RowMatch | null = null;
+          for (const candidate of candidates) {
+            const match = bestRowMatch(rows, candidate);
+            if (match && (!resolved || match.tier > resolved.tier)) resolved = match;
+          }
+
+          if (resolved && resolved.id !== undefined && resolved.id !== null) {
+            const project: OpProjectRef = {
+              id: String(resolved.id),
+              name: typeof resolved.name === 'string' ? resolved.name : String(resolved.id),
+            };
+            const today = new Date().toISOString().slice(0, 10);
+            const stdout = await exec(pythonBin, buildArgs(opConfig, ['--project', project.id, '--structured']));
+            const items = parseJsonLines(stdout)
+              .map(toWorkPackage)
+              .filter((wp): wp is OpWorkPackage => wp !== null)
+              .sort((a, b) => compareWorkPackages(a, b, today));
+            return { source: 'live', project, items };
+          }
         }
       }
     } catch {
