@@ -93,6 +93,29 @@ export function vecUpsert(
   tx();
 }
 
+/**
+ * Reads back a previously-upserted vector as a plain array (round-trips through the
+ * extension's `vec_to_json()`) — lets a caller reuse an already-embedded row (e.g. to feed
+ * it into a fresh MATCH query against a *different* vec table, see bridge.ts) without
+ * re-computing the embedding. Returns null (never throws) when the extension didn't load,
+ * the row doesn't exist, or the stored value isn't a JSON array.
+ */
+export function vecGetEmbedding(db: Database.Database, table: VecTable, refId: number | string): number[] | null {
+  if (!isVecAvailable(db)) return null;
+  const col = REF_COLUMN[table];
+  const bind = typeof refId === 'number' ? BigInt(refId) : refId;
+  const row = db.prepare(`SELECT vec_to_json(embedding) AS v FROM ${table} WHERE ${col} = ?`).get(bind) as
+    | { v: string }
+    | undefined;
+  if (!row?.v) return null;
+  try {
+    const parsed = JSON.parse(row.v);
+    return Array.isArray(parsed) ? (parsed as number[]) : null;
+  } catch {
+    return null;
+  }
+}
+
 /** K-nearest-neighbor search. Returns [] (never throws) when the extension didn't load. */
 export function vecKnn(db: Database.Database, table: VecTable, embedding: number[], k: number): VecKnnResult[] {
   if (!isVecAvailable(db)) return [];
