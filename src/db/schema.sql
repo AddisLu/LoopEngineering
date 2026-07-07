@@ -206,3 +206,55 @@ CREATE TRIGGER IF NOT EXISTS knowledge_au AFTER UPDATE ON knowledge_nodes BEGIN
   INSERT INTO knowledge_fts(knowledge_fts, rowid, title, body, tags) VALUES ('delete', old.rowid, old.title, old.body, old.tags);
   INSERT INTO knowledge_fts(rowid, title, body, tags) VALUES (new.rowid, new.title, new.body, new.tags);
 END;
+
+-- SSoT/RAG Phase 0 foundation (see src/knowledge/{vec,embed}.ts). Persistence-only here —
+-- nothing reads/writes these tables yet (Phase 1 ingest pipeline populates them); the
+-- vec0 virtual tables below are created separately (guarded on loadExtension success, see
+-- src/db/index.ts) since a plain CREATE TABLE IF NOT EXISTS would fail without the extension.
+
+-- Source registry: where documents/chunks are ingested from (Phase 1 walker).
+CREATE TABLE IF NOT EXISTS sources (
+  id               TEXT PRIMARY KEY,              -- src_<nanoid(10)>
+  kind             TEXT NOT NULL,                  -- git|folder|vault|github-issues
+  uri              TEXT NOT NULL,
+  config           TEXT NOT NULL DEFAULT '{}',     -- JSON: include/exclude globs, branch, ...
+  enabled          INTEGER NOT NULL DEFAULT 1,
+  last_ingested_at TEXT,
+  created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at       TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- One row per ingested file/page. INTEGER PRIMARY KEY so `id` doubles as the vec_chunks
+-- rowid correlation for chunks below (vec0 requires an integer rowid).
+CREATE TABLE IF NOT EXISTS documents (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  source_id    TEXT REFERENCES sources(id) ON DELETE CASCADE,
+  path         TEXT NOT NULL,
+  uri          TEXT,
+  title        TEXT,
+  doc_kind     TEXT,                               -- md|code|issue|...
+  sha256       TEXT,
+  bytes        INTEGER,
+  mtime        TEXT,
+  lang         TEXT,
+  invalid_at   TEXT,                                -- bi-temporal: superseded/removed, never deleted
+  created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_documents_source ON documents(source_id);
+
+-- Chunked document content (RAG corpus layer — only ever selectively pulled top-K,
+-- never bulk-injected into a task prompt; see the two-plane design in plan-SSoT-master.md).
+CREATE TABLE IF NOT EXISTS chunks (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  document_id  INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+  ord          INTEGER NOT NULL,
+  text         TEXT NOT NULL,
+  section      TEXT,
+  start_line   INTEGER,
+  end_line     INTEGER,
+  sha256       TEXT,
+  invalid_at   TEXT,
+  created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_chunks_document ON chunks(document_id);
