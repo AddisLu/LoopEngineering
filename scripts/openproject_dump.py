@@ -230,22 +230,142 @@ def dump_projects(op_api_mod, base_url):
     log('projects: %d written (of %d fetched)' % (count, len(projects)))
 
 
+def cmd_list_projects(op_api_mod):
+    """--list-projects: print every project as one JSON line ({id,name,identifier}) —
+    lets a caller resolve a human-typed project name/identifier to an id before running
+    --project --structured."""
+    get_projects = getattr(op_api_mod, 'get_projects', None)
+    if not callable(get_projects):
+        log('op_api.get_projects not found')
+        sys.exit(1)
+    try:
+        projects = get_projects() or []
+    except Exception as e:
+        log('get_projects failed: %s' % e)
+        sys.exit(1)
+    for p in projects:
+        pid = first(p, 'id')
+        if pid is None:
+            continue
+        print(json.dumps({
+            'id': pid,
+            'name': first(p, 'name', default=str(pid)),
+            'identifier': first(p, 'identifier', default=''),
+        }, ensure_ascii=False))
+    log('projects: %d listed' % len(projects))
+
+
+def _match_score(query, name, identifier):
+    """Fuzzy match score for --project resolution against one project's name/identifier
+    (case-insensitive); higher is better, None means no match at all."""
+    q = query.strip().lower()
+    n = (name or '').strip().lower()
+    ident = (identifier or '').strip().lower()
+    if not q:
+        return None
+    if q == n or q == ident:
+        return 2
+    if q in n or q in ident:
+        return 1
+    return None
+
+
+def resolve_project_id(op_api_mod, query):
+    """Resolve --project <name|identifier|id> to (id, name).
+
+    A pure-digit query is used as the id directly (still looked up in get_projects() for
+    a display name, best-effort). Otherwise fuzzy-matches name/identifier; multiple
+    matches are logged to stderr as candidates and the highest-scoring one (first on
+    ties) is used. Returns (None, None) when nothing matches.
+    """
+    get_projects = getattr(op_api_mod, 'get_projects', None)
+    projects = []
+    if callable(get_projects):
+        try:
+            projects = get_projects() or []
+        except Exception as e:
+            log('get_projects failed during --project resolution: %s' % e)
+
+    stripped = query.strip()
+    if stripped.isdigit():
+        pid = int(stripped)
+        match = next((p for p in projects if first(p, 'id') == pid), None)
+        return pid, (first(match, 'name', default=str(pid)) if match else str(pid))
+
+    scored = [(s, p) for p in projects for s in [_match_score(query, first(p, 'name'), first(p, 'identifier'))] if s is not None]
+    if not scored:
+        return None, None
+    if len(scored) > 1:
+        log('multiple projects match %r:' % query)
+        for score, p in scored:
+            log('  candidate: id=%s name=%r identifier=%r (score=%d)' % (
+                first(p, 'id'), first(p, 'name'), first(p, 'identifier'), score))
+    scored.sort(key=lambda t: -t[0])
+    best = scored[0][1]
+    return first(best, 'id'), first(best, 'name', default=str(first(best, 'id')))
+
+
+def dump_structured_project(op_api_mod, project_query):
+    """--project <query> --structured: resolve the project, then print every one of its
+    work packages as one complete JSON line, fields taken from op_api._normalize_wp
+    (subject/status/%done/dates/hours/assignee/project + best-effort description/
+    custom_fields -- _normalize_wp doesn't carry those through today, so they degrade to
+    empty rather than guessing)."""
+    project_id, project_name = resolve_project_id(op_api_mod, project_query)
+    if project_id is None:
+        log('no project matches %r' % project_query)
+        sys.exit(1)
+    log('resolved project %r -> id=%s name=%r' % (project_query, project_id, project_name))
+
+    get_wps_by_project = getattr(op_api_mod, 'get_work_packages_by_projects', None)
+    if not callable(get_wps_by_project):
+        log('op_api.get_work_packages_by_projects not found')
+        sys.exit(1)
+    try:
+        wps = get_wps_by_project([project_id]) or []
+    except Exception as e:
+        log('get_work_packages_by_projects failed: %s' % e)
+        sys.exit(1)
+
+    count = 0
+    for wp in wps:
+        try:
+            doc = {
+                'id': first(wp, 'id'),
+                'subject': first(wp, 'subject', default=''),
+                'status': first(wp, 'status', default=''),
+                'is_closed': bool(first(wp, 'is_closed', default=False)),
+                'type': first(wp, 'type', default=''),
+                'assignee_name': first(wp, 'assignee_name', default=''),
+                'project_id': first(wp, 'project_id', default=project_id),
+                'project_name': first(wp, 'project_name', default=project_name),
+                'start_date': first(wp, 'start_date', default=''),
+                'due_date': first(wp, 'due_date', default=''),
+                'percent_done': first(wp, 'percent_done', default=0),
+                'estimated_hours': first(wp, 'estimated_hours', default=0),
+                'spent_hours': first(wp, 'spent_hours', default=0),
+                'remaining_hours': first(wp, 'remaining_hours', default=0),
+                'description': text_of(first(wp, 'description', default='')),
+                'custom_fields': first(wp, 'custom_fields', default={}) or {},
+                'updated_at': first(wp, 'updated_at', default=''),
+            }
+            print(json.dumps(doc, ensure_ascii=False))
+            count += 1
+        except Exception as e:
+            log('skip work package (error: %s): %r' % (e, str(wp)[:200]))
+    log('structured work_packages: %d written (of %d fetched) for project %r' % (count, len(wps), project_name))
+
+
 def main():
     _force_utf8_streams()
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--op-repo', required=True, help='path to the local OpenProject_Exec_Report repo (provides op_api.py)')
     ap.add_argument('--op-config', default=None, help='override path to config.json (default: <op-repo>/config.json)')
     ap.add_argument('--kinds', default='work_packages,projects', help='comma-separated: work_packages,projects')
+    ap.add_argument('--list-projects', action='store_true', help='print every project as JSON lines ({id,name,identifier}) and exit')
+    ap.add_argument('--project', default=None, help='project name/identifier/id, for --structured mode')
+    ap.add_argument('--structured', action='store_true', help='with --project: print that project\'s work packages as structured JSON (one line per work package) instead of running the prose ingest dump')
     args = ap.parse_args()
-
-    requested = [k.strip() for k in args.kinds.split(',') if k.strip()]
-    unknown = [k for k in requested if k not in VALID_KINDS]
-    if unknown:
-        log('ignoring unknown --kinds value(s): %s' % ', '.join(unknown))
-    kinds = [k for k in requested if k in VALID_KINDS]
-    if not kinds:
-        log('no valid --kinds requested (expected work_packages,projects)')
-        sys.exit(1)
 
     op_repo = os.path.abspath(args.op_repo)
     if not os.path.isdir(op_repo):
@@ -267,9 +387,26 @@ def main():
         log('failed to import op_api from %s: %s' % (op_repo, e))
         sys.exit(1)
 
+    if args.list_projects:
+        cmd_list_projects(op_api)
+        return
+
+    if args.project and args.structured:
+        dump_structured_project(op_api, args.project)
+        return
+
     base_url = resolve_base_url(op_api, config_path)
     if not base_url:
         log('warning: could not resolve op_base_url from op_api or %s -- document uri will be null' % config_path)
+
+    requested = [k.strip() for k in args.kinds.split(',') if k.strip()]
+    unknown = [k for k in requested if k not in VALID_KINDS]
+    if unknown:
+        log('ignoring unknown --kinds value(s): %s' % ', '.join(unknown))
+    kinds = [k for k in requested if k in VALID_KINDS]
+    if not kinds:
+        log('no valid --kinds requested (expected work_packages,projects)')
+        sys.exit(1)
 
     had_error = False
     if 'work_packages' in kinds:
