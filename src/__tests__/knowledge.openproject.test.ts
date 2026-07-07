@@ -24,10 +24,12 @@ function chunksFor(documentId: number): ChunkRow[] {
   return db.prepare(`SELECT * FROM chunks WHERE document_id = ? ORDER BY ord`).all(documentId) as ChunkRow[];
 }
 
+// Mirrors what the (fixed) scripts/openproject_dump.py now emits: subject + description
+// + a few meaningful classification fields — no activity-log comments/timestamps.
 const WP_LINE = JSON.stringify({
   ext_id: 'wp:101',
   title: '#101 修正登入頁面錯誤',
-  text: '描述：登入按鈕在行動裝置上沒反應。\n\n狀態: 進行中\n類型: Bug\n負責人: 小美\n專案: 內部工具\n\n留言:\n- [2026-01-01] 小明: 已重現，正在追查',
+  text: '修正登入頁面錯誤\n\n登入按鈕在行動裝置上沒反應。\n\n類型: Bug\n狀態: 進行中\n負責人: 小美\n專案: 內部工具',
   uri: 'http://192.168.72.2/openproject/work_packages/101',
   doc_kind: 'op_work_package',
   updated_at: '2026-01-01T00:00:00Z',
@@ -126,7 +128,7 @@ describe('ingestSource: kind=openproject', () => {
     });
   }
 
-  it('produces documents/chunks from fake line-delimited JSON (Chinese WP + comments, plus a project)', async () => {
+  it('produces documents/chunks from fake line-delimited JSON (Chinese WP subject+description, plus a project)', async () => {
     const source = makeSource();
     const result = await ingestSource(db, source, { openProjectExec: makeExec(`${WP_LINE}\n${PROJECT_LINE}\n`) });
 
@@ -144,7 +146,31 @@ describe('ingestSource: kind=openproject', () => {
 
     const chunks = chunksFor(wp.id);
     expect(chunks.length).toBeGreaterThan(0);
-    expect(chunks[0]!.text).toContain('小明');
+    expect(chunks[0]!.text).toContain('登入按鈕在行動裝置上沒反應');
+  });
+
+  it('work package chunk text carries subject + description (searchable) and excludes activity-timestamp/留言 noise — the RAG recall fix', async () => {
+    const source = makeSource();
+    const wpLine = JSON.stringify({
+      ext_id: 'wp:900',
+      title: '#900 TGV檢測技術導入評估',
+      text: 'TGV檢測技術導入評估\n\n評估 TGV 蝕刻製程的檢測方案可行性。\n\n類型: Task\n狀態: 進行中\n負責人: 小美\n專案: 製程整合',
+      uri: 'http://192.168.72.2/openproject/work_packages/900',
+      doc_kind: 'op_work_package',
+      updated_at: '2026-02-01T00:00:00Z',
+    });
+
+    const result = await ingestSource(db, source, { openProjectExec: makeExec(wpLine) });
+    expect(result.documents_created).toBe(1);
+
+    const doc = activeDocs(source.id)[0]!;
+    const allText = chunksFor(doc.id)
+      .map((c) => c.text)
+      .join('\n');
+    expect(allText).toContain('TGV檢測技術導入評估'); // subject — the term the recall bug missed entirely
+    expect(allText).toContain('TGV 蝕刻'); // description content
+    expect(allText).not.toMatch(/留言/);
+    expect(allText).not.toMatch(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/); // no raw activity-log timestamp
   });
 
   it('a second run with the same updated_at skips the doc entirely (skipped_unchanged)', async () => {
@@ -165,7 +191,7 @@ describe('ingestSource: kind=openproject', () => {
     const beforeChunks = chunksFor(before.id);
 
     const changed = JSON.parse(WP_LINE);
-    changed.text = changed.text + '\n\n留言:\n- [2026-01-05] 小美: 已修好';
+    changed.text = changed.text + '\n\n已修好，等待驗收。';
     changed.updated_at = '2026-01-05T00:00:00Z';
 
     const result = await ingestSource(db, source, { openProjectExec: makeExec(JSON.stringify(changed)) });

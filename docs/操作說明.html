@@ -777,20 +777,20 @@ loop ingest run
 loop ingest run &lt;source_id&gt;</code></pre>
       <ul>
         <li><b>受治理 walker</b>：git 來源用 <code>git ls-files</code>（尊重 .gitignore）；folder/vault 用遞迴 walk。一律排除 <code>node_modules/dist/.git</code>、二進位、鎖檔；<code>.env*</code>／<code>.pem</code>／<code>id_rsa</code> 等金鑰檔名整檔跳過；檔案大小超過 <code>ingest_max_file_kb</code> 也跳過。就算檔案通過了這層，內文裡看起來像私鑰區塊／AWS／OpenAI／GitHub／Slack token／<code>key=&quot;...&quot;</code> 這類樣式，也會被逐一遮蔽成 <code>[REDACTED]</code> 才進索引。</li>
-        <li><b>chunker</b>：markdown 依標題切塊、程式碼依函式/行窗切塊，每個片段都記 <code>start_line/end_line</code> 供之後的引用。</li>
+        <li><b>chunker</b>：markdown 依標題切塊、程式碼依函式/行窗切塊，每個片段都記 <code>start_line/end_line</code> 供之後的引用；每個片段被嵌入／建 FTS 索引的文字都會前綴該文件的 <code>title</code>，確保只存在標題裡的關鍵詞（例如專有名詞、work package 主旨）也能被向量與關鍵字檢索到。</li>
         <li><b>增量、bi-temporal</b>：以檔案內容 sha256 比對——沒變的檔案整個略過（<code>skipped_unchanged</code>），變了的檔案舊版標記 <code>invalid_at</code>（保留歷史，不刪除）並產生新版文件／片段；來源裡消失的檔案同樣被標記失效，而不是砍掉重練。</li>
         <li><b>觸發方式</b>：CLI <code>loop ingest run [source]</code>、MCP <code>loop_ingest</code>／<code>loop_sources</code>、REST <code>POST /api/ingest</code>／<code>GET /api/sources</code>。</li>
       </ul>
 
       <h3>OpenProject 來源</h3>
-      <p>第五種來源類型：把 OpenProject 伺服器裡的 <b>work packages（含描述＋留言）</b>與 <b>projects</b> 擷取進 SSoT，之後能用中文語義跟程式碼一起檢索。不重新實作 OpenProject client——重用使用者既有的 <code>~/Coding/OpenProject_Exec_Report/op_api.py</code>（零外部相依、Python 3.8 相容，已封裝認證／分頁／自訂欄位／normalize）。</p>
+      <p>第五種來源類型：把 OpenProject 伺服器裡的 <b>work packages（含主旨＋描述）</b>與 <b>projects</b> 擷取進 SSoT，之後能用中文語義跟程式碼一起檢索。不重新實作 OpenProject client——重用使用者既有的 <code>~/Coding/OpenProject_Exec_Report/op_api.py</code>（零外部相依、Python 3.8 相容，已封裝認證／分頁／自訂欄位／normalize）。</p>
       <pre><code>loop ingest add --openproject ~/Coding/OpenProject_Exec_Report
 loop ingest run &lt;source_id&gt;</code></pre>
       <ul>
-        <li><b>運作方式</b>：Node 端注入式 spawn <code>scripts/openproject_dump.py</code>（僅 stdlib）——把 <code>--openproject</code> 的 repo 路徑加進 <code>sys.path</code> 後 <code>import op_api</code>，呼叫其 <code>get_work_packages</code>／<code>get_wp_activities</code>／<code>get_projects</code>；每筆輸出一行 JSON，Node 端逐行解析後走既有的 chunk→embed→store 管線；壞掉的單一行只會被跳過，不會讓整次擷取失敗。</li>
+        <li><b>運作方式</b>：Node 端注入式 spawn <code>scripts/openproject_dump.py</code>（僅 stdlib）——把 <code>--openproject</code> 的 repo 路徑加進 <code>sys.path</code> 後 <code>import op_api</code>，呼叫其 <code>get_work_packages</code>／<code>get_projects</code>；每筆輸出一行 JSON，Node 端逐行解析後走既有的 chunk→embed→store 管線；壞掉的單一行只會被跳過，不會讓整次擷取失敗。</li>
         <li><b>增量規則跟檔案型來源不同</b>：檔案型來源用內容 sha256；OpenProject 用該筆項目的 <code>updatedAt</code>（無此欄位才退回 sha256）——伺服器端已修改的 work package 才會被重新擷取，沒改的整批略過。</li>
         <li><b>登錄時做的事</b>：<code>loop ingest add --openproject &lt;repo&gt;</code> 會讀該 repo 的 <code>config.json</code>（預設路徑，<code>--op-config</code> 可覆寫）取出 <code>op_base_url</code> 當作來源的 <code>uri</code>（供之後 <code>loop_search</code> 的 <code>scope</code> 過濾用）——<b>只取這一個欄位</b>，<code>op_api_key</code> 全程不讀取、不複製、不寫入 log，僅由 <code>op_api.py</code> 自己在 spawn 出的 python 行程裡本機讀取使用。</li>
-        <li><b>只取兩種項目</b>（wiki／工時暫不做）：<code>--kinds work_packages,projects</code>（預設兩者都取）；每份 work package 文件含描述＋狀態／類型／負責人／專案＋留言彙整，引用連結（<code>document.uri</code>）指到 <code>&lt;op_base_url&gt;/work_packages/&lt;id&gt;</code>；project 文件指到 <code>&lt;op_base_url&gt;/projects/&lt;identifier&gt;</code>。</li>
+        <li><b>只取兩種項目</b>（wiki／工時暫不做）：<code>--kinds work_packages,projects</code>（預設兩者都取）；每份 work package 文件的可檢索文字＝主旨＋描述＋少數有意義分類欄位（類型／狀態／負責人／專案），活動留言的時間戳雜訊不收錄（<code>title</code> 仍另存 <code>#&lt;id&gt; &lt;主旨&gt;</code> 不變）；引用連結（<code>document.uri</code>）指到 <code>&lt;op_base_url&gt;/work_packages/&lt;id&gt;</code>；project 文件指到 <code>&lt;op_base_url&gt;/projects/&lt;identifier&gt;</code>。</li>
         <li><b>沒登錄 openproject 來源＝零行為變化</b>；沒設定 <code>ingest_openproject_python</code> 時預設呼叫 <code>python3</code>（公司 Windows 部署若執行檔叫 <code>python</code>，改這個設定即可，不需要改程式碼）。</li>
       </ul>
 

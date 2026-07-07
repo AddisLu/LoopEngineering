@@ -5,8 +5,8 @@ SSoT ingest pipeline (see plan-OP-ingest.md).
 Reuses the user's existing ~/Coding/OpenProject_Exec_Report/op_api.py (stdlib-only,
 already wraps auth/pagination/custom-fields/normalize) instead of re-implementing an
 OpenProject client — this script only adds --op-repo to sys.path, imports it, and calls
-its documented functions (get_work_packages/get_wp_activities/get_projects). Real API
-only — no demo-mode fallback is ever selected here.
+its documented functions (get_work_packages/get_projects). Real API only — no demo-mode
+fallback is ever selected here.
 
 Governance: op_api_key lives in --op-repo's config.json and is never read, copied, or
 logged by this script; op_base_url is the only config value this script inspects
@@ -29,7 +29,7 @@ VALID_KINDS = ('work_packages', 'projects')
 def _force_utf8_streams():
     # Company deployment target is Windows 11 + Python 3.8.10, whose console default
     # encoding is often cp950/cp1252, not UTF-8 — without this, printing Chinese work
-    # package titles/comments raises UnicodeEncodeError instead of just writing bytes.
+    # package titles/descriptions raises UnicodeEncodeError instead of just writing bytes.
     for stream in (sys.stdout, sys.stderr):
         try:
             stream.reconfigure(encoding='utf-8')
@@ -123,7 +123,6 @@ def dump_work_packages(op_api_mod, base_url):
     except Exception as e:
         raise RuntimeError('get_work_packages failed: %s' % e)
 
-    get_activities = getattr(op_api_mod, 'get_wp_activities', None)
     count = 0
     for wp in wps:
         try:
@@ -138,39 +137,28 @@ def dump_work_packages(op_api_mod, base_url):
             project = name_of(first(wp, 'project'))
             updated_at = first(wp, 'updatedAt', 'updated_at', 'updated_on')
 
-            comments = []
-            if callable(get_activities):
-                try:
-                    activities = get_activities(wp_id) or []
-                except Exception as e:
-                    log('get_wp_activities(%s) failed: %s' % (wp_id, e))
-                    activities = []
-                for a in activities:
-                    comment_text = text_of(first(a, 'comment', 'text', 'notes'))
-                    if not comment_text.strip():
-                        continue
-                    author = name_of(first(a, 'user', 'author'))
-                    when = first(a, 'createdAt', 'created_at', default='')
-                    comments.append(('- [%s] %s: %s' % (when, author, comment_text)).strip())
-
             meta_lines = []
-            if status:
-                meta_lines.append('狀態: %s' % status)
             if wtype:
                 meta_lines.append('類型: %s' % wtype)
+            if status:
+                meta_lines.append('狀態: %s' % status)
             if assignee:
                 meta_lines.append('負責人: %s' % assignee)
             if project:
                 meta_lines.append('專案: %s' % project)
 
-            parts = []
+            # text = subject + description + a handful of meaningful classification
+            # fields. Activity-log comments (timestamp/author-prefixed noise) are
+            # deliberately excluded -- they diluted keyword/vector search with dates
+            # and names instead of searchable content (title is stored separately,
+            # unchanged, and now also flows into every chunk's embed/FTS text —
+            # see chunk.ts).
+            parts = [subject]
             if description.strip():
                 parts.append(description.strip())
             if meta_lines:
                 parts.append('\n'.join(meta_lines))
-            if comments:
-                parts.append('留言:\n' + '\n'.join(comments))
-            text = '\n\n'.join(parts).strip() or subject
+            text = '\n\n'.join(parts)
 
             doc = {
                 'ext_id': 'wp:%s' % wp_id,
