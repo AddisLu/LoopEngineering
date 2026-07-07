@@ -7,6 +7,15 @@ import { buildApp } from '../server/app.js';
 import { createSource } from '../knowledge/ingest/sources.js';
 import { resolveProject, fetchProjectWorkPackages, type OpDataExec, type SearchFn } from '../report/opdata.js';
 import { generateReport, type ReportExec } from '../report/generate.js';
+import {
+  listReportTemplates,
+  getReportTemplate,
+  upsertReportTemplate,
+  importReportTemplates,
+  seedReportTemplates,
+  validateReportTemplateDef,
+  type ReportTemplateDef,
+} from '../report/templates.js';
 import type { RetrievedChunk } from '../knowledge/retrieve.js';
 
 let db: Database.Database;
@@ -432,5 +441,315 @@ describe('POST /api/report', () => {
     const body = res.json();
     expect(body.markdown).toBe('# 專案報告');
     expect(body.meta.source).toBe('snapshot');
+  });
+});
+
+// ---- report/templates.ts ----
+
+const CUSTOM_TEMPLATE: ReportTemplateDef = {
+  name: 'custom-a',
+  description: '測試用自訂範本',
+  audience: '測試對象',
+  format: '自由格式',
+  instructions: '【自訂範本指示標記 CUSTOM-A-XYZ】用這個語氣寫報告',
+  sections: ['s1', 's2'],
+};
+
+describe('report/templates.ts: seeded built-ins', () => {
+  it('seeds the 3 boss personas on first run (openTestDb calls seedReportTemplates)', () => {
+    const names = listReportTemplates(db).map((d) => d.name).sort();
+    expect(names).toEqual(['manager-pr-weekly', 'plant-manager-onepage', 'pm-detailed']);
+  });
+
+  it('every seeded template has non-empty instructions', () => {
+    for (const d of listReportTemplates(db)) {
+      expect(d.instructions.trim().length).toBeGreaterThan(0);
+    }
+  });
+
+  it('a re-seed never clobbers a user edit (INSERT OR IGNORE, like pipelines)', () => {
+    upsertReportTemplate(db, { name: 'plant-manager-onepage', instructions: '編輯過的指示' });
+    seedReportTemplates(db);
+    expect(getReportTemplate(db, 'plant-manager-onepage')?.instructions).toBe('編輯過的指示');
+  });
+
+  it('seeding twice is idempotent (same 3 names, no duplicates/errors)', () => {
+    seedReportTemplates(db);
+    seedReportTemplates(db);
+    const names = listReportTemplates(db).map((d) => d.name).sort();
+    expect(names).toEqual(['manager-pr-weekly', 'plant-manager-onepage', 'pm-detailed']);
+  });
+});
+
+describe('report/templates.ts: CRUD + import', () => {
+  it('upsertReportTemplate creates then updates in place by name', () => {
+    upsertReportTemplate(db, CUSTOM_TEMPLATE);
+    expect(getReportTemplate(db, 'custom-a')?.description).toBe('測試用自訂範本');
+    upsertReportTemplate(db, { ...CUSTOM_TEMPLATE, description: 'v2' });
+    expect(listReportTemplates(db).filter((d) => d.name === 'custom-a')).toHaveLength(1);
+    expect(getReportTemplate(db, 'custom-a')?.description).toBe('v2');
+  });
+
+  it('validateReportTemplateDef rejects a bad shape without throwing', () => {
+    expect(validateReportTemplateDef('nope').ok).toBe(false);
+    expect(validateReportTemplateDef({}).ok).toBe(false);
+    const missingInstructions = validateReportTemplateDef({ name: 'x' });
+    expect(missingInstructions.ok).toBe(false);
+    if (!missingInstructions.ok) expect(missingInstructions.error).toMatch(/instructions/);
+    const missingName = validateReportTemplateDef({ instructions: 'x' });
+    expect(missingName.ok).toBe(false);
+    if (!missingName.ok) expect(missingName.error).toMatch(/name/);
+    const badSections = validateReportTemplateDef({ name: 'x', instructions: 'y', sections: 'not-an-array' });
+    expect(badSections.ok).toBe(false);
+  });
+
+  it('importReportTemplates reports created/updated and rejects bad items without failing the batch', () => {
+    const result = importReportTemplates(db, [
+      CUSTOM_TEMPLATE,
+      { name: 'bad' }, // missing instructions
+      { name: 'custom-b', instructions: 'ok' },
+    ]);
+    expect(result.created).toBe(2);
+    expect(result.rejected).toHaveLength(1);
+    expect(result.rejected[0].error).toMatch(/instructions/);
+    expect(getReportTemplate(db, 'custom-a')).toBeTruthy();
+    expect(getReportTemplate(db, 'bad')).toBeUndefined();
+  });
+
+  it('re-importing the same template updates rather than duplicates', () => {
+    importReportTemplates(db, [CUSTOM_TEMPLATE]);
+    const result = importReportTemplates(db, [{ ...CUSTOM_TEMPLATE, description: 'updated via import' }]);
+    expect(result.updated).toBe(1);
+    expect(result.created).toBe(0);
+    expect(getReportTemplate(db, 'custom-a')?.description).toBe('updated via import');
+  });
+
+  it('getReportTemplate returns undefined for a missing name (never throws)', () => {
+    expect(getReportTemplate(db, 'does-not-exist')).toBeUndefined();
+  });
+});
+
+// ---- generate.ts: template support ----
+
+describe('generateReport: template support', () => {
+  it('report_enabled=false (default) -> null even with a template requested — zero behavior change', async () => {
+    const synthExec: ReportExec = async () => {
+      throw new Error('must never be called');
+    };
+    const result = await generateReport(db, { project: 'x', template: 'plant-manager-onepage' }, { synthExec });
+    expect(result).toBeNull();
+  });
+
+  it('an explicit known template: its instructions are injected into the synth prompt (not the built-in default), and meta.template is set', async () => {
+    setSetting(db, 'report_enabled', 'true');
+    setSetting(db, 'report_live_first', 'false');
+    upsertReportTemplate(db, CUSTOM_TEMPLATE);
+    const searchFn: SearchFn = async () => [];
+    let seenPrompt = '';
+    const synthExec: ReportExec = async (p) => {
+      seenPrompt = p;
+      return '# ok';
+    };
+    const result = await generateReport(db, { project: 'x', template: 'custom-a' }, { searchFn, synthExec });
+    expect(result).not.toBeNull();
+    expect(seenPrompt).toContain('CUSTOM-A-XYZ');
+    expect(seenPrompt).not.toContain('進度總覽'); // built-in default's own section heading
+    expect(result!.meta.template).toBe('custom-a');
+  });
+
+  it('an unknown template name falls back to the built-in default instructions, and meta.template is left unset', async () => {
+    setSetting(db, 'report_enabled', 'true');
+    setSetting(db, 'report_live_first', 'false');
+    const searchFn: SearchFn = async () => [];
+    let seenPrompt = '';
+    const synthExec: ReportExec = async (p) => {
+      seenPrompt = p;
+      return '# ok';
+    };
+    const result = await generateReport(db, { project: 'x', template: 'does-not-exist' }, { searchFn, synthExec });
+    expect(result).not.toBeNull();
+    expect(seenPrompt).toContain('進度總覽');
+    expect(result!.meta.template).toBeUndefined();
+  });
+
+  it("a template's default_project fills in project when the request gives none", async () => {
+    setSetting(db, 'report_enabled', 'true');
+    setSetting(db, 'report_live_first', 'false');
+    upsertReportTemplate(db, { ...CUSTOM_TEMPLATE, default_project: '預設專案X' });
+    const searchFn: SearchFn = async (_db, q) => {
+      expect(q).toContain('預設專案X');
+      return [];
+    };
+    const synthExec: ReportExec = async () => '# ok';
+    const result = await generateReport(db, { template: 'custom-a', topic: '進度' }, { searchFn, synthExec });
+    expect(result).not.toBeNull();
+    expect(result!.meta.project).toBe('預設專案X');
+  });
+
+  it('a description without an explicit template lets the injected templatePickExec choose the best-fitting one', async () => {
+    setSetting(db, 'report_enabled', 'true');
+    setSetting(db, 'report_live_first', 'false');
+    upsertReportTemplate(db, CUSTOM_TEMPLATE);
+    upsertReportTemplate(db, { name: 'custom-b', instructions: '【另一個範本 B】' });
+    const parseExec: ReportExec = async () => JSON.stringify({ project: '', topic: '隨便' });
+    const templatePickExec: ReportExec = async (prompt) => {
+      expect(prompt).toContain('custom-a');
+      expect(prompt).toContain('custom-b');
+      return JSON.stringify({ template: 'custom-b' });
+    };
+    const searchFn: SearchFn = async () => [];
+    let seenPrompt = '';
+    const synthExec: ReportExec = async (p) => {
+      seenPrompt = p;
+      return '# ok';
+    };
+    const result = await generateReport(
+      db,
+      { description: '幫我出一份報告' },
+      { parseExec, templatePickExec, searchFn, synthExec },
+    );
+    expect(result).not.toBeNull();
+    expect(seenPrompt).toContain('另一個範本 B');
+    expect(result!.meta.template).toBe('custom-b');
+  });
+
+  it('templatePickExec returning an unmatched/empty name falls back to the built-in default (never throws)', async () => {
+    setSetting(db, 'report_enabled', 'true');
+    setSetting(db, 'report_live_first', 'false');
+    upsertReportTemplate(db, CUSTOM_TEMPLATE);
+    const parseExec: ReportExec = async () => JSON.stringify({ project: '', topic: '隨便' });
+    const templatePickExec: ReportExec = async () => JSON.stringify({ template: '' });
+    const searchFn: SearchFn = async () => [];
+    const synthExec: ReportExec = async () => '# ok';
+    const result = await generateReport(
+      db,
+      { description: '幫我出一份報告' },
+      { parseExec, templatePickExec, searchFn, synthExec },
+    );
+    expect(result).not.toBeNull();
+    expect(result!.meta.template).toBeUndefined();
+  });
+
+  it('an explicit template skips the LLM auto-pick entirely, even when a description is also given', async () => {
+    setSetting(db, 'report_enabled', 'true');
+    setSetting(db, 'report_live_first', 'false');
+    upsertReportTemplate(db, CUSTOM_TEMPLATE);
+    const templatePickExec: ReportExec = async () => {
+      throw new Error('must never be called when template is explicit');
+    };
+    const searchFn: SearchFn = async () => [];
+    const synthExec: ReportExec = async () => '# ok';
+    const result = await generateReport(
+      db,
+      { description: '幫我出一份報告', template: 'custom-a' },
+      { templatePickExec, searchFn, synthExec },
+    );
+    expect(result).not.toBeNull();
+    expect(result!.meta.template).toBe('custom-a');
+  });
+
+  it('report_default_template setting is the last-resort fallback when no template/description picks one', async () => {
+    setSetting(db, 'report_enabled', 'true');
+    setSetting(db, 'report_live_first', 'false');
+    upsertReportTemplate(db, CUSTOM_TEMPLATE);
+    setSetting(db, 'report_default_template', 'custom-a');
+    const searchFn: SearchFn = async () => [];
+    let seenPrompt = '';
+    const synthExec: ReportExec = async (p) => {
+      seenPrompt = p;
+      return '# ok';
+    };
+    const result = await generateReport(db, { project: 'x' }, { searchFn, synthExec });
+    expect(result).not.toBeNull();
+    expect(seenPrompt).toContain('CUSTOM-A-XYZ');
+    expect(result!.meta.template).toBe('custom-a');
+  });
+});
+
+// ---- src/server/reportRoutes.ts: templates CRUD ----
+
+describe('report template routes', () => {
+  let app: FastifyInstance;
+  afterEach(async () => {
+    await app?.close();
+  });
+
+  it('every /api/report/templates* route 404s (disabled) by default', async () => {
+    app = buildApp({ db, apiToken: null });
+    const list = await app.inject({ method: 'GET', url: '/api/report/templates' });
+    expect(list.statusCode).toBe(404);
+    const one = await app.inject({ method: 'GET', url: '/api/report/templates/plant-manager-onepage' });
+    expect(one.statusCode).toBe(404);
+    const add = await app.inject({ method: 'POST', url: '/api/report/templates', payload: CUSTOM_TEMPLATE });
+    expect(add.statusCode).toBe(404);
+    const imp = await app.inject({ method: 'POST', url: '/api/report/templates/import', payload: { items: [] } });
+    expect(imp.statusCode).toBe(404);
+  });
+
+  it('GET /api/report/templates lists the seeded personas when enabled', async () => {
+    setSetting(db, 'report_enabled', 'true');
+    app = buildApp({ db, apiToken: null });
+    const res = await app.inject({ method: 'GET', url: '/api/report/templates' });
+    expect(res.statusCode).toBe(200);
+    const names = res.json().templates.map((t: ReportTemplateDef) => t.name).sort();
+    expect(names).toEqual(['manager-pr-weekly', 'plant-manager-onepage', 'pm-detailed']);
+  });
+
+  it('GET /api/report/templates/:name returns one template, 404s for an unknown name', async () => {
+    setSetting(db, 'report_enabled', 'true');
+    app = buildApp({ db, apiToken: null });
+    const ok = await app.inject({ method: 'GET', url: '/api/report/templates/plant-manager-onepage' });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json().template.name).toBe('plant-manager-onepage');
+    const missing = await app.inject({ method: 'GET', url: '/api/report/templates/does-not-exist' });
+    expect(missing.statusCode).toBe(404);
+  });
+
+  it('POST /api/report/templates creates/updates a template; rejects an invalid body with 400', async () => {
+    setSetting(db, 'report_enabled', 'true');
+    app = buildApp({ db, apiToken: null });
+    const created = await app.inject({ method: 'POST', url: '/api/report/templates', payload: CUSTOM_TEMPLATE });
+    expect(created.statusCode).toBe(200);
+    expect(created.json().template.name).toBe('custom-a');
+    expect(getReportTemplate(db, 'custom-a')).toBeTruthy();
+
+    const bad = await app.inject({ method: 'POST', url: '/api/report/templates', payload: { name: 'no-instructions' } });
+    expect(bad.statusCode).toBe(400);
+    expect(bad.json().error).toMatch(/instructions/);
+  });
+
+  it('POST /api/report/templates/import bulk-imports and reports rejects', async () => {
+    setSetting(db, 'report_enabled', 'true');
+    app = buildApp({ db, apiToken: null });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/report/templates/import',
+      payload: { items: [CUSTOM_TEMPLATE, { name: 'bad' }] },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.created).toBe(1);
+    expect(body.rejected).toHaveLength(1);
+  });
+
+  it('POST /api/report threads the template field through to generateReport', async () => {
+    setSetting(db, 'report_enabled', 'true');
+    setSetting(db, 'report_live_first', 'false');
+    upsertReportTemplate(db, CUSTOM_TEMPLATE);
+    const searchFn: SearchFn = async () => [];
+    let seenPrompt = '';
+    const synthExec: ReportExec = async (p) => {
+      seenPrompt = p;
+      return '# ok';
+    };
+    app = buildApp({ db, apiToken: null, reportSearchFn: searchFn, reportSynthExec: synthExec });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/report',
+      payload: { project: 'x', template: 'custom-a' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().meta.template).toBe('custom-a');
+    expect(seenPrompt).toContain('CUSTOM-A-XYZ');
   });
 });
