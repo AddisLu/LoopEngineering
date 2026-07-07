@@ -9,6 +9,14 @@ import {
   hitTestVertex,
   vertexRadius,
   docVertexId,
+  computeDegrees,
+  categoryCentroids,
+  stepForceClustered,
+  reheat,
+  decayAlpha,
+  shouldStep,
+  shouldShowLabel,
+  LOD,
 } from '../../web/graph-layout.js';
 
 function sampleGraph() {
@@ -220,5 +228,124 @@ describe('graph-layout: coordinate transforms + hit-testing', () => {
 
   it('vertexRadius gives documents a smaller radius than curated nodes', () => {
     expect(vertexRadius({ type: 'document' })).toBeLessThan(vertexRadius({ type: 'node' }));
+  });
+
+  it('GRAPH G3: vertexRadius grows with degree (sqrt map) but stays capped', () => {
+    const bare = vertexRadius({ type: 'node' });
+    const hub = vertexRadius({ type: 'node', degree: 40 });
+    expect(hub).toBeGreaterThan(bare);
+    expect(hub).toBeLessThanOrEqual(26);
+  });
+});
+
+describe('graph-layout: computeDegrees (GRAPH G3)', () => {
+  it('counts in+out edges per vertex, zero for unconnected vertices', () => {
+    const state = buildGraphState(sampleGraph());
+    const degrees = computeDegrees(state);
+    // k_a: edge to k_b + inbound links-to from doc_7 = 2
+    expect(degrees.get('k_a')).toBe(2);
+    expect(degrees.get('k_b')).toBe(1);
+    expect(degrees.get('doc_7')).toBe(1);
+  });
+
+  it('also stamps the count onto each vertex.degree', () => {
+    const state = buildGraphState(sampleGraph());
+    computeDegrees(state);
+    expect(state.vertices.get('k_a')!.degree).toBe(2);
+  });
+
+  it('a vertex with no edges gets degree 0, not undefined', () => {
+    const g = sampleGraph();
+    g.nodes.push({ id: 'k_isolated', title: 'Lonely', kind: 'fact', scope: 'global', source: 'manual', tags: '[]' });
+    const state = buildGraphState(g);
+    const degrees = computeDegrees(state);
+    expect(degrees.get('k_isolated')).toBe(0);
+  });
+});
+
+describe('graph-layout: categoryCentroids + stepForceClustered (GRAPH G3)', () => {
+  function clusteredState() {
+    return {
+      vertices: new Map([
+        ['a1', { id: 'a1', x: -500, y: 0, vx: 0, vy: 0, fixed: false, type: 'node', category: { top: 'X', sub: '1' } }],
+        ['a2', { id: 'a2', x: 500, y: 0, vx: 0, vy: 0, fixed: false, type: 'node', category: { top: 'X', sub: '2' } }],
+        ['b1', { id: 'b1', x: 0, y: -500, vx: 0, vy: 0, fixed: false, type: 'node', category: { top: 'Y', sub: '1' } }],
+      ]),
+      edges: [],
+    };
+  }
+
+  it('categoryCentroids averages positions of same-top-category vertices, ignoring uncategorized ones', () => {
+    const state = clusteredState();
+    state.vertices.set('none', { id: 'none', x: 999, y: 999, vx: 0, vy: 0, fixed: false, type: 'node', category: null });
+    const centroids = categoryCentroids(state);
+    expect(centroids.get('X')).toEqual({ x: 0, y: 0 });
+    expect(centroids.get('Y')).toEqual({ x: 0, y: -500 });
+    expect(centroids.has(undefined as any)).toBe(false);
+  });
+
+  it('pulls same-category vertices closer together over repeated steps', () => {
+    const state = clusteredState();
+    const distBefore = Math.hypot(
+      state.vertices.get('a1')!.x - state.vertices.get('a2')!.x,
+      state.vertices.get('a1')!.y - state.vertices.get('a2')!.y,
+    );
+    for (let i = 0; i < 30; i++) stepForceClustered(state);
+    const distAfter = Math.hypot(
+      state.vertices.get('a1')!.x - state.vertices.get('a2')!.x,
+      state.vertices.get('a1')!.y - state.vertices.get('a2')!.y,
+    );
+    expect(distAfter).toBeLessThan(distBefore);
+  });
+
+  it('a fixed vertex is not moved by the cluster pull', () => {
+    const state = clusteredState();
+    state.vertices.get('a1')!.fixed = true;
+    stepForceClustered(state);
+    expect(state.vertices.get('a1')!.x).toBe(-500);
+    expect(state.vertices.get('a1')!.y).toBe(0);
+  });
+});
+
+describe('graph-layout: alpha cooldown (GRAPH G3)', () => {
+  it('decayAlpha treats a fresh (uninitialized) sim as full energy and decays it', () => {
+    const state = { vertices: new Map(), edges: [] };
+    const a1 = decayAlpha(state);
+    expect(a1).toBeCloseTo(0.985, 5);
+    const a2 = decayAlpha(state);
+    expect(a2).toBeLessThan(a1);
+  });
+
+  it('shouldStep is true while alpha is above alphaMin and false once it decays past it', () => {
+    const state = { vertices: new Map(), edges: [], alpha: 1 };
+    expect(shouldStep(state)).toBe(true);
+    for (let i = 0; i < 500; i++) decayAlpha(state);
+    expect(shouldStep(state)).toBe(false);
+  });
+
+  it('reheat resets alpha back to full energy', () => {
+    const state = { vertices: new Map(), edges: [], alpha: 0.001 };
+    reheat(state);
+    expect(state.alpha).toBe(1);
+    expect(shouldStep(state)).toBe(true);
+  });
+});
+
+describe('graph-layout: shouldShowLabel LoD gate (GRAPH G3)', () => {
+  it('always shows the hovered or focused vertex\'s label regardless of zoom/degree', () => {
+    const v = { id: 'a', degree: 0 };
+    expect(shouldShowLabel(v, { scale: 0.1, hoveredId: 'a' })).toBe(true);
+    expect(shouldShowLabel(v, { scale: 0.1, focusId: 'a' })).toBe(true);
+  });
+
+  it('always shows a structural hub (degree >= LOD.hubDegree) even zoomed far out', () => {
+    const hub = { id: 'h', degree: LOD.hubDegree };
+    expect(shouldShowLabel(hub, { scale: 0.1 })).toBe(true);
+  });
+
+  it('hides a low-degree, non-hovered vertex until zoomed in past LOD.labelScale', () => {
+    const v = { id: 'a', degree: 1 };
+    expect(shouldShowLabel(v, { scale: 1 })).toBe(false);
+    expect(shouldShowLabel(v, { scale: LOD.labelScale })).toBe(true);
   });
 });
