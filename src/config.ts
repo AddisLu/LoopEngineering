@@ -276,6 +276,18 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // interpreter isn't on PATH as 'python3' (e.g. the Windows company deployment, which
   // uses 'python').
   ingest_openproject_python: 'python3',
+
+  // 報告生成 A（src/report/*.ts, src/server/reportRoutes.ts）：用自然語言描述生成 OpenProject
+  // 專案報告。off by default = zero behavior change — POST /api/report 404s and loop_report
+  // returns nothing until opted in.
+  report_enabled: 'false',
+  report_model: 'sonnet',
+  // greedy-pack budget (chars) for the work-package/snapshot data section of the prompt —
+  // separate knob from knowledge_budget_chars since report data density differs.
+  report_budget_chars: '4000',
+  // try a live OpenProject query (spawns scripts/openproject_dump.py) before falling back
+  // to the ingested corpus snapshot; false skips straight to the snapshot search.
+  report_live_first: 'true',
 };
 
 export const TOKEN_REFRESH_MS = 180_000; // TokenBar cadence

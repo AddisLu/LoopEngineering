@@ -17,6 +17,8 @@ export const NONNEG_KEYS = new Set([
   'ingest_max_file_kb',
   // SSoT/RAG Phase 4
   'ingest_pump_interval_min',
+  // report generation A
+  'report_budget_chars',
 ]);
 // values must be a number in [0, 1] (a fraction/weight, unlike the 0-100 PERCENT_KEYS)
 export const UNIT_INTERVAL_KEYS = new Set(['rag_hybrid_alpha']);
@@ -43,6 +45,8 @@ export const BOOL_KEYS = new Set([
   'rag_inject_task_context',
   // SSoT/RAG Phase 4 (src/knowledge/ingest/pump.ts) — off = no periodic auto re-ingest
   'ingest_auto_pump',
+  // report generation A (src/report/*.ts) — off = POST /api/report stays disabled
+  'report_enabled', 'report_live_first',
 ]);
 
 /** Accepted `integration_provider` values ('none' = the bridge is fully off). */
@@ -91,7 +95,7 @@ export function validateSetting(key: string, value: string): string | null {
     if (!/^\d{2}:\d{2}-\d{2}:\d{2}$/.test(value)) return 'day_window must be HH:MM-HH:MM (e.g. 08:00-23:00)';
   } else if (BOOL_KEYS.has(key)) {
     if (value !== 'true' && value !== 'false') return `${key} must be true or false`;
-  } else if (key === 'default_model' || key === 'voice_structure_model') {
+  } else if (key === 'default_model' || key === 'voice_structure_model' || key === 'report_model') {
     if (!MODEL_VALUES.has(value)) return `${key} must be one of: ${[...MODEL_VALUES].filter(Boolean).join(', ')} (or empty for CLI default)`;
   } else if (key === 'integration_provider') {
     if (!INTEGRATION_PROVIDER_VALUES.has(value)) return `integration_provider must be one of: ${[...INTEGRATION_PROVIDER_VALUES].join(', ')}`;
