@@ -56,6 +56,7 @@ export interface AppOptions {
   reportDataExec?: OpDataExec;
   reportSynthExec?: ReportExec;
   reportSearchFn?: SearchFn;
+  reportTemplatePickExec?: ReportExec;
 }
 
 interface CreateTaskBody {
@@ -428,6 +429,7 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
     dataExec: opts.reportDataExec,
     synthExec: opts.reportSynthExec,
     searchFn: opts.reportSearchFn,
+    templatePickExec: opts.reportTemplatePickExec,
   });
 
   app.register(fastifyStatic, { root: WEB_DIR, prefix: '/' });
