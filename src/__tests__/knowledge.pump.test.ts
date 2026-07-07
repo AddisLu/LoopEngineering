@@ -85,4 +85,29 @@ describe('pumpIngest', () => {
     expect(next).toBe(now);
     expect(activeDocCount(source.id)).toBe(1);
   });
+
+  it('review #4: skips a second call fired before the first ingestAll pass resolves (in-flight guard)', async () => {
+    setSetting(db, 'ingest_auto_pump', 'true');
+    setSetting(db, 'ingest_pump_interval_min', '30');
+    const root = mkTmpDir('inflight');
+    fs.writeFileSync(path.join(root, 'a.md'), '# A\nbody\n');
+    const source = createSource(db, { kind: 'folder', uri: root });
+
+    const lastRunAt = 1_000_000;
+    const due = lastRunAt + 31 * 60_000;
+    // fired back-to-back, before either has had a chance to await/resolve — same overlap
+    // src/server.ts's un-awaited per-tick `void pumpIngest(...)` call can produce if a pass
+    // outlives one poll interval.
+    const p1 = pumpIngest(db, lastRunAt, due);
+    const p2 = pumpIngest(db, lastRunAt, due);
+    const [r1, r2] = await Promise.all([p1, p2]);
+
+    expect(r1).toBe(due); // the first call ran and advanced the cursor
+    expect(r2).toBe(lastRunAt); // the second was skipped in-flight -> cursor unchanged
+    expect(activeDocCount(source.id)).toBe(1); // ingestAll actually ran exactly once
+
+    // once the first pass has finished, a later call is free to run again.
+    const next = await pumpIngest(db, r1, due + 31 * 60_000);
+    expect(next).toBe(due + 31 * 60_000);
+  });
 });
