@@ -723,7 +723,7 @@ npm run loop -- add --title "Epic: 上線通知系統" \
       <h3>知識怎麼進來</h3>
       <ul>
         <li><b>MCP 一句話</b>：任何 Claude Code 對話說「記住：公司只能用 Python 3.8.10」→ <code>loop_remember</code> 入庫；<code>loop_recall</code> 搜尋、<code>loop_link</code> 建關聯。</li>
-        <li><b>知識庫頁</b>：搜尋（中文 FTS）／kind 篩選／新增編輯／建關聯／「關聯」鈕看一跳鄰居圖。</li>
+        <li><b>知識庫頁</b>：搜尋（中文 FTS）／kind 篩選／新增編輯／建關聯／「關聯」鈕開多跳知識圖譜。</li>
         <li><b>自動蒸餾</b>：任務結案時用 haiku 從 HANDOFF 萃取候選知識 →<b>草稿</b>（琥珀徽章），你在知識庫頁<b>核可後才會注入</b>（<code>knowledge_distill</code> 可關）。</li>
         <li><b>CLI</b>：<code>loop knowledge &lt;list|search|add|import|export&gt;</code>。</li>
       </ul>
@@ -734,6 +734,15 @@ npm run loop -- add --title "Epic: 上線通知系統" \
         <li><b>CLAUDE.md 匯出</b>：<code>loop knowledge export --repo &lt;路徑&gt;</code> 把環境約束寫進該 repo 的 CLAUDE.md（標記區塊、冪等）——公司電腦上的 Claude/Cursor 也共享同一份知識。</li>
       </ul>
       <div class="note tip"><span class="ic">🧠</span><span><b>已預載你的環境</b>：公司（Win11＋Python 3.8.10、3.8 語法約束）、家用開發機（Linux＋RTX 2080 CUDA）、數位轉型辦公自動化專案、在家開發帶去公司部署的流程偏好。之後建任務時 environment 填 <code>company</code>，產出的程式碼就會自動遵守 3.8 相容。</span></div>
+
+      <h3>知識圖譜視覺化（Obsidian 式 [[wikilink]] ＋ 多跳 ＋ force-directed）</h3>
+      <p>在節點 body（或 <code>~/SSoT</code> vault 裡的 markdown 檔）寫 <code>[[標題]]</code> 就會<b>自動建關聯</b>：節點對節點的 wikilink 直接變成一條 <code>links-to</code> 關聯（跟手動建的關聯一起顯示、可刪，但只要 body 裡還留著該 <code>[[wikilink]]</code>，下次存檔就會自動重建）；vault 裡的 markdown 檔本身會成為圖上的<b>文件節點</b>（方形，跟節點的圓形區分），連到它連結的節點或其他文件——這一段解析在每次 <code>loop ingest run</code> 之後全庫重跑一次，所以連結目標晚於連結本身被 ingest／新增也會在下一次自動接上。</p>
+      <ul>
+        <li><b>開啟方式</b>：知識庫頁頂欄「🕸 圖譜」看整張圖；某節點列的「關聯」鈕則以該節點為中心開一張<b>多跳</b>鄰居圖（右上角「展開跳數」可調 1–6 跳）。</li>
+        <li><b>操作</b>：拖曳空白處平移、滾輪縮放、拖曳節點喬位置、點一下節點（不拖曳）會即時向伺服器多要一跳鄰居併入目前的圖（既有節點位置不會被打斷）。</li>
+        <li><b>篩選</b>：面板內有 kind 篩選、來源篩選（節點的 <code>source</code>／文件所屬的 ingest 來源）、標籤與 scope 關鍵字過濾，以及「顯示文件節點」開關（關掉只看策展知識，不看語料文件）。</li>
+        <li><b>純 vanilla 實作</b>：整張圖是手刻 canvas 2D force-directed（<code>web/graph-layout.js</code> 純運算＋<code>web/brain.js</code> 畫面／互動），沒有外部圖表庫、沒有 CDN，符合看板一貫的 <code>textContent</code>-only（canvas 文字是像素，本來就不是 HTML，不會有注入風險）。</li>
+      </ul>
     </section>
 
     <section id="metrics">
