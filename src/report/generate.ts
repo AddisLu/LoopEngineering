@@ -80,14 +80,47 @@ const DEFAULT_TEMPLATE_INSTRUCTIONS = `用以下結構產生一頁式繁體中�
 （條列建議的下一步行動）`;
 
 function buildParsePrompt(description: string): string {
-  return `從下面這句描述擷取「專案名稱」與「主題/重點」，用於產生 OpenProject 專案報告。
-看不出明確專案名稱就把 project 留空字串。
+  return `從下面這句描述擷取「專案名稱關鍵詞」與「主題/重點」，用於產生 OpenProject 專案報告。
+project 欄位只填「專案名稱」本身的關鍵詞（例如公司內部代號、產品/專案代稱），要去除 PR、進度、週報、report、one page、彙整、摘要、現況、狀態 等與專案名稱無關的通用詞；看不出明確專案名稱就把 project 留空字串。
+topic 欄位放這句描述裡除了專案名稱以外的重點/主題。
 
 ## 描述
 ${description}
 
 Output STRICT JSON ONLY — no markdown code fences, no commentary — exactly this shape:
 {"project":"...","topic":"..."}`;
+}
+
+// Generic reporting/PR boilerplate that carries no project-identifying signal — stripped
+// from a free-text description to surface the remaining salient keyword(s) as a second
+// resolveProject candidate, for when the haiku parse's `project` field doesn't match any
+// live project name (see generateReport's projectCandidates).
+const GENERIC_DESCRIPTION_WORDS = [
+  'one page',
+  'onepage',
+  'report',
+  'Report',
+  'PR',
+  'pr',
+  '最新進度',
+  '進度',
+  '週報',
+  '報告',
+  '彙整',
+  '總結',
+  '摘要',
+  '現況',
+  '狀態',
+  '一頁式',
+  '一頁',
+];
+
+function extractSalientKeyword(description: string): string {
+  let text = description;
+  for (const word of GENERIC_DESCRIPTION_WORDS) {
+    text = text.split(word).join(' ');
+  }
+  return text.replace(/\s+/g, ' ').trim();
 }
 
 interface ParsedDescription {
@@ -151,6 +184,15 @@ function renderItemLine(item: OpWorkPackage | OpSnapshotItem): string {
   return `- **[${mdInline(item.path)}]**：${mdInline(item.text)}`;
 }
 
+/** One aggregate stats line (counts + overdue) so the LLM knows the true totals even when
+ * a large parent project's work packages get truncated by the char budget below. */
+function summarizeWorkPackages(items: OpWorkPackage[]): string {
+  const today = new Date().toISOString().slice(0, 10);
+  const closed = items.filter((i) => i.is_closed).length;
+  const overdue = items.filter((i) => !i.is_closed && i.due_date && i.due_date < today && i.percent_done < 100).length;
+  return `**整體彙整**：共 ${items.length} 筆（未結案 ${items.length - closed}、已結案 ${closed}、逾期 ${overdue}）`;
+}
+
 /** Greedy-pack items into report_budget_chars, mirroring context.ts's ragTaskContext loop. */
 function packItems(items: (OpWorkPackage | OpSnapshotItem)[], budget: number): string {
   const lines: string[] = [];
@@ -205,6 +247,7 @@ export async function generateReport(
   try {
     let project = req.project?.trim() || '';
     let topic = req.topic?.trim() || '';
+    let projectCandidates: string[] = [];
 
     if (!project && req.description?.trim()) {
       const parseRun = deps.parseExec ?? defaultParseExec;
@@ -216,14 +259,26 @@ export async function generateReport(
       } else {
         topic = req.description.trim();
       }
+      // The haiku-parsed project string may not match any live project name (or parsing
+      // may have failed outright) -- offer the description's remaining salient keyword
+      // (generic report/PR words stripped) as a second resolveProject candidate, so a
+      // description-only request still resolves live instead of giving up to snapshot.
+      const salient = extractSalientKeyword(req.description);
+      if (salient && salient !== project) projectCandidates = [salient];
     }
     // project was given explicitly (haiku parse skipped above) but topic wasn't -- still
     // use the description text as the topic rather than silently dropping it.
     if (!topic && req.description?.trim()) topic = req.description.trim();
 
-    const fetched = await fetchProjectWorkPackages(db, { project, topic }, deps.dataExec, deps.searchFn);
+    const fetched = await fetchProjectWorkPackages(db, { project, topic, projectCandidates }, deps.dataExec, deps.searchFn);
+    // Align the "使用者需求" label with whatever actually resolved live (e.g. a fallback
+    // keyword candidate, or the canonical name behind an abbreviation), not the raw guess.
+    if (fetched.source === 'live' && fetched.project) project = fetched.project.name;
     const budget = getNum(db, 'report_budget_chars', 4000);
-    const packed = packItems(fetched.items, budget);
+    const packedItems = packItems(fetched.items, budget);
+    const firstItem = fetched.items[0];
+    const summary = firstItem && isWorkPackage(firstItem) ? summarizeWorkPackages(fetched.items as OpWorkPackage[]) : '';
+    const packed = summary ? `${summary}\n${packedItems}` : packedItems;
 
     const synthRun: ReportExec = deps.synthExec ?? ((p) => defaultSynthExec(p, getSetting(db, 'report_model') || 'sonnet'));
     const out = await synthRun(buildSynthPrompt(req, project, topic, fetched, packed));
