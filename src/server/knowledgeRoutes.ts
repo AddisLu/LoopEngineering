@@ -18,6 +18,7 @@ import {
   evidenceForNode,
   type ImportNodeInput,
   type ImportEdgeInput,
+  type GraphView,
 } from '../knowledge/store.js';
 import { KIND, STATUS, RELATION, type Kind, type Status, type Source } from '../knowledge/types.js';
 import { exportClaudeMd } from '../knowledge/export.js';
@@ -164,13 +165,15 @@ export function registerKnowledgeRoutes(
   });
 
   app.get('/api/knowledge/graph', async (req) => {
-    const query = req.query as { kind?: Kind; scope?: string; nodeId?: string; depth?: string };
+    const query = req.query as { kind?: Kind; scope?: string; nodeId?: string; depth?: string; view?: string };
     const depth = query.depth !== undefined ? Number(query.depth) : undefined;
+    const view: GraphView = query.view === 'brain' || query.view === 'brain-full' ? query.view : 'default';
     return graph(db, {
       kind: query.kind,
       scope: query.scope,
       nodeId: query.nodeId,
       depth: depth !== undefined && Number.isFinite(depth) ? depth : undefined,
+      view,
     });
   });
 

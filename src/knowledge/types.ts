@@ -40,6 +40,9 @@ export interface KnowledgeNode {
   invalid_at: string | null;
   created_at: string;
   updated_at: string;
+  /** Brain graph view only (see store.ts's graph()) — never a DB column, attached
+   * at response-assembly time so `view=brain`/`brain-full` can group/color nodes. */
+  category?: { top: string; sub: string };
 }
 
 export interface KnowledgeEdge {

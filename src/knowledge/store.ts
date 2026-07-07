@@ -1,3 +1,4 @@
+import path from 'node:path';
 import type Database from 'better-sqlite3';
 import { nanoid } from 'nanoid';
 import type { KnowledgeNode, KnowledgeEdge, Kind, Source, Status } from './types.js';
@@ -307,6 +308,11 @@ export function evidenceForNode(db: Database.Database, nodeId: string): NodeEvid
 
 // ---- graph + bulk import ----
 
+/** 'default' is the original curated/wikilink-only graph (byte-identical, zero regression).
+ * 'brain' widens documents to every ingested kind except op_work_package (too voluminous);
+ * 'brain-full' also includes op_work_package. Only 'brain'/'brain-full' attach `category`. */
+export type GraphView = 'default' | 'brain' | 'brain-full';
+
 export interface GraphOpts {
   kind?: Kind;
   scope?: string;
@@ -316,6 +322,7 @@ export interface GraphOpts {
   nodeId?: string;
   /** Hop limit from nodeId (default DEFAULT_GRAPH_DEPTH, capped at MAX_GRAPH_DEPTH). Ignored without nodeId. */
   depth?: number;
+  view?: GraphView;
 }
 
 export interface GraphDocumentLink {
@@ -336,18 +343,52 @@ export interface GraphDocument {
   doc_kind: string | null;
   source_id: string;
   links: GraphDocumentLink[];
+  /** Only attached for view='brain'/'brain-full' (see graph()) — top-level bucket
+   * (策展/程式碼/OpenProject/筆記) plus a finer sub-category, for G3's grouping/coloring. */
+  category?: { top: string; sub: string };
 }
 
 const DEFAULT_GRAPH_DEPTH = 2;
 const MAX_GRAPH_DEPTH = 6;
 
-function loadGraphDocuments(db: Database.Database): GraphDocument[] {
-  const docs = db
-    .prepare(
-      `SELECT id, path, uri, title, doc_kind, source_id FROM documents
-        WHERE invalid_at IS NULL AND doc_kind IN ('md', 'markdown', 'mdx')`,
-    )
-    .all() as {
+/** doc_kind values that bucket a document under top-level '筆記' (everything else
+ * ingested via git/folder/vault is per-file-extension code -- see ingest.ts's extOf). */
+const NOTE_DOC_KINDS = new Set(['md', 'markdown', 'mdx', 'txt', 'template', 'vault']);
+
+/** op_project titles carry a leading 【..】 category tag (data-level convention from the
+ * user's OpenProject instance, not something this codebase generates -- see plan-GRAPH-G1.md). */
+function bracketSub(title: string): string {
+  const m = /^【([^】]+)】/.exec(title);
+  return m?.[1] ?? '其他';
+}
+
+function categorizeDocument(
+  d: { doc_kind: string | null; title: string; source_id: string },
+  sourceUriById: Map<string, string>,
+): { top: string; sub: string } {
+  const kind = d.doc_kind ?? '';
+  if (kind === 'op_project') return { top: 'OpenProject', sub: bracketSub(d.title) };
+  if (kind === 'op_work_package') return { top: 'OpenProject', sub: 'work_package' };
+  if (NOTE_DOC_KINDS.has(kind)) return { top: '筆記', sub: 'notes' };
+
+  const uri = sourceUriById.get(d.source_id);
+  const base = uri ? path.basename(uri.replace(/[/\\]+$/, '')) : '';
+  return { top: '程式碼', sub: base || kind || 'other' };
+}
+
+function loadGraphDocuments(db: Database.Database, view: GraphView = 'default'): GraphDocument[] {
+  const wide = view !== 'default';
+  const docs = (
+    wide
+      ? db.prepare(
+          `SELECT id, path, uri, title, doc_kind, source_id FROM documents
+            WHERE invalid_at IS NULL${view === 'brain' ? ` AND (doc_kind IS NULL OR doc_kind != 'op_work_package')` : ''}`,
+        )
+      : db.prepare(
+          `SELECT id, path, uri, title, doc_kind, source_id FROM documents
+            WHERE invalid_at IS NULL AND doc_kind IN ('md', 'markdown', 'mdx')`,
+        )
+  ).all() as {
     id: number;
     path: string;
     uri: string | null;
@@ -391,8 +432,14 @@ function loadGraphDocuments(db: Database.Database): GraphDocument[] {
     if (link.target_kind === 'document') connected.add(link.target_id as number);
   }
 
+  const sourceUriById = wide
+    ? new Map(
+        (db.prepare(`SELECT id, uri FROM sources`).all() as { id: string; uri: string }[]).map((s) => [s.id, s.uri]),
+      )
+    : new Map<string, string>();
+
   return docs
-    .filter((d) => connected.has(d.id))
+    .filter((d) => wide || connected.has(d.id))
     .map((d) => ({
       id: d.id,
       title: d.title ?? d.path,
@@ -401,6 +448,7 @@ function loadGraphDocuments(db: Database.Database): GraphDocument[] {
       doc_kind: d.doc_kind,
       source_id: d.source_id,
       links: linksByDoc.get(d.id) ?? [],
+      ...(wide ? { category: categorizeDocument({ doc_kind: d.doc_kind, title: d.title ?? d.path, source_id: d.source_id }, sourceUriById) } : {}),
     }));
 }
 
@@ -486,7 +534,13 @@ export function graph(
   let edges = edgesFor(db, [...baseNodeIds], { status: 'approved' }).filter(
     (e) => baseNodeIds.has(e.src) && baseNodeIds.has(e.dst),
   );
-  let documents = loadGraphDocuments(db);
+  const view = opts.view ?? 'default';
+  // Only brain/brain-full attach category -- keeping the default view's node/document
+  // shape byte-identical to before this feature (zero regression, see plan-GRAPH-G1.md).
+  if (view !== 'default') {
+    nodes = nodes.map((n) => ({ ...n, category: { top: '策展', sub: n.kind } }));
+  }
+  let documents = loadGraphDocuments(db, view);
 
   if (opts.nodeId) {
     const depth = Math.min(Math.max(opts.depth ?? DEFAULT_GRAPH_DEPTH, 1), MAX_GRAPH_DEPTH);
