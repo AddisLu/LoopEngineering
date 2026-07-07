@@ -19,18 +19,24 @@ export type SpawnFn = (pythonBin: string, scriptPath: string) => ChildLike;
 export const realSpawn: SpawnFn = (pythonBin, scriptPath) => spawn(pythonBin, [scriptPath], { stdio: ['pipe', 'pipe', 'pipe'] });
 
 interface PendingRequest {
-  resolve: (text: string) => void;
+  resolve: (value: unknown) => void;
   reject: (err: Error) => void;
+  /** Pulls this request's payload out of the daemon's parsed JSON response, or
+   * returns undefined if the shape doesn't match (-> 'malformed' rejection). */
+  extract: (parsed: Record<string, unknown>) => unknown;
   timer: ReturnType<typeof setTimeout>;
 }
 
 /**
- * Singleton-per-instance manager for the warm whisper worker subprocess: spawns lazily
- * on first use, reuses the same process across requests (saves the ~1.6s model-load +
- * CUDA-init cost transcribe.py pays every time), respawns automatically if the process
- * dies mid-flight or before, and self-terminates after an idle period to free VRAM.
- * One request in flight at a time is fine (mobile voice intake is inherently serial) but
- * requests are queued FIFO regardless, matched to the daemon's one-response-per-line protocol.
+ * Singleton-per-instance manager for a warm python worker subprocess (whisper
+ * transcription, bge-m3 embedding, ...): spawns lazily on first use, reuses the same
+ * process across requests (saves the multi-second model-load + CUDA-init cost a
+ * one-shot script pays every time), respawns automatically if the process dies
+ * mid-flight or before, and self-terminates after an idle period to free VRAM. One
+ * request in flight at a time is fine (both use cases are inherently serial) but
+ * requests are queued FIFO regardless, matched to the daemon's one-response-per-line
+ * protocol. `.transcribe()`/`.embed()` are thin protocol-specific wrappers over the
+ * shared `request()` plumbing — each script speaks its own request/response shape.
  */
 export class WarmWorker {
   private child: ChildLike | null = null;
@@ -53,19 +59,34 @@ export class WarmWorker {
   /** Transcribe one audio file via the daemon; rejects on daemon death/timeout so the
    * caller (transcribe.ts) can fall back to the one-shot script. */
   async transcribe(audioPath: string, termsFile: string): Promise<string> {
+    return this.request({ audio: audioPath, terms_file: termsFile }, (p) =>
+      typeof p.text === 'string' ? p.text : undefined,
+    );
+  }
+
+  /** Embed a batch of texts via the daemon; rejects on daemon death/timeout so the
+   * caller (embed.ts) can fall back to the one-shot script. */
+  async embed(texts: string[]): Promise<number[][]> {
+    return this.request({ texts }, (p) => (Array.isArray(p.embeddings) ? (p.embeddings as number[][]) : undefined));
+  }
+
+  /** Shared request/response plumbing: writes one JSON line to the daemon's stdin,
+   * resolves/rejects the matching queued request once its response line arrives
+   * (matched FIFO in onData), and always re-arms the idle-shutdown timer after. */
+  private async request<T>(payload: Record<string, unknown>, extract: (parsed: Record<string, unknown>) => T | undefined): Promise<T> {
     this.clearIdleTimer();
     this.ensureSpawned();
     const child = this.child!;
     try {
-      return await new Promise<string>((resolve, reject) => {
+      return await new Promise<T>((resolve, reject) => {
         const timer = setTimeout(() => {
           const i = this.queue.findIndex((r) => r.resolve === resolve);
           if (i >= 0) this.queue.splice(i, 1);
           this.killChild();
           reject(new Error('warm worker timed out'));
         }, this.timeoutMs);
-        this.queue.push({ resolve, reject, timer });
-        child.stdin.write(JSON.stringify({ audio: audioPath, terms_file: termsFile }) + '\n');
+        this.queue.push({ resolve: resolve as (value: unknown) => void, reject, extract: extract as (parsed: Record<string, unknown>) => unknown, timer });
+        child.stdin.write(JSON.stringify(payload) + '\n');
       });
     } finally {
       this.scheduleIdleShutdown();
@@ -108,9 +129,13 @@ export class WarmWorker {
       if (!req) continue;
       clearTimeout(req.timer);
       try {
-        const parsed = JSON.parse(line) as { text?: unknown; error?: unknown };
-        if (typeof parsed.text === 'string') req.resolve(parsed.text);
-        else if (typeof parsed.error === 'string') req.reject(new Error(parsed.error));
+        const parsed = JSON.parse(line) as Record<string, unknown>;
+        if (typeof parsed.error === 'string') {
+          req.reject(new Error(parsed.error));
+          continue;
+        }
+        const value = req.extract(parsed);
+        if (value !== undefined) req.resolve(value);
         else req.reject(new Error('malformed warm worker response'));
       } catch {
         req.reject(new Error('malformed warm worker response'));
