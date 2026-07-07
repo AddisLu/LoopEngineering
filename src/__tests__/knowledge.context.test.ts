@@ -8,7 +8,8 @@ import { openTestDb, setSetting } from '../db/index.js';
 import { createTask, getTask } from '../tasks.js';
 import { upsertNode, invalidateNode, addEdge } from '../knowledge/store.js';
 import { repoScope } from '../knowledge/types.js';
-import { knowledgeContext } from '../knowledge/context.js';
+import { knowledgeContext, ragTaskContext } from '../knowledge/context.js';
+import type { EmbedExec } from '../knowledge/embed.js';
 import { runTask } from '../orchestrator/run.js';
 import { createMergeTask } from '../orchestrator/mergeTask.js';
 import { setCachedUsage } from '../token/usage.js';
@@ -213,7 +214,140 @@ describe('knowledgeContext: e2e through writeTaskFile/runTask', () => {
   });
 });
 
-// ---- 7. mergeTask environment inheritance ----
+// ---- 7. ragTaskContext (SSoT Phase 2): separate, flag-gated corpus section ----
+
+function insertRagSource(kind: string, uri: string): void {
+  db.prepare(`INSERT INTO sources (id, kind, uri) VALUES ('src_1', ?, ?)`).run(kind, uri);
+}
+function insertRagDocument(uri: string, docKind: string, docPath: string): number {
+  return Number(
+    db
+      .prepare(`INSERT INTO documents (source_id, path, uri, doc_kind) VALUES ('src_1', ?, ?, ?)`)
+      .run(docPath, uri, docKind).lastInsertRowid,
+  );
+}
+function insertRagChunk(documentId: number, text: string, startLine: number, endLine: number): void {
+  db.prepare(
+    `INSERT INTO chunks (document_id, ord, text, start_line, end_line) VALUES (?, 0, ?, ?, ?)`,
+  ).run(documentId, text, startLine, endLine);
+}
+
+describe('ragTaskContext: flag + repo_path gating', () => {
+  it('returns null when rag_inject_task_context is off (the default), even with matching chunks', async () => {
+    const repo = mkTmpDir('rag-off');
+    insertRagSource('git', repo);
+    const doc = insertRagDocument(path.join(repo, 'a.ts'), 'ts', 'a.ts');
+    insertRagChunk(doc, 'do the thing implementation detail', 1, 5);
+
+    const task = getTask(db, createTask(db, { title: 't', goal: 'do the thing', repo_path: repo }).id)!;
+    expect(await ragTaskContext(db, task)).toBeNull();
+  });
+
+  it('returns null when the flag is on but the task has no repo_path', async () => {
+    setSetting(db, 'rag_inject_task_context', 'true');
+    const task = getTask(db, createTask(db, { title: 't', goal: 'do the thing' }).id)!;
+    expect(await ragTaskContext(db, task)).toBeNull();
+  });
+});
+
+describe('ragTaskContext: hybrid search scoped to the repo + citation rendering', () => {
+  it('pulls chunks scoped to the repo path, rendered with a path:line citation', async () => {
+    setSetting(db, 'rag_inject_task_context', 'true');
+    const repo = mkTmpDir('rag-scoped');
+    const otherRepo = mkTmpDir('rag-other');
+    insertRagSource('git', repo);
+    const doc = insertRagDocument(path.join(repo, 'worktree.ts'), 'ts', 'worktree.ts');
+    insertRagChunk(doc, 'addWorktree cuts a fresh worktree', 12, 34);
+
+    db.prepare(`INSERT INTO sources (id, kind, uri) VALUES ('src_2', 'git', ?)`).run(otherRepo);
+    const otherDoc = Number(
+      db
+        .prepare(`INSERT INTO documents (source_id, path, uri, doc_kind) VALUES ('src_2', 'b.ts', ?, 'ts')`)
+        .run(path.join(otherRepo, 'b.ts')).lastInsertRowid,
+    );
+    insertRagChunk(otherDoc, 'addWorktree unrelated repo copy', 1, 2);
+
+    const task = getTask(db, createTask(db, { title: 't', goal: 'addWorktree', repo_path: repo }).id)!;
+    const out = await ragTaskContext(db, task);
+    expect(out).toMatch(/worktree\.ts:12-34/);
+    expect(out).toMatch(/addWorktree cuts a fresh worktree/);
+    expect(out).not.toMatch(/unrelated repo copy/);
+  });
+
+  it('returns null when nothing matches the goal within scope', async () => {
+    setSetting(db, 'rag_inject_task_context', 'true');
+    const repo = mkTmpDir('rag-nomatch');
+    insertRagSource('git', repo);
+    const doc = insertRagDocument(path.join(repo, 'a.ts'), 'ts', 'a.ts');
+    insertRagChunk(doc, 'completely unrelated content', 1, 2);
+
+    const task = getTask(db, createTask(db, { title: 't', goal: 'xyzxyzxyz_nomatch', repo_path: repo }).id)!;
+    expect(await ragTaskContext(db, task)).toBeNull();
+  });
+});
+
+describe('ragTaskContext: e2e through writeTaskFile/runTask', () => {
+  function runRow(taskId: string): any {
+    return db.prepare('SELECT * FROM task_runs WHERE task_id=? ORDER BY started_at DESC LIMIT 1').get(taskId);
+  }
+
+  it('injects its own ## 相關語料 (RAG) section, separate from ## Knowledge / Environment', async () => {
+    setSetting(db, 'rag_inject_task_context', 'true');
+    setSetting(db, 'rag_enabled', 'true');
+    upsertNode(db, { kind: 'fact', title: 'Curated fact', body: 'must be visible', scope: 'global' });
+
+    const repo = mkTmpDir('rag-e2e');
+    insertRagSource('git', repo);
+    const doc = insertRagDocument(path.join(repo, 'worktree.ts'), 'ts', 'worktree.ts');
+    insertRagChunk(doc, 'addWorktree cuts a fresh worktree from base', 1, 3);
+
+    process.env.MOCK_SLEEP_MS = '150';
+    const t = createTask(db, {
+      title: 'e2e rag task',
+      goal: 'addWorktree',
+      repo_path: repo,
+      coding_tool: 'mock',
+      verification_steps: ['true'],
+    });
+
+    const fakeEmbed: EmbedExec = async (_bin, _args, texts) => texts.map(() => new Array(1024).fill(0));
+    await runTask(db, getTask(db, t.id)!, { ragEmbedExec: fakeEmbed });
+
+    const wt = runRow(t.id).worktree_path as string;
+    const md = fs.readFileSync(path.join(wt, 'LOOP_TASK.md'), 'utf8');
+    expect(md).toMatch(/## 相關語料 \(RAG\)/);
+    expect(md).toMatch(/addWorktree cuts a fresh worktree/);
+    expect(md).toMatch(/## Knowledge \/ Environment/);
+    expect(md).toMatch(/Curated fact/);
+    // RAG section stays between Knowledge/Environment and Plan
+    expect(md.indexOf('## Knowledge / Environment')).toBeLessThan(md.indexOf('## 相關語料 (RAG)'));
+    expect(md.indexOf('## 相關語料 (RAG)')).toBeLessThan(md.indexOf('## Plan'));
+  });
+
+  it('omits the RAG section entirely with the flag off (zero-impact invariant)', async () => {
+    const repo = mkTmpDir('rag-e2e-off');
+    insertRagSource('git', repo);
+    const doc = insertRagDocument(path.join(repo, 'worktree.ts'), 'ts', 'worktree.ts');
+    insertRagChunk(doc, 'addWorktree cuts a fresh worktree from base', 1, 3);
+
+    process.env.MOCK_SLEEP_MS = '150';
+    const t = createTask(db, {
+      title: 'e2e rag off task',
+      goal: 'addWorktree',
+      repo_path: repo,
+      coding_tool: 'mock',
+      verification_steps: ['true'],
+    });
+
+    await runTask(db, getTask(db, t.id)!, {});
+
+    const wt = runRow(t.id).worktree_path as string;
+    const md = fs.readFileSync(path.join(wt, 'LOOP_TASK.md'), 'utf8');
+    expect(md).not.toMatch(/相關語料/);
+  });
+});
+
+// ---- 8. mergeTask environment inheritance ----
 
 describe('createMergeTask: environment inheritance', () => {
   function git(dir: string, args: string[]): string {
