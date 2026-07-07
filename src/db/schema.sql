@@ -300,3 +300,19 @@ CREATE TABLE IF NOT EXISTS doc_links (
 CREATE INDEX IF NOT EXISTS idx_doc_links_document ON doc_links(document_id);
 CREATE INDEX IF NOT EXISTS idx_doc_links_target_document ON doc_links(target_document_id);
 CREATE INDEX IF NOT EXISTS idx_doc_links_target_node ON doc_links(target_node_id);
+
+-- SSoT Phase 4 (src/knowledge/distill.ts): traceability from a distilled draft node back
+-- to the corpus chunks that support it (hybrid-searched by the node's title/body right
+-- after it's drafted). Separate from knowledge_edges because a chunk isn't a
+-- knowledge_nodes row (integer id, different table) — knowledge_edges' src/dst both FK
+-- to knowledge_nodes(id) and can't reference it.
+CREATE TABLE IF NOT EXISTS node_chunk_links (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  node_id    TEXT NOT NULL REFERENCES knowledge_nodes(id) ON DELETE CASCADE,
+  chunk_id   INTEGER NOT NULL REFERENCES chunks(id) ON DELETE CASCADE,
+  relation   TEXT NOT NULL DEFAULT 'evidences',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(node_id, chunk_id, relation)
+);
+CREATE INDEX IF NOT EXISTS idx_node_chunk_node ON node_chunk_links(node_id);
+CREATE INDEX IF NOT EXISTS idx_node_chunk_chunk ON node_chunk_links(chunk_id);

@@ -211,6 +211,62 @@ export function edgesFor(
     .all(...nodeIds, ...nodeIds) as KnowledgeEdge[];
 }
 
+// ---- node <-> chunk evidence links (SSoT Phase 4) ----
+
+/**
+ * Records that `chunkIds` support `nodeId` — used right after the distiller drafts a
+ * node (see src/knowledge/distill.ts) so a reviewer can see WHY it was suggested.
+ * INSERT OR IGNORE (unique on node_id+chunk_id+relation) so re-linking is a no-op.
+ */
+export function linkNodeToChunks(
+  db: Database.Database,
+  nodeId: string,
+  chunkIds: number[],
+  relation = 'evidences',
+): void {
+  if (!chunkIds.length) return;
+  const insert = db.prepare(
+    `INSERT OR IGNORE INTO node_chunk_links (node_id, chunk_id, relation) VALUES (?, ?, ?)`,
+  );
+  const tx = db.transaction(() => {
+    for (const chunkId of chunkIds) insert.run(nodeId, chunkId, relation);
+  });
+  tx();
+}
+
+export interface NodeEvidence {
+  chunk_id: number;
+  document_id: number;
+  path: string;
+  uri: string | null;
+  section: string | null;
+  start_line: number | null;
+  end_line: number | null;
+  text: string;
+  relation: string;
+}
+
+/**
+ * Citation-bearing corpus chunks that support a (typically drafted) node — joined with
+ * their document for path/line display. Excludes chunks/documents since superseded or
+ * invalidated (bi-temporal); a node with no evidence links, or whose evidence has since
+ * been invalidated, simply returns [].
+ */
+export function evidenceForNode(db: Database.Database, nodeId: string): NodeEvidence[] {
+  return db
+    .prepare(
+      `SELECT c.id AS chunk_id, c.document_id AS document_id, c.text AS text, c.section AS section,
+              c.start_line AS start_line, c.end_line AS end_line, d.path AS path, d.uri AS uri,
+              l.relation AS relation
+         FROM node_chunk_links l
+         JOIN chunks c ON c.id = l.chunk_id AND c.invalid_at IS NULL
+         JOIN documents d ON d.id = c.document_id AND d.invalid_at IS NULL
+        WHERE l.node_id = ?
+        ORDER BY l.created_at ASC`,
+    )
+    .all(nodeId) as NodeEvidence[];
+}
+
 // ---- graph + bulk import ----
 
 export interface GraphOpts {

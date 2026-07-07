@@ -728,6 +728,33 @@ server.registerTool('loop_search', {
   }
 });
 
+// ---- SSoT capture (D-Phase4): quick markdown note -> vault + immediate ingest ----
+
+server.registerTool('loop_capture', {
+  title: 'Capture a quick note into the SSoT vault',
+  description:
+    '快速記錄 — write a short note as a markdown file into the registered SSoT vault (~/SSoT, editable in Obsidian too) and ' +
+    'immediately ingest it, so it is searchable via loop_search right away. Distinct from loop_remember: this lands in the ' +
+    'RAG corpus (documents/chunks), NOT the curated knowledge_nodes layer that gets injected into task prompts — use this for ' +
+    'raw notes/decisions/logs you want captured verbatim and searchable, and loop_remember for a durable fact that should ' +
+    'shape every future task. Requires a vault source already registered on the server (`loop ingest add --vault <path>`).',
+  inputSchema: {
+    text: z.string().describe('REQUIRED. The note body (markdown).'),
+    title: z.string().optional().describe('Short title; if omitted, derived from the first line/sentence of text.'),
+    tags: z.union([z.array(z.string()), z.string()]).optional().describe('optional tags (array or comma-separated string) — written as YAML frontmatter.'),
+  },
+}, async (a) => {
+  try {
+    const result = await api('/api/capture', {
+      method: 'POST',
+      body: { title: a.title, body: a.text, tags: normSteps(a.tags) },
+    });
+    return { content: [{ type: 'text', text: `Captured -> ${result.source_id}/${result.filename} (ingested: +${result.ingest?.documents_created ?? 0} created, ${result.ingest?.chunks_created ?? 0} chunks).` }] };
+  } catch (e) {
+    return { content: [{ type: 'text', text: `Capture failed: ${e.message}` }] };
+  }
+});
+
 // ---- MCP resources: let any MCP client browse the SSoT without calling a tool ----
 
 server.registerResource(

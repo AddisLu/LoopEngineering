@@ -12,6 +12,7 @@ import {
   deleteEdge,
   graph,
   importNodes,
+  evidenceForNode,
   type ImportNodeInput,
   type ImportEdgeInput,
 } from '../knowledge/store.js';
@@ -109,6 +110,15 @@ export function registerKnowledgeRoutes(app: FastifyInstance, db: Database.Datab
     const id = Number((req.params as { id: string }).id);
     if (!deleteEdge(db, id)) return reply.code(404).send({ error: 'not found' });
     return { ok: true, deleted: id };
+  });
+
+  // SSoT Phase 4: supporting corpus chunks for a (typically distilled-draft) node — see
+  // src/knowledge/distill.ts's linkDistilledEvidence. Lets the brain UI show WHY a draft
+  // was suggested before a human approves/rejects it.
+  app.get('/api/knowledge/:id/evidence', async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    if (!getNode(db, id)) return reply.code(404).send({ error: 'not found' });
+    return { evidence: evidenceForNode(db, id) };
   });
 
   app.get('/api/knowledge/graph', async (req) => {

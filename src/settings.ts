@@ -15,6 +15,8 @@ export const NONNEG_KEYS = new Set([
   'embed_dim', 'rag_top_k', 'embed_worker_idle_min',
   // SSoT/RAG Phase 1
   'ingest_max_file_kb',
+  // SSoT/RAG Phase 4
+  'ingest_pump_interval_min',
 ]);
 // values must be a number in [0, 1] (a fraction/weight, unlike the 0-100 PERCENT_KEYS)
 export const UNIT_INTERVAL_KEYS = new Set(['rag_hybrid_alpha']);
@@ -39,6 +41,8 @@ export const BOOL_KEYS = new Set([
   'rag_enabled',
   // SSoT/RAG Phase 2 (src/knowledge/context.ts) — off = zero LOOP_TASK.md change
   'rag_inject_task_context',
+  // SSoT/RAG Phase 4 (src/knowledge/ingest/pump.ts) — off = no periodic auto re-ingest
+  'ingest_auto_pump',
 ]);
 
 /** Accepted `integration_provider` values ('none' = the bridge is fully off). */

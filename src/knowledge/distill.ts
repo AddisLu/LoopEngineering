@@ -7,7 +7,8 @@ import { getBool, getNum } from '../db/index.js';
 import { latestRun } from '../tasks.js';
 import { readUsage } from '../token/usage.js';
 import type { Task } from '../types.js';
-import { upsertNode, findActiveByTitleScope } from './store.js';
+import { upsertNode, findActiveByTitleScope, linkNodeToChunks } from './store.js';
+import { search } from './retrieve.js';
 import { KIND, type Kind, type KnowledgeNode } from './types.js';
 
 const execFileAsync = promisify(execFile);
@@ -17,6 +18,7 @@ const TITLE_MAX = 160;
 const BODY_MAX = 1200;
 const TIMEOUT_MS = 3 * 60_000;
 const MAX_ITEMS = 3;
+const EVIDENCE_TOP_K = 3;
 
 export interface DistillItem {
   kind: Kind;
@@ -168,6 +170,24 @@ export function insertDraftNodes(db: Database.Database, items: DistillItem[]): K
   return inserted;
 }
 
+/**
+ * SSoT Phase 4 traceability: for each freshly-drafted node, hybrid-search the ingested
+ * corpus by its title and record `evidences` links to the top matching chunks (see
+ * node_chunk_links / store.ts's linkNodeToChunks) — a reviewer can then see WHY a draft
+ * was suggested. Best-effort: an empty corpus, rag_enabled=false, or a search failure
+ * all degrade to "no links" rather than blocking distillation.
+ */
+export async function linkDistilledEvidence(db: Database.Database, nodes: KnowledgeNode[]): Promise<void> {
+  for (const node of nodes) {
+    try {
+      const hits = await search(db, node.title, { topK: EVIDENCE_TOP_K });
+      if (hits.length) linkNodeToChunks(db, node.id, hits.map((h) => h.chunk_id));
+    } catch {
+      // best-effort — a search/embed failure never blocks distillation
+    }
+  }
+}
+
 export type DistillExec = (prompt: string) => Promise<string | null>;
 
 /**
@@ -214,7 +234,9 @@ export async function runDistiller(
     if (!out) return null;
     const items = parseDistillerOutput(out);
     if (!items) return null;
-    return insertDraftNodes(db, items);
+    const inserted = insertDraftNodes(db, items);
+    await linkDistilledEvidence(db, inserted);
+    return inserted;
   } catch {
     return null;
   }

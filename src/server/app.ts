@@ -22,6 +22,7 @@ import type { Complexity } from '../config.js';
 import { registerKnowledgeRoutes } from './knowledgeRoutes.js';
 import { registerIngestRoutes } from './ingestRoutes.js';
 import { registerRagRoutes } from './ragRoutes.js';
+import { registerCaptureRoutes } from './captureRoutes.js';
 import { registerDeployRoutes } from './deployRoutes.js';
 import { registerPipelineRoutes } from './pipelineRoutes.js';
 import { registerIntegrationRoutes } from './integrationRoutes.js';
@@ -401,6 +402,7 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
   registerKnowledgeRoutes(app, db);
   registerIngestRoutes(app, db);
   registerRagRoutes(app, db);
+  registerCaptureRoutes(app, db);
   registerDeployRoutes(app, db);
   registerPipelineRoutes(app, db);
   registerIntegrationRoutes(app, db);

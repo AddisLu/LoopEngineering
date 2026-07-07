@@ -257,6 +257,14 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // generated dumps). Chunks/embeddings themselves still only happen when rag_enabled.
   ingest_max_file_kb: '1024',
 
+  // SSoT/RAG Phase 4 (src/knowledge/ingest/pump.ts): periodic incremental re-ingest of
+  // every enabled source from the server tick loop (mirrors integrations/pushback.ts's
+  // pumpPushback cursor idiom, but time-based rather than event-based). Off by default —
+  // `loop ingest run` / MCP loop_ingest / POST /api/ingest stay the only triggers unless
+  // opted in.
+  ingest_auto_pump: 'false',
+  ingest_pump_interval_min: '30',
+
   // SSoT/RAG Phase 2 (src/knowledge/{retrieve,context}.ts): off by default = zero behavior
   // change to LOOP_TASK.md. When on, dispatch additionally pulls top-K corpus chunks
   // (hybrid FTS+vec search scoped to the task's repo) into their own `## 相關語料 (RAG)`

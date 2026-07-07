@@ -6,6 +6,7 @@ import { notify, nearLimitEdge, routeStatusEvent } from './notify.js';
 import { readUsage } from './token/usage.js';
 import { paths } from './config.js';
 import { pumpPushback } from './integrations/pushback.js';
+import { pumpIngest } from './knowledge/ingest/pump.js';
 
 /** Production entry: runs the scheduling loop AND serves the API/board. systemd runs this. */
 export async function main(): Promise<void> {
@@ -19,6 +20,9 @@ export async function main(): Promise<void> {
   let nearWarned = false;
   let lastReason: string | null = null;
   let lastPushbackId = lastEventId;
+  // SSoT Phase 4: 0 so an enabled pump runs on the very first tick after a (re)start,
+  // catching up any change made while the server was down — see pump.ts.
+  let lastIngestPumpAt = 0;
 
   const loop = () => {
     try {
@@ -45,6 +49,10 @@ export async function main(): Promise<void> {
     // D5 pushback: fire-and-forget, never delays the tick loop (see integrations/pushback.ts)
     void pumpPushback(db, lastPushbackId).then((id) => {
       lastPushbackId = id;
+    });
+    // SSoT Phase 4: periodic incremental re-ingest, fire-and-forget (see knowledge/ingest/pump.ts)
+    void pumpIngest(db, lastIngestPumpAt, Date.now()).then((t) => {
+      lastIngestPumpAt = t;
     });
   };
 
