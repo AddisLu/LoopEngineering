@@ -755,6 +755,25 @@ server.registerTool('loop_capture', {
   }
 });
 
+// ---- 報告生成 A: OpenProject project report from a natural-language description ----
+
+server.registerTool('loop_report', {
+  title: 'Generate an OpenProject project report from a description',
+  description:
+    '用一句自然語言描述生成 OpenProject 專案報告（例：「大型AOI PR 最新進度 one page」）— 伺服器會盡量即時查詢 OpenProject，' +
+    '查不到才退回既有語料快照，套用內建一頁式繁中範本產生報告。若伺服器 report_enabled 設定為 false（預設），回傳空報告。',
+  inputSchema: {
+    description: z.string().describe('用描述下報告，例：大型AOI PR 最新進度 one page'),
+  },
+}, async ({ description }) => {
+  try {
+    const r = await api('/api/report', { method: 'POST', body: { description } });
+    return { content: [{ type: 'text', text: r.markdown || '(無內容)' }] };
+  } catch (e) {
+    return { content: [{ type: 'text', text: `Report generation failed: ${e.message}` }] };
+  }
+});
+
 // ---- MCP resources: let any MCP client browse the SSoT without calling a tool ----
 
 server.registerResource(
