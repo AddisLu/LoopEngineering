@@ -47,6 +47,8 @@ export const BOOL_KEYS = new Set([
   'ingest_auto_pump',
   // report generation A (src/report/*.ts) — off = POST /api/report stays disabled
   'report_enabled', 'report_live_first',
+  // report generation C (src/report/persist.ts) — off = never writes report files to disk
+  'report_persist',
 ]);
 
 /** Accepted `integration_provider` values ('none' = the bridge is fully off). */

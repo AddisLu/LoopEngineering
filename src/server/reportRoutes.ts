@@ -22,9 +22,19 @@ const DISABLED = { error: 'report disabled' };
 export function registerReportRoutes(app: FastifyInstance, db: Database.Database, deps: ReportDeps = {}): void {
   app.post('/api/report', async (req, reply) => {
     if (!getBool(db, 'report_enabled', false)) return reply.code(404).send(DISABLED);
-    const body = (req.body ?? {}) as { description?: string; project?: string; topic?: string; template?: string };
+    const body = (req.body ?? {}) as {
+      description?: string;
+      project?: string;
+      topic?: string;
+      template?: string;
+      save?: boolean;
+    };
     const result = await generateReport(db, body, deps);
-    return { markdown: result?.markdown ?? '', meta: result?.meta };
+    return {
+      markdown: result?.markdown ?? '',
+      meta: result?.meta,
+      ...(result?.files ? { files: result.files } : {}),
+    };
   });
 
   app.get('/api/report/templates', async (req, reply) => {

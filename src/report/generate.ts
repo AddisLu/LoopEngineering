@@ -1,7 +1,9 @@
 import { execFile, execFileSync } from 'node:child_process';
 import { promisify } from 'node:util';
+import path from 'node:path';
 import type Database from 'better-sqlite3';
 import { getBool, getNum, getSetting } from '../db/index.js';
+import { paths } from '../config.js';
 import { readUsage } from '../token/usage.js';
 import { mdInline } from '../knowledge/context.js';
 import {
@@ -12,6 +14,8 @@ import {
   type SearchFn,
 } from './opdata.js';
 import { getReportTemplate, listReportTemplates, type ReportTemplateDef } from './templates.js';
+import { ganttChart, statusPie, phaseFlow } from './charts.js';
+import { persistReport, type PersistWriteFns } from './persist.js';
 
 const execFileAsync = promisify(execFile);
 const TIMEOUT_MS = 3 * 60_000;
@@ -28,11 +32,26 @@ export interface ReportRequest {
    * where the request leaves them unset. Unknown name falls back to the built-in
    * default instead of throwing. */
   template?: string;
+  /** Force persistence (see persist.ts) for this one call even when the `report_persist`
+   * setting is off — the CLI's `report generate --save` sets this. */
+  save?: boolean;
 }
 
 export interface ReportResult {
   markdown: string;
-  meta: { source: 'live' | 'snapshot' | 'none'; project?: string; itemCount: number; template?: string };
+  meta: {
+    source: 'live' | 'snapshot' | 'none';
+    project?: string;
+    itemCount: number;
+    template?: string;
+    /** Which Mermaid charts (see charts.ts) actually got embedded — 'gantt'/'pie'/'flow'
+     * subset, in the order they appear in the markdown. Empty when the fetch wasn't
+     * structured WP data (e.g. a snapshot-search fallback) or produced no chartable items. */
+    charts: string[];
+  };
+  /** Paths written by persist.ts — present only when `report_persist` is on or the
+   * request set `save`, and the write actually succeeded. */
+  files?: string[];
 }
 
 export interface ReportDeps {
@@ -46,6 +65,8 @@ export interface ReportDeps {
   searchFn?: SearchFn;
   /** Test injection for the description-only "pick the best template" haiku call. */
   templatePickExec?: ReportExec;
+  /** Test injection for persist.ts's mkdir/writeFile (see PersistWriteFns). */
+  persistFns?: PersistWriteFns;
 }
 
 // Cached at module scope (computed once): mirrors src/knowledge/relate.ts's hasClaudeCli —
@@ -70,16 +91,12 @@ function stripFences(s: string): string {
   return (fenced?.[1] ?? trimmed).trim();
 }
 
-const DEFAULT_TEMPLATE_INSTRUCTIONS = `用以下結構產生一頁式繁體中文報告，主管視角、條列精簡，不要冗長敘述：
+// 報告已在文字之後附上程式化產生的甘特圖／狀態分布 Mermaid 圖表（見 charts.ts）——逐筆進度、
+// 交期、完成度已經由圖表呈現，指示 LLM 不要用長表格重述，只寫摘要/風險/下一步。
+const DEFAULT_TEMPLATE_INSTRUCTIONS = `用以下結構產生一頁式繁體中文報告，主管視角、條列精簡，不要冗長敘述。報告最後會附上程式化產生的甘特圖與狀態分布圖表，逐筆進度／交期／完成度已經由圖表呈現，這裡不要用長表格重述：
 
 ## 摘要
 （2-3 句話總結整體狀況）
-
-## 進度總覽
-（列出各項目的完成度 % 與交期，指出超前/落後）
-
-## PR・備料狀況
-（若資料含 PR / 備料 / 採購相關項目，列出目前狀態；沒有相關資料就省略此節）
 
 ## 風險與落後項
 （列出逾期、卡住、有風險的項目）
@@ -264,6 +281,39 @@ function packItems(items: (OpWorkPackage | OpSnapshotItem)[], budget: number): s
   return lines.join('\n');
 }
 
+interface ChartBlock {
+  kind: string;
+  label: string;
+  mmd: string;
+}
+
+/** Programmatically produce the report's charts from structured WP[] data (never from
+ * the LLM) — gantt + status pie always attempted, phase flow only when there's more
+ * than one distinct WP type to actually chart a flow between. Each entry's `mmd` is
+ * raw Mermaid source, embedded verbatim (see buildChartsMarkdown) rather than asked of
+ * the LLM, so the numbers can never be hallucinated/mangled in transcription. */
+function buildCharts(items: OpWorkPackage[]): ChartBlock[] {
+  const charts: ChartBlock[] = [];
+  const gantt = ganttChart(items);
+  if (gantt) charts.push({ kind: 'gantt', label: '甘特圖', mmd: gantt });
+  const pie = statusPie(items);
+  if (pie) charts.push({ kind: 'pie', label: '狀態分布', mmd: pie });
+  const distinctTypes = new Set(items.map((i) => i.type || '未分類')).size;
+  if (distinctTypes > 1) {
+    const flow = phaseFlow(items);
+    if (flow) charts.push({ kind: 'flow', label: '相位流程', mmd: flow });
+  }
+  return charts;
+}
+
+/** Appended after the LLM's prose as its own `## 圖表` section — one fenced ```mermaid
+ * block per chart, in generation order. Returns '' when there are no charts to embed. */
+function buildChartsMarkdown(charts: ChartBlock[]): string {
+  if (!charts.length) return '';
+  const parts = charts.map((c) => `### ${c.label}\n\n\`\`\`mermaid\n${c.mmd}\n\`\`\``);
+  return ['## 圖表', ...parts].join('\n\n');
+}
+
 function buildSynthPrompt(
   instructions: string | undefined,
   project: string,
@@ -350,7 +400,10 @@ export async function generateReport(
     const budget = getNum(db, 'report_budget_chars', 4000);
     const packedItems = packItems(fetched.items, budget);
     const firstItem = fetched.items[0];
-    const summary = firstItem && isWorkPackage(firstItem) ? summarizeWorkPackages(fetched.items as OpWorkPackage[]) : '';
+    // Charts (see charts.ts) only ever come from structured WP[] data, never the
+    // snapshot-search fallback's free-text chunks.
+    const workItems = firstItem && isWorkPackage(firstItem) ? (fetched.items as OpWorkPackage[]) : [];
+    const summary = workItems.length ? summarizeWorkPackages(workItems) : '';
     const packed = summary ? `${summary}\n${packedItems}` : packedItems;
 
     const synthRun: ReportExec =
@@ -358,8 +411,29 @@ export async function generateReport(
     const instructions = templateDef?.instructions || req.templateInstructions;
     const out = await synthRun(buildSynthPrompt(instructions, project, topic, fetched, packed));
     if (!out) return null;
-    const markdown = stripFences(out);
-    if (!markdown) return null;
+    const synthMarkdown = stripFences(out);
+    if (!synthMarkdown) return null;
+
+    const charts = buildCharts(workItems);
+    const chartsMarkdown = buildChartsMarkdown(charts);
+    const markdown = [synthMarkdown, chartsMarkdown].filter(Boolean).join('\n\n');
+
+    let files: string[] | undefined;
+    if (getBool(db, 'report_persist', false) || req.save) {
+      const outputDir = getSetting(db, 'report_output_dir') || path.join(paths.dataDir, 'reports');
+      const persisted = persistReport(
+        {
+          outputDir,
+          project: fetched.project?.name || project || '',
+          topic,
+          markdown,
+          items: fetched.items,
+          charts: charts.map((c) => ({ kind: c.kind, mmd: c.mmd })),
+        },
+        deps.persistFns,
+      );
+      if (persisted) files = persisted.files;
+    }
 
     return {
       markdown,
@@ -368,7 +442,9 @@ export async function generateReport(
         project: fetched.project?.name || project || undefined,
         itemCount: fetched.items.length,
         template: templateDef?.name,
+        charts: charts.map((c) => c.kind),
       },
+      ...(files ? { files } : {}),
     };
   } catch {
     return null;

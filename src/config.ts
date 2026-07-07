@@ -294,6 +294,14 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // whenever no template name is given/resolved; set to a seeded/custom template name
   // (e.g. 'plant-manager-onepage') to make it the last-resort default.
   report_default_template: '',
+
+  // 報告生成 C（src/report/{charts,persist}.ts）：Mermaid charts are always embedded when
+  // structured WP data is available (no flag — programmatic, never LLM-authored numbers).
+  // Persistence to disk stays off by default = zero behavior change; `report_persist=true`
+  // (or a single call's `--save`) writes markdown + WP snapshot JSON + each chart's .mmd
+  // under report_output_dir/<project>/<date-topic>/ for the user's own git to track.
+  report_persist: 'false',
+  report_output_dir: path.join(DATA_DIR, 'reports'),
 };
 
 export const TOKEN_REFRESH_MS = 180_000; // TokenBar cadence

@@ -253,11 +253,13 @@ describe('generateReport', () => {
     };
     const result = await generateReport(db, { project: '大型AOI', topic: 'PR 進度' }, { dataExec, synthExec });
     expect(result).not.toBeNull();
-    expect(result!.markdown).toBe('# 報告內容');
+    expect(result!.markdown).toContain('# 報告內容');
+    expect(result!.markdown).toContain('```mermaid');
     expect(result!.meta.source).toBe('live');
     expect(result!.meta.itemCount).toBe(1);
+    expect(result!.meta.charts).toEqual(['gantt', 'pie']);
     expect(seenPrompt).toContain('摘要');
-    expect(seenPrompt).toContain('進度總覽');
+    expect(seenPrompt).toContain('風險與落後項');
     expect(seenPrompt).toContain('PR-123 備料進度');
     expect(seenPrompt).toContain('關鍵PR進度說明');
   });
@@ -553,7 +555,7 @@ describe('generateReport: template support', () => {
     const result = await generateReport(db, { project: 'x', template: 'custom-a' }, { searchFn, synthExec });
     expect(result).not.toBeNull();
     expect(seenPrompt).toContain('CUSTOM-A-XYZ');
-    expect(seenPrompt).not.toContain('進度總覽'); // built-in default's own section heading
+    expect(seenPrompt).not.toContain('風險與落後項'); // built-in default's own section heading
     expect(result!.meta.template).toBe('custom-a');
   });
 
@@ -568,7 +570,7 @@ describe('generateReport: template support', () => {
     };
     const result = await generateReport(db, { project: 'x', template: 'does-not-exist' }, { searchFn, synthExec });
     expect(result).not.toBeNull();
-    expect(seenPrompt).toContain('進度總覽');
+    expect(seenPrompt).toContain('風險與落後項');
     expect(result!.meta.template).toBeUndefined();
   });
 

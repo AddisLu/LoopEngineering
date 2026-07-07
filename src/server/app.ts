@@ -36,6 +36,7 @@ import type { TranscribeExec } from '../voice/transcribe.js';
 import type { StructureExec } from '../voice/structure.js';
 import type { ReportExec } from '../report/generate.js';
 import type { OpDataExec, SearchFn } from '../report/opdata.js';
+import type { PersistWriteFns } from '../report/persist.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WEB_DIR = path.resolve(__dirname, '..', '..', 'web');
@@ -57,6 +58,7 @@ export interface AppOptions {
   reportSynthExec?: ReportExec;
   reportSearchFn?: SearchFn;
   reportTemplatePickExec?: ReportExec;
+  reportPersistFns?: PersistWriteFns;
 }
 
 interface CreateTaskBody {
@@ -430,6 +432,7 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
     synthExec: opts.reportSynthExec,
     searchFn: opts.reportSearchFn,
     templatePickExec: opts.reportTemplatePickExec,
+    persistFns: opts.reportPersistFns,
   });
 
   app.register(fastifyStatic, { root: WEB_DIR, prefix: '/' });

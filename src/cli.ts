@@ -579,18 +579,23 @@ report
   .description('generate an OpenProject project report from a description (prints markdown to stdout)')
   .option('--project <name>', 'project name/keyword (skips description -> project parsing)')
   .option('--template <name>', 'named report template to use (see: loop report templates)')
+  .option('--save', 'persist markdown + WP snapshot + chart .mmd files under report_output_dir, even if report_persist is off')
   .action(async (description: string, o) => {
     const db = getDb();
     if (!getBool(db, 'report_enabled', false)) {
       return fail('report_enabled is false — enable it first: loop config set report_enabled true');
     }
-    const result = await generateReport(db, { description, project: o.project, template: o.template });
+    const result = await generateReport(db, { description, project: o.project, template: o.template, save: o.save });
     if (!result) return fail('report generation failed (check report_enabled / hard_limit_pct / claude CLI availability)');
     console.log(result.markdown);
     console.error(
       `\n[meta] source=${result.meta.source} project=${result.meta.project ?? '-'} items=${result.meta.itemCount}` +
-        (result.meta.template ? ` template=${result.meta.template}` : ''),
+        (result.meta.template ? ` template=${result.meta.template}` : '') +
+        (result.meta.charts.length ? ` charts=${result.meta.charts.join(',')}` : ''),
     );
+    if (result.files?.length) {
+      console.error(`[saved]\n${result.files.map((f) => `  ${f}`).join('\n')}`);
+    }
   });
 
 const reportTemplates = report
