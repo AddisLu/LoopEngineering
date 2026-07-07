@@ -83,6 +83,20 @@ describe('resolveProject', () => {
     };
     expect(await resolveProject(db, '大型AOI', exec)).toBeNull();
   });
+
+  it('fuzzy-matches ignoring full-width brackets and whitespace noise', async () => {
+    makeOpenProjectSource();
+    const exec: OpDataExec = async () => JSON.stringify({ id: 2, name: '【大型AOI】', identifier: 'aoi2' });
+    const resolved = await resolveProject(db, '大型AOI', exec);
+    expect(resolved).toEqual({ id: '2', name: '【大型AOI】' });
+  });
+
+  it('fuzzy-matches a keyword with stray internal spaces against a bracketed project name', async () => {
+    makeOpenProjectSource();
+    const exec: OpDataExec = async () => JSON.stringify({ id: 3, name: '【大型 AOI】', identifier: 'aoi3' });
+    const resolved = await resolveProject(db, '大型  AOI', exec);
+    expect(resolved).toEqual({ id: '3', name: '【大型 AOI】' });
+  });
 });
 
 describe('fetchProjectWorkPackages', () => {
@@ -143,6 +157,55 @@ describe('fetchProjectWorkPackages', () => {
     expect(result.source).toBe('snapshot');
     expect(result.items).toEqual([]);
   });
+
+  it('retries against projectCandidates when the primary project string does not resolve, staying live', async () => {
+    makeOpenProjectSource();
+    const exec: OpDataExec = async (_bin, args) => {
+      if (args.includes('--list-projects')) return LIST_PROJECTS_LINE;
+      if (args.includes('--structured')) return WP_LINE;
+      throw new Error(`unexpected args: ${args.join(' ')}`);
+    };
+    const result = await fetchProjectWorkPackages(
+      db,
+      { project: '不存在的專案名稱', projectCandidates: ['大型AOI'] },
+      exec,
+    );
+    expect(result.source).toBe('live');
+    expect(result.project).toEqual({ id: '1', name: '大型AOI' });
+  });
+
+  it('sorts live work packages: overdue+open first, then open, then closed, tie-broken by due_date/percent_done', async () => {
+    makeOpenProjectSource();
+    const wps = [
+      { ...JSON.parse(WP_LINE), id: 'closed', subject: '已結案項目', is_closed: true, due_date: '2020-01-01' },
+      { ...JSON.parse(WP_LINE), id: 'no-due', subject: '無交期項目', is_closed: false, due_date: '', percent_done: 0 },
+      {
+        ...JSON.parse(WP_LINE),
+        id: 'future',
+        subject: '交期在未來項目',
+        is_closed: false,
+        due_date: '2099-01-01',
+        percent_done: 10,
+      },
+      {
+        ...JSON.parse(WP_LINE),
+        id: 'overdue',
+        subject: '逾期項目',
+        is_closed: false,
+        due_date: '2020-01-01',
+        percent_done: 50,
+      },
+    ];
+    const exec: OpDataExec = async (_bin, args) => {
+      if (args.includes('--list-projects')) return LIST_PROJECTS_LINE;
+      if (args.includes('--structured')) return wps.map((w) => JSON.stringify(w)).join('\n');
+      throw new Error(`unexpected args: ${args.join(' ')}`);
+    };
+    const result = await fetchProjectWorkPackages(db, { project: 'AOI' }, exec);
+    expect(result.source).toBe('live');
+    const subjects = (result.items as { subject: string }[]).map((i) => i.subject);
+    expect(subjects).toEqual(['逾期項目', '交期在未來項目', '無交期項目', '已結案項目']);
+  });
 });
 
 // ---- generate.ts ----
@@ -188,6 +251,81 @@ describe('generateReport', () => {
     expect(seenPrompt).toContain('進度總覽');
     expect(seenPrompt).toContain('PR-123 備料進度');
     expect(seenPrompt).toContain('關鍵PR進度說明');
+  });
+
+  it('description containing generic report/PR words still resolves the project live, via the salient-keyword fallback candidate', async () => {
+    setSetting(db, 'report_enabled', 'true');
+    makeOpenProjectSource();
+    // haiku parse yields a project string that does NOT match any live project --
+    // the description's remaining salient keyword ("大型AOI") must be tried as a
+    // fallback candidate instead of giving up to snapshot.
+    const parseExec: ReportExec = async () => JSON.stringify({ project: '不存在的專案', topic: 'PR 最新進度' });
+    const dataExec: OpDataExec = async (_bin, args) => {
+      if (args.includes('--list-projects')) return LIST_PROJECTS_LINE;
+      if (args.includes('--structured')) return WP_LINE;
+      throw new Error(`unexpected args: ${args.join(' ')}`);
+    };
+    const synthExec: ReportExec = async () => '# ok';
+    const result = await generateReport(
+      db,
+      { description: '大型AOI PR 最新進度 one page' },
+      { parseExec, dataExec, synthExec },
+    );
+    expect(result).not.toBeNull();
+    expect(result!.meta.source).toBe('live');
+    expect(result!.meta.project).toBe('大型AOI');
+  });
+
+  it('falls back to snapshot only when neither the parsed project nor the salient keyword resolves live', async () => {
+    setSetting(db, 'report_enabled', 'true');
+    makeOpenProjectSource();
+    const parseExec: ReportExec = async () => JSON.stringify({ project: '', topic: '隨便聊聊' });
+    const dataExec: OpDataExec = async (_bin, args) => {
+      if (args.includes('--list-projects')) return LIST_PROJECTS_LINE; // no candidate matches this list
+      throw new Error(`unexpected args: ${args.join(' ')}`);
+    };
+    const searchFn: SearchFn = async () => [fakeChunk()];
+    const synthExec: ReportExec = async () => '# ok';
+    const result = await generateReport(
+      db,
+      { description: '隨便聊聊 report' },
+      { parseExec, dataExec, searchFn, synthExec },
+    );
+    expect(result).not.toBeNull();
+    expect(result!.meta.source).toBe('snapshot');
+  });
+
+  it('sorts and prepends an aggregate summary line so overdue/open items survive a tight char budget on a large parent-project fetch', async () => {
+    setSetting(db, 'report_enabled', 'true');
+    setSetting(db, 'report_budget_chars', '300');
+    makeOpenProjectSource();
+    const closedItems = Array.from({ length: 50 }, (_, i) => ({
+      ...JSON.parse(WP_LINE),
+      id: `closed-${i}`,
+      subject: `已結案子項目 ${i}`,
+      is_closed: true,
+      due_date: '2020-01-01',
+    }));
+    const overdueItem = { ...JSON.parse(WP_LINE), id: 'overdue', subject: '關鍵逾期項目', is_closed: false, due_date: '2020-01-01', percent_done: 20 };
+    // overdue item placed LAST in the raw API response -- only sorting saves it from truncation.
+    const allItems = [...closedItems, overdueItem];
+    const dataExec: OpDataExec = async (_bin, args) => {
+      if (args.includes('--list-projects')) return LIST_PROJECTS_LINE;
+      if (args.includes('--structured')) return allItems.map((w) => JSON.stringify(w)).join('\n');
+      throw new Error(`unexpected args: ${args.join(' ')}`);
+    };
+    let seenPrompt = '';
+    const synthExec: ReportExec = async (p) => {
+      seenPrompt = p;
+      return '# ok';
+    };
+    const result = await generateReport(db, { project: '大型AOI' }, { dataExec, synthExec });
+    expect(result).not.toBeNull();
+    expect(result!.meta.itemCount).toBe(51);
+    expect(seenPrompt).toContain('關鍵逾期項目');
+    expect(seenPrompt).toContain('整體彙整');
+    expect(seenPrompt).toContain('逾期 1');
+    expect(seenPrompt).not.toContain('已結案子項目 49');
   });
 
   it('parses a bare description into {project, topic} via parseExec', async () => {
