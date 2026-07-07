@@ -71,8 +71,11 @@
         </div>
 
         <div id="graph-empty" class="empty" hidden>此節點尚無關聯</div>
-        <canvas id="graph-canvas" class="graph-canvas" width="880" height="560"></canvas>
-        <p class="graph-hint">拖曳空白處平移、滾輪縮放、拖曳節點調整位置、點一下節點展開鄰居。</p>
+        <div class="graph-canvas-wrap">
+          <canvas id="graph-canvas" class="graph-canvas" width="880" height="560"></canvas>
+          <div id="graph-tooltip" class="graph-tooltip" hidden></div>
+        </div>
+        <p class="graph-hint">拖曳空白處平移、滾輪縮放、拖曳節點調整位置、懸停高亮鄰居、點一下節點聚焦展開。</p>
       </section>
 
       <section id="draft-edges-panel" class="draft-edges-panel" hidden>

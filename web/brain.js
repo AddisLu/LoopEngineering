@@ -1,7 +1,12 @@
 import {
   buildGraphState,
   mergeGraphState,
-  stepForce,
+  stepForceClustered,
+  computeDegrees,
+  reheat,
+  decayAlpha,
+  shouldStep,
+  shouldShowLabel,
   matchesFilter,
   screenToWorld,
   worldToScreen,
@@ -303,6 +308,7 @@ const graphPanel = $('graph-panel');
 const graphTitle = $('graph-title');
 const graphEmpty = $('graph-empty');
 const graphCanvas = $('graph-canvas');
+const graphTooltip = $('graph-tooltip');
 const gctx = graphCanvas.getContext('2d');
 const graphDepthInput = $('graph-depth');
 const graphTagFilter = $('graph-tag-filter');
@@ -315,10 +321,44 @@ let graphState = null; // { vertices: Map<id, Vertex>, edges: Edge[] } — see g
 let graphView = { offsetX: 0, offsetY: 0, scale: 1 };
 let graphRaf = null;
 let graphCenterId = null; // null = whole-graph mode
+let graphViewMode = 'default'; // 'default' | 'brain' — which GraphView the current panel was opened/expanded with
+let hoveredVertexId = null; // canvas mousemove hit-test, see the graphCanvas 'mousemove' listener below
+let graphFocusId = null; // most recent click-to-focus target (see focusVertex())
+let viewAnim = null; // active pan/zoom tween — see animateViewTo()/tickViewAnim()
 
 const ALL_KINDS = KIND_CHIPS.slice(1).map(([v]) => v);
 let selectedGraphKinds = new Set(ALL_KINDS); // opt-out: all kinds shown by default
 let selectedGraphSources = new Set(); // opt-in: empty = no source filter applied
+
+// ---- G3 immersive visual tunables --------------------------------------
+// Baseline dark-immersive numbers, deliberately centralized so Claude Design can retune
+// the look later without touching rendering/interaction logic. Category hue/sat/lightness
+// mirror the four view=brain top-level buckets (see src/knowledge/store.ts::categorizeDocument);
+// sub-category only varies lightness (subLightnessOffset below), never hue, so a category's
+// members always read as one family of color.
+const CATEGORY_HSL = {
+  策展: { h: 217, s: 88, l: 66 },
+  程式碼: { h: 158, s: 60, l: 56 },
+  OpenProject: { h: 32, s: 90, l: 60 },
+  筆記: { h: 280, s: 65, l: 70 },
+};
+const CATEGORY_DEFAULT_HSL = { h: 220, s: 8, l: 60 };
+
+const GRAPH_VISUAL = Object.freeze({
+  glowBlur: 12,
+  glowBlurHi: 22,
+  edgeWidth: 1.1,
+  edgeAlphaBase: 0.22,
+  edgeAlphaHi: 0.9,
+  edgeAlphaDim: 0.05,
+  nodeAlphaDim: 0.22,
+  curveAmount: 0.14, // fraction of edge length the bezier control point offsets by
+  curveMax: 46,
+  zoomFocusScale: 1.9,
+  zoomAnimMs: 420,
+});
+
+let graphLabelDensity = 0; // G4 hook: a future density slider biases the LoD zoom threshold
 
 function currentGraphFilters() {
   return {
@@ -339,8 +379,39 @@ function cssVar(name, fallback) {
   const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   return v || fallback;
 }
+
+/** Deterministic string->[-10,10] hash, used to vary a category's lightness by
+ * sub-category without touching its hue (see CATEGORY_HSL). */
+function subLightnessOffset(sub) {
+  if (!sub) return 0;
+  let h = 0;
+  for (let i = 0; i < sub.length; i++) h = (h * 31 + sub.charCodeAt(i)) >>> 0;
+  return (h % 21) - 10;
+}
+
+/** view=brain/brain-full vertices carry `category` (see src/knowledge/store.ts) and are
+ * colored by it; the node-centric 關聯 relation view (default GraphView) never has
+ * category and keeps the original per-kind coloring so that flow is unaffected by G3. */
 function vertexColor(v) {
+  const top = v.category?.top;
+  if (top) {
+    const base = CATEGORY_HSL[top] ?? CATEGORY_DEFAULT_HSL;
+    const l = Math.min(85, Math.max(28, base.l + subLightnessOffset(v.category.sub)));
+    return `hsl(${base.h} ${base.s}% ${l}%)`;
+  }
   return v.type === 'document' ? cssVar('--k-document', '#888') : cssVar(`--k-${v.kind}`, cssVar('--k-fact', '#888'));
+}
+
+/** { id -> true } for `id` itself plus every vertex directly connected to it — used to
+ * highlight a hovered/focused node's neighborhood and dim everything else. */
+function neighborIds(state, id) {
+  const set = new Set([id]);
+  if (!state) return set;
+  for (const e of state.edges) {
+    if (e.src === id) set.add(e.dst);
+    else if (e.dst === id) set.add(e.src);
+  }
+  return set;
 }
 
 /** Keeps the canvas's backing-store resolution in sync with its CSS display size
@@ -358,30 +429,64 @@ function resizeGraphCanvas() {
   return { cssW: rect.width, cssH: rect.height, dpr };
 }
 
+/** Dark immersive background: a solid base plus a soft off-center glow that falls off
+ * into a vignette at the edges — the "night sky" the graph floats in, independent of the
+ * page's light/dark theme (see --graph-bg-*/--graph-vignette in styles.css). */
+function drawBackground(cssW, cssH) {
+  gctx.fillStyle = cssVar('--graph-bg-1', '#05070d');
+  gctx.fillRect(0, 0, cssW, cssH);
+  const r = Math.max(cssW, cssH) * 0.8;
+  const grad = gctx.createRadialGradient(cssW / 2, cssH * 0.4, 0, cssW / 2, cssH * 0.4, r);
+  grad.addColorStop(0, cssVar('--graph-bg-2', '#111a30'));
+  grad.addColorStop(1, cssVar('--graph-vignette', 'rgba(2,4,10,0.92)'));
+  gctx.fillStyle = grad;
+  gctx.fillRect(0, 0, cssW, cssH);
+}
+
 function drawGraph() {
   const { cssW, cssH, dpr } = resizeGraphCanvas();
   gctx.save();
   gctx.clearRect(0, 0, graphCanvas.width, graphCanvas.height);
   gctx.scale(dpr, dpr); // world<->screen math below stays in CSS-pixel units regardless of DPR
 
+  drawBackground(cssW, cssH);
+
   const vertices = visibleGraphVertices();
   const visibleIds = new Set(vertices.map((v) => v.id));
-  const borderColor = cssVar('--border-2', '#999');
-  const textColor = cssVar('--text-2', '#333');
+  const textColor = cssVar('--graph-text', '#e8ecf5');
+  const textDim = cssVar('--graph-text-dim', 'rgba(232,236,245,0.55)');
+  // hover wins over the (rarer) click-focus ring when both are set, since it's the more
+  // immediate signal of what the user's looking at right now.
+  const highlightId = hoveredVertexId ?? graphFocusId;
+  const highlight = highlightId ? neighborIds(graphState, highlightId) : null;
 
-  gctx.strokeStyle = borderColor;
-  gctx.lineWidth = 1;
+  gctx.lineWidth = GRAPH_VISUAL.edgeWidth * Math.sqrt(graphView.scale);
   for (const e of graphState ? graphState.edges : []) {
     if (!visibleIds.has(e.src) || !visibleIds.has(e.dst)) continue;
     const a = graphState.vertices.get(e.src);
     const b = graphState.vertices.get(e.dst);
     const pa = worldToScreen(graphView, a.x, a.y, cssW, cssH);
     const pb = worldToScreen(graphView, b.x, b.y, cssW, cssH);
+    const related = highlight && (e.src === highlightId || e.dst === highlightId);
+    gctx.globalAlpha = !highlight ? GRAPH_VISUAL.edgeAlphaBase : related ? GRAPH_VISUAL.edgeAlphaHi : GRAPH_VISUAL.edgeAlphaDim;
+    const grad = gctx.createLinearGradient(pa.x, pa.y, pb.x, pb.y);
+    grad.addColorStop(0, vertexColor(a));
+    grad.addColorStop(1, vertexColor(b));
+    gctx.strokeStyle = grad;
+    // gentle quadratic curve (Obsidian-style) instead of a straight line -- offset the
+    // control point perpendicular to the edge, capped so long edges don't bow wildly.
+    const dx = pb.x - pa.x;
+    const dy = pb.y - pa.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const bow = Math.min(len * GRAPH_VISUAL.curveAmount, GRAPH_VISUAL.curveMax);
+    const cx = (pa.x + pb.x) / 2 + (-dy / len) * bow;
+    const cy = (pa.y + pb.y) / 2 + (dx / len) * bow;
     gctx.beginPath();
     gctx.moveTo(pa.x, pa.y);
-    gctx.lineTo(pb.x, pb.y);
+    gctx.quadraticCurveTo(cx, cy, pb.x, pb.y);
     gctx.stroke();
   }
+  gctx.globalAlpha = 1;
 
   gctx.textAlign = 'center';
   gctx.textBaseline = 'top';
@@ -389,24 +494,57 @@ function drawGraph() {
   for (const v of vertices) {
     const p = worldToScreen(graphView, v.x, v.y, cssW, cssH);
     const r = vertexRadius(v) * Math.sqrt(graphView.scale);
-    gctx.fillStyle = vertexColor(v);
+    const selected = v.id === graphCenterId || v.id === graphFocusId || v.id === hoveredVertexId;
+    const dimmed = highlight && !highlight.has(v.id);
+
+    gctx.globalAlpha = dimmed ? GRAPH_VISUAL.nodeAlphaDim : 1;
+    const color = vertexColor(v);
+    gctx.shadowColor = color;
+    gctx.shadowBlur = selected ? GRAPH_VISUAL.glowBlurHi : GRAPH_VISUAL.glowBlur;
+    gctx.fillStyle = color;
     gctx.beginPath();
     if (v.type === 'document') gctx.rect(p.x - r, p.y - r, r * 2, r * 2);
     else gctx.arc(p.x, p.y, r, 0, Math.PI * 2);
     gctx.fill();
-    if (v.id === graphCenterId) {
+    gctx.shadowBlur = 0;
+    if (selected) {
       gctx.lineWidth = 2;
       gctx.strokeStyle = textColor;
       gctx.stroke();
     }
-    gctx.fillStyle = textColor;
-    gctx.fillText(String(v.label ?? '').slice(0, 22), p.x, p.y + r + 3);
+
+    if (shouldShowLabel(v, { scale: graphView.scale + graphLabelDensity, hoveredId: hoveredVertexId, focusId: graphFocusId })) {
+      gctx.fillStyle = dimmed ? textDim : textColor;
+      gctx.fillText(String(v.label ?? '').slice(0, 22), p.x, p.y + r + 3);
+    }
   }
+  gctx.globalAlpha = 1;
   gctx.restore();
 }
 
+/** Eases the active pan/zoom tween (see focusVertex/animateViewTo) toward its target;
+ * a no-op once no animation is running. Runs every frame regardless of alpha cooldown --
+ * it's independent of the force sim. */
+function tickViewAnim() {
+  if (!viewAnim) return;
+  const t = Math.min(1, (performance.now() - viewAnim.start) / viewAnim.duration);
+  const eased = 1 - Math.pow(1 - t, 3); // ease-out cubic
+  graphView = {
+    offsetX: viewAnim.from.offsetX + (viewAnim.to.offsetX - viewAnim.from.offsetX) * eased,
+    offsetY: viewAnim.from.offsetY + (viewAnim.to.offsetY - viewAnim.from.offsetY) * eased,
+    scale: viewAnim.from.scale + (viewAnim.to.scale - viewAnim.from.scale) * eased,
+  };
+  if (t >= 1) viewAnim = null;
+}
+
 function graphLoop() {
-  if (graphState) stepForce(graphState);
+  if (graphState) {
+    if (shouldStep(graphState)) {
+      stepForceClustered(graphState);
+      decayAlpha(graphState);
+    }
+    tickViewAnim();
+  }
   drawGraph();
   graphRaf = requestAnimationFrame(graphLoop);
 }
@@ -450,24 +588,31 @@ function populateGraphFilterChips() {
   }
 }
 
-async function fetchGraph(nodeId, depth) {
+async function fetchGraph(nodeId, depth, view) {
   const qs = new URLSearchParams();
   if (nodeId) qs.set('nodeId', nodeId);
   if (depth) qs.set('depth', String(depth));
+  if (view) qs.set('view', view);
   return api('/api/knowledge/graph' + (qs.toString() ? '?' + qs.toString() : ''), 'GET');
 }
 
 /** Opens the graph panel: `nodeId` centers a depth-hop BFS neighborhood (see the
- * `關聯` button and click-to-expand below); omit it for the whole curated graph. */
+ * `關聯` button and click-to-expand below) on the plain GraphView; omit it for the whole
+ * curated graph, which fetches `view=brain` (GRAPH G3) so vertices carry `category` for
+ * the immersive grouped/colored rendering below. */
 async function openGraphView(nodeId) {
   graphPanel.hidden = false;
   graphEmpty.hidden = true;
   graphCenterId = nodeId ?? null;
+  graphFocusId = null;
+  hoveredVertexId = null;
+  viewAnim = null;
   graphView = { offsetX: 0, offsetY: 0, scale: 1 };
+  graphViewMode = nodeId ? 'default' : 'brain';
 
   let g;
   try {
-    g = await fetchGraph(nodeId, nodeId ? Number(graphDepthInput.value || 2) : undefined);
+    g = await fetchGraph(nodeId, nodeId ? Number(graphDepthInput.value || 2) : undefined, nodeId ? undefined : 'brain');
   } catch (e) {
     graphState = null;
     graphTitle.textContent = '';
@@ -477,6 +622,8 @@ async function openGraphView(nodeId) {
   }
 
   graphState = buildGraphState(g);
+  computeDegrees(graphState);
+  reheat(graphState);
   populateGraphFilterChips();
 
   graphTitle.textContent = nodeId
@@ -496,23 +643,46 @@ async function openGraphView(nodeId) {
 }
 
 /** Click-to-expand: pull a 1-hop neighborhood around the clicked vertex and merge it
- * into the live graph (new vertices seeded near it, existing layout undisturbed). */
+ * into the live graph (new vertices seeded near it, existing layout undisturbed). Uses
+ * the panel's current GraphView mode so merged-in vertices keep the same category/no-
+ * category shape as the rest of the live state. */
 async function expandVertex(vertex) {
   let g;
   try {
-    g = await fetchGraph(vertex.id, 1);
+    g = await fetchGraph(vertex.id, 1, graphViewMode === 'brain' ? 'brain' : undefined);
   } catch (e) {
     alert('展開失敗: ' + e);
     return;
   }
   mergeGraphState(graphState, g, vertex.id);
+  computeDegrees(graphState);
+  reheat(graphState);
   populateGraphFilterChips();
   graphEmpty.hidden = true;
 }
 
+/** Click-to-focus (GRAPH G3): smoothly pans/zooms the clicked vertex to canvas center
+ * before expanding its neighborhood, so the graph reads as "diving into" a node rather
+ * than jump-cutting. */
+function focusVertex(vertex) {
+  graphFocusId = vertex.id;
+  reheat(graphState);
+  const targetScale = Math.min(Math.max(graphView.scale, 1) * 1.25, GRAPH_VISUAL.zoomFocusScale);
+  animateViewTo({ offsetX: -vertex.x * targetScale, offsetY: -vertex.y * targetScale, scale: targetScale });
+  expandVertex(vertex);
+}
+
+function animateViewTo(target, duration = GRAPH_VISUAL.zoomAnimMs) {
+  viewAnim = { from: { ...graphView }, to: target, start: performance.now(), duration };
+}
+
 $('graph-close').onclick = () => { graphPanel.hidden = true; stopGraphLoop(); };
 $('graph-btn').onclick = () => openGraphView(null);
-$('graph-reset').onclick = () => { graphView = { offsetX: 0, offsetY: 0, scale: 1 }; };
+$('graph-reset').onclick = () => {
+  viewAnim = null;
+  graphFocusId = null;
+  graphView = { offsetX: 0, offsetY: 0, scale: 1 };
+};
 $('graph-zoom-in').onclick = () => { graphView.scale = Math.min(graphView.scale * 1.25, 4); };
 $('graph-zoom-out').onclick = () => { graphView.scale = Math.max(graphView.scale / 1.25, 0.15); };
 graphDepthInput.addEventListener('change', () => {
@@ -539,6 +709,7 @@ graphCanvas.addEventListener('mousedown', (evt) => {
   if (hit) {
     hit.fixed = true;
     dragTarget = hit;
+    reheat(graphState);
   } else {
     dragTarget = 'pan';
     panStart = { x: evt.clientX, y: evt.clientY, offsetX: graphView.offsetX, offsetY: graphView.offsetY };
@@ -562,11 +733,45 @@ window.addEventListener('mousemove', (evt) => {
 window.addEventListener('mouseup', () => {
   if (dragTarget && dragTarget !== 'pan') {
     dragTarget.fixed = false;
-    if (!dragMoved) expandVertex(dragTarget);
+    if (!dragMoved) focusVertex(dragTarget);
   }
   dragTarget = null;
   panStart = null;
 });
+
+/** Hover (GRAPH G3): hit-tests under the cursor to highlight a vertex + its neighbors
+ * (see drawGraph's `highlight` set), show a small tooltip, and switch the cursor to a
+ * pointer over a hittable vertex. Skipped mid-drag/pan — that has its own feedback. */
+graphCanvas.addEventListener('mousemove', (evt) => {
+  if (dragTarget || !graphState) return;
+  const { x, y, width, height } = eventToCanvasPoint(evt);
+  const world = screenToWorld(graphView, x, y, width, height);
+  const hit = hitTestVertex(visibleGraphVertices(), world.x, world.y, 16 / graphView.scale);
+  hoveredVertexId = hit ? hit.id : null;
+  graphCanvas.style.cursor = hit ? 'pointer' : 'grab';
+  updateTooltip(hit, evt);
+});
+graphCanvas.addEventListener('mouseleave', () => {
+  hoveredVertexId = null;
+  updateTooltip(null);
+});
+
+/** Small canvas-adjacent tooltip for the hovered vertex — a real DOM element (not canvas
+ * text) built with el()/textContent like every other dynamic DOM piece in this file. */
+function updateTooltip(vertex, evt) {
+  if (!vertex) {
+    graphTooltip.hidden = true;
+    return;
+  }
+  graphTooltip.replaceChildren();
+  graphTooltip.appendChild(el('div', 'graph-tooltip-title', vertex.label));
+  const sub = vertex.type === 'document' ? '文件' : (vertex.category?.sub ?? vertex.kind ?? '');
+  if (sub) graphTooltip.appendChild(el('div', 'graph-tooltip-meta', sub));
+  graphTooltip.hidden = false;
+  const rect = graphCanvas.getBoundingClientRect();
+  graphTooltip.style.left = `${evt.clientX - rect.left + 14}px`;
+  graphTooltip.style.top = `${evt.clientY - rect.top + 14}px`;
+}
 graphCanvas.addEventListener(
   'wheel',
   (evt) => {
