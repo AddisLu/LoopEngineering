@@ -33,6 +33,7 @@
         <a class="btn" href="/metrics.html">儀表板</a>
         <button id="theme-btn" class="btn icon-btn" type="button" title="切換佈景" aria-label="切換佈景"></button>
         <button id="graph-btn" class="btn" type="button">🕸 圖譜</button>
+        <button id="capture-btn" class="btn" type="button">📥 擷取</button>
         <button id="new-node-btn" class="btn primary" type="button">＋ 新增</button>
       </div>
     </header>
@@ -128,6 +129,21 @@
         <menu>
           <button class="btn" type="button" id="node-cancel">取消</button>
           <button value="save" class="btn primary" id="node-save" type="submit">儲存</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <dialog id="capture-dialog">
+      <form id="capture-form" method="dialog">
+        <h3>擷取到 SSoT vault</h3>
+        <p class="muted">寫一則 markdown 筆記進已登錄的 SSoT vault 並立即索引，可在 <code>loop_search</code> 直接搜到；跟上面「＋ 新增」的策展知識節點是分開的兩層（見操作說明 SSoT 章節）。</p>
+        <label>標題（留白＝取內文第一句） <input name="title" autocomplete="off" /></label>
+        <label>內文 <span class="req">*</span><textarea name="body" rows="6" required></textarea></label>
+        <label>Tags（逗號分隔） <input name="tags" autocomplete="off" /></label>
+        <p class="banner" id="capture-msg" hidden></p>
+        <menu>
+          <button class="btn" type="button" id="capture-cancel">取消</button>
+          <button value="save" class="btn primary" id="capture-save" type="submit">寫入</button>
         </menu>
       </form>
     </dialog>

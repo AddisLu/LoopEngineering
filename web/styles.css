@@ -886,6 +886,16 @@ dialog menu { display: flex; justify-content: flex-end; gap: 10px; margin: 18px 
 }
 .node-actions { flex: 0 0 auto; display: flex; flex-direction: column; gap: 6px; }
 
+/* SSoT Phase 4: supporting-chunk citations shown under a draft node (see
+ * evidenceForNode / GET /api/knowledge/:id/evidence) — reuses .edge-row's look. */
+.node-evidence { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.evidence-row {
+  font-size: 12.5px; color: var(--text-2);
+  background: var(--surface-sunk); border: 1px solid var(--border);
+  border-radius: var(--r-sm); padding: 6px 10px;
+}
+.evidence-text { margin-top: 3px; color: var(--text); word-break: break-word; }
+
 /* edges panel inside the add/edit dialog */
 .edge-section { margin-top: 4px; }
 .edge-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }

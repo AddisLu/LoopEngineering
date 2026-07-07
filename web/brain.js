@@ -135,6 +135,8 @@ function buildRow(n) {
   if (n.status === 'draft') {
     actions.appendChild(btn('核可', 'primary', () => act(`/api/knowledge/${n.id}/approve`)));
     actions.appendChild(btn('退回', 'danger-ghost', () => act(`/api/knowledge/${n.id}/reject`)));
+    const evBtn = btn('佐證', '', () => toggleEvidence(n.id, main, evBtn));
+    actions.appendChild(evBtn);
   }
   actions.appendChild(btn('關聯', '', () => openGraphView(n.id)));
   actions.appendChild(btn('編輯', '', () => openNodeDialog(n)));
@@ -142,6 +144,41 @@ function buildRow(n) {
   row.appendChild(actions);
 
   return row;
+}
+
+/** Toggles an inline citation panel under a draft node's body — supporting corpus
+ * chunks the distiller found when it drafted this node (see GET /api/knowledge/:id/evidence). */
+async function toggleEvidence(id, main, evBtn) {
+  const existing = main.querySelector('.node-evidence');
+  if (existing) {
+    existing.remove();
+    evBtn.textContent = '佐證';
+    return;
+  }
+  evBtn.textContent = '載入中…';
+  let evidence;
+  try {
+    const res = await api(`/api/knowledge/${id}/evidence`, 'GET');
+    evidence = res.evidence || [];
+  } catch (e) {
+    evBtn.textContent = '佐證';
+    alert('載入佐證失敗: ' + e);
+    return;
+  }
+  evBtn.textContent = '佐證 ▾';
+  const panel = el('div', 'node-evidence');
+  if (!evidence.length) {
+    panel.appendChild(el('div', 'muted', '（尚無語料佐證）'));
+  } else {
+    for (const ev of evidence) {
+      const row = el('div', 'evidence-row');
+      const lineRef = ev.start_line != null ? `:${ev.start_line}-${ev.end_line ?? ev.start_line}` : '';
+      row.appendChild(el('span', 'chip mono', `${ev.path}${lineRef}`));
+      row.appendChild(el('div', 'evidence-text', String(ev.text || '').replace(/\s+/g, ' ').trim().slice(0, 200)));
+      panel.appendChild(row);
+    }
+  }
+  main.appendChild(panel);
 }
 
 async function delNode(id, title) {
@@ -587,6 +624,49 @@ nodeForm.addEventListener('submit', async (e) => {
   } catch (err) {
     nodeErr.textContent = '儲存失敗：' + err;
     nodeErr.hidden = false;
+  } finally {
+    saveBtn.disabled = false;
+  }
+});
+
+// ---- SSoT quick-capture dialog (Phase 4) --------------------------------
+// Writes a markdown note into the registered SSoT vault + ingests it immediately
+// (POST /api/capture) — a distinct, lighter flow from the node dialog above: this lands
+// in the RAG corpus layer (documents/chunks), not the curated knowledge_nodes layer.
+const captureDialog = $('capture-dialog');
+const captureForm = $('capture-form');
+const captureMsg = $('capture-msg');
+
+$('capture-btn').onclick = () => {
+  captureForm.reset();
+  captureMsg.hidden = true;
+  captureMsg.className = 'banner';
+  captureDialog.showModal();
+};
+$('capture-cancel').onclick = () => captureDialog.close();
+
+captureForm.addEventListener('submit', async (e) => {
+  if (e.submitter && e.submitter.value !== 'save') return; // cancel closes normally
+  e.preventDefault();
+  const fd = new FormData(captureForm);
+  const body = {
+    title: String(fd.get('title') || '').trim() || undefined,
+    body: String(fd.get('body') || ''),
+    tags: String(fd.get('tags') || '').split(',').map((s) => s.trim()).filter(Boolean),
+  };
+  const saveBtn = $('capture-save');
+  saveBtn.disabled = true;
+  captureMsg.hidden = true;
+  try {
+    const r = await postJSON('/api/capture', body);
+    captureMsg.className = 'banner ok';
+    captureMsg.textContent = `已寫入 ${r.filename}（新增 ${r.ingest?.documents_created ?? 0} 份文件、${r.ingest?.chunks_created ?? 0} 個片段）`;
+    captureMsg.hidden = false;
+    captureForm.reset();
+  } catch (err) {
+    captureMsg.className = 'banner danger';
+    captureMsg.textContent = '寫入失敗：' + err;
+    captureMsg.hidden = false;
   } finally {
     saveBtn.disabled = false;
   }
