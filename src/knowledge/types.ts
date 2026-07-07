@@ -48,6 +48,7 @@ export interface KnowledgeEdge {
   dst: string;
   relation: string;
   note: string | null;
+  status: Status; // approved | draft | rejected — see src/knowledge/relate.ts
   invalid_at: string | null;
   created_at: string;
 }

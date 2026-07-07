@@ -26,6 +26,7 @@ import { upsertNode, listNodes, searchNodes, importNodes, type ImportNodeInput, 
 import { exportClaudeMd } from './knowledge/export.js';
 import type { KnowledgeNode, Kind, Status } from './knowledge/types.js';
 import { collectDistillMaterial, runDistiller } from './knowledge/distill.js';
+import { suggestRelations } from './knowledge/relate.js';
 import {
   upsertEnvironment,
   getEnvironment,
@@ -388,6 +389,21 @@ knowledge
     console.log(
       `import ${target}: created=${result.created} updated=${result.updated} edges=${result.edges}`,
     );
+  });
+
+knowledge
+  .command('relate')
+  .description('suggest relations between approved knowledge nodes (embedding top-K + one LLM classify call); inserted as draft edges pending approval in the brain UI')
+  .option('--limit <n>', 'max candidate pairs to assess (closest first)', (v) => parseInt(v, 10))
+  .action(async (o) => {
+    const db = getDb();
+    const edges = await suggestRelations(db, { limit: o.limit });
+    if (!edges) {
+      console.log('no relations suggested');
+      return;
+    }
+    console.log(`suggested ${edges.length} draft edge(s) — approve/reject in the brain UI`);
+    for (const e of edges) console.log(`  ${e.src} --${e.relation}--> ${e.dst}${e.note ? `  (${e.note})` : ''}`);
   });
 
 knowledge

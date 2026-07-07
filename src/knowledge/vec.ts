@@ -18,6 +18,24 @@ const REF_COLUMN: Record<VecTable, string> = {
 };
 
 /**
+ * vec_nodes (unlike vec_chunks) is ranked by cosine similarity (see src/knowledge/relate.ts's
+ * top-K nearest-neighbor candidate search) — `CREATE VIRTUAL TABLE IF NOT EXISTS` never alters
+ * an already-created vec0 table, so a vec_nodes table created before this used the vec0 default
+ * (L2) and needs a one-time drop+recreate. Detected via sqlite_master.sql (virtual table DDL is
+ * stored verbatim); safe because nothing persists real data in vec_nodes across calls — every
+ * suggestRelations() pass re-embeds and re-upserts the current approved node set.
+ */
+function ensureVecNodesCosine(db: Database.Database, dim: number): void {
+  const existing = db
+    .prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'vec_nodes'`)
+    .get() as { sql: string } | undefined;
+  if (existing && !existing.sql.includes('distance_metric=cosine')) {
+    db.exec(`DROP TABLE vec_nodes`);
+  }
+  db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS vec_nodes USING vec0(embedding float[${dim}] distance_metric=cosine, node_id TEXT)`);
+}
+
+/**
  * Load the vec0 SQLite extension and create the vec_chunks/vec_nodes virtual tables
  * (dimension fixed at creation time — changing `embed_dim` later does not resize an
  * already-created table). Any failure degrades to FTS-only and never throws; callers
@@ -29,7 +47,7 @@ export function loadVec(db: Database.Database, dim: number, loader: VecLoader = 
   try {
     loader(db);
     db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS vec_chunks USING vec0(embedding float[${dim}], chunk_id INTEGER)`);
-    db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS vec_nodes USING vec0(embedding float[${dim}], node_id TEXT)`);
+    ensureVecNodesCosine(db, dim);
     availability.set(db, true);
     return true;
   } catch {

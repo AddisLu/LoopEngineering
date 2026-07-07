@@ -74,7 +74,8 @@ export function knowledgeContext(db: Database.Database, task: Task): string | nu
     const edges = db
       .prepare(
         `SELECT src, dst FROM knowledge_edges
-          WHERE invalid_at IS NULL AND (src IN (${idPlaceholders}) OR dst IN (${idPlaceholders}))`,
+          WHERE invalid_at IS NULL AND status = 'approved'
+            AND (src IN (${idPlaceholders}) OR dst IN (${idPlaceholders}))`,
       )
       .all(...tier0.map((n) => n.id), ...tier0.map((n) => n.id)) as { src: string; dst: string }[];
 

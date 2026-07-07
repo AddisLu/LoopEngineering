@@ -120,6 +120,9 @@ function migrate(db: Database.Database): void {
   // src/integrations/import.ts) — nullable, drives idempotent re-import + pushback.
   add('tasks', [['source_ref', 'TEXT']]);
   db.exec('CREATE INDEX IF NOT EXISTS idx_tasks_source_ref ON tasks(source_ref)');
+  // auto-relate (see src/knowledge/relate.ts): edges get a review state just like nodes —
+  // existing rows default to 'approved' (unaffected), LLM-suggested edges land as 'draft'.
+  add('knowledge_edges', [["status", "TEXT NOT NULL DEFAULT 'approved'"]]);
 }
 
 function seedSettings(db: Database.Database): void {

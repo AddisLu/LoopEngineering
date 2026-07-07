@@ -175,40 +175,78 @@ export interface NewEdgeInput {
   dst: string;
   relation?: string;
   note?: string | null;
+  /** Defaults to 'approved' (manual/import edges); 'draft' for LLM-suggested edges
+   * pending review (see src/knowledge/relate.ts). */
+  status?: Status;
 }
 
 export function addEdge(db: Database.Database, input: NewEdgeInput): KnowledgeEdge | undefined {
   const relation = input.relation ?? 'related';
   db.prepare(
-    `INSERT OR IGNORE INTO knowledge_edges (src, dst, relation, note) VALUES (@src, @dst, @relation, @note)`,
+    `INSERT OR IGNORE INTO knowledge_edges (src, dst, relation, note, status) VALUES (@src, @dst, @relation, @note, @status)`,
   ).run({
     src: input.src,
     dst: input.dst,
     relation,
     note: input.note ?? null,
+    status: input.status ?? 'approved',
   });
   return db
     .prepare(`SELECT * FROM knowledge_edges WHERE src = ? AND dst = ? AND relation = ?`)
     .get(input.src, input.dst, relation) as KnowledgeEdge | undefined;
 }
 
+export function getEdge(db: Database.Database, id: number): KnowledgeEdge | undefined {
+  return db.prepare(`SELECT * FROM knowledge_edges WHERE id = ?`).get(id) as KnowledgeEdge | undefined;
+}
+
 export function deleteEdge(db: Database.Database, id: number): boolean {
   return db.prepare(`DELETE FROM knowledge_edges WHERE id = ?`).run(id).changes > 0;
+}
+
+/** Approve/reject a draft edge (see src/knowledge/relate.ts) — mirrors setStatusNode's
+ * review-decision shape; the row is kept either way, never deleted. */
+export function setEdgeStatus(db: Database.Database, id: number, status: 'approved' | 'rejected'): void {
+  db.prepare(`UPDATE knowledge_edges SET status = ? WHERE id = ?`).run(status, id);
+}
+
+/** Pending auto-relate suggestions (see src/knowledge/relate.ts), joined with both
+ * endpoints' titles so the brain UI can render a reviewable list without a second fetch. */
+export interface DraftEdge extends KnowledgeEdge {
+  src_title: string;
+  dst_title: string;
+}
+
+export function listDraftEdges(db: Database.Database): DraftEdge[] {
+  return db
+    .prepare(
+      `SELECT e.*, sn.title AS src_title, dn.title AS dst_title
+         FROM knowledge_edges e
+         JOIN knowledge_nodes sn ON sn.id = e.src
+         JOIN knowledge_nodes dn ON dn.id = e.dst
+        WHERE e.status = 'draft' AND e.invalid_at IS NULL
+        ORDER BY e.created_at ASC`,
+    )
+    .all() as DraftEdge[];
 }
 
 export function edgesFor(
   db: Database.Database,
   nodeIds: string[],
-  opts: { includeInvalid?: boolean } = {},
+  opts: { includeInvalid?: boolean; status?: Status } = {},
 ): KnowledgeEdge[] {
   if (nodeIds.length === 0) return [];
   const placeholders = nodeIds.map(() => '?').join(', ');
-  const invalidSql = opts.includeInvalid ? '' : 'AND invalid_at IS NULL';
+  const clauses = [`(src IN (${placeholders}) OR dst IN (${placeholders}))`];
+  const params: unknown[] = [...nodeIds, ...nodeIds];
+  if (!opts.includeInvalid) clauses.push('invalid_at IS NULL');
+  if (opts.status) {
+    clauses.push('status = ?');
+    params.push(opts.status);
+  }
   return db
-    .prepare(
-      `SELECT * FROM knowledge_edges WHERE (src IN (${placeholders}) OR dst IN (${placeholders})) ${invalidSql}`,
-    )
-    .all(...nodeIds, ...nodeIds) as KnowledgeEdge[];
+    .prepare(`SELECT * FROM knowledge_edges WHERE ${clauses.join(' AND ')}`)
+    .all(...params) as KnowledgeEdge[];
 }
 
 // ---- node <-> chunk evidence links (SSoT Phase 4) ----
@@ -441,9 +479,13 @@ export function graph(
   // edgesFor only requires ONE endpoint in the given id list (see its OR clause) — a
   // manual edge to a node excluded by kind/scope, or since invalidated, would otherwise
   // dangle (an edge referencing a node absent from `nodes`). Both endpoints must be
-  // in the returned node set for an edge to be graph-worthy.
+  // in the returned node set for an edge to be graph-worthy. status='approved' only —
+  // auto-relate drafts (src/knowledge/relate.ts) are reviewed via a separate list, never
+  // rendered in the graph until approved.
   const baseNodeIds = new Set(nodes.map((n) => n.id));
-  let edges = edgesFor(db, [...baseNodeIds]).filter((e) => baseNodeIds.has(e.src) && baseNodeIds.has(e.dst));
+  let edges = edgesFor(db, [...baseNodeIds], { status: 'approved' }).filter(
+    (e) => baseNodeIds.has(e.src) && baseNodeIds.has(e.dst),
+  );
   let documents = loadGraphDocuments(db);
 
   if (opts.nodeId) {

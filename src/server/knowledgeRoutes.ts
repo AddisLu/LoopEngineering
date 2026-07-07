@@ -9,7 +9,10 @@ import {
   invalidateNode,
   setStatusNode,
   addEdge,
+  getEdge,
   deleteEdge,
+  setEdgeStatus,
+  listDraftEdges,
   graph,
   importNodes,
   evidenceForNode,
@@ -18,6 +21,8 @@ import {
 } from '../knowledge/store.js';
 import { KIND, STATUS, RELATION, type Kind, type Status, type Source } from '../knowledge/types.js';
 import { exportClaudeMd } from '../knowledge/export.js';
+import { suggestRelations, type RelateExec } from '../knowledge/relate.js';
+import type { EmbedExec } from '../knowledge/embed.js';
 
 function isValidScope(scope: unknown): boolean {
   if (typeof scope !== 'string' || !scope) return false;
@@ -41,7 +46,17 @@ function validateNodeInput(b: Record<string, unknown>): string | null {
   return null;
 }
 
-export function registerKnowledgeRoutes(app: FastifyInstance, db: Database.Database): void {
+export interface KnowledgeRouteDeps {
+  /** Test-only injection points for POST /api/knowledge/relate (zero tokens/network). */
+  relateLlmExec?: RelateExec;
+  relateEmbedExec?: EmbedExec;
+}
+
+export function registerKnowledgeRoutes(
+  app: FastifyInstance,
+  db: Database.Database,
+  deps: KnowledgeRouteDeps = {},
+): void {
   app.get('/api/knowledge', async (req) => {
     const query = req.query as { q?: string; kind?: Kind; scope?: string; status?: Status };
     const nodes = query.q
@@ -110,6 +125,33 @@ export function registerKnowledgeRoutes(app: FastifyInstance, db: Database.Datab
     const id = Number((req.params as { id: string }).id);
     if (!deleteEdge(db, id)) return reply.code(404).send({ error: 'not found' });
     return { ok: true, deleted: id };
+  });
+
+  // auto-relate (see src/knowledge/relate.ts): pending suggestions + their approve/reject,
+  // mirroring the node draft workflow above (:id/approve, :id/reject).
+  app.get('/api/knowledge/edges/drafts', async () => {
+    return { edges: listDraftEdges(db) };
+  });
+
+  app.post('/api/knowledge/edges/:id/approve', async (req, reply) => {
+    const id = Number((req.params as { id: string }).id);
+    if (!getEdge(db, id)) return reply.code(404).send({ error: 'not found' });
+    setEdgeStatus(db, id, 'approved');
+    return { ok: true };
+  });
+
+  app.post('/api/knowledge/edges/:id/reject', async (req, reply) => {
+    const id = Number((req.params as { id: string }).id);
+    if (!getEdge(db, id)) return reply.code(404).send({ error: 'not found' });
+    setEdgeStatus(db, id, 'rejected');
+    return { ok: true };
+  });
+
+  app.post('/api/knowledge/relate', async (req) => {
+    const b = (req.body ?? {}) as { limit?: number };
+    const limit = typeof b.limit === 'number' && Number.isFinite(b.limit) && b.limit > 0 ? Math.floor(b.limit) : undefined;
+    const edges = await suggestRelations(db, { limit, llmExec: deps.relateLlmExec, embedExec: deps.relateEmbedExec });
+    return { edges: edges ?? [] };
   });
 
   // SSoT Phase 4: supporting corpus chunks for a (typically distilled-draft) node — see

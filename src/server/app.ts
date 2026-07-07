@@ -29,6 +29,8 @@ import { registerIntegrationRoutes } from './integrationRoutes.js';
 import { registerVoiceRoutes } from './voiceRoutes.js';
 import { environmentMap } from '../deploy/store.js';
 import { collectDistillMaterial, runDistiller, type DistillExec } from '../knowledge/distill.js';
+import type { RelateExec } from '../knowledge/relate.js';
+import type { EmbedExec } from '../knowledge/embed.js';
 import type { TranscribeExec } from '../voice/transcribe.js';
 import type { StructureExec } from '../voice/structure.js';
 
@@ -40,6 +42,9 @@ export interface AppOptions {
   apiToken?: string | null;
   /** Test-only injection point for the close route's fire-and-forget distiller call. */
   distillExec?: DistillExec;
+  /** Test-only injection points for POST /api/knowledge/relate (zero tokens/network). */
+  relateLlmExec?: RelateExec;
+  relateEmbedExec?: EmbedExec;
   /** Test-only injection points for POST /api/voice/intake (zero audio/GPU/tokens). */
   voiceTranscribeExec?: TranscribeExec;
   voiceStructureExec?: StructureExec;
@@ -399,7 +404,7 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
     return computeMetrics(db, { days });
   });
 
-  registerKnowledgeRoutes(app, db);
+  registerKnowledgeRoutes(app, db, { relateLlmExec: opts.relateLlmExec, relateEmbedExec: opts.relateEmbedExec });
   registerIngestRoutes(app, db);
   registerRagRoutes(app, db);
   registerCaptureRoutes(app, db);
