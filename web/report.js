@@ -26,11 +26,12 @@
   };
   paint();
 
-  async function api(path, { method = 'GET', body } = {}) {
+  async function api(path, { method = 'GET', body, signal } = {}) {
     const r = await fetch(path, {
       method,
       headers: { ...authHeaders, ...(body ? { 'content-type': 'application/json' } : {}) },
       body: body ? JSON.stringify(body) : undefined,
+      signal,
     });
     const t = await r.text();
     let j; try { j = t ? JSON.parse(t) : {}; } catch { j = { raw: t }; }
@@ -186,6 +187,17 @@
   const printBtn = $('print-btn');
   printBtn.onclick = () => window.print();
 
+  // Progress stages shown while POST /api/report is in flight. There's no server-side
+  // progress channel (it's one request/response) -- this is a time-based heuristic that
+  // roughly mirrors generateReport's own sequence (parse -> fetch -> synth, see
+  // src/report/generate.ts), so "產生中…" doesn't look stalled on a 70-90s call.
+  const STAGE_HINTS = [
+    { afterSec: 0, label: '解析描述中…' },
+    { afterSec: 4, label: '抓取專案資料中…' },
+    { afterSec: 12, label: '產生報告內容中…' },
+  ];
+  const CLIENT_TIMEOUT_MS = 120_000;
+
   genBtn.onclick = async () => {
     const description = $('f-description').value.trim();
     if (!description) { setNote('請先輸入描述', true); return; }
@@ -197,16 +209,28 @@
     if ($('f-save').checked) body.save = true;
 
     genBtn.disabled = true;
-    setNote('產生中…', false);
+    const startedAt = Date.now();
+    const tick = () => {
+      const elapsedSec = Math.floor((Date.now() - startedAt) / 1000);
+      let stage = STAGE_HINTS[0].label;
+      for (const s of STAGE_HINTS) { if (elapsedSec >= s.afterSec) stage = s.label; }
+      setNote(`${stage}（已等待 ${elapsedSec} 秒）`, false);
+    };
+    tick();
+    const timer = setInterval(tick, 1000);
+    const controller = new AbortController();
+    const abortTimer = setTimeout(() => controller.abort(), CLIENT_TIMEOUT_MS);
     try {
-      const res = await api('/api/report', { method: 'POST', body });
+      const res = await api('/api/report', { method: 'POST', body, signal: controller.signal });
       await renderMarkdown($('rpt-output'), res.markdown || '（無內容）');
       renderMeta(res.meta, res.files);
       printBtn.hidden = !res.markdown;
       setNote('', false);
     } catch (err) {
-      setNote('產生失敗：' + err.message, true);
+      setNote(err.name === 'AbortError' ? '產生逾時，請稍後再試' : '產生失敗：' + err.message, true);
     } finally {
+      clearInterval(timer);
+      clearTimeout(abortTimer);
       genBtn.disabled = false;
     }
   };
