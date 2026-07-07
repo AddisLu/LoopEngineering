@@ -144,12 +144,16 @@ CREATE TABLE IF NOT EXISTS knowledge_edges (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   src        TEXT NOT NULL REFERENCES knowledge_nodes(id) ON DELETE CASCADE,
   dst        TEXT NOT NULL REFERENCES knowledge_nodes(id) ON DELETE CASCADE,
-  relation   TEXT NOT NULL DEFAULT 'related',  -- runs-on|constrains|deployed-at|uses|part-of|related
+  relation   TEXT NOT NULL DEFAULT 'related',  -- runs-on|constrains|deployed-at|uses|part-of|related|links-to
   note       TEXT,
   invalid_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE(src, dst, relation)
 );
+-- SSoT Phase 3: multi-hop traversal at scale needs both directions indexed — the
+-- UNIQUE(src,dst,relation) constraint's implicit index only serves src-first lookups.
+CREATE INDEX IF NOT EXISTS idx_edges_src ON knowledge_edges(src);
+CREATE INDEX IF NOT EXISTS idx_edges_dst ON knowledge_edges(dst);
 
 -- Environments: promotes `tasks.environment` from a knowledge-scope label to a real
 -- execution/deploy target (see src/deploy/store.ts). Additive — the env:<name> knowledge
@@ -275,3 +279,24 @@ END;
 CREATE TRIGGER IF NOT EXISTS chunks_ad AFTER DELETE ON chunks BEGIN
   INSERT INTO chunks_fts(chunks_fts, rowid, text, section) VALUES ('delete', old.id, old.text, old.section);
 END;
+
+-- SSoT Phase 3 (src/knowledge/wikilink.ts): outbound [[wikilink]] targets parsed out of
+-- vault/markdown documents, resolved against other documents (by basename sans extension)
+-- and curated knowledge_nodes (by title) — the "documents become graph vertices, linked
+-- both ways" half of the Obsidian-style graph (node-body wikilinks reuse knowledge_edges
+-- directly, relation='links-to', see resyncNodeWikilinks). Rebuilt wholesale on every
+-- ingest run (see resyncDocumentWikilinks) rather than incrementally, so a link stays
+-- correct even when its target is ingested by a later/different source run. Unresolved
+-- links (target_document_id AND target_node_id both NULL) are kept so a later ingest of
+-- the missing target resolves them without re-parsing document text.
+CREATE TABLE IF NOT EXISTS doc_links (
+  id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+  document_id        INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+  target_title       TEXT NOT NULL,
+  target_document_id INTEGER REFERENCES documents(id) ON DELETE CASCADE,
+  target_node_id     TEXT REFERENCES knowledge_nodes(id) ON DELETE CASCADE,
+  created_at         TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_doc_links_document ON doc_links(document_id);
+CREATE INDEX IF NOT EXISTS idx_doc_links_target_document ON doc_links(target_document_id);
+CREATE INDEX IF NOT EXISTS idx_doc_links_target_node ON doc_links(target_node_id);

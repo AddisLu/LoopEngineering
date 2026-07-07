@@ -21,8 +21,10 @@ export type Source = (typeof SOURCE)[number];
 export const STATUS = ['approved', 'draft', 'rejected'] as const;
 export type Status = (typeof STATUS)[number];
 
-/** knowledge_edges.relation — how two nodes relate. */
-export const RELATION = ['runs-on', 'constrains', 'deployed-at', 'uses', 'part-of', 'related'] as const;
+/** knowledge_edges.relation — how two nodes relate. 'links-to' is auto-derived from
+ * [[wikilink]]s in a node's body (see src/knowledge/wikilink.ts) — not normally picked
+ * by hand, but a valid value like any other relation. */
+export const RELATION = ['runs-on', 'constrains', 'deployed-at', 'uses', 'part-of', 'related', 'links-to'] as const;
 export type Relation = (typeof RELATION)[number];
 
 export interface KnowledgeNode {

@@ -8,6 +8,7 @@ import { listSources, getSource, touchSourceIngested } from './sources.js';
 import { walkSource, maskSecrets, realGitExec, type GitListExec } from './walk.js';
 import { chunkDocument, type ChunkPiece } from './chunk.js';
 import type { SourceRow, DocumentRow } from './types.js';
+import { resyncDocumentWikilinks } from '../wikilink.js';
 
 function sha256(text: string): string {
   return crypto.createHash('sha256').update(text, 'utf8').digest('hex');
@@ -173,6 +174,10 @@ export async function ingestSource(
   }
 
   touchSourceIngested(db, source.id);
+  // SSoT Phase 3: rebuild the [[wikilink]] graph over every active markdown document —
+  // wholesale, not scoped to this source, since a link's target may live in a different
+  // source (see resyncDocumentWikilinks). Cheap relative to the walk/chunk/embed work above.
+  resyncDocumentWikilinks(db);
   return result;
 }
 

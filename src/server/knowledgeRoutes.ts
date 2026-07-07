@@ -111,7 +111,16 @@ export function registerKnowledgeRoutes(app: FastifyInstance, db: Database.Datab
     return { ok: true, deleted: id };
   });
 
-  app.get('/api/knowledge/graph', async () => graph(db));
+  app.get('/api/knowledge/graph', async (req) => {
+    const query = req.query as { kind?: Kind; scope?: string; nodeId?: string; depth?: string };
+    const depth = query.depth !== undefined ? Number(query.depth) : undefined;
+    return graph(db, {
+      kind: query.kind,
+      scope: query.scope,
+      nodeId: query.nodeId,
+      depth: depth !== undefined && Number.isFinite(depth) ? depth : undefined,
+    });
+  });
 
   app.post('/api/knowledge/import', async (req, reply) => {
     const b = (req.body ?? {}) as { items?: ImportNodeInput[]; edges?: ImportEdgeInput[] };

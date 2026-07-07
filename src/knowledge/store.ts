@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3';
 import { nanoid } from 'nanoid';
 import type { KnowledgeNode, KnowledgeEdge, Kind, Source, Status } from './types.js';
+import { resyncNodeWikilinks } from './wikilink.js';
 
 // ---- nodes ----
 
@@ -49,6 +50,7 @@ export function upsertNode(db: Database.Database, input: UpsertNodeInput): Knowl
       weight: input.weight ?? existing.weight,
       status: input.status ?? existing.status,
     });
+    resyncNodeWikilinks(db);
     return getNode(db, existing.id)!;
   }
 
@@ -67,6 +69,7 @@ export function upsertNode(db: Database.Database, input: UpsertNodeInput): Knowl
     status: input.status ?? 'approved',
     weight: input.weight ?? 3,
   });
+  resyncNodeWikilinks(db);
   return getNode(db, id)!;
 }
 
@@ -152,6 +155,7 @@ export function invalidateNode(db: Database.Database, id: string): void {
   db.prepare(`UPDATE knowledge_nodes SET invalid_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`).run(
     id,
   );
+  resyncNodeWikilinks(db); // drop links-to edges other nodes had pointing at the now-inactive node
 }
 
 /** Hard delete — cascades to knowledge_edges via ON DELETE CASCADE. */
@@ -161,6 +165,7 @@ export function deleteNode(db: Database.Database, id: string): boolean {
 
 export function setStatusNode(db: Database.Database, id: string, status: 'approved' | 'rejected'): void {
   db.prepare(`UPDATE knowledge_nodes SET status = ?, updated_at = datetime('now') WHERE id = ?`).run(status, id);
+  resyncNodeWikilinks(db); // a rejected node drops out of wikilink resolution just like an invalidated one
 }
 
 // ---- edges ----
@@ -208,19 +213,205 @@ export function edgesFor(
 
 // ---- graph + bulk import ----
 
-export function graph(db: Database.Database): { nodes: KnowledgeNode[]; edges: KnowledgeEdge[] } {
-  const nodes = db
+export interface GraphOpts {
+  kind?: Kind;
+  scope?: string;
+  /** Center a multi-hop traversal on this vertex: a knowledge_nodes.id ('k_...') or a
+   * document pseudo-id ('doc_<documents.id>'). Omit for the whole (kind/scope-filtered)
+   * graph. An id matching neither a node nor a linked document degrades to an empty result. */
+  nodeId?: string;
+  /** Hop limit from nodeId (default DEFAULT_GRAPH_DEPTH, capped at MAX_GRAPH_DEPTH). Ignored without nodeId. */
+  depth?: number;
+}
+
+export interface GraphDocumentLink {
+  target_title: string;
+  target_kind: 'node' | 'document';
+  target_id: string | number;
+}
+
+/** A markdown document shown as a distinct vertex type in the graph (see
+ * src/knowledge/wikilink.ts's resyncDocumentWikilinks) — only documents that
+ * participate in at least one resolved [[wikilink]] are graph-worthy; an ingested
+ * corpus can be huge, an unlinked document belongs in RAG search, not here. */
+export interface GraphDocument {
+  id: number;
+  title: string;
+  path: string;
+  uri: string | null;
+  doc_kind: string | null;
+  source_id: string;
+  links: GraphDocumentLink[];
+}
+
+const DEFAULT_GRAPH_DEPTH = 2;
+const MAX_GRAPH_DEPTH = 6;
+
+function loadGraphDocuments(db: Database.Database): GraphDocument[] {
+  const docs = db
     .prepare(
-      `SELECT * FROM knowledge_nodes
-        WHERE invalid_at IS NULL AND status IN ('approved', 'draft')
-        ORDER BY weight DESC, created_at ASC`,
+      `SELECT id, path, uri, title, doc_kind, source_id FROM documents
+        WHERE invalid_at IS NULL AND doc_kind IN ('md', 'markdown', 'mdx')`,
     )
-    .all() as KnowledgeNode[];
-  const edges = edgesFor(
-    db,
-    nodes.map((n) => n.id),
+    .all() as {
+    id: number;
+    path: string;
+    uri: string | null;
+    title: string | null;
+    doc_kind: string | null;
+    source_id: string;
+  }[];
+  if (!docs.length) return [];
+
+  // node-kind targets are re-checked against currently-active nodes here: doc_links is
+  // only rebuilt on ingest, so a node invalidated/rejected since the last ingest would
+  // otherwise leave a dangling reference (nodes it points at aren't in the `nodes` output).
+  const activeNodeIds = new Set(
+    (
+      db
+        .prepare(`SELECT id FROM knowledge_nodes WHERE invalid_at IS NULL AND status IN ('approved', 'draft')`)
+        .all() as { id: string }[]
+    ).map((r) => r.id),
   );
-  return { nodes, edges };
+
+  const linkRows = db.prepare(`SELECT document_id, target_title, target_document_id, target_node_id FROM doc_links`).all() as {
+    document_id: number;
+    target_title: string;
+    target_document_id: number | null;
+    target_node_id: string | null;
+  }[];
+
+  const linksByDoc = new Map<number, GraphDocumentLink[]>();
+  const connected = new Set<number>();
+  for (const r of linkRows) {
+    if (r.target_node_id != null && !activeNodeIds.has(r.target_node_id)) continue;
+    if (r.target_document_id == null && r.target_node_id == null) continue; // unresolved -- not graph-worthy yet
+    const link: GraphDocumentLink =
+      r.target_node_id != null
+        ? { target_title: r.target_title, target_kind: 'node', target_id: r.target_node_id }
+        : { target_title: r.target_title, target_kind: 'document', target_id: r.target_document_id! };
+    const arr = linksByDoc.get(r.document_id) ?? [];
+    arr.push(link);
+    linksByDoc.set(r.document_id, arr);
+    connected.add(r.document_id);
+    if (link.target_kind === 'document') connected.add(link.target_id as number);
+  }
+
+  return docs
+    .filter((d) => connected.has(d.id))
+    .map((d) => ({
+      id: d.id,
+      title: d.title ?? d.path,
+      path: d.path,
+      uri: d.uri,
+      doc_kind: d.doc_kind,
+      source_id: d.source_id,
+      links: linksByDoc.get(d.id) ?? [],
+    }));
+}
+
+/** Undirected adjacency over the combined curated-node + document vertex space, used
+ * only for multi-hop BFS — relation direction doesn't matter for "what's near this node". */
+function buildGraphAdjacency(
+  nodeIds: string[],
+  edges: KnowledgeEdge[],
+  documents: GraphDocument[],
+): Map<string, Set<string>> {
+  const adj = new Map<string, Set<string>>();
+  const ensure = (v: string): Set<string> => {
+    let s = adj.get(v);
+    if (!s) {
+      s = new Set();
+      adj.set(v, s);
+    }
+    return s;
+  };
+  const link = (a: string, b: string) => {
+    ensure(a).add(b);
+    ensure(b).add(a);
+  };
+  for (const id of nodeIds) ensure(id);
+  for (const e of edges) link(e.src, e.dst);
+  for (const d of documents) {
+    const docVid = `doc_${d.id}`;
+    ensure(docVid);
+    for (const l of d.links) link(docVid, l.target_kind === 'node' ? String(l.target_id) : `doc_${l.target_id}`);
+  }
+  return adj;
+}
+
+function bfsVisited(adj: Map<string, Set<string>>, start: string, depth: number): Set<string> {
+  const visited = new Set([start]);
+  let frontier = [start];
+  for (let hop = 0; hop < depth && frontier.length; hop++) {
+    const next: string[] = [];
+    for (const v of frontier) {
+      for (const nb of adj.get(v) ?? []) {
+        if (!visited.has(nb)) {
+          visited.add(nb);
+          next.push(nb);
+        }
+      }
+    }
+    frontier = next;
+  }
+  return visited;
+}
+
+/**
+ * Curated graph, extended for SSoT Phase 3: without `nodeId`, the whole graph
+ * (optionally kind/scope-filtered, same as the original behavior). With `nodeId`, a
+ * `depth`-hop BFS neighborhood around one vertex — a knowledge_nodes.id or a document
+ * pseudo-id — so the brain UI can do "expand this node" without ever pulling the entire
+ * graph. `documents` is additive (existing callers reading only nodes/edges are unaffected).
+ */
+export function graph(
+  db: Database.Database,
+  opts: GraphOpts = {},
+): { nodes: KnowledgeNode[]; edges: KnowledgeEdge[]; documents: GraphDocument[] } {
+  const clauses = [`invalid_at IS NULL`, `status IN ('approved', 'draft')`];
+  const params: unknown[] = [];
+  if (opts.kind) {
+    clauses.push('kind = ?');
+    params.push(opts.kind);
+  }
+  if (opts.scope) {
+    clauses.push('scope = ?');
+    params.push(opts.scope);
+  }
+  let nodes = db
+    .prepare(`SELECT * FROM knowledge_nodes WHERE ${clauses.join(' AND ')} ORDER BY weight DESC, created_at ASC`)
+    .all(...params) as KnowledgeNode[];
+  // edgesFor only requires ONE endpoint in the given id list (see its OR clause) — a
+  // manual edge to a node excluded by kind/scope, or since invalidated, would otherwise
+  // dangle (an edge referencing a node absent from `nodes`). Both endpoints must be
+  // in the returned node set for an edge to be graph-worthy.
+  const baseNodeIds = new Set(nodes.map((n) => n.id));
+  let edges = edgesFor(db, [...baseNodeIds]).filter((e) => baseNodeIds.has(e.src) && baseNodeIds.has(e.dst));
+  let documents = loadGraphDocuments(db);
+
+  if (opts.nodeId) {
+    const depth = Math.min(Math.max(opts.depth ?? DEFAULT_GRAPH_DEPTH, 1), MAX_GRAPH_DEPTH);
+    const adj = buildGraphAdjacency(
+      nodes.map((n) => n.id),
+      edges,
+      documents,
+    );
+    const visited = bfsVisited(adj, opts.nodeId, depth);
+    nodes = nodes.filter((n) => visited.has(n.id));
+    const nodeIdSet = new Set(nodes.map((n) => n.id));
+    edges = edges.filter((e) => nodeIdSet.has(e.src) && nodeIdSet.has(e.dst));
+    documents = documents
+      .filter((d) => visited.has(`doc_${d.id}`))
+      .map((d) => ({
+        ...d,
+        links: d.links.filter((l) =>
+          l.target_kind === 'node' ? nodeIdSet.has(String(l.target_id)) : visited.has(`doc_${l.target_id}`),
+        ),
+      }));
+  }
+
+  return { nodes, edges, documents };
 }
 
 export interface ImportNodeInput extends UpsertNodeInput {
