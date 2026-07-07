@@ -196,6 +196,41 @@ describe('knowledge REST: draft workflow + invalidate', () => {
   });
 });
 
+describe('knowledge REST: GET /api/knowledge/:id/evidence (SSoT Phase 4)', () => {
+  it('returns [] for a node with no evidence links, and 404 for an unknown node', async () => {
+    app = buildApp({ db, apiToken: null });
+    const node = upsertNode(db, { title: 'No evidence yet', scope: 'global', status: 'draft' });
+
+    const res = await app.inject({ method: 'GET', url: `/api/knowledge/${node.id}/evidence` });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().evidence).toEqual([]);
+
+    const missing = await app.inject({ method: 'GET', url: '/api/knowledge/k_doesnotexist/evidence' });
+    expect(missing.statusCode).toBe(404);
+  });
+
+  it('returns citation-bearing chunks once linked via linkNodeToChunks', async () => {
+    app = buildApp({ db, apiToken: null });
+    const node = upsertNode(db, { title: 'Has evidence', scope: 'global', status: 'draft' });
+    db.prepare(`INSERT INTO sources (id, kind, uri) VALUES ('src_1', 'git', '/repo')`).run();
+    const docId = Number(
+      db.prepare(`INSERT INTO documents (source_id, path, doc_kind) VALUES ('src_1', 'a.ts', 'ts')`).run()
+        .lastInsertRowid,
+    );
+    const chunkId = Number(
+      db.prepare(`INSERT INTO chunks (document_id, ord, text) VALUES (?, 0, 'supporting chunk text')`).run(docId)
+        .lastInsertRowid,
+    );
+    db.prepare(`INSERT INTO node_chunk_links (node_id, chunk_id) VALUES (?, ?)`).run(node.id, chunkId);
+
+    const res = await app.inject({ method: 'GET', url: `/api/knowledge/${node.id}/evidence` });
+    expect(res.statusCode).toBe(200);
+    const { evidence } = res.json();
+    expect(evidence).toHaveLength(1);
+    expect(evidence[0]).toMatchObject({ chunk_id: chunkId, path: 'a.ts', relation: 'evidences' });
+  });
+});
+
 // ---- 4. graph shape ----
 
 describe('knowledge REST: graph payload', () => {

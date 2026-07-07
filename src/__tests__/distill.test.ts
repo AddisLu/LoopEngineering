@@ -6,7 +6,7 @@ import type Database from 'better-sqlite3';
 import type { FastifyInstance } from 'fastify';
 import { openTestDb, setSetting } from '../db/index.js';
 import { createTask, getTask, setStatus, createRun } from '../tasks.js';
-import { listNodes, upsertNode } from '../knowledge/store.js';
+import { listNodes, upsertNode, evidenceForNode } from '../knowledge/store.js';
 import { knowledgeContext } from '../knowledge/context.js';
 import {
   collectDistillMaterial,
@@ -258,7 +258,53 @@ describe('close route: distiller is fire-and-forget and properly gated', () => {
   });
 });
 
-// ---- 5. budget guard ----
+// ---- 5. SSoT Phase 4: distiller <-> corpus chunk evidence linking ----
+
+describe('runDistiller: evidence linking (SSoT Phase 4)', () => {
+  function insertSource(id: string, kind: string, uri: string): void {
+    db.prepare(`INSERT INTO sources (id, kind, uri) VALUES (?, ?, ?)`).run(id, kind, uri);
+  }
+  function insertDocument(sourceId: string, docPath: string): number {
+    const info = db
+      .prepare(`INSERT INTO documents (source_id, path, doc_kind) VALUES (?, ?, 'md')`)
+      .run(sourceId, docPath);
+    return Number(info.lastInsertRowid);
+  }
+  function insertChunk(documentId: number, text: string): number {
+    const info = db.prepare(`INSERT INTO chunks (document_id, ord, text) VALUES (?, 0, ?)`).run(documentId, text);
+    return Number(info.lastInsertRowid);
+  }
+
+  it('links a freshly-drafted node to the corpus chunk whose text matches its title', async () => {
+    insertSource('src_1', 'git', '/repo');
+    const doc = insertDocument('src_1', 'worktree.ts');
+    const chunk = insertChunk(doc, 'Distilled evidence title appears verbatim here for FTS phrase match.');
+
+    const t = getTask(db, createTask(db, { title: 't', goal: 'g', coding_tool: 'claude-code' }).id)!;
+    const fakeExec: DistillExec = async () =>
+      JSON.stringify({
+        items: [{ kind: 'fact', title: 'Distilled evidence title', body: 'body text', tags: [], scope: 'global' }],
+      });
+    const inserted = await runDistiller(db, t, 'material', fakeExec);
+    expect(inserted).toHaveLength(1);
+    const evidence = evidenceForNode(db, inserted![0].id);
+    expect(evidence.map((e) => e.chunk_id)).toContain(chunk);
+    expect(evidence[0]!.relation).toBe('evidences');
+  });
+
+  it('a node with no corpus match gets no evidence links (best-effort, never throws)', async () => {
+    const t = getTask(db, createTask(db, { title: 't', goal: 'g', coding_tool: 'claude-code' }).id)!;
+    const fakeExec: DistillExec = async () =>
+      JSON.stringify({
+        items: [{ kind: 'fact', title: 'Nothing matches this anywhere', body: 'b', tags: [], scope: 'global' }],
+      });
+    const inserted = await runDistiller(db, t, 'material', fakeExec);
+    expect(inserted).toHaveLength(1);
+    expect(evidenceForNode(db, inserted![0].id)).toEqual([]);
+  });
+});
+
+// ---- 6. budget guard ----
 
 describe('runDistiller: budget guard', () => {
   it('does not call exec when session usage is already at/over hard_limit_pct', async () => {
