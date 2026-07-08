@@ -845,6 +845,16 @@ loop ingest run &lt;source_id&gt;</code></pre>
           <tr><td><code>ingest_openproject_python</code></td><td>python3</td><td>OpenProject 連接器（<code>scripts/openproject_dump.py</code>）用的 python 執行檔；純 stdlib、不需 venv，換一台機器（例如公司 Windows 叫 <code>python</code>）改這個即可。</td></tr>
         </tbody>
       </table></div>
+
+      <h3>其他應用唯讀串接 SSoT</h3>
+      <p>除了上面任務內自動注入（<code>rag_inject_task_context</code>）與看板／CLI，任何<b>其他應用程式</b>都能<b>唯讀</b>串接這一層 SSoT——三種消費者、一句話各自入口：</p>
+      <ul>
+        <li><b>後端腳本／服務</b>：直接帶 <code>Authorization: Bearer</code> 打 REST（<code>GET /api/rag/search</code>／<code>/api/knowledge</code>／<code>/api/sources</code>／<code>/api/status</code>）。</li>
+        <li><b>瀏覽器前端</b>：先把來源 origin 加進 <code>LOOP_CORS_ORIGINS</code>，再用同一把 token 直接 <code>fetch</code>。</li>
+        <li><b>其他 LLM/Agent</b>：<code>claude mcp add --transport http</code> 接唯讀 MCP server（<code>loop_search</code>／<code>loop_recall</code>／<code>loop_sources</code>），經 tailscale serve 對外。</li>
+      </ul>
+      <div class="note warn"><span class="ic">🔒</span><span>三種消費者都用同一把<b>唯讀 token</b>（<code>~/.config/loop-engineering/env</code> 的 <code>LOOP_READONLY_TOKEN</code>，與全權 <code>LOOP_API_TOKEN</code> 分開產生、絕不印在文件裡）。<b>只能查、不能改</b>：非 <code>GET</code> 方法或白名單以外的路徑一律 <code>403</code>。</span></div>
+      <p>完整端點、CORS 設定、MCP 連法、極簡 Python/Node client 範例，見獨立文件：<a href="SSoT-連接指南.html">SSoT 連接指南</a>。</p>
     </section>
 
     <section id="metrics">
