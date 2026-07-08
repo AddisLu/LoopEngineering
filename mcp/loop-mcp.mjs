@@ -17,55 +17,15 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { readEnvFile, BASE, createApi } from './lib.mjs';
 
-// ---- resolve config from env vars, falling back to the deploy env file ----
-function readEnvFile() {
-  const p = path.join(os.homedir(), '.config', 'loop-engineering', 'env');
-  const out = {};
-  try {
-    for (const line of fs.readFileSync(p, 'utf8').split('\n')) {
-      if (line.trim().startsWith('#')) continue;
-      const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
-      if (m) out[m[1]] = m[2].trim();
-    }
-  } catch { /* no env file — use defaults */ }
-  return out;
-}
 const ENVF = readEnvFile();
-const PORT = process.env.LOOP_PORT || ENVF.LOOP_PORT || '4711';
-const BASE = (process.env.LOOP_API_URL || `http://127.0.0.1:${PORT}`).replace(/\/$/, '');
 const TOKEN = process.env.LOOP_API_TOKEN || ENVF.LOOP_API_TOKEN || '';
 const DATA_DIR = process.env.LOOP_DATA_DIR || ENVF.LOOP_DATA_DIR ||
   path.join(os.homedir(), '.local', 'share', 'loop-engineering');
 const PLANS_DIR = path.join(DATA_DIR, 'plans');
 
-function headers(json) {
-  const h = {};
-  if (TOKEN) h.Authorization = `Bearer ${TOKEN}`;
-  if (json) h['content-type'] = 'application/json';
-  return h;
-}
-async function api(pathname, { method = 'GET', body } = {}) {
-  let res;
-  try {
-    res = await fetch(BASE + pathname, {
-      method,
-      headers: headers(!!body),
-      body: body ? JSON.stringify(body) : undefined,
-    });
-  } catch (e) {
-    throw new Error(`cannot reach Loop API at ${BASE} (${e.message}). Is the service running? ` +
-      `Check: systemctl --user status loop-engineering`);
-  }
-  const text = await res.text();
-  let json;
-  try { json = text ? JSON.parse(text) : {}; } catch { json = { raw: text }; }
-  if (!res.ok) {
-    const hint = res.status === 401 ? ' (401 — token missing/wrong; MCP reads LOOP_API_TOKEN from ~/.config/loop-engineering/env)' : '';
-    throw new Error(`${method} ${pathname} -> HTTP ${res.status}${hint}: ${text.slice(0, 300)}`);
-  }
-  return json;
-}
+const api = createApi({ base: BASE, token: TOKEN });
 
 // ---- auto-detection helpers (so the caller only needs the fix + goal) ----
 function git(repo, args) {
