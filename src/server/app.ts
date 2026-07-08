@@ -41,9 +41,17 @@ import type { PersistWriteFns } from '../report/persist.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WEB_DIR = path.resolve(__dirname, '..', '..', 'web');
 
+const READONLY_PREFIXES = ['/api/rag/', '/api/knowledge', '/api/sources', '/api/status'];
+function isReadonlyAllowed(url: string): boolean {
+  const p = url.split('?')[0] ?? '';
+  return READONLY_PREFIXES.some((pre) => p === pre || p.startsWith(pre));
+}
+
 export interface AppOptions {
   db?: Database.Database;
   apiToken?: string | null;
+  /** Second, read-only bearer: GET-only, restricted to the SSoT-read whitelist (see isReadonlyAllowed). */
+  readonlyToken?: string | null;
   /** Test-only injection point for the close route's fire-and-forget distiller call. */
   distillExec?: DistillExec;
   /** Test-only injection points for POST /api/knowledge/relate (zero tokens/network). */
@@ -87,19 +95,27 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
   // back to the ambient LOOP_API_TOKEN when the caller left it unspecified. Using ??
   // here would let the env var override an intentional `apiToken: null`.
   const apiToken = opts.apiToken !== undefined ? opts.apiToken : (process.env.LOOP_API_TOKEN ?? null);
+  const readonlyToken =
+    opts.readonlyToken !== undefined ? opts.readonlyToken : (process.env.LOOP_READONLY_TOKEN ?? null);
   const app = Fastify({ logger: false });
   app.register(fastifyMultipart, { limits: { fileSize: 25 * 1024 * 1024 } });
 
   // --- bearer auth on /api/* (Tailscale is the primary boundary; this is layer 2) ---
+  // Two tokens: the full apiToken (any method, any /api/* path) and an optional
+  // readonlyToken scoped to GET requests on the SSoT-read whitelist (isReadonlyAllowed) —
+  // for external automation that should only ever query, never mutate.
   app.addHook('onRequest', async (req, reply) => {
-    if (!apiToken) return; // dev / no token configured
+    if (!apiToken && !readonlyToken) return; // dev / no token configured
     if (!req.url.startsWith('/api/')) return;
     const auth = req.headers.authorization;
     const q = (req.query as any)?.token;
-    const ok = auth === `Bearer ${apiToken}` || q === apiToken;
-    if (!ok) {
-      reply.code(401).send({ error: 'unauthorized' });
+    if (apiToken && (auth === `Bearer ${apiToken}` || q === apiToken)) return;
+    if (readonlyToken && (auth === `Bearer ${readonlyToken}` || q === readonlyToken)) {
+      if (req.method === 'GET' && isReadonlyAllowed(req.url)) return;
+      reply.code(403).send({ error: 'read-only token: forbidden' });
+      return;
     }
+    reply.code(401).send({ error: 'unauthorized' });
   });
 
   app.get('/api/status', async () => {
