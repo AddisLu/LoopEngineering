@@ -1,6 +1,7 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import fastifyStatic from '@fastify/static';
 import fastifyMultipart from '@fastify/multipart';
+import fastifyCors from '@fastify/cors';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type Database from 'better-sqlite3';
@@ -52,6 +53,8 @@ export interface AppOptions {
   apiToken?: string | null;
   /** Second, read-only bearer: GET-only, restricted to the SSoT-read whitelist (see isReadonlyAllowed). */
   readonlyToken?: string | null;
+  /** Browser CORS origin whitelist (test-only injection point; falls back to LOOP_CORS_ORIGINS). */
+  corsOrigins?: string[];
   /** Test-only injection point for the close route's fire-and-forget distiller call. */
   distillExec?: DistillExec;
   /** Test-only injection points for POST /api/knowledge/relate (zero tokens/network). */
@@ -97,8 +100,21 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
   const apiToken = opts.apiToken !== undefined ? opts.apiToken : (process.env.LOOP_API_TOKEN ?? null);
   const readonlyToken =
     opts.readonlyToken !== undefined ? opts.readonlyToken : (process.env.LOOP_READONLY_TOKEN ?? null);
+  const corsOrigins =
+    opts.corsOrigins ?? (process.env.LOOP_CORS_ORIGINS ?? '').split(',').map((s) => s.trim()).filter(Boolean);
   const app = Fastify({ logger: false });
   app.register(fastifyMultipart, { limits: { fileSize: 25 * 1024 * 1024 } });
+
+  // CORS is opt-in via LOOP_CORS_ORIGINS: empty (default) registers nothing, so
+  // behavior is byte-for-byte identical to before this option existed.
+  if (corsOrigins.length) {
+    app.register(fastifyCors, {
+      origin: corsOrigins,
+      methods: ['GET', 'OPTIONS'],
+      allowedHeaders: ['authorization', 'content-type'],
+      credentials: false,
+    });
+  }
 
   // --- bearer auth on /api/* (Tailscale is the primary boundary; this is layer 2) ---
   // Two tokens: the full apiToken (any method, any /api/* path) and an optional
