@@ -6,6 +6,7 @@ import { prepareWeekly, renderWeekly, type WeeklyDeps } from '../report/pptx/wee
 import type { AssembleFs } from '../report/pptx/assemble.js';
 import type { OpDataExec } from '../report/opdata.js';
 import type { PptxRenderExec } from '../report/pptx/render.js';
+import type { ContentExec } from '../report/pptx/status.js';
 import type { DeckSpec } from '../report/pptx/spec.js';
 
 function fakeFs(initial: Record<string, string> = {}): { fs: AssembleFs; files: Map<string, string> } {
@@ -38,6 +39,52 @@ function fakeFs(initial: Record<string, string> = {}): { fs: AssembleFs; files: 
   return { fs, files };
 }
 
+/** Live-fetch dataExec fixture: `--list-projects` resolves the registry's 'AOI 專案' by
+ * exact name match (tier 3), `--project ... --structured` returns the given WPs as
+ * newline-delimited JSON (see opdata.ts's parseJsonLines). */
+function liveWpDataExec(wps: Array<Record<string, unknown>>): OpDataExec {
+  return async (_bin, args) => {
+    if (args.includes('--list-projects')) return JSON.stringify({ id: 42, name: 'AOI 專案', identifier: 'aoi-amc' });
+    return wps.map((w) => JSON.stringify(w)).join('\n');
+  };
+}
+
+/** Routes a shared ContentExec by each prompt's distinctive heading (status.ts's
+ * buildStatusPrompt / quality.ts's buildPolishPrompt / buildJudgePrompt all start with a
+ * different `# ...` line) so one fake can drive generate/polish/judge independently —
+ * mirrors production, where all three share exactly one injected hook. */
+function dispatchExec(handlers: {
+  generate?: (prompt: string, call: number) => string | null;
+  polish?: (prompt: string, call: number) => string | null;
+  judge?: (prompt: string, call: number) => string | null;
+}): {
+  exec: ContentExec;
+  prompts: { generate: string[]; polish: string[]; judge: string[] };
+  calls: { generate: number; polish: number; judge: number };
+} {
+  const prompts = { generate: [] as string[], polish: [] as string[], judge: [] as string[] };
+  const calls = { generate: 0, polish: 0, judge: 0 };
+  const exec: ContentExec = async (prompt) => {
+    if (prompt.startsWith('# 週報 status 項目生成')) {
+      calls.generate++;
+      prompts.generate.push(prompt);
+      return handlers.generate ? handlers.generate(prompt, calls.generate) : null;
+    }
+    if (prompt.startsWith('# 週報 status 潤稿')) {
+      calls.polish++;
+      prompts.polish.push(prompt);
+      return handlers.polish ? handlers.polish(prompt, calls.polish) : null;
+    }
+    if (prompt.startsWith('# 週報內容品質評分')) {
+      calls.judge++;
+      prompts.judge.push(prompt);
+      return handlers.judge ? handlers.judge(prompt, calls.judge) : null;
+    }
+    return null;
+  };
+  return { exec, prompts, calls };
+}
+
 const PPTX_DIR = '/data/report-pptx';
 
 const ONE_PROJECT_REGISTRY = {
@@ -60,7 +107,7 @@ describe('weekly.ts: zero-impact — flag off fail-fast', () => {
   it('prepareWeekly returns null when report_pptx_enabled is false', async () => {
     setSetting(db, 'report_pptx_enabled', 'false');
     const { fs } = fakeFs();
-    const result = await prepareWeekly(db, {}, { fs, now: FIXED_NOW });
+    const result = await prepareWeekly(db, { llm: false }, { fs, now: FIXED_NOW });
     expect(result).toBeNull();
   });
 
@@ -75,7 +122,7 @@ describe('weekly.ts: zero-impact — flag off fail-fast', () => {
 describe('weekly.ts: prepareWeekly', () => {
   it('missing projects.json -> null (fail-fast with an example printed to stderr)', async () => {
     const { fs } = fakeFs();
-    const result = await prepareWeekly(db, {}, { fs, now: FIXED_NOW });
+    const result = await prepareWeekly(db, { llm: false }, { fs, now: FIXED_NOW });
     expect(result).toBeNull();
   });
 
@@ -83,7 +130,7 @@ describe('weekly.ts: prepareWeekly', () => {
     const { fs, files } = fakeFs({
       [`${PPTX_DIR}/projects.json`]: JSON.stringify(ONE_PROJECT_REGISTRY),
     });
-    const result = await prepareWeekly(db, { week: '2026-W01' }, { fs, now: FIXED_NOW });
+    const result = await prepareWeekly(db, { week: '2026-W01', llm: false }, { fs, now: FIXED_NOW });
     expect(result).not.toBeNull();
     expect(result!.specPath).toBe(`${PPTX_DIR}/weeks/2026-W01/deck-spec.json`);
     expect(result!.explainPath).toBe(`${PPTX_DIR}/weeks/2026-W01/explain-pages.json`);
@@ -108,7 +155,7 @@ describe('weekly.ts: prepareWeekly', () => {
       [`${PPTX_DIR}/projects.json`]: JSON.stringify(ONE_PROJECT_REGISTRY),
       [`${PPTX_DIR}/weeks/2026-W01/explain-pages.json`]: JSON.stringify(existingExplain),
     });
-    await prepareWeekly(db, { week: '2026-W01' }, { fs, now: FIXED_NOW });
+    await prepareWeekly(db, { week: '2026-W01', llm: false }, { fs, now: FIXED_NOW });
     const explain = JSON.parse(files.get(`${PPTX_DIR}/weeks/2026-W01/explain-pages.json`)!);
     expect(explain).toEqual(existingExplain);
   });
@@ -119,7 +166,7 @@ describe('weekly.ts: prepareWeekly', () => {
       [`${PPTX_DIR}/projects.json`]: JSON.stringify(ONE_PROJECT_REGISTRY),
       [`${PPTX_DIR}/weeks/2026-W01/deck-spec.json`]: priorDraft,
     });
-    const result = await prepareWeekly(db, { week: '2026-W01' }, { fs, now: FIXED_NOW });
+    const result = await prepareWeekly(db, { week: '2026-W01', llm: false }, { fs, now: FIXED_NOW });
     expect(files.get(`${PPTX_DIR}/weeks/2026-W01/deck-spec.json.bak`)).toBe(priorDraft);
     const newSpec = JSON.parse(files.get(`${PPTX_DIR}/weeks/2026-W01/deck-spec.json`)!);
     expect(newSpec.week).toBe('2026-W01'); // freshly assembled, not the stale draft
@@ -135,7 +182,7 @@ describe('weekly.ts: prepareWeekly', () => {
     const { fs, files } = fakeFs({
       [`${PPTX_DIR}/projects.json`]: JSON.stringify(ONE_PROJECT_REGISTRY),
     });
-    await prepareWeekly(db, { week: '2026-W01' }, { fs, now: FIXED_NOW, dataExec });
+    await prepareWeekly(db, { week: '2026-W01', llm: false }, { fs, now: FIXED_NOW, dataExec });
 
     const wpSnapshot = JSON.parse(files.get(`${PPTX_DIR}/weeks/2026-W01/workpackages/aoi-amc.json`)!);
     expect(wpSnapshot).toHaveLength(1);
@@ -159,7 +206,7 @@ describe('weekly.ts: prepareWeekly', () => {
         ],
       }),
     });
-    const result = await prepareWeekly(db, { week: '2026-W01', currentOverrides: { 'aoi-amc': 2 } }, { fs, now: FIXED_NOW });
+    const result = await prepareWeekly(db, { week: '2026-W01', currentOverrides: { 'aoi-amc': 2 }, llm: false }, { fs, now: FIXED_NOW });
     const spec = JSON.parse(files.get(result!.specPath)!) as DeckSpec;
     expect(spec.projects[0]?.roadmap.current_index).toBe(2);
   });
@@ -300,5 +347,150 @@ describe('weekly.ts: renderWeekly', () => {
     const result = await renderWeekly(db, { week: '2026-W02' }, { fs, now: FIXED_NOW, renderExec: failingExec });
     expect(result).toBeNull();
     expect(files.get(`${PPTX_DIR}/weeks/2026-W02/deck-spec.json`)).toBe(original);
+  });
+});
+
+describe('weekly.ts: T3 LLM status generation', () => {
+  const PREV_SPEC_BLACK: DeckSpec = {
+    version: 1,
+    week: '2026-W01',
+    summary: { rows: [] },
+    projects: [
+      {
+        key: 'aoi-amc',
+        pillar: 'AMC',
+        fab: 'Fab1',
+        name: 'AOI 專案',
+        roadmap: { checkpoints: [], current_index: 0 },
+        status_items: [{ text: 'A案已導入', color: 'black' }],
+        explain_pages: [],
+      },
+    ],
+  };
+
+  function oneWp(overrides: Record<string, unknown> = {}) {
+    return { id: 1001, subject: '良率驗證', status: '進行中', is_closed: false, updated_at: '2026-07-10T00:00:00Z', ...overrides };
+  }
+
+  it('llm:false (--no-llm) never calls contentExec even when injected — matches T2 exactly', async () => {
+    createSource(db, { kind: 'openproject', uri: 'http://example/openproject', config: { op_repo: '/fake/op-repo' } });
+    const { exec, calls } = dispatchExec({ generate: () => JSON.stringify({ items: [{ text: '不應該被呼叫' }] }) });
+    const { fs } = fakeFs({ [`${PPTX_DIR}/projects.json`]: JSON.stringify(ONE_PROJECT_REGISTRY) });
+    const result = await prepareWeekly(
+      db,
+      { week: '2026-W02', llm: false },
+      { fs, now: FIXED_NOW, dataExec: liveWpDataExec([oneWp()]), contentExec: exec },
+    );
+    expect(result).not.toBeNull();
+    expect(calls.generate).toBe(0);
+    expect(calls.polish).toBe(0);
+    expect(calls.judge).toBe(0);
+  });
+
+  it('LLM candidate whose text differs from last week flows through the diff pipeline as blue, sources intact', async () => {
+    setSetting(db, 'report_pptx_judge', 'false'); // isolate diff-coloring from the quality loop
+    createSource(db, { kind: 'openproject', uri: 'http://example/openproject', config: { op_repo: '/fake/op-repo' } });
+    const { exec } = dispatchExec({
+      generate: () => JSON.stringify({ items: [{ text: '良率驗證完成，達標 98.5%', sources: [{ wp: 1001 }] }] }),
+    });
+    const { fs, files } = fakeFs({
+      [`${PPTX_DIR}/projects.json`]: JSON.stringify(ONE_PROJECT_REGISTRY),
+      [`${PPTX_DIR}/weeks/2026-W01/deck-spec.json`]: JSON.stringify(PREV_SPEC_BLACK),
+    });
+    const result = await prepareWeekly(db, { week: '2026-W02' }, { fs, now: FIXED_NOW, dataExec: liveWpDataExec([oneWp()]), contentExec: exec });
+    expect(result).not.toBeNull();
+    const spec = JSON.parse(files.get(result!.specPath)!) as DeckSpec;
+    expect(spec.projects[0]?.status_items).toEqual([{ text: '良率驗證完成，達標 98.5%', color: 'blue', sources: [{ wp: 1001 }] }]);
+  });
+
+  it('LLM candidate whose text matches last week normalizes to black (continuation, not "new")', async () => {
+    setSetting(db, 'report_pptx_judge', 'false');
+    createSource(db, { kind: 'openproject', uri: 'http://example/openproject', config: { op_repo: '/fake/op-repo' } });
+    const { exec } = dispatchExec({ generate: () => JSON.stringify({ items: [{ text: 'A案已導入' }] }) });
+    const { fs, files } = fakeFs({
+      [`${PPTX_DIR}/projects.json`]: JSON.stringify(ONE_PROJECT_REGISTRY),
+      [`${PPTX_DIR}/weeks/2026-W01/deck-spec.json`]: JSON.stringify(PREV_SPEC_BLACK),
+    });
+    const result = await prepareWeekly(db, { week: '2026-W02' }, { fs, now: FIXED_NOW, dataExec: liveWpDataExec([oneWp()]), contentExec: exec });
+    const spec = JSON.parse(files.get(result!.specPath)!) as DeckSpec;
+    expect(spec.projects[0]?.status_items).toEqual([{ text: 'A案已導入', color: 'black' }]);
+  });
+
+  it('polish rewriting text back to last week\'s wording recolors it black on re-diff (polish output wins over the raw generate output)', async () => {
+    setSetting(db, 'report_pptx_judge', 'false');
+    createSource(db, { kind: 'openproject', uri: 'http://example/openproject', config: { op_repo: '/fake/op-repo' } });
+    const { exec, calls } = dispatchExec({
+      generate: () => JSON.stringify({ items: [{ text: 'A案 已經 導入了（措辭不同）' }] }),
+      polish: () => JSON.stringify({ items: [{ text: 'A案已導入' }] }),
+    });
+    const { fs, files } = fakeFs({
+      [`${PPTX_DIR}/projects.json`]: JSON.stringify(ONE_PROJECT_REGISTRY),
+      [`${PPTX_DIR}/weeks/2026-W01/deck-spec.json`]: JSON.stringify(PREV_SPEC_BLACK),
+    });
+    const result = await prepareWeekly(db, { week: '2026-W02' }, { fs, now: FIXED_NOW, dataExec: liveWpDataExec([oneWp()]), contentExec: exec });
+    const spec = JSON.parse(files.get(result!.specPath)!) as DeckSpec;
+    expect(spec.projects[0]?.status_items).toEqual([{ text: 'A案已導入', color: 'black' }]);
+    expect(calls.polish).toBe(1);
+  });
+
+  it('polish exec failure leaves the generated items untouched (still colors correctly)', async () => {
+    setSetting(db, 'report_pptx_judge', 'false');
+    createSource(db, { kind: 'openproject', uri: 'http://example/openproject', config: { op_repo: '/fake/op-repo' } });
+    const { exec } = dispatchExec({
+      generate: () => JSON.stringify({ items: [{ text: '全新項目內容' }] }),
+      polish: () => null, // polish fails -> generated text passed through unchanged
+    });
+    const { fs, files } = fakeFs({ [`${PPTX_DIR}/projects.json`]: JSON.stringify(ONE_PROJECT_REGISTRY) });
+    const result = await prepareWeekly(db, { week: '2026-W02' }, { fs, now: FIXED_NOW, dataExec: liveWpDataExec([oneWp()]), contentExec: exec });
+    const spec = JSON.parse(files.get(result!.specPath)!) as DeckSpec;
+    expect(spec.projects[0]?.status_items).toEqual([{ text: '全新項目內容', color: 'blue' }]);
+  });
+
+  it('quality loop: a failing judge triggers exactly one regenerate-with-feedback pass; still failing sets quality_flags + a warning', async () => {
+    createSource(db, { kind: 'openproject', uri: 'http://example/openproject', config: { op_repo: '/fake/op-repo' } });
+    const { exec, calls, prompts } = dispatchExec({
+      generate: (_p, call) => JSON.stringify({ items: [{ text: call === 1 ? '第一次生成內容' : '第二次生成內容' }] }),
+      judge: (_p, call) => JSON.stringify({ pass: false, score: 40, feedback: call === 1 ? '缺對策' : '仍缺對策' }),
+    });
+    const { fs, files } = fakeFs({ [`${PPTX_DIR}/projects.json`]: JSON.stringify(ONE_PROJECT_REGISTRY) });
+    const result = await prepareWeekly(db, { week: '2026-W02' }, { fs, now: FIXED_NOW, dataExec: liveWpDataExec([oneWp()]), contentExec: exec });
+    expect(result).not.toBeNull();
+    expect(calls.generate).toBe(2);
+    expect(calls.judge).toBe(2);
+    expect(prompts.generate[1]).toContain('缺對策');
+
+    const spec = JSON.parse(files.get(result!.specPath)!) as DeckSpec;
+    expect(spec.projects[0]?.quality_flags).toEqual(['仍缺對策']);
+    expect(result!.warnings.some((w) => w.includes('品質未達標'))).toBe(true);
+  });
+
+  it('judge returning garbage is an inconclusive pass — no regeneration, no quality_flags', async () => {
+    createSource(db, { kind: 'openproject', uri: 'http://example/openproject', config: { op_repo: '/fake/op-repo' } });
+    const { exec, calls } = dispatchExec({
+      generate: () => JSON.stringify({ items: [{ text: '進度正常，如期交付' }] }),
+      judge: () => 'not json at all',
+    });
+    const { fs, files } = fakeFs({ [`${PPTX_DIR}/projects.json`]: JSON.stringify(ONE_PROJECT_REGISTRY) });
+    const result = await prepareWeekly(db, { week: '2026-W02' }, { fs, now: FIXED_NOW, dataExec: liveWpDataExec([oneWp()]), contentExec: exec });
+    expect(calls.generate).toBe(1);
+    expect(calls.judge).toBe(1);
+    const spec = JSON.parse(files.get(result!.specPath)!) as DeckSpec;
+    expect(spec.projects[0]?.quality_flags).toBeUndefined();
+    expect(result!.warnings.some((w) => w.includes('品質未達標'))).toBe(false);
+  });
+
+  it('fallback chain: LLM fully unavailable -> prepare still completes, carries last week forward all-black, with a warning', async () => {
+    createSource(db, { kind: 'openproject', uri: 'http://example/openproject', config: { op_repo: '/fake/op-repo' } });
+    const { exec, calls } = dispatchExec({ generate: () => null });
+    const { fs, files } = fakeFs({
+      [`${PPTX_DIR}/projects.json`]: JSON.stringify(ONE_PROJECT_REGISTRY),
+      [`${PPTX_DIR}/weeks/2026-W01/deck-spec.json`]: JSON.stringify(PREV_SPEC_BLACK),
+    });
+    const result = await prepareWeekly(db, { week: '2026-W02' }, { fs, now: FIXED_NOW, dataExec: liveWpDataExec([oneWp()]), contentExec: exec });
+    expect(result).not.toBeNull();
+    expect(calls.judge).toBe(0); // never reached — generate never used the LLM
+    const spec = JSON.parse(files.get(result!.specPath)!) as DeckSpec;
+    expect(spec.projects[0]?.status_items).toEqual([{ text: 'A案已導入', color: 'black' }]);
+    expect(result!.warnings.some((w) => w.includes('aoi-amc') && w.includes('LLM status generation unavailable'))).toBe(true);
   });
 });
