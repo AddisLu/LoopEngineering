@@ -1,0 +1,62 @@
+{
+  "version": 1,
+  "week": "2026-W28",
+  "generated_at": "2026-07-13T00:00:00Z",
+  "summary": {
+    "rows": [
+      {
+        "pillar": "AMC",
+        "project": "AOI 專案",
+        "fab_line": "Fab1/LineA",
+        "status_items": [{ "text": "進度正常，如期交付", "color": "blue" }]
+      },
+      {
+        "pillar": "Energy",
+        "project": "能源管理專案",
+        "fab_line": "Fab2/LineB",
+        "status_items": [{ "text": "尚未啟動", "color": "black" }]
+      }
+    ]
+  },
+  "projects": [
+    {
+      "key": "aoi-amc",
+      "pillar": "AMC",
+      "fab": "Fab1",
+      "name": "AOI 專案",
+      "benefit": "提升良率 3%，降低人工複檢工時",
+      "roadmap": {
+        "checkpoints": [
+          { "label": "Kickoff", "date": "2026-06-01", "at": "Fab1", "wp": 1001 },
+          { "label": "Pilot Run", "date": "2026-07-01", "at": "Fab1", "wp": 1002 },
+          { "label": "Mass Production", "date": "2026-08-15", "at": "Fab1", "wp": 1003 }
+        ],
+        "current_index": 1
+      },
+      "status_items": [
+        { "text": "進度正常，如期交付", "color": "blue", "sources": [{ "wp": 1002 }] },
+        { "text": "良率驗證完成，達標 98.5%", "color": "black" }
+      ],
+      "explain_pages": [
+        {
+          "title": "AOI 專案本週重點",
+          "note": "Pilot run 已完成第一批次驗證，良率符合預期；下一步進入量產排程協調。",
+          "images": [
+            { "path": "/tmp/report-pptx-sample/aoi-pilot-1.png", "caption": "Pilot run 良率趨勢" },
+            { "path": "/tmp/report-pptx-sample/aoi-pilot-2.png", "caption": "缺陷分類統計" }
+          ],
+          "sources": [{ "wp": 1002 }, { "commit": "a1b2c3d" }]
+        }
+      ]
+    },
+    {
+      "key": "energy-mgmt",
+      "pillar": "Energy",
+      "fab": "Fab2",
+      "name": "能源管理專案",
+      "roadmap": { "checkpoints": [], "current_index": 0 },
+      "status_items": [],
+      "explain_pages": []
+    }
+  ]
+}
