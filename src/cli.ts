@@ -746,10 +746,11 @@ reportWeekly
   .description('組裝本週 deck-spec 草稿 + WP 快照 + explain-pages 骨架,供人工編輯把關')
   .option('--week <week>', 'ISO week id (YYYY-Www), default = this week')
   .option('--current <kv>', '<projectKey>=<index> current_index override, repeatable', collectCurrentOverride, {})
+  .option('--no-llm', '停用 LLM status 生成，維持 T2 全黑沿用行為')
   .action(async (o) => {
     const db = getDb();
     if (!requirePptxEnabled(db)) return;
-    const result = await prepareWeekly(db, { week: o.week, currentOverrides: o.current });
+    const result = await prepareWeekly(db, { week: o.week, currentOverrides: o.current, llm: o.llm });
     if (!result) return fail('prepare failed (see stderr)');
     console.log(`spec: ${result.specPath}`);
     console.log(`explain: ${result.explainPath}`);

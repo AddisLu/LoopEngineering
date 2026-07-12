@@ -1,25 +1,40 @@
 /**
- * Weekly two-stage flow: `prepareWeekly` fetches WP snapshots + drafts a deck-spec (all
- * carried-over black, per assemble.ts's fallback rule) and an explain-pages gate file for
- * a human to edit; `renderWeekly` re-validates + re-colors deterministically (so manual
- * text edits still diff correctly), applies the human's approve/reject gate on explain
- * pages, drops any page whose image is missing, renders, and writes the *actual shipped*
- * deck-spec back to disk — that's what next week's diff reads. LLM status generation is
- * T3's job; `statusCandidates` here is always an empty Map, an explicit seam for it.
+ * Weekly two-stage flow: `prepareWeekly` fetches WP snapshots, generates LLM status
+ * candidates (see status.ts/quality.ts — best-effort, any failure carries last week's
+ * items forward per assemble.ts's fallback rule) and drafts a deck-spec + an
+ * explain-pages gate file for a human to edit; `renderWeekly` re-validates + re-colors
+ * deterministically (so manual text edits still diff correctly), applies the human's
+ * approve/reject gate on explain pages, drops any page whose image is missing, renders,
+ * and writes the *actual shipped* deck-spec back to disk — that's what next week's diff
+ * reads.
  */
 import path from 'node:path';
 import type Database from 'better-sqlite3';
-import { getBool, getSetting } from '../../db/index.js';
+import { getBool, getNum, getSetting } from '../../db/index.js';
 import { DEFAULT_SETTINGS } from '../../config.js';
 import { fetchProjectWorkPackages, type OpDataExec, type OpWorkPackage } from '../opdata.js';
-import { renderDeck, qaRender, type PptxRenderExec } from './render.js';
-import { validateDeckSpec, parseRegistry, parseRoadmap, type DeckSpec, type ExplainPage, type RoadmapConfig } from './spec.js';
+import { renderDeck, qaRender, resolveManifestPath, type PptxRenderExec } from './render.js';
+import {
+  validateDeckSpec,
+  parseManifest,
+  parseRegistry,
+  parseRoadmap,
+  type DeckSpec,
+  type ExplainPage,
+  type RegistryProject,
+  type RoadmapConfig,
+} from './spec.js';
 import { classifyStatusItems, type StatusCandidate } from './diff.js';
 import { assembleDeckSpec, findPrevWeekSpec, weekId, defaultAssembleFs, type AssembleFs } from './assemble.js';
+import { detectChangedWps, generateStatusCandidates, type ContentExec } from './status.js';
+import { polishItems, judgeDeckContent } from './quality.js';
 
 export interface WeeklyDeps {
   dataExec?: OpDataExec;
   renderExec?: PptxRenderExec;
+  /** Test injection for status.ts/quality.ts's LLM calls (generate/polish/judge all
+   * share this one hook — see CLAUDE.md's "ContentExec 全注入" hermeticity constraint). */
+  contentExec?: ContentExec;
   fs?: AssembleFs;
   now?: () => Date;
 }
@@ -88,6 +103,99 @@ function resolvePptxDir(db: Database.Database): string {
   return getSetting(db, 'report_pptx_dir') || DEFAULT_SETTINGS.report_pptx_dir || '';
 }
 
+// spec.ts's own parseManifest default when summary.max_item_chars is missing/invalid —
+// reused here so an unwritten/unreadable manifest.json degrades to the exact same number.
+const DEFAULT_MAX_ITEM_CHARS = 200;
+
+function resolveMaxItemChars(db: Database.Database, assembleFs: AssembleFs): number {
+  const manifestRaw = readJson(assembleFs, resolveManifestPath(db));
+  if (manifestRaw === null) return DEFAULT_MAX_ITEM_CHARS;
+  const parsed = parseManifest(manifestRaw);
+  return parsed.ok ? parsed.manifest.summary.max_item_chars : DEFAULT_MAX_ITEM_CHARS;
+}
+
+interface StatusCandidatesResult {
+  candidates: Map<string, StatusCandidate[]>;
+  qualityFlags: Map<string, string[]>;
+}
+
+/**
+ * LLM status-candidate generation for every enabled project: changedWps (diffed against
+ * last week's persisted WP snapshot) -> generateStatusCandidates -> polishItems ->
+ * (report_pptx_judge on) judge -> on fail, one regenerate-with-feedback pass -> judge
+ * again -> still failing -> quality_flags. A project whose generation didn't actually
+ * use the LLM (guard tripped, exec null, unparseable) is left OUT of `candidates`
+ * entirely (not set to []) so assembleDeckSpec's `.has(key)` seam falls through to its
+ * own carry-last-week-forward fallback — the deck must never ship blank over an LLM
+ * hiccup. `llm=false` (the `--no-llm` CLI flag) skips this whole pass, matching T2's
+ * original all-black-carryover behavior exactly (and never touches contentExec at all).
+ */
+async function buildStatusCandidates(
+  db: Database.Database,
+  opts: {
+    enabledProjects: RegistryProject[];
+    wps: Map<string, OpWorkPackage[]>;
+    prevSpec: DeckSpec | null;
+    pptxDir: string;
+    assembleFs: AssembleFs;
+    llm: boolean;
+    contentExec?: ContentExec;
+    warnings: string[];
+  },
+): Promise<StatusCandidatesResult> {
+  const candidates = new Map<string, StatusCandidate[]>();
+  const qualityFlags = new Map<string, string[]>();
+  if (!opts.llm) return { candidates, qualityFlags };
+
+  const maxItemChars = resolveMaxItemChars(db, opts.assembleFs);
+  const budgetChars = getNum(db, 'report_budget_chars', 4000);
+  const qualityGateOn = getBool(db, 'report_pptx_judge', true);
+  const prevWeek = opts.prevSpec?.week ?? null;
+  const prevByKey = new Map((opts.prevSpec?.projects ?? []).map((p) => [p.key, p]));
+
+  for (const project of opts.enabledProjects) {
+    const currentWps = opts.wps.get(project.key) ?? [];
+    const prevProject = prevByKey.get(project.key);
+    const prevItems = prevProject?.status_items.map((i) => i.text) ?? [];
+
+    let prevWps: OpWorkPackage[] | null = null;
+    if (prevWeek) {
+      const raw = readJson(opts.assembleFs, wpSnapshotPath(opts.pptxDir, prevWeek, project.key));
+      if (Array.isArray(raw)) prevWps = raw as OpWorkPackage[];
+    }
+    const changedWps = detectChangedWps(currentWps, prevWps);
+
+    const genInput = { projectName: project.name, changedWps, allOpenWps: currentWps, prevItems, maxItemChars, budgetChars };
+    const gen = await generateStatusCandidates(db, genInput, opts.contentExec);
+    if (!gen.usedLlm) {
+      opts.warnings.push(`${project.key}: LLM status generation unavailable/failed — falling back to last week's items`);
+      continue;
+    }
+
+    let items = await polishItems(db, gen.items, maxItemChars, opts.contentExec);
+
+    if (qualityGateOn) {
+      const judgeInput = { projectName: project.name, items, explainPages: [] as ExplainPage[], changedWpCount: changedWps.length };
+      let verdict = await judgeDeckContent(db, judgeInput, opts.contentExec);
+      if (!verdict.pass) {
+        const regen = await generateStatusCandidates(db, { ...genInput, feedback: verdict.feedback }, opts.contentExec);
+        if (regen.usedLlm) {
+          items = await polishItems(db, regen.items, maxItemChars, opts.contentExec);
+          verdict = await judgeDeckContent(db, { ...judgeInput, items }, opts.contentExec);
+        }
+        if (!verdict.pass) {
+          qualityFlags.set(project.key, [verdict.feedback]);
+          opts.warnings.push(`⚠ ${project.name} 品質未達標，請把關時特別確認`);
+        }
+      }
+    }
+
+    candidates.set(project.key, items);
+  }
+
+  return { candidates, qualityFlags };
+}
+
 /**
  * Stage 1: read the registry + each enabled project's roadmap, fetch a fresh WP snapshot
  * (falling back to an empty set + warning on anything but a live hit), assemble a
@@ -100,7 +208,7 @@ function resolvePptxDir(db: Database.Database): string {
  */
 export async function prepareWeekly(
   db: Database.Database,
-  opts: { week?: string; currentOverrides?: Record<string, number> },
+  opts: { week?: string; currentOverrides?: Record<string, number>; llm?: boolean },
   deps: WeeklyDeps = {},
 ): Promise<PrepareWeeklyResult | null> {
   if (!getBool(db, 'report_pptx_enabled', false)) {
@@ -171,17 +279,31 @@ export async function prepareWeekly(
   const prevSpec = findPrevWeekSpec(pptxDir, week, assembleFs);
   const currentOverrides = new Map<string, number>(Object.entries(opts.currentOverrides ?? {}));
 
+  const { candidates: statusCandidates, qualityFlags } = await buildStatusCandidates(db, {
+    enabledProjects,
+    wps,
+    prevSpec,
+    pptxDir,
+    assembleFs,
+    llm: opts.llm !== false,
+    contentExec: deps.contentExec,
+    warnings,
+  });
+
   const deckSpec = assembleDeckSpec({
     week,
     registry,
     roadmaps,
     prevSpec,
-    statusCandidates: new Map<string, StatusCandidate[]>(), // LLM candidate seam — T3 wires this
+    statusCandidates,
     explain: new Map<string, ExplainPage[]>(), // explain pages are gated through explain-pages.json at render time
     wps,
     currentOverrides,
     now,
   });
+  if (qualityFlags.size) {
+    deckSpec.projects = deckSpec.projects.map((p) => (qualityFlags.has(p.key) ? { ...p, quality_flags: qualityFlags.get(p.key)! } : p));
+  }
 
   const specPath = specPathFor(pptxDir, week);
   if (assembleFs.exists(specPath)) {
@@ -269,6 +391,7 @@ export async function renderWeekly(
       const candidates: StatusCandidate[] = project.status_items.map((i) => ({
         text: i.text,
         ...(i.color === 'red' ? { highlight: true } : {}),
+        ...(i.sources ? { sources: i.sources } : {}),
       }));
       return {
         ...project,

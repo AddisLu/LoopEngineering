@@ -321,6 +321,17 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   report_pptx_manifest: '',
   report_pptx_python: '',
   report_pptx_timeout_ms: '120000',
+
+  // 報告生成 D 續篇（src/report/pptx/{status,quality}.ts）：LLM status 生成 + 品質閘門(T3)。
+  // report_pptx_model empty = fall back to report_model (then 'sonnet') for the content-
+  // generation call; judge reuses the board-wide llm_judge_model, not a pptx-specific one.
+  // report_pptx_judge on by default (once report_pptx_enabled is already on) — a failed
+  // gate never blocks shipping, it only flags quality_flags for human review. explain_agent
+  // is registered but not wired to automatic dispatch yet (out of scope this task) —
+  // interactive/manual use of seed/report-pptx/explain-agent-prompt.md only.
+  report_pptx_model: '',
+  report_pptx_judge: 'true',
+  report_pptx_explain_agent: 'false',
 };
 
 export const TOKEN_REFRESH_MS = 180_000; // TokenBar cadence

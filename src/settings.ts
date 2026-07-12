@@ -54,6 +54,9 @@ export const BOOL_KEYS = new Set([
   // report generation D (scripts/report_pptx.py, src/report/pptx/*.ts) — off = `loop
   // report pptx *` stays fail-fast disabled
   'report_pptx_enabled',
+  // report generation D continued (src/report/pptx/{status,quality}.ts, T3) — quality
+  // gate on by default; explain_agent only registered, not wired to auto-dispatch yet
+  'report_pptx_judge', 'report_pptx_explain_agent',
 ]);
 
 /** Accepted `integration_provider` values ('none' = the bridge is fully off). */
@@ -102,7 +105,7 @@ export function validateSetting(key: string, value: string): string | null {
     if (!/^\d{2}:\d{2}-\d{2}:\d{2}$/.test(value)) return 'day_window must be HH:MM-HH:MM (e.g. 08:00-23:00)';
   } else if (BOOL_KEYS.has(key)) {
     if (value !== 'true' && value !== 'false') return `${key} must be true or false`;
-  } else if (key === 'default_model' || key === 'voice_structure_model' || key === 'report_model') {
+  } else if (key === 'default_model' || key === 'voice_structure_model' || key === 'report_model' || key === 'report_pptx_model') {
     if (!MODEL_VALUES.has(value)) return `${key} must be one of: ${[...MODEL_VALUES].filter(Boolean).join(', ')} (or empty for CLI default)`;
   } else if (key === 'integration_provider') {
     if (!INTEGRATION_PROVIDER_VALUES.has(value)) return `integration_provider must be one of: ${[...INTEGRATION_PROVIDER_VALUES].join(', ')}`;
