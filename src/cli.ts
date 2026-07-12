@@ -49,7 +49,7 @@ import { generateReport } from './report/generate.js';
 import { listReportTemplates, importReportTemplates } from './report/templates.js';
 import { validateDeckSpec } from './report/pptx/spec.js';
 import { renderDeck, qaRender, resolvePythonBin, resolveTemplatePath, resolveManifestPath } from './report/pptx/render.js';
-import { prepareWeekly, renderWeekly } from './report/pptx/weekly.js';
+import { prepareWeekly, renderWeekly, runWeekly } from './report/pptx/weekly.js';
 
 const program = new Command();
 program.name('loop').description('Loop Engineering — token-aware coding-task scheduler').version('0.1.0');
@@ -773,6 +773,37 @@ reportWeekly
     if (!result) return fail('render failed (see stderr)');
     console.log(`output: ${result.output}`);
     console.log(`slides: ${result.slides}`);
+    if (result.warnings.length) {
+      console.error('[warnings]');
+      for (const w of result.warnings) console.error(`  ${w}`);
+    }
+  });
+
+function reportQualityFlagsSummary(qualityFlags: Record<string, string[]>): void {
+  const flagged = Object.entries(qualityFlags);
+  if (!flagged.length) return;
+  console.error('[quality flags]');
+  for (const [key, flags] of flagged) console.error(`  ${key}: ${flags.join('; ')}`);
+}
+
+reportWeekly
+  .command('run')
+  .description('一鍵:本週 deck-spec 不存在則 prepare+render,已存在則只 render(把關安全:未批准說明頁一律不進 deck)')
+  .option('--week <week>', 'ISO week id (YYYY-Www), default = this week')
+  .option('--qa', 'also run the LibreOffice+pdftoppm visual QA pass')
+  .option('--no-llm', '停用 LLM status 生成 (僅在本次需要 prepare 時生效)')
+  .action(async (o) => {
+    const db = getDb();
+    if (!requirePptxEnabled(db)) return;
+    const result = await runWeekly(db, { week: o.week, qa: o.qa, llm: o.llm });
+    if (!result) return fail('run failed (see stderr)');
+    console.log(`output: ${result.output}`);
+    console.log(`slides: ${result.slides}`);
+    const gateLabel = result.explainApproved
+      ? `${result.explainPageCount} 頁已批准`
+      : `${result.explainPageCount} 頁未批准(已剔除)`;
+    console.log(`說明頁狀態: ${gateLabel}`);
+    reportQualityFlagsSummary(result.qualityFlags);
     if (result.warnings.length) {
       console.error('[warnings]');
       for (const w of result.warnings) console.error(`  ${w}`);
