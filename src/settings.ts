@@ -19,6 +19,8 @@ export const NONNEG_KEYS = new Set([
   'ingest_pump_interval_min',
   // report generation A
   'report_budget_chars', 'report_timeout_ms',
+  // report generation D (PPTX)
+  'report_pptx_timeout_ms',
 ]);
 // values must be a number in [0, 1] (a fraction/weight, unlike the 0-100 PERCENT_KEYS)
 export const UNIT_INTERVAL_KEYS = new Set(['rag_hybrid_alpha']);
@@ -49,6 +51,9 @@ export const BOOL_KEYS = new Set([
   'report_enabled', 'report_live_first',
   // report generation C (src/report/persist.ts) — off = never writes report files to disk
   'report_persist',
+  // report generation D (scripts/report_pptx.py, src/report/pptx/*.ts) — off = `loop
+  // report pptx *` stays fail-fast disabled
+  'report_pptx_enabled',
 ]);
 
 /** Accepted `integration_provider` values ('none' = the bridge is fully off). */

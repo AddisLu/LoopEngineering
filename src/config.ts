@@ -308,6 +308,19 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // under report_output_dir/<project>/<date-topic>/ for the user's own git to track.
   report_persist: 'false',
   report_output_dir: path.join(DATA_DIR, 'reports'),
+
+  // 報告生成 D（scripts/report_pptx.py, src/report/pptx/*.ts）：企業週報 PPTX 確定性渲染
+  // 器 -- python-pptx fill-only,絕不在執行期生成版面。off by default = zero behavior
+  // change -- `loop report pptx *` fail-fasts until opted in. template/manifest empty
+  // string = default to <report_pptx_dir>/template/{fillready.pptx,manifest.json} (see
+  // src/report/pptx/render.ts's resolveTemplatePath/resolveManifestPath). The real
+  // fillready.pptx is company-confidential and never lives in this repo.
+  report_pptx_enabled: 'false',
+  report_pptx_dir: path.join(DATA_DIR, 'report-pptx'),
+  report_pptx_template: '',
+  report_pptx_manifest: '',
+  report_pptx_python: '',
+  report_pptx_timeout_ms: '120000',
 };
 
 export const TOKEN_REFRESH_MS = 180_000; // TokenBar cadence
