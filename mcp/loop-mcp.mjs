@@ -180,6 +180,7 @@ server.registerTool('loop_add_task', {
     verify_rubric: z.string().optional().describe('Acceptance criteria — what "done" means. Required when verify_mode includes "llm"; also shown to a human for a "manual" review.'),
     verify_timeout_min: z.number().int().optional().describe('Per-task verify per-step timeout override, in minutes (default: the verify_step_timeout_min setting, 10).'),
     requires: z.string().optional().describe('CSV of capability tokens this task needs this HOST to have (e.g. "gpu", "camera", "network", "os:windows"). If the host\'s `host_capabilities` setting is missing one, command verification is skipped and the task auto-defers to manual review instead of failing — use this when a task needs hardware/OS this machine may not have.'),
+    experiment: z.string().optional().describe('A/B cohort label for measurement (e.g. "ab_A"/"ab_B"). Pure tag — never affects scheduling/gate; compare cohorts later with the `loop experiment` CLI or metrics.experiment_ab.'),
   },
 }, async (a) => {
   const isMock = a.coding_tool === 'mock';
@@ -216,6 +217,7 @@ server.registerTool('loop_add_task', {
       verify_rubric: a.verify_rubric ?? null,
       verify_timeout_min: a.verify_timeout_min ?? null,
       requires: a.requires ?? null,
+      experiment: a.experiment ?? null,
     },
   });
   const id = created.task?.id;

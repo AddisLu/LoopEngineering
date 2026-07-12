@@ -35,6 +35,10 @@ export const BOOL_KEYS = new Set([
   'knowledge_inject', 'knowledge_distill',
   // execution-discipline prompt (experimental, opt-in)
   'prompt_discipline',
+  // SDD Phase 2: per-child self-contained specs from the epic planner (opt-in)
+  'sdd_specs',
+  // SDD Phase 3: per-complexity model routing (opt-in)
+  'model_routing',
   // ADO/GitHub integration bridge
   'integration_pushback',
   // mobile voice -> task intake
@@ -73,6 +77,8 @@ export const TUNABLE_KEYS = [
   'git_fetch_base', 'auto_push_branch', 'auto_merge', 'merge_conflict_task',
   // execution model
   'default_model',
+  // per-complexity model routing (SDD Phase 3, opt-in)
+  'model_routing', 'route_S', 'route_M', 'route_L',
   // execution-discipline prompt (experimental, opt-in)
   'prompt_discipline',
   // mobile voice -> task intake
@@ -97,7 +103,10 @@ export function validateSetting(key: string, value: string): string | null {
     if (!/^\d{2}:\d{2}-\d{2}:\d{2}$/.test(value)) return 'day_window must be HH:MM-HH:MM (e.g. 08:00-23:00)';
   } else if (BOOL_KEYS.has(key)) {
     if (value !== 'true' && value !== 'false') return `${key} must be true or false`;
-  } else if (key === 'default_model' || key === 'voice_structure_model' || key === 'report_model') {
+  } else if (
+    key === 'default_model' || key === 'voice_structure_model' || key === 'report_model' ||
+    key === 'route_S' || key === 'route_M' || key === 'route_L'
+  ) {
     if (!MODEL_VALUES.has(value)) return `${key} must be one of: ${[...MODEL_VALUES].filter(Boolean).join(', ')} (or empty for CLI default)`;
   } else if (key === 'integration_provider') {
     if (!INTEGRATION_PROVIDER_VALUES.has(value)) return `integration_provider must be one of: ${[...INTEGRATION_PROVIDER_VALUES].join(', ')}`;

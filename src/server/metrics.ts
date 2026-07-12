@@ -38,6 +38,22 @@ export interface MetricsSnapshot {
       avg_cycle_min: number | null;
     }[];
   };
+  // SDD Phase 1: free-text A/B cohort comparison (tasks.experiment). Unlike discipline_ab's
+  // fixed 0/1 groups, cohorts are whatever labels exist. Counts terminal tasks (closed |
+  // attention | failed) so pass_rate has an honest denominator; avg_session_pct is the
+  // quota cost of ALL terminal tasks in the cohort (a failed/attention task still burned %).
+  experiment_ab: {
+    groups: {
+      experiment: string;
+      count: number; // terminal tasks in the cohort
+      passed: number; // status = 'closed'
+      pass_rate: number; // passed / count
+      avg_session_pct: number | null;
+      attention_rate: number;
+      avg_resume_count: number | null;
+      avg_cycle_min: number | null;
+    }[];
+  };
 }
 
 /** Parse a stored timestamp (sqlite "YYYY-MM-DD HH:MM:SS" UTC, or ISO). */
@@ -216,6 +232,54 @@ export function computeMetrics(db: Database.Database, opts: { days?: number } = 
     };
   });
 
+  // ---- experiment A/B: does {SDD spec + cheap model} beat {vague goal + sonnet}? ----
+  // Cohorts are the distinct tasks.experiment labels. Denominator = TERMINAL tasks so a
+  // failed/attention run counts against its cohort's pass_rate (unlike discipline_ab which
+  // only looks at closed tasks). Rows predating the column (experiment IS NULL) are excluded.
+  const experimentRows = db
+    .prepare(
+      `SELECT
+         t.experiment AS experiment,
+         t.status AS status,
+         t.resume_count AS resume_count,
+         t.created_at AS created_at,
+         t.updated_at AS updated_at,
+         (SELECT SUM(session_pct_after - session_pct_before) FROM task_runs
+            WHERE task_id = t.id AND session_pct_after IS NOT NULL AND session_pct_before IS NOT NULL) AS session_delta,
+         (SELECT COUNT(*) FROM task_events WHERE task_id = t.id AND kind = 'status' AND to_status = 'attention') AS attention_count
+       FROM tasks t
+       WHERE t.experiment IS NOT NULL AND t.experiment <> ''
+         AND t.status IN ('closed', 'attention', 'failed')
+         AND t.updated_at >= datetime('now', ?)`,
+    )
+    .all(since) as {
+    experiment: string;
+    status: string;
+    resume_count: number;
+    created_at: string;
+    updated_at: string;
+    session_delta: number | null;
+    attention_count: number;
+  }[];
+  const experimentTags = [...new Set(experimentRows.map((r) => r.experiment))].sort();
+  const experimentGroups = experimentTags.map((tag) => {
+    const rows = experimentRows.filter((r) => r.experiment === tag);
+    const passed = rows.filter((r) => r.status === 'closed');
+    const sessionDeltas = rows.map((r) => r.session_delta).filter((d): d is number => d != null);
+    // cycle time only means created->closed; non-closed terminal tasks have no real cycle.
+    const cycleMins = passed.map((r) => (tsToMs(r.updated_at) - tsToMs(r.created_at)) / 60000);
+    return {
+      experiment: tag,
+      count: rows.length,
+      passed: passed.length,
+      pass_rate: rows.length ? passed.length / rows.length : 0,
+      avg_session_pct: avg(sessionDeltas),
+      attention_rate: rows.length ? rows.filter((r) => r.attention_count > 0).length / rows.length : 0,
+      avg_resume_count: avg(rows.map((r) => r.resume_count)),
+      avg_cycle_min: avg(cycleMins),
+    };
+  });
+
   return {
     days,
     throughput: { by_day, total_closed },
@@ -248,5 +312,6 @@ export function computeMetrics(db: Database.Database, opts: { days?: number } = 
       merge_conflict_tasks: mergeConflictTasks.n,
     },
     discipline_ab: { groups: disciplineGroups },
+    experiment_ab: { groups: experimentGroups },
   };
 }

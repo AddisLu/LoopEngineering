@@ -4,6 +4,7 @@ import { countByStatus, listTasks, latestRun, activeRunCosts, dependencyState, s
 import { validateTask } from '../gate/validateTask.js';
 import { readUsage } from '../token/usage.js';
 import { estimatePct, estimateWeeklyPct } from '../token/accounting.js';
+import { resolveModel } from '../orchestrator/run.js';
 import type { Task, UsageReading } from '../types.js';
 import { resolvePolicy, type Policy } from './policy.js';
 import { checkBreaker, checkWindowSwitch } from './breaker.js';
@@ -134,11 +135,13 @@ export function tick(db: Database.Database, deps: TickDeps): TickInfo {
 
   if (getBool(db, 'concurrency_reserve', true)) {
     for (const rc of activeRunCosts(db)) {
+      // Phase 4: reserve against the in-flight run's OWN model estimate (rc.model), so a cheap
+      // run doesn't over-reserve at the sonnet seed. Null (pre-migration rows) -> legacy estimate.
       const spentS = rc.session_pct_before != null ? reading.session.percent - rc.session_pct_before : 0;
-      headroom -= Math.max(0, estimatePct(db, rc.complexity) - Math.max(0, spentS));
+      headroom -= Math.max(0, estimatePct(db, rc.complexity, rc.model) - Math.max(0, spentS));
       if (weeklyPacking) {
         const spentW = rc.weekly_pct_before != null ? reading.weekly.percent - rc.weekly_pct_before : 0;
-        weeklyHeadroom -= Math.max(0, estimateWeeklyPct(db, rc.complexity) - Math.max(0, spentW));
+        weeklyHeadroom -= Math.max(0, estimateWeeklyPct(db, rc.complexity, rc.model) - Math.max(0, spentW));
       }
     }
   }
@@ -151,8 +154,11 @@ export function tick(db: Database.Database, deps: TickDeps): TickInfo {
   let starveReserved = false;
   for (const c of candidates) {
     if (cap <= 0) break;
-    const est = estimatePct(db, c.task.complexity);
-    const estW = weeklyPacking ? estimateWeeklyPct(db, c.task.complexity) : 0;
+    // Phase 4: fit against the model this task will actually dispatch under (routing-aware),
+    // so a cheaper model's smaller footprint lets the gate pack more work into the same headroom.
+    const cModel = resolveModel(db, c.task) ?? 'default';
+    const est = estimatePct(db, c.task.complexity, cModel);
+    const estW = weeklyPacking ? estimateWeeklyPct(db, c.task.complexity, cModel) : 0;
     if (est > headroom || estW > weeklyHeadroom) {
       // #4 anti-starvation reserve: if the highest-priority QUEUED task has aged past the
       // threshold but doesn't fit yet, stop here — don't let cheaper, lower-priority work

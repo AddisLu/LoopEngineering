@@ -30,6 +30,7 @@ export interface NewTaskInput {
   pipeline_id?: string | null;
   stage_name?: string | null;
   source_ref?: string | null;
+  experiment?: string | null;
 }
 
 export function createTask(db: Database.Database, input: NewTaskInput): Task {
@@ -38,11 +39,11 @@ export function createTask(db: Database.Database, input: NewTaskInput): Task {
     `INSERT INTO tasks (id, title, goal, plan_ref, plan_kind, coding_tool, verification_steps,
        setup_cmd, repo_path, base_branch, complexity, priority, model, timeout_min, depends_on, environment,
        verify_mode, verify_rubric, verify_timeout_min, requires, owner, created_by, parent_id,
-       pipeline_id, stage_name, source_ref, status)
+       pipeline_id, stage_name, source_ref, experiment, status)
      VALUES (@id, @title, @goal, @plan_ref, @plan_kind, @coding_tool, @verification_steps,
        @setup_cmd, @repo_path, @base_branch, @complexity, @priority, @model, @timeout_min, @depends_on, @environment,
        @verify_mode, @verify_rubric, @verify_timeout_min, @requires, @owner, @created_by, @parent_id,
-       @pipeline_id, @stage_name, @source_ref, 'draft')`,
+       @pipeline_id, @stage_name, @source_ref, @experiment, 'draft')`,
   ).run({
     id,
     title: input.title,
@@ -70,6 +71,7 @@ export function createTask(db: Database.Database, input: NewTaskInput): Task {
     pipeline_id: input.pipeline_id ?? null,
     stage_name: input.stage_name ?? null,
     source_ref: input.source_ref ?? null,
+    experiment: input.experiment ?? null,
   });
   logEvent(db, { task_id: id, kind: 'status', to_status: 'draft', detail: 'created' });
   return getTask(db, id)!;
@@ -235,14 +237,15 @@ export function createRun(
     weekly_pct_before?: number | null;
     dispatch_window?: string | null;
     discipline?: number | null;
+    model?: string | null;
   },
 ): TaskRun {
   const id = `r_${nanoid(10)}`;
   db.prepare(
     `INSERT INTO task_runs (id, task_id, resume_of, attempt, worktree_path, branch, log_path,
-       session_pct_before, weekly_pct_before, dispatch_window, discipline)
+       session_pct_before, weekly_pct_before, dispatch_window, discipline, model)
      VALUES (@id, @task_id, @resume_of, @attempt, @worktree_path, @branch, @log_path,
-       @session_pct_before, @weekly_pct_before, @dispatch_window, @discipline)`,
+       @session_pct_before, @weekly_pct_before, @dispatch_window, @discipline, @model)`,
   ).run({
     id,
     task_id: args.task_id,
@@ -255,6 +258,7 @@ export function createRun(
     weekly_pct_before: args.weekly_pct_before ?? null,
     dispatch_window: args.dispatch_window ?? null,
     discipline: args.discipline ?? null,
+    model: args.model ?? null,
   });
   return getRun(db, id)!;
 }
@@ -293,13 +297,15 @@ export interface ActiveRunCost {
   complexity: Complexity;
   session_pct_before: number | null;
   weekly_pct_before: number | null;
+  model: string | null; // SDD Phase 4: the run's resolved model, so the reserve keys its estimate too
 }
 export function activeRunCosts(db: Database.Database): ActiveRunCost[] {
   return db
     .prepare(
       `SELECT t.complexity AS complexity,
               r.session_pct_before AS session_pct_before,
-              r.weekly_pct_before  AS weekly_pct_before
+              r.weekly_pct_before  AS weekly_pct_before,
+              r.model              AS model
          FROM task_runs r JOIN tasks t ON t.id = r.task_id
         WHERE r.finished_at IS NULL`,
     )

@@ -25,12 +25,18 @@ function deltas(
   complexity: Complexity,
   beforeCol: string,
   afterCol: string,
+  model?: string | null,
 ): number[] {
+  // SDD Phase 4: an optional model filter keys the sample on (complexity, model) so a cheaper
+  // implementation model calibrates separately. Omitting model (or passing null/'') reproduces
+  // the exact legacy query — same rows as before, so estimator behavior is unchanged when off.
+  const modelClause = model ? ' AND r.model = ?' : '';
+  const params: unknown[] = model ? [complexity, model] : [complexity];
   const rows = db
     .prepare(
       `SELECT r.${beforeCol} AS b, r.${afterCol} AS a
          FROM task_runs r JOIN tasks t ON t.id = r.task_id
-        WHERE t.complexity = ?
+        WHERE t.complexity = ?${modelClause}
           AND r.${beforeCol} IS NOT NULL
           AND r.${afterCol} IS NOT NULL
           AND r.interrupted_by IS NULL
@@ -39,18 +45,18 @@ function deltas(
         ORDER BY r.started_at DESC
         LIMIT 20`,
     )
-    .all(complexity) as { b: number; a: number }[];
+    .all(...params) as { b: number; a: number }[];
   return rows.map((r) => r.a - r.b).filter((d) => d >= 0);
 }
 
-/** Measured session %-point cost of completed runs. */
-export function runDeltas(db: Database.Database, complexity: Complexity): number[] {
-  return deltas(db, complexity, 'session_pct_before', 'session_pct_after');
+/** Measured session %-point cost of completed runs (optionally keyed by model — Phase 4). */
+export function runDeltas(db: Database.Database, complexity: Complexity, model?: string | null): number[] {
+  return deltas(db, complexity, 'session_pct_before', 'session_pct_after', model);
 }
 
-/** Measured weekly %-point cost of completed runs (Phase 3 #2). */
-export function weeklyRunDeltas(db: Database.Database, complexity: Complexity): number[] {
-  return deltas(db, complexity, 'weekly_pct_before', 'weekly_pct_after');
+/** Measured weekly %-point cost of completed runs (Phase 3 #2; optionally model-keyed — Phase 4). */
+export function weeklyRunDeltas(db: Database.Database, complexity: Complexity, model?: string | null): number[] {
+  return deltas(db, complexity, 'weekly_pct_before', 'weekly_pct_after', model);
 }
 
 /** Linear-interpolated percentile (p in 0..1) of a numeric sample. */
@@ -76,8 +82,11 @@ function median(xs: number[]): number {
  * (a safety margin over the median so a run is less likely to overrun its headroom),
  * else the seeded default.
  */
-export function estimatePct(db: Database.Database, complexity: Complexity): number {
-  const ds = runDeltas(db, complexity);
+export function estimatePct(db: Database.Database, complexity: Complexity, model?: string | null): number {
+  // Phase 4: with enough (complexity, model) samples, use that model's own p75; otherwise fall
+  // back to the per-complexity seed (sonnet-calibrated) — a strictly SAFE over-estimate for a
+  // cheaper model at cold start, so the fit gate never under-reserves. No new seed keys needed.
+  const ds = runDeltas(db, complexity, model);
   if (ds.length >= MIN_SAMPLES) {
     const p = percentile(ds, 0.75);
     if (Number.isFinite(p)) return p;
@@ -90,8 +99,8 @@ export function estimatePct(db: Database.Database, complexity: Complexity): numb
  * Same calibration shape as estimatePct, against the weekly before/after columns;
  * uses the median (weekly deltas are coarser, no extra p75 margin needed).
  */
-export function estimateWeeklyPct(db: Database.Database, complexity: Complexity): number {
-  const ds = weeklyRunDeltas(db, complexity);
+export function estimateWeeklyPct(db: Database.Database, complexity: Complexity, model?: string | null): number {
+  const ds = weeklyRunDeltas(db, complexity, model);
   if (ds.length >= MIN_SAMPLES) {
     const m = median(ds);
     if (Number.isFinite(m)) return m;

@@ -113,6 +113,9 @@ function migrate(db: Database.Database): void {
   add('tasks', [['parent_id', 'TEXT']]);
   // execution-discipline A/B: which side of prompt_discipline a run was dispatched under.
   add('task_runs', [['discipline', 'INTEGER']]);
+  // SDD Phase 4: resolved model at dispatch, so estimatePct can key cost on (complexity, model)
+  // — see src/token/accounting.ts. Nullable; pre-migration rows only feed the legacy no-model query.
+  add('task_runs', [['model', 'TEXT']]);
   // delivery pipeline templates: which pipeline instance + stage this task materializes
   // from (see src/pipeline/materialize.ts). Nullable; distinct from parent_id/depends_on.
   add('tasks', [
@@ -123,6 +126,9 @@ function migrate(db: Database.Database): void {
   // src/integrations/import.ts) — nullable, drives idempotent re-import + pushback.
   add('tasks', [['source_ref', 'TEXT']]);
   db.exec('CREATE INDEX IF NOT EXISTS idx_tasks_source_ref ON tasks(source_ref)');
+  // SDD Phase 1: A/B experiment cohort label (see src/server/metrics.ts experiment_ab).
+  // Nullable, write-only from intake, never read by scheduler/gate — pure measurement tag.
+  add('tasks', [['experiment', 'TEXT']]);
   // auto-relate (see src/knowledge/relate.ts): edges get a review state just like nodes —
   // existing rows default to 'approved' (unaffected), LLM-suggested edges land as 'draft'.
   add('knowledge_edges', [["status", "TEXT NOT NULL DEFAULT 'approved'"]]);

@@ -35,6 +35,10 @@ CREATE TABLE IF NOT EXISTS tasks (
                                               -- (e.g. gpu, camera, network, os:windows) — unmet
                                               -- ones defer command verification to manual
 
+  -- A/B experiment cohort label (see src/server/metrics.ts experiment_ab). Write-only from
+  -- intake, NEVER read by scheduler/gate — a pure measurement tag. Nullable = zero behavior change.
+  experiment     TEXT,
+
   -- lifecycle
   status         TEXT NOT NULL DEFAULT 'draft',
     -- draft|ready|queued|running|verifying|blocked|attention|review|failed|closed
@@ -77,6 +81,8 @@ CREATE TABLE IF NOT EXISTS task_runs (
   weekly_pct_after   REAL,
   dispatch_window    TEXT,                        -- Phase 3 #1: 'day' | 'night' at dispatch time
   discipline     INTEGER,                        -- 0|1: prompt_discipline setting at dispatch time
+  model          TEXT,                            -- SDD Phase 4: resolved model at dispatch
+                                                  -- ('sonnet'|'haiku'|'default'...) for model-aware cost calibration
 
   started_at     TEXT NOT NULL DEFAULT (datetime('now')),
   finished_at    TEXT

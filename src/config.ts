@@ -102,7 +102,12 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   timeout_M: '45',
   timeout_L: '120',
 
-  // model routing per complexity
+  // model routing per complexity (SDD Phase 3, src/orchestrator/run.ts resolveModel).
+  // Off by default = every implementation run uses default_model, exactly as before. When on,
+  // route_<S|M|L> picks the model per complexity; a per-task `model` still overrides. A slot of
+  // 'default'/'' falls through to default_model (not the costly CLI default). Only flip route_S
+  // to a cheaper model (e.g. haiku) once sdd_specs is on AND the Phase-1 A/B proves it holds up.
+  model_routing: 'false',
   route_S: 'sonnet',
   route_M: 'default',
   route_L: 'default',
@@ -210,6 +215,12 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // change to LOOP_TASK.md; measure the effect via computeMetrics' discipline_ab block before
   // ever flipping this on for real work.
   prompt_discipline: 'false',
+
+  // SDD Phase 2 (src/orchestrator/planner.ts): when on, the epic planner asks for a
+  // self-contained spec per child and writes each child its OWN plan_ref (spec-*.md) instead
+  // of sharing the epic brief — so a cheaper implementation model can do each reliably. Off by
+  // default = byte-identical planner prompt + children keep inheriting epic.plan_ref (zero impact).
+  sdd_specs: 'false',
 
   // ADO/GitHub integration bridge (src/integrations/): pull work-items -> Loop tasks and
   // push results back. Off by default = zero external calls; credentials come from

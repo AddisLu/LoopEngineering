@@ -56,6 +56,33 @@ export function pickAdapter(task: Task, db: Database.Database): Adapter {
 }
 
 /**
+ * Resolve the model for a task's IMPLEMENTATION run. Precedence:
+ *   1. task.model (non-empty) — the per-task override always wins (unchanged contract).
+ *   2. model_routing on -> route_<complexity> (SDD Phase 3): route budget-cheap complexities
+ *      to a cheaper model once their specs are precise enough (see sdd_specs). A route slot of
+ *      ''/'default' means "fall through to default_model" (NOT the costly interactive CLI
+ *      default), so an unset bucket still inherits the board default rather than dropping tiers.
+ *   3. default_model.
+ * A final ''/'default' -> null (no --model flag, CLI default), exactly as before. With
+ * model_routing OFF this reduces to `task.model || default_model || null` — the same dispatch
+ * as the previous inline expression (model.test.ts stays green). Routing applies ONLY to
+ * implementation runs; the epic planner + SDD spec authoring stay on default_model (planner.ts).
+ */
+export function resolveModel(db: Database.Database, task: Task): string | null {
+  // A per-task model is non-empty => it WINS (incl. the explicit literal 'default', which
+  // then resolves to null = CLI default), so a task can always pin/opt-out of routing.
+  const perTask = task.model?.trim();
+  if (perTask) return perTask === 'default' ? null : perTask;
+  let chosen = '';
+  if (getBool(db, 'model_routing', false)) {
+    const routed = (getSetting(db, `route_${task.complexity}`) ?? '').trim();
+    if (routed && routed !== 'default') chosen = routed; // ''/'default' route -> fall through
+  }
+  if (!chosen) chosen = (getSetting(db, 'default_model') ?? '').trim();
+  return chosen && chosen !== 'default' ? chosen : null;
+}
+
+/**
  * Commit a WIP checkpoint for a run that was interrupted (breaker/timeout/user), so
  * nothing uncommitted is lost and a resume has a base to build on. No-op on a clean
  * worktree. Best-effort: a commit failure is logged, never thrown. Returns true iff
@@ -155,6 +182,10 @@ export async function runTask(
   }
 
   const disciplineOn = getBool(db, 'prompt_discipline', false);
+  // Resolve the model ONCE: raw (null => CLI default, no --model) for dispatch, and a non-null
+  // key ('default' when null) for storage + model-aware cost calibration (SDD Phase 3/4).
+  const dispatchModel = resolveModel(db, task);
+  const modelKey = dispatchModel ?? 'default';
   const logPath = path.join(paths.logsDir, `${task.id}-${Date.now()}.jsonl`);
   const run = createRun(db, {
     task_id: task.id,
@@ -167,6 +198,7 @@ export async function runTask(
     weekly_pct_before: weeklyBefore,
     dispatch_window: dispatchWindow,
     discipline: disciplineOn ? 1 : 0,
+    model: modelKey,
   });
 
   const taskFilePath = writeTaskFile(worktreePath, task, {
@@ -204,7 +236,7 @@ export async function runTask(
   }
   if (!isMock) writeSettingsLocal(worktreePath, hardLimit);
 
-  const est = estimatePct(db, task.complexity);
+  const est = estimatePct(db, task.complexity, modelKey);
   db.prepare('UPDATE tasks SET est_session_pct = ? WHERE id = ?').run(est, task.id);
   setStatus(db, task.id, 'running', { run_id: run.id, session_pct: before });
   logEvent(db, {
@@ -235,9 +267,9 @@ export async function runTask(
       cwd: worktreePath,
       taskFilePath,
       logPath,
-      // per-task model wins; else the board-wide default_model (keeps costly runs off
-      // the interactive default). Empty/'default' -> no --model (CLI default).
-      model: task.model || getSetting(db, 'default_model') || null,
+      // resolved once above: per-task model wins; else per-complexity routing (model_routing);
+      // else default_model. null/'default' -> no --model (CLI default). See resolveModel.
+      model: dispatchModel,
       timeoutMs,
       resumeSessionId: resumeSid,
       resume: !!opts.resume,

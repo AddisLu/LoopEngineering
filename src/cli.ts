@@ -70,6 +70,7 @@ program
   .option('--rubric <text>', 'acceptance criteria for the llm judge / manual review')
   .option('--verify-timeout <min>', 'per-task verify per-step timeout override (minutes)', (v) => parseInt(v, 10))
   .option('--requires <csv>', 'comma-separated capability tokens this task needs (e.g. gpu,camera,os:windows) — unmet ones defer command verification to manual')
+  .option('--experiment <tag>', 'A/B cohort label for measurement (see `loop experiment`) — pure tag, does not affect scheduling')
   .action((o) => {
     const db = getDb();
     const kind = o.plan
@@ -98,6 +99,7 @@ program
       verify_rubric: o.rubric ?? null,
       verify_timeout_min: o.verifyTimeout ?? null,
       requires: o.requires ?? null,
+      experiment: o.experiment ?? null,
     });
     const gate = validateTask(getTask(db, t.id)!, getSetting(db, 'host_capabilities') ?? '', environmentMap(db));
     console.log(`created ${t.id} (${t.status})`);
@@ -186,6 +188,32 @@ program
         `${g.discipline ? 'on ' : 'off'} n=${g.count} avg_session%=${g.avg_session_pct?.toFixed(1) ?? '–'} ` +
         `attention=${Math.round(g.attention_rate * 100)}% resumes=${g.avg_resume_count?.toFixed(1) ?? '–'} avg_cycle=${g.avg_cycle_min == null ? '–' : Math.round(g.avg_cycle_min) + 'm'}`;
       console.log(`discipline A/B (prompt_discipline, last 14d): ${ab.map(fmt).join('  |  ')}`);
+    }
+  });
+
+program
+  .command('experiment [tag]')
+  .description('A/B cohort comparison (tasks --experiment) — e.g. did {SDD spec + cheap model} beat the baseline?')
+  .option('--days <n>', 'window in days (default 14)', (v) => parseInt(v, 10))
+  .action((tag, o) => {
+    const db = getDb();
+    const groups = computeMetrics(db, o.days ? { days: o.days } : {}).experiment_ab.groups.filter(
+      (g) => !tag || g.experiment.startsWith(tag),
+    );
+    if (!groups.length) {
+      console.log(
+        tag
+          ? `no experiment cohorts matching "${tag}" among terminal tasks in the window`
+          : 'no experiment cohorts yet — tag tasks with `loop add --experiment <name>`',
+      );
+      return;
+    }
+    for (const g of groups) {
+      console.log(
+        `${pad(g.experiment, 12)} n=${g.count} pass=${Math.round(g.pass_rate * 100)}% (${g.passed}/${g.count})  ` +
+          `avg_session%=${g.avg_session_pct?.toFixed(1) ?? '–'}  attention=${Math.round(g.attention_rate * 100)}%  ` +
+          `resumes=${g.avg_resume_count?.toFixed(1) ?? '–'}  avg_cycle=${g.avg_cycle_min == null ? '–' : Math.round(g.avg_cycle_min) + 'm'}`,
+      );
     }
   });
 

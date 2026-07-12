@@ -34,6 +34,7 @@ export interface Task {
   environment: string | null;
   owner: string | null; // team-prep: unused passthrough, reserves the multi-user path
   created_by: string | null; // team-prep: unused passthrough, reserves the multi-user path
+  experiment: string | null; // A/B cohort label (SDD Phase 1); write-only from intake, read only by metrics.experiment_ab
   created_at: string;
   updated_at: string;
 }
@@ -58,6 +59,7 @@ export interface TaskRun {
   weekly_pct_after: number | null;
   dispatch_window: string | null;
   discipline: number | null;
+  model: string | null; // SDD Phase 4: resolved model at dispatch, for model-aware cost calibration
   started_at: string;
   finished_at: string | null;
 }
