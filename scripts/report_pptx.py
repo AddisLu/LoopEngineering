@@ -131,9 +131,14 @@ def index_shapes(prs: Any, prefix: str) -> Dict[int, Dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 def _text_frame_of(shape: Any) -> Optional[Any]:
-    if not getattr(shape, 'has_text_frame', False):
+    # Regular shapes expose has_text_frame (False for e.g. Picture/Chart); table _Cell
+    # objects have no has_text_frame attribute at all but ALWAYS have a text_frame, so a
+    # naive `getattr(shape, 'has_text_frame', False)` guard would wrongly treat every
+    # cell as text-frame-less. try/except handles both shapes and cells uniformly.
+    try:
+        return shape.text_frame
+    except Exception:
         return None
-    return shape.text_frame
 
 
 def _collapse_to_single_run(para: Any, text: str) -> None:
