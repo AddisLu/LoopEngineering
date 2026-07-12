@@ -49,6 +49,7 @@ import { generateReport } from './report/generate.js';
 import { listReportTemplates, importReportTemplates } from './report/templates.js';
 import { validateDeckSpec } from './report/pptx/spec.js';
 import { renderDeck, qaRender, resolvePythonBin, resolveTemplatePath, resolveManifestPath } from './report/pptx/render.js';
+import { prepareWeekly, renderWeekly } from './report/pptx/weekly.js';
 
 const program = new Command();
 program.name('loop').description('Loop Engineering — token-aware coding-task scheduler').version('0.1.0');
@@ -722,6 +723,59 @@ reportPptx
     if (!result) return fail('qa failed (soffice/pdftoppm unavailable or failed — see stderr)');
     console.log(`pdf: ${result.pdf}`);
     for (const img of result.images) console.log(`image: ${img}`);
+  });
+
+/** Accumulates repeated `--current <key>=<idx>` flags into a Record for prepareWeekly's
+ * currentOverrides — malformed entries (no `=`, non-numeric index) are silently skipped
+ * rather than failing the whole command over one typo. */
+function collectCurrentOverride(value: string, prev: Record<string, number>): Record<string, number> {
+  const eq = value.indexOf('=');
+  if (eq === -1) return prev;
+  const key = value.slice(0, eq).trim();
+  const idx = Number(value.slice(eq + 1).trim());
+  if (key && Number.isFinite(idx)) prev[key] = idx;
+  return prev;
+}
+
+const reportWeekly = report
+  .command('weekly')
+  .description('每週企業週報 PPTX 流程 — prepare 組草稿+抓 WP 快照,人工把關後 render 出片 (see docs/report-pptx-authoring.md)');
+
+reportWeekly
+  .command('prepare')
+  .description('組裝本週 deck-spec 草稿 + WP 快照 + explain-pages 骨架,供人工編輯把關')
+  .option('--week <week>', 'ISO week id (YYYY-Www), default = this week')
+  .option('--current <kv>', '<projectKey>=<index> current_index override, repeatable', collectCurrentOverride, {})
+  .action(async (o) => {
+    const db = getDb();
+    if (!requirePptxEnabled(db)) return;
+    const result = await prepareWeekly(db, { week: o.week, currentOverrides: o.current });
+    if (!result) return fail('prepare failed (see stderr)');
+    console.log(`spec: ${result.specPath}`);
+    console.log(`explain: ${result.explainPath}`);
+    if (result.warnings.length) {
+      console.error('[warnings]');
+      for (const w of result.warnings) console.error(`  ${w}`);
+    }
+  });
+
+reportWeekly
+  .command('render')
+  .description('重驗證 + 重上色 + 渲染本週 deck-spec,回寫最終出貨內容')
+  .option('--week <week>', 'ISO week id (YYYY-Www), default = this week')
+  .option('--qa', 'also run the LibreOffice+pdftoppm visual QA pass')
+  .option('--allow-unapproved', 'render explain pages even when explain-pages.json is not approved')
+  .action(async (o) => {
+    const db = getDb();
+    if (!requirePptxEnabled(db)) return;
+    const result = await renderWeekly(db, { week: o.week, allowUnapproved: o.allowUnapproved, qa: o.qa });
+    if (!result) return fail('render failed (see stderr)');
+    console.log(`output: ${result.output}`);
+    console.log(`slides: ${result.slides}`);
+    if (result.warnings.length) {
+      console.error('[warnings]');
+      for (const w of result.warnings) console.error(`  ${w}`);
+    }
   });
 
 program
