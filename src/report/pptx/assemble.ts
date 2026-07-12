@@ -181,7 +181,7 @@ export function assembleDeckSpec(input: AssembleDeckSpecInput): DeckSpec {
     const candidates: StatusCandidate[] = input.statusCandidates.has(key)
       ? input.statusCandidates.get(key)!
       : prevProject
-        ? prevProject.status_items.map((i) => ({ text: i.text }))
+        ? prevProject.status_items.map((i) => ({ text: i.text, ...(i.sources ? { sources: i.sources } : {}) }))
         : [];
     const status_items = classifyStatusItems(prevTexts, candidates);
 

@@ -7,11 +7,14 @@
  * weekly.ts's renderWeekly for the two call sites (draft-time coloring, then
  * re-coloring after human edits at render time).
  */
-import type { StatusItem } from './spec.js';
+import type { SourceRef, StatusItem } from './spec.js';
 
 export interface StatusCandidate {
   text: string;
   highlight?: boolean;
+  /** Citations (T3's LLM generation attaches these) — passed straight through to the
+   * classified StatusItem so T1's renderer can write them into the slide's speaker notes. */
+  sources?: SourceRef[];
 }
 
 const FUZZY_THRESHOLD = 0.85;
@@ -64,9 +67,10 @@ function fuzzySim(na: string, nb: string): number {
 export function classifyStatusItems(prevTexts: string[], candidates: StatusCandidate[]): StatusItem[] {
   const normPrev = prevTexts.map(normalizeStatusText);
   return candidates.slice(0, MAX_STATUS_ITEMS).map((c): StatusItem => {
-    if (c.highlight === true) return { text: c.text, color: 'red' };
+    const sources = c.sources?.length ? { sources: c.sources } : {};
+    if (c.highlight === true) return { text: c.text, color: 'red', ...sources };
     const norm = normalizeStatusText(c.text);
     const carried = normPrev.some((p) => norm === p || fuzzySim(norm, p) >= FUZZY_THRESHOLD);
-    return { text: c.text, color: carried ? 'black' : 'blue' };
+    return { text: c.text, color: carried ? 'black' : 'blue', ...sources };
   });
 }
