@@ -404,6 +404,7 @@
           <tr><td><code>config [list｜get｜set] [key] [value]</code></td><td>檢視 / 即時修改排程設定（門檻、模型、Git 收尾旗標）。例：<code>loop config set default_model sonnet</code>。改完下一個 tick 生效、免重啟；含防呆。</td></tr>
           <tr><td><code>set-usage --session &lt;%&gt; [--weekly &lt;%&gt;]</code></td><td><b>開發用</b>：強制寫入共享用量快取（斷路器演練）。</td></tr>
           <tr><td><code>forecast</code></td><td>Backlog 用量預估（見第 17 章）；若有可比較資料，尾端再附一行執行紀律 A/B 摘要（見第 18 章）。</td></tr>
+          <tr><td><code>experiment [tag] [--days &lt;n&gt;]</code></td><td>A/B cohort 比較：把用 <code>--experiment &lt;名&gt;</code> 標記過的終態任務（closed／attention／failed）依標籤分組，列出 pass 率、平均 session%、attention 率、平均 resume。給 <code>tag</code> 只看前綴符合的 cohort。用來驗證「精準規格＋便宜模型」是否真的贏過基線（見第 18 章）。</td></tr>
           <tr><td><code>env list｜add &lt;name&gt;｜remove &lt;name&gt;</code></td><td>管理部署環境（見第 19 章）。<code>add</code> 旗標：<code>--kind</code> <code>--host</code> <code>--capabilities</code> <code>--deploy-cmd</code> <code>--auto-deploy</code>。</td></tr>
           <tr><td><code>deploy --env &lt;name&gt; --repo &lt;path&gt; --base &lt;branch&gt;</code></td><td>建立並排入一個 <code>tool=deploy</code> 任務（見第 19 章）。</td></tr>
           <tr><td><code>deploy rollback &lt;env&gt;</code></td><td>把該環境回滾到上一次成功部署的 commit。</td></tr>
@@ -463,6 +464,9 @@ npm run loop -- list --status review</code></pre>
         <thead><tr><th>鍵</th><th>預設</th><th>說明</th></tr></thead>
         <tbody>
           <tr><td><code>default_model</code></td><td><code>sonnet</code></td><td><b>全域預設模型</b>：任務未指定 model 時就用它。<code>sonnet</code>＝Sonnet 5，自主 coding 用它就夠、又省 token；避免繼承你互動用的 Fable 5。可選 <code>haiku</code>／<code>opus</code>／<code>fable-5</code>／<code>default</code>（CLI 預設）。單一任務可在新增表單覆寫。</td></tr>
+          <tr><td><code>model_routing</code></td><td><code>false</code></td><td><b>依複雜度分流模型</b>（SDD）：開啟後，實作 run 的模型改由 <code>route_S/M/L</code> 依任務複雜度決定；單一任務的 <code>model</code> 仍最優先。關閉＝每個 run 都用 <code>default_model</code>（與改版前完全一樣）。<b>只在 <code>sdd_specs</code> 已開、且用 <code>loop experiment</code> A/B 證實便宜模型撐得住後</b>，才把 <code>route_S</code> 調成 <code>haiku</code>。</td></tr>
+          <tr><td><code>route_S</code>／<code>route_M</code>／<code>route_L</code></td><td><code>sonnet</code>／<code>default</code>／<code>default</code></td><td>各複雜度的實作模型（僅 <code>model_routing</code> 開時生效）。值為 <code>default</code>／空＝<b>退回 <code>default_model</code></b>（不是 CLI 預設）。規劃器與 SDD 規格撰寫維持 <code>default_model</code>（推理重、只做一次），分流只作用於實作 run。</td></tr>
+          <tr><td><code>sdd_specs</code></td><td><code>false</code></td><td><b>每個子任務自帶獨立規格</b>（SDD）：開啟後 Epic 規劃器（<code>tool=plan</code>，見第 13 章）為每個子任務生成一份自足規格 <code>spec-*.md</code> 當各自的 plan_ref（而非全部共用 Epic brief）——規格夠精準，便宜模型才能可靠實作。關閉＝規劃器提示與子任務 plan_ref 與改版前完全一樣（零影響）。</td></tr>
           <tr><td><code>agent_backend</code></td><td><code>claude-code</code></td><td><b>執行後端（adapter）</b>：真正派工時實際呼叫哪個 CLI（與 <code>coding_tool</code> 是兩回事——後者是任務類型／工作區模式，前者是底層跑哪個 agent）。目前只有 <code>claude-code</code> 已實作；<code>copilot-cli</code> 是預留給日後公司環境改用 GitHub Copilot CLI 的後端代號（尚需 PAT＋公司端煙霧測試，暫無 adapter）。設成未知值不會擋下設定，只會警告並在派工時退回 <code>claude-code</code>。</td></tr>
           <tr><td><code>shell</code></td><td><code>auto</code></td><td><b>跨 OS shell</b>：verify 步驟／<code>setup_cmd</code>／<code>deploy_cmd</code> 實際用哪個殼跑（見 <code>src/util/shell.ts</code>）。<code>auto</code>：Linux／macOS 一律 <code>bash -lc</code>（跟改版前完全一樣，家用機無感）；Windows（<code>win32</code>）則優先找 Git-Bash（<code>git --exec-path</code> 或 PATH 上的 <code>bash</code>），找不到才退到 PowerShell，再退到 <code>cmd</code>——這是為了日後公司（Windows 11、無 WSL）部署預先鋪的路。也可明確設成 <code>bash</code>／<code>powershell</code>／<code>cmd</code>／<code>git-bash</code> 強制指定。<b>注意</b>：這只換執行殼，步驟指令本身仍是你寫的——`rm -rf` 這類 unix-only 指令換到 Windows 一樣會壞，Windows 目標的任務請優先用 <code>npm run x</code> 這種跨殼都能跑的寫法。</td></tr>
         </tbody>
@@ -709,6 +713,7 @@ npm run loop -- add --title "B" --goal "…" --plan ./B.md \
       </ol>
       <div class="note info"><span class="ic">🧬</span><span><b>看板怎麼看：</b>Epic 卡片顯示「子任務 n/m 完成」rollup 徽章；子任務卡片顯示「↳ epic: t_xxx」回指徽章；點開任一張卡片的詳情視窗都能看到完整的子任務清單與各自狀態。</span></div>
       <div class="note warn"><span class="ic">⚠️</span><span>Epic 任務不需要（也不會用到）Verify steps／Repo／Base——這些檢查全部略過；真正需要驗證的是它產生出來的子任務。</span></div>
+      <div class="note tip"><span class="ic">📐</span><span><b>SDD 規格模式（<code>sdd_specs</code>，預設關）：</b>預設每個子任務都<b>共用</b>同一份 Epic 說明書當 plan_ref。開啟 <code>sdd_specs</code> 後，規劃器改為每個子任務生成一份<b>自足規格 spec-*.md</b>（背景／驗收情境／限制／out-of-scope）當各自的 plan_ref——讓沒有其他背景的實作者（或<b>便宜模型</b>）只讀那份規格就能可靠完成。這正是把「便宜模型」下放到實作階段（<code>model_routing</code>，見第 8 章）的前提。關閉＝規劃器提示與子任務 plan_ref 與改版前完全一樣（零影響）。</span></div>
       <pre><code># CLI：交一個 Epic
 npm run loop -- add --title "Epic: 上線通知系統" \
   --goal "讓任務結案/attention 時能推播到 Slack" \
@@ -882,6 +887,15 @@ loop ingest run &lt;source_id&gt;</code></pre>
         <li><b>誠實原則</b>：這是量測工具，不是背書——效果好壞看你自己的任務跑出來的數字，不是相信這段文案。</li>
       </ul>
       <div class="note info"><span class="ic">💡</span><span>Superpowers 這個 plugin 本身很適合<b>互動式</b> Claude（brainstorming 等技能靠使用者來回才有價值），只是不適合 Loop 這種無頭排程執行——兩者的使用情境不同，不是互斥。</span></div>
+
+      <h3>SDD × 便宜模型 A/B（同一套量測骨架）</h3>
+      <p>核心假設：<b>把規格寫到夠精準，便宜模型（haiku）就能達到強模型面對模糊目標的水準，且更省額度、rework 更少</b>。「更好」＝同一個 5h/週額度窗口出更多貨、變異更小。這是<b>要用資料驗證的假設</b>，不是可直接假定成立——所以先量測再開分流。</p>
+      <ul>
+        <li><b>怎麼標記</b>：新增任務時用 <code>loop add --experiment &lt;名&gt;</code>（或 MCP <code>loop_add_task</code> 的 <code>experiment</code> 參數）。這是<b>純標籤，完全不影響排程／入場審核</b>。</li>
+        <li><b>怎麼比</b>：挑幾個代表性目標，各建兩次——A＝模糊目標＋sonnet＋<code>--experiment ab_A</code>；B＝手寫 SDD 規格 .md 當 plan_ref＋<code>--model haiku</code>＋<code>--experiment ab_B</code>；在<b>拋棄式 repo/branch 序列跑</b>（勿並行同檔任務）。跑完 <code>loop experiment ab</code> 看兩組的 pass 率／平均 session%／attention 率／resume。</li>
+        <li><b>放行閘門</b>：<b>唯有 B 組（SDD＋haiku）在 pass 率不劣、且額度顯著更省時</b>，才把 <code>model_routing</code> 開起來、<code>route_S</code> 調成 <code>haiku</code>（見第 8 章）。這也是為什麼分流預設全關。</li>
+        <li><b>Epic 版</b>：開 <code>sdd_specs</code> 後，<code>tool=plan</code> 的 Epic 規劃器會自動為每個子任務生成獨立自足規格（見第 13 章），就不必手寫 B 組規格。</li>
+      </ul>
     </section>
 
     <section id="envdeploy">
