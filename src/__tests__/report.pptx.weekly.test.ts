@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type Database from 'better-sqlite3';
 import { openTestDb, setSetting } from '../db/index.js';
 import { createSource } from '../knowledge/ingest/sources.js';
-import { prepareWeekly, renderWeekly, type WeeklyDeps } from '../report/pptx/weekly.js';
+import { prepareWeekly, renderWeekly, runWeekly, getWeeklyStatus, type WeeklyDeps } from '../report/pptx/weekly.js';
 import type { AssembleFs } from '../report/pptx/assemble.js';
 import type { OpDataExec } from '../report/opdata.js';
 import type { PptxRenderExec } from '../report/pptx/render.js';
@@ -102,6 +102,33 @@ beforeEach(() => {
 afterEach(() => db.close());
 
 const FIXED_NOW = () => new Date('2026-07-13T00:00:00Z'); // Monday, ISO week 2026-W29
+
+/** Shared fixture for the runWeekly/getWeeklyStatus tests below -- kept minimal (one
+ * project, one status item) since these tests exercise dispatch semantics, not spec
+ * content (already covered by the prepareWeekly/renderWeekly describes above). */
+function fixedSpecForRun(overrides: Partial<DeckSpec['projects'][0]> = {}): DeckSpec {
+  return {
+    version: 1,
+    week: '2026-W02',
+    summary: { rows: [] },
+    projects: [
+      {
+        key: 'aoi-amc',
+        pillar: 'AMC',
+        fab: 'Fab1',
+        name: 'AOI 專案',
+        roadmap: { checkpoints: [], current_index: 0 },
+        status_items: [{ text: 'A案已導入', color: 'blue' }],
+        explain_pages: [],
+        ...overrides,
+      },
+    ],
+  };
+}
+
+function fakeRenderExecForRun(): PptxRenderExec {
+  return async () => JSON.stringify({ output: `${PPTX_DIR}/weeks/2026-W02/weekly-2026-07-13.pptx`, slides: 3, warnings: [] });
+}
 
 describe('weekly.ts: zero-impact — flag off fail-fast', () => {
   it('prepareWeekly returns null when report_pptx_enabled is false', async () => {
@@ -332,7 +359,14 @@ describe('weekly.ts: renderWeekly', () => {
       [`${PPTX_DIR}/weeks/2026-W02/deck-spec.json`]: JSON.stringify(fixedSpec()),
     });
     const result = await renderWeekly(db, { week: '2026-W02' }, { fs, now: FIXED_NOW, renderExec: fakeRenderExec() });
-    expect(result).toEqual({ output: `${PPTX_DIR}/weeks/2026-W02/weekly-2026-07-13.pptx`, slides: 3, warnings: expect.any(Array) });
+    expect(result).toEqual({
+      output: `${PPTX_DIR}/weeks/2026-W02/weekly-2026-07-13.pptx`,
+      slides: 3,
+      warnings: expect.any(Array),
+      qualityFlags: {},
+      explainApproved: false,
+      explainPageCount: 0,
+    });
 
     const written = JSON.parse(files.get(`${PPTX_DIR}/weeks/2026-W02/deck-spec.json`)!) as DeckSpec;
     expect(written.week).toBe('2026-W02');
@@ -492,5 +526,98 @@ describe('weekly.ts: T3 LLM status generation', () => {
     const spec = JSON.parse(files.get(result!.specPath)!) as DeckSpec;
     expect(spec.projects[0]?.status_items).toEqual([{ text: 'A案已導入', color: 'black' }]);
     expect(result!.warnings.some((w) => w.includes('aoi-amc') && w.includes('LLM status generation unavailable'))).toBe(true);
+  });
+});
+
+describe('weekly.ts: runWeekly (one-shot CLI/REST/MCP entry point)', () => {
+  it('report_pptx_enabled false -> null', async () => {
+    setSetting(db, 'report_pptx_enabled', 'false');
+    const { fs } = fakeFs();
+    const result = await runWeekly(db, {}, { fs, now: FIXED_NOW });
+    expect(result).toBeNull();
+  });
+
+  it('no deck-spec.json for the week -> prepares then renders (prepared=true); fresh explain-pages.json is unapproved so 0 pages ship', async () => {
+    const { fs, files } = fakeFs({ [`${PPTX_DIR}/projects.json`]: JSON.stringify(ONE_PROJECT_REGISTRY) });
+    const result = await runWeekly(db, { week: '2026-W01', llm: false }, { fs, now: FIXED_NOW, renderExec: fakeRenderExecForRun() });
+    expect(result).not.toBeNull();
+    expect(result!.prepared).toBe(true);
+    expect(result!.specPath).toBe(`${PPTX_DIR}/weeks/2026-W01/deck-spec.json`);
+    expect(result!.explainPath).toBe(`${PPTX_DIR}/weeks/2026-W01/explain-pages.json`);
+    expect(result!.explainApproved).toBe(false);
+    expect(result!.explainPageCount).toBe(0);
+    expect(files.has(`${PPTX_DIR}/weeks/2026-W01/deck-spec.json`)).toBe(true);
+  });
+
+  it('deck-spec.json already exists for the week -> render-only (prepared=false); approved explain-pages.json ships its pages', async () => {
+    const { fs, files } = fakeFs({
+      [`${PPTX_DIR}/weeks/2026-W02/deck-spec.json`]: JSON.stringify(fixedSpecForRun()),
+      [`${PPTX_DIR}/weeks/2026-W02/explain-pages.json`]: JSON.stringify({
+        approved: true,
+        projects: { 'aoi-amc': [{ title: '已批准', note: 'n', images: [] }] },
+      }),
+    });
+    const before = files.get(`${PPTX_DIR}/weeks/2026-W02/deck-spec.json`);
+    const result = await runWeekly(db, { week: '2026-W02' }, { fs, now: FIXED_NOW, renderExec: fakeRenderExecForRun() });
+    expect(result).not.toBeNull();
+    expect(result!.prepared).toBe(false);
+    expect(result!.specPath).toBeUndefined();
+    expect(result!.explainPath).toBeUndefined();
+    expect(result!.explainApproved).toBe(true);
+    expect(result!.explainPageCount).toBe(1);
+    expect(result!.output).toBe(`${PPTX_DIR}/weeks/2026-W02/weekly-2026-07-13.pptx`);
+    // Content changed (re-colored + explain page merged in) but the registry was never
+    // read again -- confirms prepare was skipped, not just idempotent.
+    expect(files.get(`${PPTX_DIR}/weeks/2026-W02/deck-spec.json`)).not.toBe(before);
+  });
+
+  it('render failure during run -> null, even after a successful prepare', async () => {
+    const { fs } = fakeFs({ [`${PPTX_DIR}/projects.json`]: JSON.stringify(ONE_PROJECT_REGISTRY) });
+    const failingExec: PptxRenderExec = async () => {
+      throw new Error('spawn ENOENT');
+    };
+    const result = await runWeekly(db, { week: '2026-W01', llm: false }, { fs, now: FIXED_NOW, renderExec: failingExec });
+    expect(result).toBeNull();
+  });
+});
+
+describe('weekly.ts: getWeeklyStatus (read-only, no side effects)', () => {
+  it('week not prepared yet -> exists:false, approved:null, no projects, no output', () => {
+    const { fs } = fakeFs();
+    const status = getWeeklyStatus(db, '2026-W05', { fs });
+    expect(status).toEqual({
+      exists: false,
+      files: {
+        deckSpec: `${PPTX_DIR}/weeks/2026-W05/deck-spec.json`,
+        explainPages: `${PPTX_DIR}/weeks/2026-W05/explain-pages.json`,
+        output: null,
+      },
+      approved: null,
+      projects: [],
+    });
+  });
+
+  it('prepared but not rendered -> exists:true, approved:false, projects from deck-spec, no output yet', () => {
+    const { fs } = fakeFs({
+      [`${PPTX_DIR}/weeks/2026-W02/deck-spec.json`]: JSON.stringify(fixedSpecForRun()),
+      [`${PPTX_DIR}/weeks/2026-W02/explain-pages.json`]: JSON.stringify({ approved: false, projects: {} }),
+    });
+    const status = getWeeklyStatus(db, '2026-W02', { fs });
+    expect(status.exists).toBe(true);
+    expect(status.approved).toBe(false);
+    expect(status.files.output).toBeNull();
+    expect(status.projects).toEqual([{ key: 'aoi-amc', statusCount: 1, explainCount: 0, qualityFlags: [] }]);
+  });
+
+  it('rendered -> output resolves to the latest weekly-*.pptx in the week dir, quality_flags surfaced per project', () => {
+    const { fs } = fakeFs({
+      [`${PPTX_DIR}/weeks/2026-W02/deck-spec.json`]: JSON.stringify(fixedSpecForRun({ quality_flags: ['缺對策'] })),
+      [`${PPTX_DIR}/weeks/2026-W02/explain-pages.json`]: JSON.stringify({ approved: true, projects: {} }),
+      [`${PPTX_DIR}/weeks/2026-W02/weekly-2026-07-06.pptx`]: 'old',
+      [`${PPTX_DIR}/weeks/2026-W02/weekly-2026-07-13.pptx`]: 'new',
+    });
+    const status = getWeeklyStatus(db, '2026-W02', { fs });
+    expect(status.files.output).toBe(`${PPTX_DIR}/weeks/2026-W02/weekly-2026-07-13.pptx`);
+    expect(status.projects[0]?.qualityFlags).toEqual(['缺對策']);
   });
 });

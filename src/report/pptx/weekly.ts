@@ -43,12 +43,22 @@ export interface PrepareWeeklyResult {
   specPath: string;
   explainPath: string;
   warnings: string[];
+  /** project key -> quality-gate feedback (see buildStatusCandidates); empty when the
+   * gate is off or every project passed. */
+  qualityFlags: Record<string, string[]>;
 }
 
 export interface RenderWeeklyResult {
   output: string;
   slides: number;
   warnings: string[];
+  /** project key -> quality_flags carried through from deck-spec.json (set by a prior
+   * prepare, untouched by render itself). */
+  qualityFlags: Record<string, string[]>;
+  /** Whether this render actually included explain pages (approved, or --allow-unapproved). */
+  explainApproved: boolean;
+  /** Total explain pages shipped across all projects (0 when not approved). */
+  explainPageCount: number;
 }
 
 const SAMPLE_REGISTRY_JSON = JSON.stringify(
@@ -321,7 +331,7 @@ export async function prepareWeekly(
   console.error(`explain pages: ${explainPath}`);
   console.error('請編輯以上檔案後把 explain-pages.json 的 approved 改成 true，再跑 render');
 
-  return { specPath, explainPath, warnings };
+  return { specPath, explainPath, warnings, qualityFlags: Object.fromEntries(qualityFlags) };
 }
 
 interface ExplainPagesFile {
@@ -444,5 +454,131 @@ export async function renderWeekly(
     if (!qa) warnings.push('qa: soffice/pdftoppm unavailable or failed (see stderr)');
   }
 
-  return { output: result.output, slides: result.slides, warnings };
+  const qualityFlagsObj: Record<string, string[]> = {};
+  for (const p of projectsAfterImageCheck) {
+    if (p.quality_flags?.length) qualityFlagsObj[p.key] = p.quality_flags;
+  }
+  const explainPageCount = projectsAfterImageCheck.reduce((sum, p) => sum + p.explain_pages.length, 0);
+
+  return {
+    output: result.output,
+    slides: result.slides,
+    warnings,
+    qualityFlags: qualityFlagsObj,
+    explainApproved: includeExplain,
+    explainPageCount,
+  };
+}
+
+export interface RunWeeklyResult extends RenderWeeklyResult {
+  specPath?: string;
+  explainPath?: string;
+  /** true when this run had to prepare first (no deck-spec.json yet for the week). */
+  prepared: boolean;
+}
+
+/**
+ * One-shot CLI/REST/MCP entry point: prepare+render when the week has no deck-spec.json
+ * yet, else render-only (the "re-run after human approval" scenario). Never skips the
+ * approval gate itself -- a fresh week's first `run` always ships zero explain pages
+ * until a human approves explain-pages.json and runs again.
+ */
+export async function runWeekly(
+  db: Database.Database,
+  opts: { week?: string; qa?: boolean; llm?: boolean; allowUnapproved?: boolean; currentOverrides?: Record<string, number> },
+  deps: WeeklyDeps = {},
+): Promise<RunWeeklyResult | null> {
+  if (!getBool(db, 'report_pptx_enabled', false)) {
+    console.error('report_pptx_enabled is false — enable it first: loop config set report_pptx_enabled true');
+    return null;
+  }
+
+  const assembleFs = deps.fs ?? defaultAssembleFs;
+  const now = deps.now ? deps.now() : new Date();
+  const week = opts.week?.trim() || weekId(now);
+  const pptxDir = resolvePptxDir(db);
+  const specPath = specPathFor(pptxDir, week);
+
+  const prepared = !assembleFs.exists(specPath);
+  let prepareResult: PrepareWeeklyResult | null = null;
+  if (prepared) {
+    prepareResult = await prepareWeekly(db, { week, currentOverrides: opts.currentOverrides, llm: opts.llm }, deps);
+    if (!prepareResult) return null;
+  }
+
+  const renderResult = await renderWeekly(db, { week, qa: opts.qa, allowUnapproved: opts.allowUnapproved }, deps);
+  if (!renderResult) return null;
+
+  return {
+    ...renderResult,
+    specPath: prepareResult?.specPath,
+    explainPath: prepareResult?.explainPath,
+    prepared,
+    warnings: [...(prepareResult?.warnings ?? []), ...renderResult.warnings],
+  };
+}
+
+export interface WeeklyStatusProject {
+  key: string;
+  statusCount: number;
+  explainCount: number;
+  qualityFlags: string[];
+}
+
+export interface WeeklyStatus {
+  exists: boolean;
+  files: { deckSpec: string; explainPages: string; output: string | null };
+  approved: boolean | null;
+  projects: WeeklyStatusProject[];
+}
+
+/** Finds the most recently rendered `weekly-*.pptx` under a week dir by lexicographic
+ * (== chronological, since the date suffix is zero-padded ISO) sort. Never throws --
+ * a not-yet-rendered week just has no output file. */
+function findOutputPptx(assembleFs: AssembleFs, dir: string): string | null {
+  if (!assembleFs.exists(dir)) return null;
+  let names: string[];
+  try {
+    names = assembleFs.readdir(dir).filter((n) => /^weekly-.*\.pptx$/.test(n));
+  } catch {
+    return null;
+  }
+  if (!names.length) return null;
+  names.sort();
+  return path.join(dir, names[names.length - 1]!);
+}
+
+/** Read-only week status for the REST GET endpoint -- no side effects, safe to call
+ * repeatedly (e.g. for a status poll). `approved` is null only when the week hasn't
+ * been prepared yet at all. */
+export function getWeeklyStatus(db: Database.Database, week: string, deps: WeeklyDeps = {}): WeeklyStatus {
+  const assembleFs = deps.fs ?? defaultAssembleFs;
+  const pptxDir = resolvePptxDir(db);
+  const specPath = specPathFor(pptxDir, week);
+  const explainPath = explainPathFor(pptxDir, week);
+
+  const specRaw = readJson(assembleFs, specPath);
+  const exists = specRaw !== null;
+
+  let projects: WeeklyStatusProject[] = [];
+  let approved: boolean | null = null;
+  if (exists) {
+    const validated = validateDeckSpec(specRaw);
+    if (validated.ok) {
+      projects = validated.spec.projects.map((p) => ({
+        key: p.key,
+        statusCount: p.status_items.length,
+        explainCount: p.explain_pages.length,
+        qualityFlags: p.quality_flags ?? [],
+      }));
+    }
+    approved = parseExplainPagesFile(readJson(assembleFs, explainPath)).approved;
+  }
+
+  return {
+    exists,
+    files: { deckSpec: specPath, explainPages: explainPath, output: findOutputPptx(assembleFs, weekDir(pptxDir, week)) },
+    approved,
+    projects,
+  };
 }
