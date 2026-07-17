@@ -323,6 +323,18 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
 
 export const TOKEN_REFRESH_MS = 180_000; // TokenBar cadence
 
+// Cross-tool shared usage cache: this engine, claude-usage-mcp and any other local
+// tool read+write the SAME file, so at most one of them hits oauth/usage per TTL
+// window (prevents 429 pile-ups when several tools poll concurrently). A custom
+// LOOP_DATA_DIR (tests, portable installs) keeps the cache private to that dir so
+// hermetic tests never touch the real shared file.
+export const USAGE_CACHE_FILE = expand(
+  process.env.LOOP_USAGE_CACHE ??
+    (process.env.LOOP_DATA_DIR
+      ? path.join(DATA_DIR, 'usage-cache.json')
+      : path.join(os.homedir(), '.local', 'share', 'claude-usage', 'usage-cache.json')),
+);
+
 export type Complexity = 'S' | 'M' | 'L';
 // Lifecycle: draft -> queued -> running -> verifying -> review -> closed, with
 // 'blocked' (auto-resumable interrupt), 'attention' (human hold: failure triage with

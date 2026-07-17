@@ -1,11 +1,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { paths, TOKEN_REFRESH_MS } from '../config.js';
+import { paths, TOKEN_REFRESH_MS, USAGE_CACHE_FILE } from '../config.js';
 import type { UsageReading, UsageLimit } from '../types.js';
 
 const OAUTH_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
-const CACHE_FILE = path.join(paths.dataDir, 'usage-cache.json');
+const CACHE_FILE = USAGE_CACHE_FILE;
 
 interface CacheEnvelope {
   reading: UsageReading;
