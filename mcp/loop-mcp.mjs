@@ -17,55 +17,15 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { readEnvFile, BASE, createApi } from './lib.mjs';
 
-// ---- resolve config from env vars, falling back to the deploy env file ----
-function readEnvFile() {
-  const p = path.join(os.homedir(), '.config', 'loop-engineering', 'env');
-  const out = {};
-  try {
-    for (const line of fs.readFileSync(p, 'utf8').split('\n')) {
-      if (line.trim().startsWith('#')) continue;
-      const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
-      if (m) out[m[1]] = m[2].trim();
-    }
-  } catch { /* no env file — use defaults */ }
-  return out;
-}
 const ENVF = readEnvFile();
-const PORT = process.env.LOOP_PORT || ENVF.LOOP_PORT || '4711';
-const BASE = (process.env.LOOP_API_URL || `http://127.0.0.1:${PORT}`).replace(/\/$/, '');
 const TOKEN = process.env.LOOP_API_TOKEN || ENVF.LOOP_API_TOKEN || '';
 const DATA_DIR = process.env.LOOP_DATA_DIR || ENVF.LOOP_DATA_DIR ||
   path.join(os.homedir(), '.local', 'share', 'loop-engineering');
 const PLANS_DIR = path.join(DATA_DIR, 'plans');
 
-function headers(json) {
-  const h = {};
-  if (TOKEN) h.Authorization = `Bearer ${TOKEN}`;
-  if (json) h['content-type'] = 'application/json';
-  return h;
-}
-async function api(pathname, { method = 'GET', body } = {}) {
-  let res;
-  try {
-    res = await fetch(BASE + pathname, {
-      method,
-      headers: headers(!!body),
-      body: body ? JSON.stringify(body) : undefined,
-    });
-  } catch (e) {
-    throw new Error(`cannot reach Loop API at ${BASE} (${e.message}). Is the service running? ` +
-      `Check: systemctl --user status loop-engineering`);
-  }
-  const text = await res.text();
-  let json;
-  try { json = text ? JSON.parse(text) : {}; } catch { json = { raw: text }; }
-  if (!res.ok) {
-    const hint = res.status === 401 ? ' (401 — token missing/wrong; MCP reads LOOP_API_TOKEN from ~/.config/loop-engineering/env)' : '';
-    throw new Error(`${method} ${pathname} -> HTTP ${res.status}${hint}: ${text.slice(0, 300)}`);
-  }
-  return json;
-}
+const api = createApi({ base: BASE, token: TOKEN });
 
 // ---- auto-detection helpers (so the caller only needs the fix + goal) ----
 function git(repo, args) {
@@ -790,6 +750,44 @@ server.registerTool('loop_report_templates', {
     return { content: [{ type: 'text', text: rows.join('\n') || '(no report templates)' }] };
   } catch (e) {
     return { content: [{ type: 'text', text: `Could not list report templates: ${e.message}` }] };
+  }
+});
+
+server.registerTool('loop_report_weekly', {
+  title: 'Run the weekly enterprise report PPTX pipeline (prepare / render / run)',
+  description:
+    '企業週報 PPTX 週流程：stage=prepare 只組草稿(WP 快照＋LLM status 候選＋品質閘門)供人工在 explain-pages.json 把關' +
+    '（改措辭／標紅／批准說明頁）；stage=render 在人工把關後重驗證＋重上色＋渲染出片(未批准的說明頁一律剔除，絕不繞過把關)；' +
+    "stage=run(預設)為一鍵：該週 deck-spec 不存在就先 prepare 再 render，已存在就只 render。若伺服器 report_pptx_enabled 設定為 false，動作會失敗。",
+  inputSchema: {
+    stage: z.enum(['prepare', 'render', 'run']).optional().describe("流程階段，預設 'run'"),
+    week: z.string().optional().describe('ISO week id（例：2026-W29），省略則用本週'),
+    qa: z.boolean().optional().describe('render 完成後是否順便跑 LibreOffice+pdftoppm 視覺 QA'),
+    no_llm: z.boolean().optional().describe('停用 LLM status 生成（僅在本次需要 prepare 時生效），維持全黑沿用行為'),
+  },
+}, async ({ stage, week, qa, no_llm }) => {
+  try {
+    const body = {};
+    if (stage) body.stage = stage;
+    if (week) body.week = week;
+    if (qa !== undefined) body.qa = qa;
+    if (no_llm !== undefined) body.noLlm = no_llm;
+    const r = await api('/api/report/weekly', { method: 'POST', body });
+    const lines = [];
+    if (r.specPath) lines.push(`deck-spec: ${r.specPath}`);
+    if (r.explainPath) lines.push(`explain-pages: ${r.explainPath}`);
+    if (r.output) lines.push(`output: ${r.output}${r.slides != null ? `（${r.slides} 頁）` : ''}`);
+    if (r.qualityFlags && Object.keys(r.qualityFlags).length) {
+      lines.push('[quality flags]');
+      for (const [key, flags] of Object.entries(r.qualityFlags)) lines.push(`  ${key}: ${(flags || []).join('; ')}`);
+    }
+    if (Array.isArray(r.warnings) && r.warnings.length) {
+      lines.push('[warnings]');
+      for (const w of r.warnings) lines.push(`  ${w}`);
+    }
+    return { content: [{ type: 'text', text: lines.join('\n') || '(no output)' }] };
+  } catch (e) {
+    return { content: [{ type: 'text', text: `Weekly report failed: ${e.message}` }] };
   }
 });
 

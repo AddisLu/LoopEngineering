@@ -2,6 +2,7 @@
 import { Command } from 'commander';
 import fs from 'node:fs';
 import path from 'node:path';
+import { spawn } from 'node:child_process';
 import { getDb, getSetting, setSetting, getBool } from './db/index.js';
 import {
   createTask,
@@ -46,6 +47,9 @@ import type { SourceKind, SourceConfig } from './knowledge/ingest/types.js';
 import { ingestSource, ingestAll } from './knowledge/ingest/ingest.js';
 import { generateReport } from './report/generate.js';
 import { listReportTemplates, importReportTemplates } from './report/templates.js';
+import { validateDeckSpec } from './report/pptx/spec.js';
+import { renderDeck, qaRender, resolvePythonBin, resolveTemplatePath, resolveManifestPath } from './report/pptx/render.js';
+import { prepareWeekly, renderWeekly, runWeekly } from './report/pptx/weekly.js';
 
 const program = new Command();
 program.name('loop').description('Loop Engineering — token-aware coding-task scheduler').version('0.1.0');
@@ -649,6 +653,189 @@ reportTemplates
     const result = importReportTemplates(db, items);
     console.log(`import: created=${result.created} updated=${result.updated} rejected=${result.rejected.length}`);
     for (const r of result.rejected) console.log(`  [${r.index}] ${r.error}`);
+  });
+
+const reportPptx = report
+  .command('pptx')
+  .description('企業週報 PPTX — deterministic fill-only renderer (see docs/report-pptx-authoring.md)');
+
+function requirePptxEnabled(db: ReturnType<typeof getDb>): boolean {
+  if (!getBool(db, 'report_pptx_enabled', false)) {
+    fail('report_pptx_enabled is false — enable it first: loop config set report_pptx_enabled true');
+    return false;
+  }
+  return true;
+}
+
+/** Streams scripts/report_pptx.py's --probe/--validate output straight through to this
+ * process's stdio -- unlike --render (renderDeck) these modes are interactive/manual
+ * tools whose whole point is for a human to read the raw output, not to be parsed. */
+function runPptxScript(db: ReturnType<typeof getDb>, args: string[]): Promise<number> {
+  const scriptPath = path.join(ENGINE_REPO_ROOT, 'scripts', 'report_pptx.py');
+  return new Promise((resolve) => {
+    const child = spawn(resolvePythonBin(db), [scriptPath, ...args], { stdio: 'inherit' });
+    child.on('error', (err) => {
+      console.error(`could not start python (${resolvePythonBin(db)}): ${err.message}`);
+      resolve(1);
+    });
+    child.on('close', (code) => resolve(code ?? 1));
+  });
+}
+
+reportPptx
+  .command('render')
+  .description('render a DeckSpec JSON file into a .pptx via scripts/report_pptx.py')
+  .requiredOption('--spec <file>', 'DeckSpec JSON file path (see seed/report-pptx/sample-deck-spec.json)')
+  .option('--out <file>', 'output .pptx path (default: <report_pptx_dir>/weeks/adhoc/weekly-<today>.pptx)')
+  .option('--template <file>', 'override report_pptx_template (persists the setting)')
+  .option('--manifest <file>', 'override report_pptx_manifest (persists the setting)')
+  .action(async (o) => {
+    const db = getDb();
+    if (!requirePptxEnabled(db)) return;
+
+    let raw: unknown;
+    try {
+      raw = JSON.parse(fs.readFileSync(o.spec, 'utf8'));
+    } catch (e) {
+      return fail(`could not read/parse --spec ${o.spec}: ${(e as Error).message}`);
+    }
+    const validated = validateDeckSpec(raw);
+    if (!validated.ok) return fail(`invalid deck spec: ${validated.error}`);
+
+    if (o.template) setSetting(db, 'report_pptx_template', path.resolve(o.template));
+    if (o.manifest) setSetting(db, 'report_pptx_manifest', path.resolve(o.manifest));
+
+    const pptxDir = getSetting(db, 'report_pptx_dir') || DEFAULT_SETTINGS.report_pptx_dir || '';
+    const outPath = o.out
+      ? path.resolve(o.out)
+      : path.join(pptxDir, 'weeks', 'adhoc', `weekly-${new Date().toISOString().slice(0, 10)}.pptx`);
+
+    const result = await renderDeck(db, validated.spec, { out: outPath });
+    if (!result) return fail('render failed (check report_pptx_python / template / manifest / logs)');
+    console.log(`output: ${result.output}`);
+    console.log(`slides: ${result.slides}`);
+    if (result.warnings.length) {
+      console.error('[warnings]');
+      for (const w of result.warnings) console.error(`  ${w}`);
+    }
+  });
+
+reportPptx
+  .command('probe')
+  .description('inventory every shape (name/type/text/table dims) in a .pptx — template-authoring discovery aid')
+  .option('--file <pptx>', 'pptx to probe (default: resolved report_pptx_template)')
+  .action(async (o) => {
+    const db = getDb();
+    if (!requirePptxEnabled(db)) return;
+    const file = o.file ? path.resolve(o.file) : resolveTemplatePath(db);
+    process.exitCode = await runPptxScript(db, ['--probe', file]);
+  });
+
+reportPptx
+  .command('validate')
+  .description('validate report_pptx_template against report_pptx_manifest (shape names / pool / capacity / sha256)')
+  .action(async () => {
+    const db = getDb();
+    if (!requirePptxEnabled(db)) return;
+    process.exitCode = await runPptxScript(db, ['--validate', '--template', resolveTemplatePath(db), '--manifest', resolveManifestPath(db)]);
+  });
+
+reportPptx
+  .command('qa')
+  .description('LibreOffice+pdftoppm visual QA pass for a rendered .pptx (PNGs land under its own qa/ dir)')
+  .requiredOption('--file <pptx>', 'pptx to QA')
+  .action(async (o) => {
+    const db = getDb();
+    if (!requirePptxEnabled(db)) return;
+    const result = await qaRender(db, path.resolve(o.file));
+    if (!result) return fail('qa failed (soffice/pdftoppm unavailable or failed — see stderr)');
+    console.log(`pdf: ${result.pdf}`);
+    for (const img of result.images) console.log(`image: ${img}`);
+  });
+
+/** Accumulates repeated `--current <key>=<idx>` flags into a Record for prepareWeekly's
+ * currentOverrides — malformed entries (no `=`, non-numeric index) are silently skipped
+ * rather than failing the whole command over one typo. */
+function collectCurrentOverride(value: string, prev: Record<string, number>): Record<string, number> {
+  const eq = value.indexOf('=');
+  if (eq === -1) return prev;
+  const key = value.slice(0, eq).trim();
+  const idx = Number(value.slice(eq + 1).trim());
+  if (key && Number.isFinite(idx)) prev[key] = idx;
+  return prev;
+}
+
+const reportWeekly = report
+  .command('weekly')
+  .description('每週企業週報 PPTX 流程 — prepare 組草稿+抓 WP 快照,人工把關後 render 出片 (see docs/report-pptx-authoring.md)');
+
+reportWeekly
+  .command('prepare')
+  .description('組裝本週 deck-spec 草稿 + WP 快照 + explain-pages 骨架,供人工編輯把關')
+  .option('--week <week>', 'ISO week id (YYYY-Www), default = this week')
+  .option('--current <kv>', '<projectKey>=<index> current_index override, repeatable', collectCurrentOverride, {})
+  .option('--no-llm', '停用 LLM status 生成，維持 T2 全黑沿用行為')
+  .action(async (o) => {
+    const db = getDb();
+    if (!requirePptxEnabled(db)) return;
+    const result = await prepareWeekly(db, { week: o.week, currentOverrides: o.current, llm: o.llm });
+    if (!result) return fail('prepare failed (see stderr)');
+    console.log(`spec: ${result.specPath}`);
+    console.log(`explain: ${result.explainPath}`);
+    if (result.warnings.length) {
+      console.error('[warnings]');
+      for (const w of result.warnings) console.error(`  ${w}`);
+    }
+  });
+
+reportWeekly
+  .command('render')
+  .description('重驗證 + 重上色 + 渲染本週 deck-spec,回寫最終出貨內容')
+  .option('--week <week>', 'ISO week id (YYYY-Www), default = this week')
+  .option('--qa', 'also run the LibreOffice+pdftoppm visual QA pass')
+  .option('--allow-unapproved', 'render explain pages even when explain-pages.json is not approved')
+  .action(async (o) => {
+    const db = getDb();
+    if (!requirePptxEnabled(db)) return;
+    const result = await renderWeekly(db, { week: o.week, allowUnapproved: o.allowUnapproved, qa: o.qa });
+    if (!result) return fail('render failed (see stderr)');
+    console.log(`output: ${result.output}`);
+    console.log(`slides: ${result.slides}`);
+    if (result.warnings.length) {
+      console.error('[warnings]');
+      for (const w of result.warnings) console.error(`  ${w}`);
+    }
+  });
+
+function reportQualityFlagsSummary(qualityFlags: Record<string, string[]>): void {
+  const flagged = Object.entries(qualityFlags);
+  if (!flagged.length) return;
+  console.error('[quality flags]');
+  for (const [key, flags] of flagged) console.error(`  ${key}: ${flags.join('; ')}`);
+}
+
+reportWeekly
+  .command('run')
+  .description('一鍵:本週 deck-spec 不存在則 prepare+render,已存在則只 render(把關安全:未批准說明頁一律不進 deck)')
+  .option('--week <week>', 'ISO week id (YYYY-Www), default = this week')
+  .option('--qa', 'also run the LibreOffice+pdftoppm visual QA pass')
+  .option('--no-llm', '停用 LLM status 生成 (僅在本次需要 prepare 時生效)')
+  .action(async (o) => {
+    const db = getDb();
+    if (!requirePptxEnabled(db)) return;
+    const result = await runWeekly(db, { week: o.week, qa: o.qa, llm: o.llm });
+    if (!result) return fail('run failed (see stderr)');
+    console.log(`output: ${result.output}`);
+    console.log(`slides: ${result.slides}`);
+    const gateLabel = result.explainApproved
+      ? `${result.explainPageCount} 頁已批准`
+      : `${result.explainPageCount} 頁未批准(已剔除)`;
+    console.log(`說明頁狀態: ${gateLabel}`);
+    reportQualityFlagsSummary(result.qualityFlags);
+    if (result.warnings.length) {
+      console.error('[warnings]');
+      for (const w of result.warnings) console.error(`  ${w}`);
+    }
   });
 
 program

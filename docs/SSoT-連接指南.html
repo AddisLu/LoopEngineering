@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="zh-Hant" data-mode="light">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Loop Engineering — SSoT 連接指南</title>
+<script>
+  (function () {
+    try {
+      var m = localStorage.getItem('loopdoc_mode');
+      if (m !== 'light' && m !== 'dark')
+        m = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-mode', m);
+    } catch (e) {}
+  })();
+</script>
+<style>
+  :root {
+    --bg: #f7f4ee; --surface: #fffdf8; --surface-2: #f1ede4; --sunk: #efe9de;
+    --ink: #2a2723; --ink-2: #5f5a51; --ink-3: #8a8479;
+    --border: #e5dfd2; --hairline: #efe9dd; --rail: #cfc7b6;
+    --accent: #b25a34; --accent-ink: #fff; --accent-soft: #f6e6dc;
+    --ok: #2f7a56; --ok-soft: #e3f1e9;
+    --warn: #a9701c; --warn-soft: #f7ecd8;
+    --danger: #b23b34; --danger-soft: #f8e3e1;
+    --info: #2f6b86; --info-soft: #e0eef4;
+    --mono: ui-monospace, SFMono-Regular, Menlo, "Cascadia Mono", monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
+    --shadow: 0 1px 2px rgba(60,50,35,.05), 0 4px 16px rgba(60,50,35,.06);
+  }
+  :root[data-mode="dark"] {
+    --bg: #1a1917; --surface: #232120; --surface-2: #2b2926; --sunk: #1e1c1a;
+    --ink: #ece7de; --ink-2: #b1aa9c; --ink-3: #837c6f;
+    --border: #383430; --hairline: #302c28; --rail: #4a453d;
+    --accent: #e08b5f; --accent-ink: #1a1917; --accent-soft: #3a2a20;
+    --ok: #6bc79a; --ok-soft: #1e3a2d;
+    --warn: #e0aa53; --warn-soft: #3a2e18;
+    --danger: #e58179; --danger-soft: #3a211f;
+    --info: #7bb4cf; --info-soft: #1d3540;
+    --shadow: 0 1px 2px rgba(0,0,0,.2), 0 6px 20px rgba(0,0,0,.28);
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: var(--sans); font-size: 16px; line-height: 1.68;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  .topbar {
+    position: sticky; top: 0; z-index: 30; display: flex; align-items: center; gap: 14px;
+    padding: 12px 22px; background: color-mix(in srgb, var(--surface) 88%, transparent);
+    backdrop-filter: saturate(1.2) blur(8px); border-bottom: 1px solid var(--border);
+  }
+  .brand { display: flex; align-items: center; gap: 11px; font-weight: 650; letter-spacing: .2px; }
+  .brand .mk { width: 22px; height: 22px; border-radius: 7px; background: linear-gradient(150deg, var(--accent), color-mix(in srgb, var(--accent) 60%, #d99)); box-shadow: var(--shadow); }
+  .brand small { display: block; font-size: 10.5px; font-weight: 600; letter-spacing: 1.2px; text-transform: uppercase; color: var(--ink-3); }
+  .spacer { margin-left: auto; }
+  .tbtn { font: inherit; font-size: 14px; cursor: pointer; border: 1px solid var(--border); background: var(--surface-2); color: var(--ink); border-radius: 9px; padding: 6px 12px; }
+  .tbtn:hover { background: var(--sunk); }
+
+  .layout { display: grid; grid-template-columns: 240px minmax(0,1fr); gap: 0; max-width: 1180px; margin: 0 auto; }
+  .toc {
+    position: sticky; top: 57px; align-self: start; height: calc(100dvh - 57px); overflow-y: auto;
+    padding: 26px 16px 40px 22px; border-right: 1px solid var(--hairline); font-size: 14px;
+  }
+  .toc h4 { margin: 18px 0 7px; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; color: var(--ink-3); }
+  .toc a { display: block; color: var(--ink-2); padding: 4px 10px; border-radius: 7px; border-left: 2px solid transparent; }
+  .toc a:hover { background: var(--surface-2); color: var(--ink); text-decoration: none; }
+
+  main { padding: 34px clamp(20px, 4vw, 52px) 96px; min-width: 0; }
+  .hero { margin: 6px 0 30px; }
+  .hero h1 { font-size: clamp(26px, 4vw, 36px); line-height: 1.2; margin: 0 0 10px; letter-spacing: -.4px; }
+  .hero p { font-size: 17px; color: var(--ink-2); margin: 0; max-width: 62ch; }
+  .badges { display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0 0; }
+  .badge { font-size: 12.5px; padding: 4px 11px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); color: var(--ink-2); }
+
+  section { scroll-margin-top: 72px; padding: 26px 0; border-top: 1px solid var(--hairline); }
+  section:first-of-type { border-top: none; }
+  h2 { font-size: 23px; letter-spacing: -.2px; margin: 6px 0 14px; display: flex; align-items: baseline; gap: 11px; }
+  h2 .num { font-family: var(--mono); font-size: 14px; color: var(--accent); font-weight: 700; }
+  h3 { font-size: 17px; margin: 24px 0 8px; }
+  p, li { color: var(--ink); }
+  ul, ol { padding-left: 22px; }
+  li { margin: 4px 0; }
+  code { font-family: var(--mono); font-size: .88em; background: var(--sunk); padding: 1.5px 6px; border-radius: 5px; border: 1px solid var(--hairline); }
+  pre { background: var(--sunk); border: 1px solid var(--border); border-radius: 11px; padding: 14px 16px; overflow-x: auto; box-shadow: var(--shadow); }
+  pre code { background: none; border: none; padding: 0; font-size: 13.5px; line-height: 1.6; color: var(--ink); }
+  kbd { font-family: var(--mono); font-size: 12px; background: var(--surface); border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 6px; padding: 1px 7px; }
+
+  table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 14.5px; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--hairline); vertical-align: top; }
+  th { font-size: 12.5px; letter-spacing: .4px; text-transform: uppercase; color: var(--ink-3); font-weight: 650; }
+  td code { white-space: nowrap; }
+  .tbl-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 11px; box-shadow: var(--shadow); }
+  .tbl-wrap table { margin: 0; }
+  .tbl-wrap th, .tbl-wrap td { padding: 10px 14px; }
+  .tbl-wrap tr:last-child td { border-bottom: none; }
+  thead tr { background: var(--surface-2); }
+
+  .note { display: grid; grid-template-columns: auto 1fr; gap: 12px; align-items: start;
+    margin: 16px 0; padding: 13px 16px; border-radius: 11px; border: 1px solid var(--border);
+    background: var(--surface); box-shadow: var(--shadow); font-size: 14.5px; }
+  .note .ic { font-size: 17px; line-height: 1.5; }
+  .note span b:first-child { display: block; margin-bottom: 2px; }
+  .note.tip { border-left: 3px solid var(--ok); }
+  .note.warn { border-left: 3px solid var(--warn); }
+  .note.danger { border-left: 3px solid var(--danger); }
+  .note.info { border-left: 3px solid var(--info); }
+
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; margin: 16px 0; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 15px 17px; box-shadow: var(--shadow); }
+  .card h3 { margin: 0 0 6px; font-size: 15.5px; }
+  .card p { margin: 0; font-size: 14px; color: var(--ink-2); }
+  .pill { display: inline-block; font-family: var(--mono); font-size: 12px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface-2); color: var(--ink-2); }
+
+  footer { max-width: 1180px; margin: 0 auto; padding: 24px 52px 60px; color: var(--ink-3); font-size: 13px; border-top: 1px solid var(--hairline); }
+
+  .menu-toggle { display: none; }
+  @media (max-width: 860px) {
+    .layout { grid-template-columns: 1fr; }
+    .toc { position: static; height: auto; border-right: none; border-bottom: 1px solid var(--hairline); padding: 14px 20px; display: none; }
+    .toc.open { display: block; }
+    .menu-toggle { display: inline-flex; }
+    main { padding: 22px 20px 80px; }
+  }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><span class="mk"></span><span>Loop Engineering<small>SSoT 連接指南</small></span></div>
+  <span class="spacer"></span>
+  <button class="tbtn menu-toggle" id="menu-btn" aria-label="目錄">☰ 目錄</button>
+  <button class="tbtn" id="theme-btn" aria-label="切換佈景">☾</button>
+</header>
+
+<div class="layout">
+  <nav class="toc" id="toc">
+    <h4>快速導覽</h4>
+    <a href="#intro">1 · 總覽：唯讀邊界</a>
+    <a href="#rest">2 · REST（後端/腳本）</a>
+    <a href="#browser">3 · 瀏覽器前端</a>
+    <a href="#mcp">4 · 其他 LLM/Agent（MCP）</a>
+    <a href="#token">5 · 唯讀 token 取得</a>
+    <a href="#clients">6 · 極簡 Client（clients/）</a>
+  </nav>
+
+  <main>
+    <div class="hero" id="top">
+      <h1>SSoT 連接指南</h1>
+      <p>讓你的<b>任何應用程式</b>（後端腳本、瀏覽器前端、或另一個 LLM/Agent）<b>唯讀</b>串接 Loop Engineering 的 SSoT——RAG 語料檢索、策展知識圖譜、擷取來源清單。三種連法都用同一把<b>唯讀 token</b>，只能查、不能改。</p>
+      <div class="badges">
+        <span class="badge">唯讀 · 寫入一律 403</span>
+        <span class="badge">REST / 瀏覽器 / MCP 三種消費者</span>
+        <span class="badge">Tailscale tailnet only</span>
+      </div>
+    </div>
+
+    <section id="intro">
+      <h2><span class="num">01</span>總覽：唯讀邊界</h2>
+      <p>Loop Engineering 的看板/API 原本只有一把<b>全權 token</b>（<code>LOOP_API_TOKEN</code>）。第二把<b>唯讀 token</b>（<code>LOOP_READONLY_TOKEN</code>）是專門給「其他應用來查 SSoT」用的：範圍被硬限制在下面這幾個 <code>GET</code> 路徑（伺服器端白名單，見 <code>src/server/app.ts</code> 的 <code>READONLY_PREFIXES</code>）：</p>
+      <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>路徑前綴</th><th>用途</th></tr></thead>
+        <tbody>
+          <tr><td><code>GET /api/rag/search</code></td><td>混合 RAG 語料檢索（FTS ⊕ 向量 KNN）</td></tr>
+          <tr><td><code>GET /api/knowledge...</code></td><td>策展知識（含 <code>/api/knowledge/graph</code>）</td></tr>
+          <tr><td><code>GET /api/sources</code></td><td>已登錄的擷取來源清單</td></tr>
+          <tr><td><code>GET /api/status</code></td><td>排程/用量狀態（輕量健康檢查）</td></tr>
+        </tbody>
+      </table>
+      </div>
+      <div class="note warn"><span class="ic">🔒</span><span><b>只能查、不能改。</b>用唯讀 token 打非 <code>GET</code> 方法（POST/PUT/DELETE）或白名單以外的路徑（例如 <code>/api/tasks</code>），一律回 <code>403</code>；帶錯 token 或完全不帶則回 <code>401</code>。</span></div>
+      <p>三種消費者、同一把 token：</p>
+      <ol>
+        <li><b>REST</b>——任何後端服務或腳本，直接帶 <code>Authorization: Bearer</code> 打 API（第 2 章）。</li>
+        <li><b>瀏覽器前端</b>——需伺服器另外開 CORS 白名單（第 3 章）。</li>
+        <li><b>其他 LLM/Agent</b>——透過唯讀 MCP server，經 tailscale serve 對外暴露（第 4 章）。</li>
+      </ol>
+    </section>
+
+    <section id="rest">
+      <h2><span class="num">02</span>REST（後端/腳本）</h2>
+      <p>Base URL 依你打哪裡而定：</p>
+      <ul>
+        <li>經 tailscale serve 對外：<code>https://&lt;host&gt;.&lt;tailnet&gt;.ts.net</code></li>
+        <li>本機同一台機器：<code>http://127.0.0.1:4711</code></li>
+      </ul>
+      <p>每個請求都帶 <code>Authorization: Bearer $LOOP_READONLY_TOKEN</code>。</p>
+
+      <h3>混合 RAG 檢索</h3>
+      <pre><code>curl -sS "$LOOP_API_URL/api/rag/search?q=%E6%9F%A5%E8%A9%A2" \
+  -H "Authorization: Bearer $LOOP_READONLY_TOKEN"</code></pre>
+      <p style="color:var(--ink-3);font-size:14px">選填 query 參數：<code>scope</code>（限定某個已登錄來源的 uri 前綴）、<code>kind</code>（限定文件類型，如 <code>md</code>/<code>ts</code>）、<code>topK</code>（回傳筆數上限）。</p>
+
+      <h3>策展知識搜尋</h3>
+      <pre><code>curl -sS "$LOOP_API_URL/api/knowledge?q=OpenProject" \
+  -H "Authorization: Bearer $LOOP_READONLY_TOKEN"</code></pre>
+
+      <h3>知識圖譜</h3>
+      <pre><code>curl -sS "$LOOP_API_URL/api/knowledge/graph" \
+  -H "Authorization: Bearer $LOOP_READONLY_TOKEN"</code></pre>
+
+      <h3>擷取來源清單</h3>
+      <pre><code>curl -sS "$LOOP_API_URL/api/sources" \
+  -H "Authorization: Bearer $LOOP_READONLY_TOKEN"</code></pre>
+
+      <div class="note info"><span class="ic">ℹ️</span><span>唯讀 token 只能打這四類 <code>GET</code>；其餘一律 <code>403</code>（見第 1 章白名單）。</span></div>
+    </section>
+
+    <section id="browser">
+      <h2><span class="num">03</span>瀏覽器前端</h2>
+      <p>瀏覽器直接 <code>fetch</code> 是跨網域請求，預設會被瀏覽器擋下——伺服器端要先把前端的 origin 加進 <code>LOOP_CORS_ORIGINS</code>（逗號分隔，多個 origin 可並列），再重啟服務：</p>
+      <pre><code># ~/.config/loop-engineering/env
+LOOP_CORS_ORIGINS=https://my-frontend.example.com,http://localhost:5173</code></pre>
+      <p>前端呼叫範例：</p>
+      <pre><code>const res = await fetch('https://&lt;host&gt;.&lt;tailnet&gt;.ts.net/api/rag/search?q=hello', {
+  headers: { Authorization: 'Bearer ' + READONLY_TOKEN },
+});
+const { results } = await res.json();</code></pre>
+      <div class="note danger"><span class="ic">⚠️</span><span><b>瀏覽器只放唯讀 token。</b>前端程式碼（含打包後的 JS）任何人都能看到，絕對不要把全權 <code>LOOP_API_TOKEN</code> 放進瀏覽器——唯讀 token 就算外洩，最壞情況也只是被查詢，不能寫入或執行任務。</span></div>
+      <p style="color:var(--ink-3);font-size:14px">CORS 只允許 <code>GET</code>／<code>OPTIONS</code> 與 <code>authorization</code>／<code>content-type</code> header；沒設 <code>LOOP_CORS_ORIGINS</code>（預設空）＝完全不註冊 CORS，行為與原本一致。</p>
+    </section>
+
+    <section id="mcp">
+      <h2><span class="num">04</span>其他 LLM/Agent（MCP over network）</h2>
+      <p>另一顆機器上的 Claude Code（或任何支援 MCP 的 agent）可以透過<b>唯讀 MCP server</b>（Streamable HTTP）直接查 SSoT，不需要自己組 REST 請求。伺服器監聽 <code>LOOP_MCP_PORT</code>（預設 <code>4713</code>，僅綁 <code>127.0.0.1</code>），跟看板一樣經 tailscale serve 對外。</p>
+      <pre><code>claude mcp add --transport http loop-ssot \
+  https://&lt;host&gt;.&lt;tailnet&gt;.ts.net:4713/mcp \
+  --header "Authorization: Bearer $LOOP_READONLY_TOKEN"</code></pre>
+      <p style="color:var(--ink-3);font-size:14px">實際 tailscale serve 路徑/port 對應以你的部署設定為準；也可用環境變數方式帶 token（依你的 MCP client 支援程度）。</p>
+
+      <h3>工具（僅唯讀三個）</h3>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>工具</th><th>作用</th></tr></thead>
+        <tbody>
+          <tr><td><code>loop_search</code></td><td>混合 RAG 檢索語料庫，回帶引用的片段（路徑/行號/分數）</td></tr>
+          <tr><td><code>loop_recall</code></td><td>全文搜尋策展知識庫（環境／偏好／限制／事實）</td></tr>
+          <tr><td><code>loop_sources</code></td><td>列出已登錄的擷取來源</td></tr>
+        </tbody>
+      </table></div>
+
+      <h3>資源</h3>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>URI</th><th>內容</th></tr></thead>
+        <tbody>
+          <tr><td><code>ssot://sources</code></td><td>已登錄擷取來源（同 <code>loop_sources</code>）</td></tr>
+          <tr><td><code>ssot://graph</code></td><td>策展知識圖譜（nodes/edges）</td></tr>
+        </tbody>
+      </table></div>
+      <div class="note tip"><span class="ic">✅</span><span>這個 MCP server 完全不含任務／部署／排程的變更工具——就算 client 端被誤導去呼叫「新增任務」之類的動作，伺服器上根本沒有這個工具存在。檔案：<code>mcp/loop-ssot-mcp.mjs</code>。</span></div>
+    </section>
+
+    <section id="token">
+      <h2><span class="num">05</span>唯讀 token 取得</h2>
+      <p>唯讀 token 存在 <code>~/.config/loop-engineering/env</code> 的 <code>LOOP_READONLY_TOKEN</code>，跟全權 token 一樣<b>不會印在這份文件裡</b>。在主機上取值：</p>
+      <pre><code>grep '^LOOP_READONLY_TOKEN=' ~/.config/loop-engineering/env | cut -d= -f2</code></pre>
+      <div class="note warn"><span class="ic">🛡️</span><span>Token 治理慣例：<b>絕不寫死在程式碼、絕不複製到別的檔案</b>——每個消費者（REST 腳本／前端／MCP client）都應該在啟動時從環境變數或這個 env 檔即時讀取。</span></div>
+    </section>
+
+    <section id="clients">
+      <h2><span class="num">06</span>極簡 Client（clients/）</h2>
+      <p>不想自己組 HTTP 請求，repo 裡已附兩支可直接照抄的極簡唯讀 client——都是<b>零額外依賴</b>（Python 只用 stdlib、Node 只用內建 <code>fetch</code>），設定解析邏輯一致：先看環境變數，沒有就退回 <code>~/.config/loop-engineering/env</code>，<b>都沒設 token 就直接報錯、非零結束</b>，不會靜默用空 token 打出去。</p>
+
+      <h3>Python（<code>clients/ssot_client.py</code>）</h3>
+      <pre><code>export LOOP_READONLY_TOKEN=...   # 或放進 env 檔
+python3 clients/ssot_client.py search "查詢字串"
+python3 clients/ssot_client.py recall "查詢字串"
+python3 clients/ssot_client.py sources
+python3 clients/ssot_client.py graph</code></pre>
+      <p style="color:var(--ink-3);font-size:14px">當函式庫用：<code>from ssot_client import SsotClient; SsotClient().search("q")</code>。</p>
+
+      <h3>Node（<code>clients/ssot_client.mjs</code>）</h3>
+      <pre><code>export LOOP_READONLY_TOKEN=...   # 或放進 env 檔
+node clients/ssot_client.mjs search "查詢字串"
+node clients/ssot_client.mjs recall "查詢字串"
+node clients/ssot_client.mjs sources
+node clients/ssot_client.mjs graph</code></pre>
+      <p style="color:var(--ink-3);font-size:14px">當模組用：<code>import { SsotClient } from './clients/ssot_client.mjs'; await new SsotClient().search('q');</code></p>
+
+      <div class="note info"><span class="ic">📄</span><span>兩支 client 都對應第 2 章的四個唯讀端點：<code>search</code> → <code>/api/rag/search</code>、<code>recall</code> → <code>/api/knowledge</code>、<code>sources</code> → <code>/api/sources</code>、<code>graph</code> → <code>/api/knowledge/graph</code>；CLI 模式印出的是伺服器回應的原始 JSON。</span></div>
+    </section>
+
+    <p style="margin-top:34px"><a href="#top">↑ 回到頂端</a></p>
+  </main>
+</div>
+
+<footer>
+  Loop Engineering SSoT 連接指南 · 本檔為離線自足 HTML，可直接以瀏覽器開啟 · 唯讀 token 治理見第 5 章。
+</footer>
+
+<script>
+  var tbtn = document.getElementById('theme-btn');
+  function paint() {
+    var dark = document.documentElement.getAttribute('data-mode') === 'dark';
+    tbtn.textContent = dark ? '☀' : '☾';
+    tbtn.setAttribute('aria-label', dark ? '切換至淺色' : '切換至深色');
+  }
+  tbtn.onclick = function () {
+    var next = document.documentElement.getAttribute('data-mode') === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-mode', next);
+    try { localStorage.setItem('loopdoc_mode', next); } catch (e) {}
+    paint();
+  };
+  paint();
+  var mb = document.getElementById('menu-btn'), toc = document.getElementById('toc');
+  mb.onclick = function () { toc.classList.toggle('open'); };
+  toc.addEventListener('click', function (e) { if (e.target.tagName === 'A') toc.classList.remove('open'); });
+</script>
+</body>
+</html>

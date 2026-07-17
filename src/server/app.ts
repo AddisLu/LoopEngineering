@@ -1,6 +1,7 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import fastifyStatic from '@fastify/static';
 import fastifyMultipart from '@fastify/multipart';
+import fastifyCors from '@fastify/cors';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type Database from 'better-sqlite3';
@@ -28,6 +29,7 @@ import { registerPipelineRoutes } from './pipelineRoutes.js';
 import { registerIntegrationRoutes } from './integrationRoutes.js';
 import { registerVoiceRoutes } from './voiceRoutes.js';
 import { registerReportRoutes } from './reportRoutes.js';
+import { registerReportPptxRoutes } from './reportPptxRoutes.js';
 import { environmentMap } from '../deploy/store.js';
 import { collectDistillMaterial, runDistiller, type DistillExec } from '../knowledge/distill.js';
 import type { RelateExec } from '../knowledge/relate.js';
@@ -37,13 +39,26 @@ import type { StructureExec } from '../voice/structure.js';
 import type { ReportExec } from '../report/generate.js';
 import type { OpDataExec, SearchFn } from '../report/opdata.js';
 import type { PersistWriteFns } from '../report/persist.js';
+import type { PptxRenderExec } from '../report/pptx/render.js';
+import type { ContentExec } from '../report/pptx/status.js';
+import type { AssembleFs } from '../report/pptx/assemble.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WEB_DIR = path.resolve(__dirname, '..', '..', 'web');
 
+const READONLY_PREFIXES = ['/api/rag/', '/api/knowledge', '/api/sources', '/api/status'];
+function isReadonlyAllowed(url: string): boolean {
+  const p = url.split('?')[0] ?? '';
+  return READONLY_PREFIXES.some((pre) => p === pre || p.startsWith(pre));
+}
+
 export interface AppOptions {
   db?: Database.Database;
   apiToken?: string | null;
+  /** Second, read-only bearer: GET-only, restricted to the SSoT-read whitelist (see isReadonlyAllowed). */
+  readonlyToken?: string | null;
+  /** Browser CORS origin whitelist (test-only injection point; falls back to LOOP_CORS_ORIGINS). */
+  corsOrigins?: string[];
   /** Test-only injection point for the close route's fire-and-forget distiller call. */
   distillExec?: DistillExec;
   /** Test-only injection points for POST /api/knowledge/relate (zero tokens/network). */
@@ -58,6 +73,12 @@ export interface AppOptions {
   reportSynthExec?: ReportExec;
   reportSearchFn?: SearchFn;
   reportPersistFns?: PersistWriteFns;
+  /** Test-only injection points for POST/GET /api/report/weekly (zero network/tokens/python). */
+  reportPptxDataExec?: OpDataExec;
+  reportPptxRenderExec?: PptxRenderExec;
+  reportPptxContentExec?: ContentExec;
+  reportPptxFs?: AssembleFs;
+  reportPptxNow?: () => Date;
 }
 
 interface CreateTaskBody {
@@ -88,19 +109,40 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
   // back to the ambient LOOP_API_TOKEN when the caller left it unspecified. Using ??
   // here would let the env var override an intentional `apiToken: null`.
   const apiToken = opts.apiToken !== undefined ? opts.apiToken : (process.env.LOOP_API_TOKEN ?? null);
+  const readonlyToken =
+    opts.readonlyToken !== undefined ? opts.readonlyToken : (process.env.LOOP_READONLY_TOKEN ?? null);
+  const corsOrigins =
+    opts.corsOrigins ?? (process.env.LOOP_CORS_ORIGINS ?? '').split(',').map((s) => s.trim()).filter(Boolean);
   const app = Fastify({ logger: false });
   app.register(fastifyMultipart, { limits: { fileSize: 25 * 1024 * 1024 } });
 
+  // CORS is opt-in via LOOP_CORS_ORIGINS: empty (default) registers nothing, so
+  // behavior is byte-for-byte identical to before this option existed.
+  if (corsOrigins.length) {
+    app.register(fastifyCors, {
+      origin: corsOrigins,
+      methods: ['GET', 'OPTIONS'],
+      allowedHeaders: ['authorization', 'content-type'],
+      credentials: false,
+    });
+  }
+
   // --- bearer auth on /api/* (Tailscale is the primary boundary; this is layer 2) ---
+  // Two tokens: the full apiToken (any method, any /api/* path) and an optional
+  // readonlyToken scoped to GET requests on the SSoT-read whitelist (isReadonlyAllowed) —
+  // for external automation that should only ever query, never mutate.
   app.addHook('onRequest', async (req, reply) => {
-    if (!apiToken) return; // dev / no token configured
+    if (!apiToken && !readonlyToken) return; // dev / no token configured
     if (!req.url.startsWith('/api/')) return;
     const auth = req.headers.authorization;
     const q = (req.query as any)?.token;
-    const ok = auth === `Bearer ${apiToken}` || q === apiToken;
-    if (!ok) {
-      reply.code(401).send({ error: 'unauthorized' });
+    if (apiToken && (auth === `Bearer ${apiToken}` || q === apiToken)) return;
+    if (readonlyToken && (auth === `Bearer ${readonlyToken}` || q === readonlyToken)) {
+      if (req.method === 'GET' && isReadonlyAllowed(req.url)) return;
+      reply.code(403).send({ error: 'read-only token: forbidden' });
+      return;
     }
+    reply.code(401).send({ error: 'unauthorized' });
   });
 
   app.get('/api/status', async () => {
@@ -433,6 +475,13 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
     synthExec: opts.reportSynthExec,
     searchFn: opts.reportSearchFn,
     persistFns: opts.reportPersistFns,
+  });
+  registerReportPptxRoutes(app, db, {
+    dataExec: opts.reportPptxDataExec,
+    renderExec: opts.reportPptxRenderExec,
+    contentExec: opts.reportPptxContentExec,
+    fs: opts.reportPptxFs,
+    now: opts.reportPptxNow,
   });
 
   app.register(fastifyStatic, { root: WEB_DIR, prefix: '/' });
