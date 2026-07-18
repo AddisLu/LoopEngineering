@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { EventEmitter } from 'node:events';
-import { resolveShell, runShell } from '../util/shell.js';
+import { resolveShell, runShell, commandExists } from '../util/shell.js';
 
 // ---- fake execFileSync for platform-detection tests (no real process ever spawned) ----
 
@@ -106,6 +106,44 @@ describe('resolveShell', () => {
 
     const notFound = resolveShell({ platform: 'win32', shellSetting: 'git-bash', execFileSync: nothingPresent(), existsSync: existsNever });
     expect(notFound.cmd).toBe('bash');
+  });
+});
+
+describe('commandExists', () => {
+  it('POSIX probes with `which`', () => {
+    const calls: string[] = [];
+    const ok = commandExists('gh', {
+      platform: 'linux',
+      execFileSync: (cmd) => {
+        calls.push(cmd);
+        return '';
+      },
+    });
+    expect(ok).toBe(true);
+    expect(calls).toEqual(['which']);
+  });
+
+  it('win32 probes with `where` (no `which` on Windows)', () => {
+    const calls: string[] = [];
+    const ok = commandExists('gh', {
+      platform: 'win32',
+      execFileSync: (cmd) => {
+        calls.push(cmd);
+        return '';
+      },
+    });
+    expect(ok).toBe(true);
+    expect(calls).toEqual(['where']);
+  });
+
+  it('missing command -> false, never throws', () => {
+    const ok = commandExists('nope', {
+      platform: 'linux',
+      execFileSync: () => {
+        throw new Error('not found');
+      },
+    });
+    expect(ok).toBe(false);
   });
 });
 

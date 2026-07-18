@@ -289,6 +289,19 @@ export function activeRuns(db: Database.Database): TaskRun[] {
 }
 
 /**
+ * Count dispatches (task_runs) whose started_at falls within a SQLite datetime modifier
+ * window (e.g. '-24 hours', '-5 hours'). Each run — fresh or resume — is one backend
+ * invocation; on the Copilot host that equals one premium request. Powers the request-cap
+ * gate in tick.ts (the real layer-1 limiter when usage_provider='none').
+ */
+export function dispatchCountSince(db: Database.Database, sinceModifier: string): number {
+  const row = db
+    .prepare(`SELECT COUNT(*) AS n FROM task_runs WHERE started_at >= datetime('now', ?)`)
+    .get(sinceModifier) as { n: number };
+  return row.n;
+}
+
+/**
  * In-flight runs joined with their task complexity — for concurrency headroom
  * reservation (Phase 3 #3). Each row carries the budget% at dispatch so the tick can
  * reserve the run's *unspent* estimated cost before packing more work.

@@ -27,7 +27,7 @@ warn() { printf '\033[1;33mWARN\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[1;31mERR\033[0m %s\n' "$*" >&2; exit 1; }
 
 # --- prerequisites ---
-command -v node   >/dev/null || die "node not found — install Node.js (>= 18) first."
+command -v node   >/dev/null || die "node not found — install Node.js (>= 20) first."
 command -v claude >/dev/null || die "claude CLI not found — run: npm i -g @anthropic-ai/claude-code"
 [ -f "$MCP_JS" ]             || die "missing $MCP_JS — run this from a full clone of the repo."
 command -v tailscale >/dev/null || warn "tailscale not found — the engine is only reachable inside your tailnet."

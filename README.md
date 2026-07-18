@@ -100,6 +100,36 @@ Still to confirm on the host: exact `result`-event fields of stream-json, native
 sandbox keys in `settings.local.json`, and the PreToolUse hook exit/JSON contract
 (we use exit 2 + stderr = block).
 
+## Cross-platform deployment (macOS + Windows/Copilot)
+
+The engine runs on Linux, macOS, and Windows 11. The AI backend is selected by the
+`agent_backend` setting; budget by `usage_provider`.
+
+| Host | Backend | Budget | Service | Setup |
+|------|---------|--------|---------|-------|
+| Linux (home) | `claude-code` | `anthropic-oauth` (session/weekly %) | systemd user | `deploy/setup-linux.sh` |
+| **macOS (portable)** | `claude-code` | `anthropic-oauth` | launchd (optional) | `deploy/setup-mac-engine.sh` |
+| **Windows 11 (company)** | `copilot-cli` | `none` + request caps | NSSM | `deploy/setup-windows.ps1` |
+
+**Copilot backend (Windows).** `agent_backend=copilot-cli` spawns the GitHub Copilot CLI
+(`npm i -g @github/copilot`, Node ≥ 22) instead of `claude`. Copilot Business has no
+real-time usage-percent API, so set `usage_provider=none`: `readUsage()` returns a benign
+0% reading (the percent breaker/fit-gate go inert) and the **request-cap gate** becomes the
+real limiter — `request_daily_max` / `request_window_max` (+ `request_window_hours`) cap
+dispatches (each = one premium request). Auth is device-code (`copilot login` → enter the
+code at github.com/login/device); when the token expires the adapter reports `auth-required`,
+which routes the task to `attention` and (if `pause_on_auth_fail`, default on) auto-pauses the
+scheduler so an unattended host never burns premium requests re-trying an unauthenticated CLI.
+Your org admin must have **enabled the Copilot CLI policy** for the Business seat.
+
+**Portability primitives.** `signalGroup` tree-kills via `taskkill /T /F` on win32 (POSIX
+`kill(-pid)` unchanged); `commandExists` probes with `where`/`which`; `shell=auto` runs
+verify/setup steps under git-bash→PowerShell→cmd on Windows; `selfUpdate()` restarts via
+systemctl/launchctl/nssm by platform (override with `LOOP_RESTART_CMD`); and a small
+`KEY=VALUE` env-file loader (`~/.config/loop-engineering/env`, override `LOOP_ENV_FILE`) gives
+all three platforms one env-injection mechanism. `*_python` settings default to `python` on
+the Windows PPTX/SSoT tooling; data lives under `%LOCALAPPDATA%` on Windows.
+
 ## TokenBar integration
 
 Reuses [AddisLu/TokenBar](https://github.com/AddisLu/TokenBar)'s `mcp/usage-core.mjs`

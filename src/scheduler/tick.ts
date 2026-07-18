@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 import { getBool, getNum, getSetting, setSetting, logEvent } from '../db/index.js';
-import { countByStatus, listTasks, latestRun, activeRunCosts, dependencyState, setStatus } from '../tasks.js';
+import { countByStatus, listTasks, latestRun, activeRunCosts, dependencyState, setStatus, dispatchCountSince } from '../tasks.js';
 import { validateTask } from '../gate/validateTask.js';
 import { readUsage } from '../token/usage.js';
 import { estimatePct, estimateWeeklyPct } from '../token/accounting.js';
@@ -110,6 +110,25 @@ export function tick(db: Database.Database, deps: TickDeps): TickInfo {
   // 5. capacity
   let cap = getNum(db, 'max_concurrency', 1) - deps.inflightCount();
   if (cap <= 0) return info(false, 'at concurrency');
+
+  // 5b. local dispatch-count caps — the real layer-1 limiter when usage_provider='none' (the
+  // Copilot host has no percent API). Each run = one backend invocation = one premium request.
+  // 0 = disabled -> byte-identical on anthropic-oauth hosts. Folded into `cap` (which already
+  // bounds the candidate loop below), so a single tick can never exceed the ceiling even at
+  // max_concurrency > 1. In-flight runs (finished_at NULL) still have a started_at, so they count.
+  const dailyMax = getNum(db, 'request_daily_max', 0);
+  if (dailyMax > 0) {
+    const used = dispatchCountSince(db, '-24 hours');
+    if (used >= dailyMax) return info(false, `request cap: ${used}/${dailyMax} in 24h`);
+    cap = Math.min(cap, dailyMax - used);
+  }
+  const windowMax = getNum(db, 'request_window_max', 0);
+  if (windowMax > 0) {
+    const hrs = getNum(db, 'request_window_hours', 5);
+    const used = dispatchCountSince(db, `-${hrs} hours`);
+    if (used >= windowMax) return info(false, `request cap: ${used}/${windowMax} in ${hrs}h`);
+    cap = Math.min(cap, windowMax - used);
+  }
 
   // 6. task-independent safe-to-run gates
   if (reading.session.percent >= policy.sessionMax) return info(false, `session ${reading.session.percent}% >= ${policy.sessionMax}%`);

@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { commandExists } from '../util/shell.js';
 import { paths } from '../config.js';
 import type { Task } from '../types.js';
 
@@ -17,11 +18,7 @@ Be terse. Do NOT modify any files.`;
  */
 export function runGapReview(task: Task, worktreePath: string): string | null {
   if (task.coding_tool !== 'claude-code') return null;
-  try {
-    execFileSync('which', ['claude'], { stdio: 'ignore' });
-  } catch {
-    return null;
-  }
+  if (!commandExists('claude')) return null;
   try {
     const out = execFileSync(
       'claude',

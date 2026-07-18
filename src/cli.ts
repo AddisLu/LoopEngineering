@@ -973,6 +973,14 @@ ingest
     for (const r of results) report(r);
   });
 
+// Snapshot usage_provider into the env so readUsage() (called by `loop status`/`forecast`)
+// respects a 'none' host without a db handle. Mirrors engine.ts's env snapshots.
+program.hook('preAction', () => {
+  const db = getDb();
+  process.env.LOOP_USAGE_PROVIDER =
+    process.env.LOOP_USAGE_PROVIDER ?? (getSetting(db, 'usage_provider') || 'anthropic-oauth');
+});
+
 program.parseAsync();
 
 function printEnvironments(envs: EnvironmentRow[]): void {

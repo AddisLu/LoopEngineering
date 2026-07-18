@@ -34,6 +34,31 @@ function commandOnPath(name: string, execFileSyncFn: ExecFileSyncFn): boolean {
   }
 }
 
+export interface CommandExistsOptions {
+  /** Injectable for tests — defaults to process.platform. */
+  platform?: NodeJS.Platform;
+  /** Injectable for tests — defaults to node:child_process execFileSync. */
+  execFileSync?: ExecFileSyncFn;
+}
+
+/**
+ * Cross-platform "is <name> on PATH?" probe. POSIX uses `which`, Windows uses `where`
+ * (there is no `which` on stock Windows). Replaces the ad-hoc `execFileSync('which', ...)`
+ * probes scattered across the codebase, which always reported "missing" on Windows and
+ * silently disabled the guarded feature. Never throws.
+ */
+export function commandExists(name: string, opts: CommandExistsOptions = {}): boolean {
+  const platform = opts.platform ?? process.platform;
+  const execFileSyncFn = opts.execFileSync ?? execFileSync;
+  const probe = platform === 'win32' ? 'where' : 'which';
+  try {
+    execFileSyncFn(probe, [name], { stdio: ['ignore', 'ignore', 'ignore'] });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Git-for-Windows ships bash at <git-exec-path>/../../../bin/bash.exe; fall back to PATH. */
 function locateGitBash(existsSyncFn: (p: string) => boolean, execFileSyncFn: ExecFileSyncFn): string | null {
   try {

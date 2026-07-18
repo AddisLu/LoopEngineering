@@ -21,6 +21,8 @@ export const NONNEG_KEYS = new Set([
   'report_budget_chars', 'report_timeout_ms',
   // report generation D (PPTX)
   'report_pptx_timeout_ms',
+  // Windows/Copilot deployment: local dispatch-count caps (0 = disabled)
+  'request_daily_max', 'request_window_max', 'request_window_hours',
 ]);
 // values must be a number in [0, 1] (a fraction/weight, unlike the 0-100 PERCENT_KEYS)
 export const UNIT_INTERVAL_KEYS = new Set(['rag_hybrid_alpha']);
@@ -33,6 +35,8 @@ export const BOOL_KEYS = new Set([
   'git_fetch_base', 'auto_push_branch', 'auto_merge', 'merge_conflict_task',
   // self-update / dependency-release flags
   'self_update', 'dep_done_on_merge',
+  // copilot-cli backend: auto-pause the scheduler on an auth failure (Windows deployment)
+  'pause_on_auth_fail',
   // knowledge base
   'knowledge_inject', 'knowledge_distill',
   // execution-discipline prompt (experimental, opt-in)
@@ -74,6 +78,11 @@ export const AGENT_BACKEND_VALUES = new Set(['claude-code', 'copilot-cli']);
 
 /** Accepted `shell` values (see src/util/shell.ts resolveShell). */
 export const SHELL_VALUES = new Set(['auto', 'bash', 'powershell', 'cmd', 'git-bash']);
+
+/** Accepted `usage_provider` values. 'none' disables percent-based budgeting (e.g. the
+ * Copilot host, which has no session/weekly usage API — see src/token/usage.ts). Unlike
+ * agent_backend, an unknown value here is hard-rejected (like integration_provider). */
+export const USAGE_PROVIDER_VALUES = new Set(['anthropic-oauth', 'none']);
 
 /** Keys the board settings panel reads/writes (the budget/scheduling knobs). */
 export const TUNABLE_KEYS = [
@@ -125,6 +134,8 @@ export function validateSetting(key: string, value: string): string | null {
     }
   } else if (key === 'shell') {
     if (!SHELL_VALUES.has(value)) return `shell must be one of: ${[...SHELL_VALUES].join(', ')}`;
+  } else if (key === 'usage_provider') {
+    if (!USAGE_PROVIDER_VALUES.has(value)) return `usage_provider must be one of: ${[...USAGE_PROVIDER_VALUES].join(', ')}`;
   }
   return null;
 }

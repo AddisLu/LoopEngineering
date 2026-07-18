@@ -71,7 +71,7 @@ export interface UsageReading {
   fetchedAt: string;
   session: UsageLimit;
   weekly: UsageLimit;
-  source: 'api' | 'cache' | 'ledger';
+  source: 'api' | 'cache' | 'ledger' | 'disabled';
   error?: string;
 }
 

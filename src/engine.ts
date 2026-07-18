@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 import { spawn } from 'node:child_process';
-import { getDb, getNum } from './db/index.js';
+import { getDb, getNum, getSetting } from './db/index.js';
 import type { Task } from './types.js';
 import { runTask } from './orchestrator/run.js';
 import { recoverOnStartup } from './orchestrator/recovery.js';
@@ -9,29 +9,53 @@ import { releasePower } from './scheduler/power.js';
 import { paths, ENGINE_REPO_ROOT } from './config.js';
 
 /**
- * Rebuild + restart the engine in place, detached so it survives the engine's own
- * `systemctl --user restart`. Best-effort: a synchronous spawn failure propagates to
- * the tick's try/catch, which re-arms self_update_pending for a retry next tick.
+ * Platform-specific "restart THIS engine's service" command. Overridable via LOOP_RESTART_CMD;
+ * the service name/label default to the setup-script conventions (deploy/setup-*). Linux =
+ * systemd user unit, macOS = launchd LaunchAgent, Windows = NSSM service.
+ */
+function restartCommand(): string {
+  if (process.env.LOOP_RESTART_CMD) return process.env.LOOP_RESTART_CMD;
+  switch (process.platform) {
+    case 'darwin':
+      return `launchctl kickstart -k gui/$(id -u)/${process.env.LOOP_LAUNCHD_LABEL ?? 'com.loop-engineering'}`;
+    case 'win32':
+      return `nssm restart ${process.env.LOOP_WIN_SERVICE ?? 'loop-engineering'}`;
+    default:
+      return `systemctl --user restart ${process.env.LOOP_SYSTEMD_UNIT ?? 'loop-engineering'}`;
+  }
+}
+
+/**
+ * Rebuild + restart the engine in place, detached so it survives the engine's own service
+ * restart. Cross-platform: orchestrated by a detached `node -e` runner (no bash / systemctl
+ * hard-wiring) that installs deps, rebuilds, then runs the platform restart command. Best-
+ * effort: a synchronous spawn failure propagates to the tick's try/catch, which re-arms
+ * self_update_pending for a retry next tick.
  *
- * Output goes to a timestamped log (NOT stdio:'ignore') so a FAILED build — which
- * short-circuits the `&&` before restart and would otherwise leave the engine silently
- * on old code with no signal — is diagnosable. `systemctl restart` only runs if the
- * build succeeded; a failed build leaves a line in the log for the operator.
+ * All output is appended to a timestamped log so a FAILED build — which skips the restart and
+ * would otherwise leave the engine silently on old code with no signal — is diagnosable. The
+ * restart only runs if install + build both succeeded; a failure leaves a line for the operator.
  */
 function selfUpdate(): void {
   const log = `${paths.logsDir}/self-update.log`;
-  const cmd =
-    `echo "=== self-update $(date -Iseconds) ===" >> ${log}; ` +
-    // install first: a merged commit may add a dependency (e.g. sqlite-vec); building
-    // without installing it fails tsc and leaves the engine silently on old code.
-    `sleep 2 && npm install --no-audit --no-fund --no-progress >> ${log} 2>&1 ` +
-    `&& npm run build >> ${log} 2>&1 ` +
-    `&& { echo "build OK -> restarting" >> ${log}; systemctl --user restart loop-engineering; } ` +
-    `|| echo "SELF-UPDATE BUILD FAILED — engine still on OLD code, restart skipped (see above)" >> ${log}`;
-  const child = spawn('bash', ['-lc', cmd], {
+  const restart = restartCommand();
+  // install first: a merged commit may add a dependency (e.g. sqlite-vec); building without
+  // installing it fails tsc and leaves the engine silently on old code. execSync runs each
+  // step through the platform shell, so `npm`/`npm.cmd` and the restart command resolve on PATH.
+  const runner =
+    `const {execSync}=require('child_process'),fs=require('fs');` +
+    `const log=${JSON.stringify(log)},cwd=${JSON.stringify(ENGINE_REPO_ROOT)};` +
+    `const app=(s)=>{try{fs.appendFileSync(log,s+"\\n")}catch(_){}};` +
+    `const sh=(c)=>execSync(c,{cwd,stdio:['ignore',fs.openSync(log,'a'),fs.openSync(log,'a')]});` +
+    `app("=== self-update "+new Date().toISOString()+" ===");` +
+    `try{sh("npm install --no-audit --no-fund --no-progress");sh("npm run build");` +
+    `app("build OK -> restarting");sh(${JSON.stringify(restart)});}` +
+    `catch(e){app("SELF-UPDATE FAILED — engine still on OLD code, restart skipped: "+(e&&e.message));}`;
+  const child = spawn(process.execPath, ['-e', runner], {
     cwd: ENGINE_REPO_ROOT,
     detached: true,
     stdio: 'ignore',
+    windowsHide: true,
   });
   child.unref();
 }
@@ -53,6 +77,9 @@ export function createEngine(db: Database.Database = getDb()): Engine {
   // Let the budget-guard hook (spawned inside claude) find the shared cache + limit.
   process.env.LOOP_USAGE_CACHE = process.env.LOOP_USAGE_CACHE ?? `${paths.dataDir}/usage-cache.json`;
   process.env.LOOP_HARD_LIMIT_PCT = String(getNum(db, 'hard_limit_pct', 95));
+  // usage_provider='none' -> readUsage() short-circuits to a benign 0% reading (Copilot host).
+  process.env.LOOP_USAGE_PROVIDER =
+    process.env.LOOP_USAGE_PROVIDER ?? (getSetting(db, 'usage_provider') || 'anthropic-oauth');
 
   function startRun(task: Task, opts: { resume?: boolean }): void {
     if (inflight.has(task.id)) return;

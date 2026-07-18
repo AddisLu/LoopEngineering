@@ -5,6 +5,7 @@ import { createTask, getTask } from '../tasks.js';
 import { pickAdapter } from '../orchestrator/run.js';
 import { mockAdapter } from '../orchestrator/adapters/mock.js';
 import { claudeCodeAdapter } from '../orchestrator/adapters/claudeCode.js';
+import { copilotCliAdapter } from '../orchestrator/adapters/copilotCli.js';
 import { getBackend, registerBackend, registeredBackends } from '../orchestrator/adapters/registry.js';
 import type { Adapter, DispatchHandle } from '../orchestrator/adapters/types.js';
 
@@ -37,12 +38,12 @@ registerBackend('echo-test', echoAdapter);
 describe('backend registry', () => {
   it('getBackend returns the registered adapter by name', () => {
     expect(getBackend('claude-code')).toBe(claudeCodeAdapter);
+    expect(getBackend('copilot-cli')).toBe(copilotCliAdapter);
     expect(getBackend('mock')).toBe(mockAdapter);
     expect(getBackend('echo-test')).toBe(echoAdapter);
   });
 
   it('unknown backend id falls back to claude-code (never throws)', () => {
-    expect(getBackend('copilot-cli')).toBe(claudeCodeAdapter);
     expect(getBackend('nonsense')).toBe(claudeCodeAdapter);
   });
 
@@ -78,8 +79,14 @@ describe('pickAdapter: agent_backend selection', () => {
     expect(pickAdapter(t, db)).toBe(mockAdapter);
   });
 
+  it('agent_backend=copilot-cli selects the Copilot adapter', () => {
+    setSetting(db, 'agent_backend', 'copilot-cli');
+    const t = getTask(db, createTask(db, { ...BASE, coding_tool: 'claude-code' }).id)!;
+    expect(pickAdapter(t, db)).toBe(copilotCliAdapter);
+  });
+
   it('unrecognized agent_backend value falls back to claude-code, not a throw', () => {
-    setSetting(db, 'agent_backend', 'copilot-cli'); // reserved, no adapter registered yet
+    setSetting(db, 'agent_backend', 'no-such-backend');
     const t = getTask(db, createTask(db, { ...BASE, coding_tool: 'claude-code' }).id)!;
     expect(pickAdapter(t, db)).toBe(claudeCodeAdapter);
   });

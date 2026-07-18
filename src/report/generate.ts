@@ -1,4 +1,5 @@
-import { execFile, execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
+import { commandExists } from '../util/shell.js';
 import { promisify } from 'node:util';
 import path from 'node:path';
 import type Database from 'better-sqlite3';
@@ -105,14 +106,7 @@ export interface ReportDeps {
 let claudeCliCache: boolean | null = null;
 
 function hasClaudeCli(): boolean {
-  if (claudeCliCache === null) {
-    try {
-      execFileSync('which', ['claude'], { stdio: 'ignore' });
-      claudeCliCache = true;
-    } catch {
-      claudeCliCache = false;
-    }
-  }
+  if (claudeCliCache === null) claudeCliCache = commandExists('claude');
   return claudeCliCache;
 }
 

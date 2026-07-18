@@ -19,7 +19,8 @@ export function spawnStreaming(
   const child = spawn(cmd, args, {
     cwd: ctx.cwd,
     env,
-    detached: true, // new process group -> kill(-pid) hits the whole group
+    detached: true, // new process group -> kill(-pid) (POSIX) / taskkill /T (win32) hits the whole tree
+    windowsHide: true, // ignored on POSIX; suppresses a per-dispatch console window on win32
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 

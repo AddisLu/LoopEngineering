@@ -1,5 +1,6 @@
 import type { Adapter } from './types.js';
 import { claudeCodeAdapter } from './claudeCode.js';
+import { copilotCliAdapter } from './copilotCli.js';
 import { mockAdapter } from './mock.js';
 
 /**
@@ -14,6 +15,7 @@ import { mockAdapter } from './mock.js';
  */
 const backends: Record<string, Adapter> = {
   'claude-code': claudeCodeAdapter,
+  'copilot-cli': copilotCliAdapter,
   mock: mockAdapter,
 };
 

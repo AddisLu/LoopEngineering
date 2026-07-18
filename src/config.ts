@@ -22,9 +22,58 @@ export function isEngineRepo(repoPath: string): boolean {
   }
 }
 
-const DATA_DIR = expand(
-  process.env.LOOP_DATA_DIR ?? path.join(os.homedir(), '.local', 'share', 'loop-engineering'),
-);
+/**
+ * Minimal KEY=VALUE env-file loader (no dependency). On Linux the systemd unit injects env
+ * via `EnvironmentFile`; macOS launchd and Windows NSSM have no drop-in equivalent, so this
+ * gives all three platforms ONE mechanism for LOOP_API_TOKEN / GITHUB_TOKEN / etc. Reads
+ * LOOP_ENV_FILE (default ~/.config/loop-engineering/env) and sets each var only when it is
+ * not already present (a real environment variable always wins). Blank lines and '#'
+ * comments are ignored; surrounding single/double quotes on the value are stripped.
+ */
+function loadEnvFile(): void {
+  if (process.env.VITEST) return; // hermetic tests: never read the host's real env file
+  const file = expand(
+    process.env.LOOP_ENV_FILE ?? path.join(os.homedir(), '.config', 'loop-engineering', 'env'),
+  );
+  let text: string;
+  try {
+    text = fs.readFileSync(file, 'utf8');
+  } catch {
+    return; // no env file present -> nothing to load
+  }
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#')) continue;
+    const eq = line.indexOf('=');
+    if (eq <= 0) continue;
+    const key = line.slice(0, eq).trim();
+    let val = line.slice(eq + 1).trim();
+    if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+      val = val.slice(1, -1);
+    }
+    if (!(key in process.env)) process.env[key] = val;
+  }
+}
+
+loadEnvFile();
+
+/** Default data dir. Windows uses %LOCALAPPDATA%\loop-engineering (idiomatic per-user app
+ *  data); POSIX keeps ~/.local/share/loop-engineering. Overridable via LOOP_DATA_DIR anywhere. */
+function defaultDataDir(): string {
+  if (process.platform === 'win32' && process.env.LOCALAPPDATA) {
+    return path.join(process.env.LOCALAPPDATA, 'loop-engineering');
+  }
+  return path.join(os.homedir(), '.local', 'share', 'loop-engineering');
+}
+
+/** Python inside a virtualenv, per platform: POSIX '<venv>/bin/python', win32 '<venv>\Scripts\python.exe'. */
+function venvPython(venvDir: string): string {
+  return process.platform === 'win32'
+    ? path.join(venvDir, 'Scripts', 'python.exe')
+    : path.join(venvDir, 'bin', 'python');
+}
+
+const DATA_DIR = expand(process.env.LOOP_DATA_DIR ?? defaultDataDir());
 
 export const paths = {
   dataDir: DATA_DIR,
@@ -60,7 +109,7 @@ export function ensureDirs(): void {
 export function getVoicePython(): string {
   return expand(
     process.env.LOOP_VOICE_PYTHON ??
-      path.join(os.homedir(), '.local', 'share', 'loop-engineering', 'voice-venv', 'bin', 'python'),
+      venvPython(path.join(os.homedir(), '.local', 'share', 'loop-engineering', 'voice-venv')),
   );
 }
 
@@ -159,6 +208,27 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // prep for the Windows company deployment, testable today from Linux.
   shell: 'auto',
 
+  // budget provider: 'anthropic-oauth' (default) reads session/weekly usage percent from the
+  // Anthropic OAuth usage API. 'none' disables percent-based budgeting entirely (readUsage
+  // returns a benign 0% reading) — for hosts with no such API (e.g. the Windows Copilot
+  // deployment, which bills on a monthly premium-request quota). With 'none', the request-cap
+  // gate below is the real pre-dispatch limiter. See src/token/usage.ts + src/scheduler/tick.ts.
+  usage_provider: 'anthropic-oauth',
+
+  // when the copilot-cli backend reports an auth failure (device-code token expired/revoked),
+  // auto-pause the scheduler so an unattended host doesn't keep burning premium requests
+  // re-dispatching an unauthenticated CLI. A human re-runs `copilot login` then unpauses.
+  // true = safe default; false = just route the task to attention without pausing.
+  pause_on_auth_fail: 'true',
+
+  // local dispatch-count caps — the real layer-1 limiter when usage_provider='none' (the
+  // Copilot host has no percent API). Each dispatch (fresh or resume) = one backend
+  // invocation = one premium request. 0 = disabled (zero-impact; the default, so
+  // anthropic-oauth hosts are byte-identical).
+  request_daily_max: '0', // rolling-24h ceiling
+  request_window_max: '0', // rolling request_window_hours ceiling
+  request_window_hours: '5', // window length (mirrors the 5h session mental model)
+
   // usage-fetch cadence + ledger fallback
   usage_refresh_sec: '180',
   ledger_fallback_after_min: '10',
@@ -235,7 +305,7 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // by default = zero behavior change; voice_model/voice_terms_path only matter once enabled.
   voice_intake_enabled: 'false',
   voice_model: 'large-v3',
-  voice_terms_path: '/home/addis/Coding/VoiceToTemplate/terms.txt',
+  voice_terms_path: '',
   // warm whisper worker (scripts/transcribe_daemon.py, src/voice/daemon.ts): a singleton
   // subprocess keeps the model loaded in VRAM between requests instead of paying the
   // ~1.6s load+CUDA-init cost on every recording. On by default; any daemon failure falls
@@ -256,7 +326,7 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   embed_dim: '1024',
   // shares the voice-venv python (torch + sentence-transformers installed alongside
   // faster-whisper — see plan-SSoT-master.md's out-of-band setup steps).
-  embed_python: path.join(os.homedir(), '.local', 'share', 'loop-engineering', 'voice-venv', 'bin', 'python'),
+  embed_python: venvPython(path.join(os.homedir(), '.local', 'share', 'loop-engineering', 'voice-venv')),
   rag_top_k: '8',
   rag_hybrid_alpha: '0.5',
   // warm embed worker (scripts/embed_daemon.py, reuses src/voice/daemon.ts's WarmWorker):

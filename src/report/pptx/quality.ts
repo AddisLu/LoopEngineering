@@ -7,7 +7,7 @@
  * gate defaults to shipping rather than blocking, leaning on quality_flags + human
  * review as the backstop). Neither stage ever throws.
  */
-import { execFileSync } from 'node:child_process';
+import { commandExists } from '../../util/shell.js';
 import type Database from 'better-sqlite3';
 import { getNum, getSetting } from '../../db/index.js';
 import { readUsage } from '../../token/usage.js';
@@ -20,14 +20,7 @@ import { defaultContentExec, type ContentExec } from './status.js';
 let claudeCliCache: boolean | null = null;
 
 function hasClaudeCli(): boolean {
-  if (claudeCliCache === null) {
-    try {
-      execFileSync('which', ['claude'], { stdio: 'ignore' });
-      claudeCliCache = true;
-    } catch {
-      claudeCliCache = false;
-    }
-  }
+  if (claudeCliCache === null) claudeCliCache = commandExists('claude');
   return claudeCliCache;
 }
 

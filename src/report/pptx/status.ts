@@ -9,7 +9,8 @@
  * assembleDeckSpec falls back to carrying last week's items forward verbatim (T2's
  * existing all-black-carryover behavior). The deck must never ship blank over an LLM hiccup.
  */
-import { execFile, execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
+import { commandExists } from '../../util/shell.js';
 import { promisify } from 'node:util';
 import type Database from 'better-sqlite3';
 import { getNum, getSetting } from '../../db/index.js';
@@ -30,14 +31,7 @@ export type ContentExec = (prompt: string, model: string) => Promise<string | nu
 let claudeCliCache: boolean | null = null;
 
 function hasClaudeCli(): boolean {
-  if (claudeCliCache === null) {
-    try {
-      execFileSync('which', ['claude'], { stdio: 'ignore' });
-      claudeCliCache = true;
-    } catch {
-      claudeCliCache = false;
-    }
-  }
+  if (claudeCliCache === null) claudeCliCache = commandExists('claude');
   return claudeCliCache;
 }
 

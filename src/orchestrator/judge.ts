@@ -1,4 +1,5 @@
 import { execFile, execFileSync } from 'node:child_process';
+import { commandExists } from '../util/shell.js';
 import { promisify } from 'node:util';
 import type Database from 'better-sqlite3';
 import { getNum, getSetting } from '../db/index.js';
@@ -20,12 +21,7 @@ export interface JudgeResult {
 }
 
 function hasClaudeCli(): boolean {
-  try {
-    execFileSync('which', ['claude'], { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
-  }
+  return commandExists('claude');
 }
 
 function stripFences(s: string): string {

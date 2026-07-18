@@ -372,6 +372,19 @@ export async function runTask(
     return;
   }
   if (dispatchFailed(result)) {
+    // Copilot auth expired/absent: pause the whole scheduler so we don't keep burning premium
+    // requests re-dispatching against an unauthenticated CLI. A human re-runs `copilot login`
+    // then unpauses. The task itself still lands in attention below. (pause_on_auth_fail on by
+    // default; only the copilot-cli adapter ever emits resultSubtype='auth-required'.)
+    if (result.resultSubtype === 'auth-required' && getBool(db, 'pause_on_auth_fail', true)) {
+      setSetting(db, 'scheduler_paused', 'true');
+      logEvent(db, {
+        task_id: task.id,
+        run_id: run.id,
+        kind: 'note',
+        detail: 'copilot auth failed — scheduler auto-paused; run `copilot login` then unpause',
+      });
+    }
     // Adapter error: the worktree (and any streamed session) is intact — hold for triage.
     setStatus(db, task.id, 'attention', {
       run_id: run.id,

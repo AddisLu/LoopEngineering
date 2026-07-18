@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import type Database from 'better-sqlite3';
 import type { TaskRun } from '../types.js';
 import { updateRun } from '../tasks.js';
@@ -13,8 +14,45 @@ export function isAlive(pid: number | null | undefined): boolean {
   }
 }
 
-/** Signal the whole process group (spawned detached => own group). */
-export function signalGroup(pid: number, sig: NodeJS.Signals): boolean {
+/** Fire-and-forget exec used by the win32 tree-kill branch (injectable for tests). */
+type KillExec = (cmd: string, args: string[]) => void;
+
+export interface SignalGroupOptions {
+  /** Injectable for tests — defaults to process.platform. */
+  platform?: NodeJS.Platform;
+  /** Injectable for tests — defaults to a swallow-errors execFileSync('taskkill', ...). */
+  exec?: KillExec;
+}
+
+/**
+ * Signal the whole process group (spawned detached => own group).
+ *
+ * POSIX: `process.kill(-pid, sig)` (negative pid = the group), falling back to the
+ * single pid. Windows has no POSIX process groups, and negative-pid / SIGINT / SIGKILL
+ * are not honored there, so we tree-kill with `taskkill /PID <pid> /T [/F]`
+ * (`/T` = whole tree, `/F` = force, used for the SIGKILL escalation).
+ */
+export function signalGroup(pid: number, sig: NodeJS.Signals, opts: SignalGroupOptions = {}): boolean {
+  const platform = opts.platform ?? process.platform;
+  if (platform === 'win32') {
+    const exec =
+      opts.exec ??
+      ((cmd, args) => {
+        try {
+          execFileSync(cmd, args, { stdio: 'ignore' });
+        } catch {
+          /* already gone / not ours */
+        }
+      });
+    const args = ['/PID', String(pid), '/T', ...(sig === 'SIGKILL' ? ['/F'] : [])];
+    try {
+      exec('taskkill', args);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  // ---- POSIX (unchanged): kill the group, then the single pid ----
   try {
     process.kill(-pid, sig);
     return true;

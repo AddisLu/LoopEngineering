@@ -25,6 +25,11 @@ interface CacheEnvelope {
  * the cache file is honored on the next read (see writeCache / the M1 breaker test).
  */
 export function readUsage(opts: { force?: boolean; refreshMs?: number } = {}): UsageReading {
+  // usage_provider='none' (e.g. the Copilot host): no percent API exists. Return a benign
+  // 0%-used reading so the breaker / start-gate / fit-gate never trip; the request-cap gate
+  // in tick.ts is the real limiter. Snapshotted into the env at engine/cli start (no db here).
+  if (process.env.LOOP_USAGE_PROVIDER === 'none') return benignReading();
+
   const refreshMs = opts.refreshMs ?? TOKEN_REFRESH_MS;
 
   const mock = process.env.LOOP_MOCK_USAGE;
@@ -168,6 +173,11 @@ function normalize(r: LooseReading, source: UsageReading['source']): UsageReadin
     source,
     ...(r.error ? { error: r.error } : {}),
   };
+}
+
+/** usage_provider='none': a healthy 0%-used reading so no percent-based gate ever trips. */
+function benignReading(): UsageReading {
+  return normalize({ ok: true, session: { percent: 0 }, weekly: { percent: 0 } }, 'disabled');
 }
 
 function degraded(msg: string): UsageReading {

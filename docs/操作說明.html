@@ -173,7 +173,8 @@
     <a href="#report">23 · 報告生成（描述式 + 老闆範本 + 16:9 Deck）</a>
     <a href="#report-charts">24 · 報告圖表（Mermaid）與存檔</a>
     <a href="#report-pptx">25 · 企業週報 PPTX（公版格式）</a>
-    <a href="#appendix">26 · 附錄（API / 檔案位置）</a>
+    <a href="#xplatform">26 · 跨平台部署（Mac / Windows Copilot）</a>
+    <a href="#appendix">27 · 附錄（API / 檔案位置）</a>
   </nav>
 
   <main>
@@ -1093,8 +1094,61 @@ npm run loop -- pipeline run ship \
       <div class="note info"><span class="ic">🔒</span><span><b>把關永遠是人。</b>不論走 CLI 的 <code>run</code>、REST 的 <code>stage:"run"</code>、還是 MCP 的 <code>loop_report_weekly</code>，說明頁能不能進 deck 只看 <code>explain-pages.json</code> 的 <code>approved</code> 欄位——沒有任何「一鍵」路徑會自動把它改成 <code>true</code>。</span></div>
     </section>
 
+    <section id="xplatform">
+      <h2><span class="num">26</span>跨平台部署（Mac 隨選 / Windows Copilot）</h2>
+      <p>同一份程式碼可跑在三種主機。AI 後端由 <code>agent_backend</code> 設定選擇，預算模型由 <code>usage_provider</code> 選擇。</p>
+      <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>主機</th><th>後端</th><th>預算</th><th>服務</th><th>安裝腳本</th></tr></thead>
+        <tbody>
+          <tr><td>Linux（家用，主引擎）</td><td><code>claude-code</code></td><td><code>anthropic-oauth</code>（session/週百分比）</td><td>systemd user</td><td><code>deploy/setup-linux.sh</code></td></tr>
+          <tr><td>macOS（可攜、隨選）</td><td><code>claude-code</code></td><td><code>anthropic-oauth</code></td><td>launchd（可選）</td><td><code>deploy/setup-mac-engine.sh</code></td></tr>
+          <tr><td>Windows 11（公司）</td><td><code>copilot-cli</code></td><td><code>none</code> + 次數上限</td><td>NSSM</td><td><code>deploy/setup-windows.ps1</code></td></tr>
+        </tbody>
+      </table>
+      </div>
+
+      <h3>MacBook Air（隨選，Claude 帳號）</h3>
+      <p>可攜開發機，用你自己的 Claude 訂閱，不常駐；家裡 Linux 仍是唯一常駐主引擎。安裝：</p>
+      <pre><code>bash deploy/setup-mac-engine.sh            # 建置 + 寫 env，印出啟動指令
+bash deploy/setup-mac-engine.sh --run      # 順便前景啟動
+bash deploy/setup-mac-engine.sh --install-launchd   # 改成開機自啟</code></pre>
+      <div class="note tip"><span class="ic">⚠️</span><span><b>併發注意：</b>Mac 與家裡 Linux <b>勿同時</b>對同一 repo/base 跑——各自 worktree，但會搶同一 base 分支。隨選時由你錯開即可。</span></div>
+
+      <h3>公司 Windows 11（全自動，Copilot Business）</h3>
+      <p>公司沒有 Claude，只有 GitHub Copilot Business。<code>agent_backend=copilot-cli</code> 會改叫 GitHub Copilot CLI（<code>npm i -g @github/copilot</code>，需 Node ≥ 22）而非 <code>claude</code>。安裝（以系統管理員 PowerShell）：</p>
+      <pre><code>powershell -ExecutionPolicy Bypass -File deploy\setup-windows.ps1</code></pre>
+      <ol>
+        <li><b>前置阻斷點：</b>請組織管理員在 GitHub 啟用 <b>Copilot CLI 政策</b>（Business 訂閱本身不夠）。</li>
+        <li><b>裝置碼登入（一次性、手動）：</b><code>copilot login</code> → 到 <code>github.com/login/device</code> 填數字碼。</li>
+        <li>腳本會 <code>npm ci &amp;&amp; npm run build</code>、寫 <code>%USERPROFILE%\.config\loop-engineering\env</code>（隨機 <code>LOOP_API_TOKEN</code>）、裝 <code>python-pptx==1.0.2</code>（週報，Python 3.8.10）、套用 Copilot 主機設定、並以 NSSM 註冊服務。</li>
+        <li><b>冒煙測試：</b>先跑一個 <code>--tool mock</code> 任務（零 token，驗 tick/watchdog/中斷/合併），再跑一個真 Copilot 小任務。</li>
+      </ol>
+
+      <h3>Copilot 主機的預算：以「次數」取代「百分比」</h3>
+      <p>Copilot Business 只有每月 premium request 額度，引擎讀不到即時百分比，所以設 <code>usage_provider=none</code>：<code>readUsage()</code> 回傳良性 0% 讀數（百分比斷路器與 fit-gate 全惰性），改由 <b>request-cap 閘門</b>當實際限制：</p>
+      <ul>
+        <li><code>request_daily_max</code>——滾動 24 小時派工上限（每次派工＝一次 premium request）。<code>0</code>＝不限。</li>
+        <li><code>request_window_max</code> + <code>request_window_hours</code>（預設 5）——滾動視窗上限。</li>
+      </ul>
+      <div class="note info"><span class="ic">🔑</span><span><b>認證過期自我保護：</b>Copilot 的裝置碼 token 會過期。adapter 偵測到未認證會回 <code>auth-required</code>，任務轉 <code>attention</code>；若 <code>pause_on_auth_fail</code>（預設<b>開</b>）則同時<b>自動暫停排程</b>，避免無人值守下持續燒 premium request 重試。處理：<code>copilot login</code> 重登後解除暫停即可。</span></div>
+
+      <h3>三層預算保護在 Copilot 主機的對應</h3>
+      <p>第 9 章的三層保護在 Copilot 主機是<b>重新詮釋、未違反</b>：① 派工前 gate → request-cap 次數閘門；② 執行中斷路器（百分比）→ 惰性，改由 watchdog 逾時擔任執行中止；③ 每 run watchdog → 不變（Windows 以 <code>taskkill /T /F</code> 中斷）。</p>
+
+      <h3>可攜性基礎（跨平台自動處理，無需你操心）</h3>
+      <ul>
+        <li>中斷：win32 以 <code>taskkill /T /F</code> 樹殺（POSIX <code>kill(-pid)</code> 不變）。</li>
+        <li>執行檔偵測：<code>commandExists</code> 於 Windows 用 <code>where</code>、POSIX 用 <code>which</code>。</li>
+        <li>verify/setup 步驟的 shell：<code>shell=auto</code> 於 Windows 依序試 git-bash → PowerShell → cmd。</li>
+        <li>自我更新重啟：依平台 systemctl／launchctl／nssm（可用 <code>LOOP_RESTART_CMD</code> 覆寫）。</li>
+        <li>環境變數注入：三平台共用 <code>~/.config/loop-engineering/env</code>（<code>KEY=VALUE</code>；可用 <code>LOOP_ENV_FILE</code> 覆寫）。</li>
+        <li>Python：Windows PPTX/SSoT 工具的 <code>*_python</code> 預設用 <code>python</code>；資料目錄於 Windows 落在 <code>%LOCALAPPDATA%</code>。</li>
+      </ul>
+    </section>
+
     <section id="appendix">
-      <h2><span class="num">26</span>附錄</h2>
+      <h2><span class="num">27</span>附錄</h2>
       <h3>REST / SSE 端點</h3>
       <p>除 <code>/</code> 靜態頁外，<code>/api/*</code> 需帶 bearer（<code>Authorization: Bearer &lt;token&gt;</code>）或 <code>?token=</code>。</p>
       <div class="tbl-wrap">

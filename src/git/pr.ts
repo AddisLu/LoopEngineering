@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { commandExists } from '../util/shell.js';
 import { hasRemote } from './integrate.js';
 
 // hasRemote now lives in integrate.ts (shared with the whole git close-out path); re-export
@@ -13,12 +14,7 @@ function git(repo: string, args: string[]): string {
 }
 
 function has(cmd: string): boolean {
-  try {
-    execFileSync('which', [cmd], { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
-  }
+  return commandExists(cmd);
 }
 
 /**

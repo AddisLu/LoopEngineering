@@ -1,4 +1,5 @@
-import { execFile, execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
+import { commandExists } from '../util/shell.js';
 import { promisify } from 'node:util';
 import type Database from 'better-sqlite3';
 import { getNum } from '../db/index.js';
@@ -25,14 +26,7 @@ const ALLOWED_RELATIONS = new Set<Relation>(RELATION.filter((r) => r !== 'links-
 let claudeCliCache: boolean | null = null;
 
 function hasClaudeCli(): boolean {
-  if (claudeCliCache === null) {
-    try {
-      execFileSync('which', ['claude'], { stdio: 'ignore' });
-      claudeCliCache = true;
-    } catch {
-      claudeCliCache = false;
-    }
-  }
+  if (claudeCliCache === null) claudeCliCache = commandExists('claude');
   return claudeCliCache;
 }
 
