@@ -259,6 +259,17 @@
       </table>
       </div>
       <div class="note tip"><span class="ic">✅</span><span><b>由 systemd 常駐，不再依賴任何終端機視窗。</b>重開機也會自動起來。日誌隨看隨用：<code>journalctl --user -u loop-engineering -f</code></span></div>
+
+      <h3>桌面一鍵啟動</h3>
+      <p>不想打指令時，可在桌面放一個<b>一鍵啟動</b>圖示——雙擊後：看板已在跑就直接開瀏覽器；有裝 systemd 服務就走 <code>systemctl --user start</code>；否則自動補 <code>npm ci</code>／<code>npm run build</code> 再啟動 <code>node dist/server.js</code>，等看板就緒後開啟 <code>http://127.0.0.1:4711</code>。重複雙擊不會多開第二份。</p>
+      <pre><code># Linux／macOS：安裝桌面捷徑（重跑無害）
+bash deploy/install-desktop-shortcut.sh</code></pre>
+      <ul>
+        <li><b>Linux</b>：桌面出現「啟動 LoopEngineering」圖示（同時進應用程式選單）。GNOME 首次雙擊若顯示不信任，右鍵選「允許啟動」一次即可。</li>
+        <li><b>macOS</b>：桌面出現 <code>啟動LoopEngineering.command</code>，雙擊即可（首次可能要在「系統設定 → 隱私權與安全性」放行一次）。</li>
+        <li><b>Windows</b>：對 <code>deploy\start-loop.bat</code> 右鍵 → <b>傳送到 → 桌面（建立捷徑）</b>；雙擊捷徑會開一個引擎視窗（關掉該視窗＝停止引擎）並自動開啟看板。</li>
+        <li>三個平台的腳本都放在 repo 的 <code>deploy/</code>：<code>start-loop.sh</code>／<code>start-loop.bat</code>／<code>install-desktop-shortcut.sh</code>；捷徑指回 repo 內的腳本，之後 <code>git pull</code> 更新不用重建捷徑。</li>
+      </ul>
     </section>
 
     <section id="remote">
