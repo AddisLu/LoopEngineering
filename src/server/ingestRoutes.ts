@@ -3,6 +3,7 @@ import type Database from 'better-sqlite3';
 import { createSource, listSources, deleteSource, getSource } from '../knowledge/ingest/sources.js';
 import { ingestSource, ingestAll } from '../knowledge/ingest/ingest.js';
 import { SOURCE_KIND, type SourceKind } from '../knowledge/ingest/types.js';
+import { normalizeGithubUri } from '../knowledge/ingest/github.js';
 
 interface CreateSourceBody {
   kind?: string;
@@ -22,9 +23,12 @@ export function registerIngestRoutes(app: FastifyInstance, db: Database.Database
       return reply.code(400).send({ error: `kind must be one of: ${SOURCE_KIND.join(', ')}` });
     }
     if (!b.uri) return reply.code(400).send({ error: 'uri is required' });
+    // Same canonicalization as `loop ingest add --github` — owner/repo and github.com
+    // URLs store as https://github.com/<owner>/<repo>; other kinds pass through.
+    const uri = b.kind === 'github' ? (normalizeGithubUri(b.uri).webBase ?? b.uri.trim()) : b.uri;
     const source = createSource(db, {
       kind: b.kind as SourceKind,
-      uri: b.uri,
+      uri,
       config: { include: b.include, exclude: b.exclude, branch: b.branch },
       enabled: b.enabled,
     });

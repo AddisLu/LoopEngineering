@@ -5,9 +5,11 @@ import { getBool, getNum } from '../../db/index.js';
 import { embed, type EmbedExec } from '../embed.js';
 import { vecUpsert } from '../vec.js';
 import { listSources, getSource, touchSourceIngested } from './sources.js';
-import { walkSource, maskSecrets, realGitExec, type GitListExec } from './walk.js';
+import { walkSource, maskSecrets, realGitExec, type GitListExec, type WalkedFile } from './walk.js';
 import { chunkDocument, type ChunkPiece } from './chunk.js';
+import { syncGithubSource, realGitSyncExec, type GitSyncExec } from './github.js';
 import type { SourceRow, DocumentRow } from './types.js';
+import { parseSourceConfig } from './types.js';
 import { resyncDocumentWikilinks } from '../wikilink.js';
 import { dumpOpenProjectSource, type OpenProjectDumpExec, type OpenProjectDoc } from './openproject.js';
 
@@ -24,6 +26,9 @@ function extOf(relPath: string): string {
 export interface IngestOptions {
   /** Test injection for the git-source file listing (see walk.ts). */
   gitExec?: GitListExec;
+  /** Test injection for the github-source clone/fetch sync (see github.ts) — the suite
+   * drives real git against file:// bare-origin fixtures, zero network. */
+  gitSyncExec?: GitSyncExec;
   /** Test injection for embedding (see embed.ts) — only reached when rag_enabled. */
   embedExec?: EmbedExec;
   /** Test injection for the OpenProject dump script exec (see openproject.ts). */
@@ -200,7 +205,29 @@ export async function ingestSource(
   }
 
   const maxFileKb = getNum(db, 'ingest_max_file_kb', 1024);
-  const files = walkSource(source, maxFileKb, opts.gitExec ?? realGitExec);
+  let files: WalkedFile[];
+  // documents.uri per source kind: local kinds join the on-disk root; github points at
+  // the canonical web URL (blob/<ref>/<path>) when the remote is github.com, else the
+  // engine-owned clone path.
+  let docUri: (relPath: string) => string;
+  if (source.kind === 'github') {
+    const sync = syncGithubSource(source, opts.gitSyncExec ?? realGitSyncExec);
+    // Walk the synced clone exactly like a local 'git' source. config.branch is dropped
+    // for the walk: the sync already checked out the requested ref, and the branch name
+    // may not exist as a local ref in the shallow clone (only FETCH_HEAD does).
+    const walkRow: SourceRow = {
+      ...source,
+      kind: 'git',
+      uri: sync.dir,
+      config: JSON.stringify({ ...parseSourceConfig(source.config), branch: undefined }),
+    };
+    files = walkSource(walkRow, maxFileKb, opts.gitExec ?? realGitExec);
+    docUri = (relPath) =>
+      sync.webBase ? `${sync.webBase}/blob/${sync.ref}/${relPath}` : path.join(sync.dir, relPath);
+  } else {
+    files = walkSource(source, maxFileKb, opts.gitExec ?? realGitExec);
+    docUri = (relPath) => path.join(source.uri, relPath);
+  }
   const existing = activeDocumentsByPath(db, source.id);
   const seenPaths = new Set<string>();
 
@@ -241,7 +268,7 @@ export async function ingestSource(
     const info = insertDoc.run({
       source_id: source.id,
       path: file.path,
-      uri: path.join(source.uri, file.path),
+      uri: docUri(file.path),
       title: path.basename(file.path),
       doc_kind: ext || null,
       sha256: digest,

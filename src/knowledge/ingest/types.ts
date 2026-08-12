@@ -1,8 +1,11 @@
 /** sources.kind — what a registered ingestion source walks. 'github-issues' is reserved
  * (already handled by the existing src/integrations/github.ts issue import — not a
  * file-tree walk, not implemented by walk.ts). 'openproject' is not a file-tree walk
- * either — see src/knowledge/ingest/openproject.ts. */
-export const SOURCE_KIND = ['git', 'folder', 'vault', 'github-issues', 'openproject'] as const;
+ * either — see src/knowledge/ingest/openproject.ts. 'github' is a REMOTE repo (uri is
+ * owner/repo or a clone URL, not a local path): each ingest run syncs an engine-owned
+ * clone under the data dir and then walks it exactly like a 'git' source — see
+ * src/knowledge/ingest/github.ts. */
+export const SOURCE_KIND = ['git', 'folder', 'vault', 'github-issues', 'openproject', 'github'] as const;
 export type SourceKind = (typeof SOURCE_KIND)[number];
 
 /** sources.config, parsed. include/exclude are globs matched against each file's path

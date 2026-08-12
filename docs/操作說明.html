@@ -797,9 +797,10 @@ npm run loop -- add --title "Epic: 上線通知系統" \
 
       <h3>來源登錄與擷取管線</h3>
       <p>先登錄一個<b>來源</b>（<code>sources</code> 表），再觸發擷取：</p>
-      <pre><code># 登錄：git repo（受 .gitignore、只取已追蹤檔）／folder／Obsidian 風格 vault
+      <pre><code># 登錄：git repo（受 .gitignore、只取已追蹤檔）／folder／Obsidian 風格 vault／遠端 GitHub repo
 loop ingest add --git ~/Coding/LoopEngineering
 loop ingest add --vault ~/SSoT
+loop ingest add --github addislu/loopengineering        # owner/repo 或完整 URL 皆可
 loop ingest list
 loop ingest rm &lt;source_id&gt;
 
@@ -811,6 +812,20 @@ loop ingest run &lt;source_id&gt;</code></pre>
         <li><b>chunker</b>：markdown 依標題切塊、程式碼依函式/行窗切塊，每個片段都記 <code>start_line/end_line</code> 供之後的引用；每個片段被嵌入／建 FTS 索引的文字都會前綴該文件的 <code>title</code>，確保只存在標題裡的關鍵詞（例如專有名詞、work package 主旨）也能被向量與關鍵字檢索到。</li>
         <li><b>增量、bi-temporal</b>：以檔案內容 sha256 比對——沒變的檔案整個略過（<code>skipped_unchanged</code>），變了的檔案舊版標記 <code>invalid_at</code>（保留歷史，不刪除）並產生新版文件／片段；來源裡消失的檔案同樣被標記失效，而不是砍掉重練。</li>
         <li><b>觸發方式</b>：CLI <code>loop ingest run [source]</code>、MCP <code>loop_ingest</code>／<code>loop_sources</code>、REST <code>POST /api/ingest</code>／<code>GET /api/sources</code>。</li>
+      </ul>
+
+      <h3>GitHub 來源（把你 GitHub 上的 repo 串進知識圖譜）</h3>
+      <p>第六種來源類型：<b>不需要先手動 clone</b>，直接登錄一個遠端 GitHub repo，每次 <code>loop ingest run</code>（含 <code>ingest_auto_pump</code> 週期性自動擷取）都會先把引擎自有的 clone 同步到最新，再走跟 <code>--git</code> 完全相同的受治理 walker →chunk→embed 管線。擷取進來的程式碼檔會自動落在知識星圖的「程式碼」星系（以 repo 名稱分群）、markdown 落在「筆記」，並可被 <code>loop_search</code> 混合檢索。</p>
+      <pre><code>loop ingest add --github addislu/loopengineering            # owner/repo
+loop ingest add --github https://github.com/owner/repo      # 或完整 URL
+loop ingest add --github owner/repo --branch develop --include &quot;src/**,docs/**&quot;
+loop ingest run &lt;source_id&gt;</code></pre>
+      <ul>
+        <li><b>同步方式</b>：clone 放在引擎資料目錄 <code>ingest-github/</code> 底下（<b>絕不碰你自己的 checkout</b>）；第一次淺層 clone（<code>--depth 1</code>），之後每次擷取先 <code>fetch</code> 指定分支（<code>--branch</code>，預設遠端 HEAD）再硬同步工作樹。所有網路 git 呼叫都有 30 秒逾時。</li>
+        <li><b>斷網降級</b>：遠端暫時連不上時，沿用上一次同步好的內容照常擷取（<b>不會</b>把既有文件標成失效）；只有「從來沒 clone 成功過」才會回報擷取失敗。</li>
+        <li><b>私有 repo</b>：在引擎的環境（例如 systemd 的 <code>~/.config/loop-engineering/env</code>）設 <code>GITHUB_TOKEN</code> 即可——token 只以每次呼叫的環境變數帶入 git（HTTP header），<b>不寫入</b> clone 的 <code>.git/config</code>、不進 DB、不進 log；跟第 17 章 GitHub 整合用同一個環境變數。</li>
+        <li><b>引用連結</b>：github.com 來源的文件 <code>uri</code> 直接指到 <code>https://github.com/&lt;owner&gt;/&lt;repo&gt;/blob/&lt;分支&gt;/&lt;路徑&gt;</code>——RAG 檢索回的引用可以直接點開網頁版原始檔。</li>
+        <li><b>治理照舊</b>：.gitignore／金鑰檔名排除／內文 secret 遮蔽／<code>ingest_max_file_kb</code> 大小上限、<code>--include/--exclude</code> glob 全部沿用 git 來源的同一套規則。</li>
       </ul>
 
       <h3>OpenProject 來源</h3>

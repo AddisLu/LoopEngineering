@@ -236,7 +236,7 @@ END;
 -- Source registry: where documents/chunks are ingested from (Phase 1 walker).
 CREATE TABLE IF NOT EXISTS sources (
   id               TEXT PRIMARY KEY,              -- src_<nanoid(10)>
-  kind             TEXT NOT NULL,                  -- git|folder|vault|github-issues
+  kind             TEXT NOT NULL,                  -- git|folder|vault|github-issues|openproject|github
   uri              TEXT NOT NULL,
   config           TEXT NOT NULL DEFAULT '{}',     -- JSON: include/exclude globs, branch, ...
   enabled          INTEGER NOT NULL DEFAULT 1,

@@ -43,6 +43,7 @@ import { materializePipeline } from './pipeline/materialize.js';
 import { resolveProvider } from './integrations/config.js';
 import { importWorkItems } from './integrations/import.js';
 import { createSource, listSources, deleteSource, getSource } from './knowledge/ingest/sources.js';
+import { normalizeGithubUri } from './knowledge/ingest/github.js';
 import type { SourceKind, SourceConfig } from './knowledge/ingest/types.js';
 import { ingestSource, ingestAll } from './knowledge/ingest/ingest.js';
 import { generateReport } from './report/generate.js';
@@ -866,8 +867,9 @@ const ingest = program.command('ingest').description('SSoT ingestion: register s
 
 ingest
   .command('add')
-  .description('register an ingestion source (exactly one of --git/--folder/--vault/--openproject)')
+  .description('register an ingestion source (exactly one of --git/--folder/--vault/--openproject/--github)')
   .option('--git <path>', 'git repo — tracked files via `git ls-files` (respects .gitignore)')
+  .option('--github <repo>', 'remote GitHub repo — owner/repo or clone URL; synced into the engine data dir on every ingest run (private repos: export GITHUB_TOKEN)')
   .option('--folder <path>', 'plain folder — recursive walk')
   .option('--vault <path>', 'Obsidian-style markdown vault — recursive walk')
   .option('--openproject <path>', 'OpenProject connector — local path to the OpenProject_Exec_Report repo (reuses its op_api.py + config.json)')
@@ -875,11 +877,29 @@ ingest
   .option('--kinds <csv>', 'openproject only: comma-separated work_packages,projects (default: both)')
   .option('--include <csv>', 'comma-separated include globs')
   .option('--exclude <csv>', 'comma-separated exclude globs')
-  .option('--branch <name>', 'git ref to list from (git sources only; default: working tree)')
+  .option('--branch <name>', 'git ref to list from (git: default working tree; github: default remote HEAD)')
   .option('--disabled', 'register disabled (skipped by `loop ingest run` with no source id)')
   .action((o) => {
-    const kind: SourceKind | null = o.git ? 'git' : o.folder ? 'folder' : o.vault ? 'vault' : o.openproject ? 'openproject' : null;
-    if (!kind) return fail('usage: loop ingest add --git|--folder|--vault|--openproject <path>');
+    const kind: SourceKind | null = o.git ? 'git' : o.folder ? 'folder' : o.vault ? 'vault' : o.openproject ? 'openproject' : o.github ? 'github' : null;
+    if (!kind) return fail('usage: loop ingest add --git|--folder|--vault|--openproject <path> | --github <owner/repo>');
+
+    if (kind === 'github') {
+      // Canonicalize owner/repo and github.com URLs so the stored uri (and the scope
+      // string loop_search filters on) is stable; non-GitHub clone URLs pass through.
+      const remote = normalizeGithubUri(String(o.github));
+      const source = createSource(getDb(), {
+        kind,
+        uri: remote.webBase ?? String(o.github).trim(),
+        config: {
+          include: o.include ? String(o.include).split(',').map((s: string) => s.trim()).filter(Boolean) : undefined,
+          exclude: o.exclude ? String(o.exclude).split(',').map((s: string) => s.trim()).filter(Boolean) : undefined,
+          branch: o.branch,
+        },
+        enabled: !o.disabled,
+      });
+      console.log(`${source.id}  [${source.kind}] ${source.uri}`);
+      return;
+    }
 
     if (kind === 'openproject') {
       const opRepo = path.resolve(o.openproject);
