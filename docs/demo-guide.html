@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="zh-Hant" data-mode="light">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Loop Engineering · 3 分鐘上手</title>
+<script>
+  // same rule as web/theme-boot.js: follow the saved mode, else the OS
+  (function () {
+    try {
+      var m = localStorage.getItem('loop_mode');
+      if (m !== 'light' && m !== 'dark') m = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-mode', m);
+    } catch (e) {}
+  })();
+</script>
+<style>
+  :root {
+    --bg: #f7f4ee; --surface: #fffdf8; --sunk: #efe9de; --line: #e3dccf;
+    --ink: #2a2723; --ink-2: #5f5a51; --ink-3: #8a8479;
+    --accent: #b25a34; --accent-soft: #f6e6dc; --ok: #2f7d4f; --ok-soft: #e3f1ea; --warn: #a9701c; --blue: #3b6ea8; --blue-soft: #e7eef7;
+    --term: #1f2328; --term-ink: #f2ede4;
+    --sans: ui-sans-serif, system-ui, "PingFang TC", "Noto Sans TC", sans-serif; --mono: ui-monospace, "JetBrains Mono", Menlo, monospace;
+  }
+  :root[data-mode="dark"] {
+    --bg: #1a1917; --surface: #232120; --sunk: #1e1c1a; --line: #3a3733;
+    --ink: #ece7de; --ink-2: #b1aa9c; --ink-3: #837c6f;
+    --accent: #e08b5f; --accent-soft: #3a2a20; --ok: #6fbf8c; --ok-soft: #22352a; --warn: #d9a25a; --blue: #7fa6d9; --blue-soft: #223449;
+    --term: #14171c;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body { background: var(--bg); color: var(--ink); font-family: var(--sans); font-size: 16px; line-height: 1.65; }
+  a { color: var(--accent); text-decoration: none; }
+  header { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 12px; padding: 12px 22px; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
+  header .mk { width: 22px; height: 22px; border-radius: 7px; background: linear-gradient(150deg, var(--accent), #d99); }
+  header b { font-size: 15px; }
+  header .grow { flex: 1; }
+  header .btn { font: inherit; font-size: 13px; padding: 5px 11px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; }
+  main { max-width: 1040px; margin: 0 auto; padding: 26px 18px 60px; }
+  h1 { font-size: 30px; margin: 6px 0 4px; letter-spacing: -.3px; }
+  .lead { color: var(--ink-2); margin: 0 0 22px; font-size: 17px; }
+  .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+  @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+  .step { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 16px 18px 14px; display: flex; flex-direction: column; gap: 10px; }
+  .step .n { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 50%; background: var(--accent); color: #fff; font-weight: 700; font-size: 13px; flex: 0 0 auto; }
+  .step h2 { font-size: 17px; margin: 0; display: flex; align-items: center; gap: 10px; }
+  .step p { margin: 0; color: var(--ink-2); font-size: 14.5px; }
+  .step .how { font-size: 13.5px; color: var(--ink); background: var(--sunk); border-radius: 10px; padding: 8px 11px; }
+  .step .how b { color: var(--accent); }
+  kbd { font-family: var(--mono); font-size: 12px; padding: 1px 6px; border-radius: 5px; border: 1px solid var(--line); background: var(--surface); box-shadow: 0 1px 0 var(--line); }
+  .fig { width: 100%; aspect-ratio: 16 / 7; border-radius: 12px; background: var(--sunk); overflow: hidden; }
+  .fig svg { width: 100%; height: 100%; display: block; font-family: var(--sans); }
+  .fig text { fill: var(--ink); font-size: 11px; }
+  .fig .muted { fill: var(--ink-3); }
+  .fig .card { fill: var(--surface); stroke: var(--line); }
+  .fig .acc { fill: var(--accent); }
+  .fig .accs { fill: var(--accent-soft); }
+  .fig .ok { fill: var(--ok); }
+  .fig .oks { fill: var(--ok-soft); }
+  .fig .blue { fill: var(--blue); }
+  .fig .blues { fill: var(--blue-soft); }
+  .fig .line { stroke: var(--line); }
+  .fig .ink { fill: var(--ink); }
+  .fig .term { fill: var(--term); }
+  .fig .termink { fill: var(--term-ink); font-family: var(--mono); }
+  .script { margin-top: 26px; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 16px 18px; }
+  .script h2 { font-size: 18px; margin: 0 0 8px; }
+  .script ol { margin: 0; padding-left: 22px; color: var(--ink-2); font-size: 14.5px; }
+  .script li { margin: 4px 0; }
+  .script li b { color: var(--ink); }
+  .keys { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 10px; font-size: 13.5px; color: var(--ink-2); }
+  footer { text-align: center; color: var(--ink-3); font-size: 12.5px; margin-top: 26px; }
+
+  /* ---- animations (CSS only, so they pause under reduced motion) ---- */
+  .loop { animation-iteration-count: infinite; animation-timing-function: ease-in-out; }
+  @keyframes typing { 0%, 15% { width: 0; } 45%, 100% { width: 150px; } }
+  @keyframes pop { 0%, 55% { opacity: 0; transform: translateY(6px); } 70%, 100% { opacity: 1; transform: translateY(0); } }
+  @keyframes pop2 { 0%, 75% { opacity: 0; transform: translateY(6px); } 88%, 100% { opacity: 1; transform: translateY(0); } }
+  @keyframes cycle { 0%, 12% { transform: translateY(0); } 14%, 26% { transform: translateY(24px); } 28%, 40% { transform: translateY(48px); } 42%, 54% { transform: translateY(72px); } 56%, 68% { transform: translateY(96px); } 70%, 82% { transform: translateY(120px); } 84%, 96% { transform: translateY(144px); } 100% { transform: translateY(0); } }
+  @keyframes paneIn { 0% { opacity: 0; transform: translateX(10px); } 10%, 90% { opacity: 1; transform: translateX(0); } 100% { opacity: 0; } }
+  @keyframes fill { 0%, 20% { width: 0; } 70%, 100% { width: 168px; } }
+  @keyframes swapText1 { 0%, 18% { opacity: 1; } 22%, 100% { opacity: 0; } }
+  @keyframes swapText2 { 0%, 20% { opacity: 0; } 24%, 70% { opacity: 1; } 74%, 100% { opacity: 0; } }
+  @keyframes swapText3 { 0%, 72% { opacity: 0; } 76%, 100% { opacity: 1; } }
+  @keyframes chipOn { 0%, 10% { fill: var(--surface); } 15%, 100% { fill: var(--accent-soft); } }
+  @keyframes fly { 0%, 15% { transform: translate(0, 0); opacity: 0; } 20% { opacity: 1; } 45% { transform: translate(150px, -34px); opacity: 1; } 55%, 100% { transform: translate(150px, -34px); opacity: 0; } }
+  @keyframes plug { 0%, 15% { transform: translateX(-70px); } 45%, 100% { transform: translateX(0); } }
+  @keyframes lines { 0%, 50% { opacity: 0; } 60%, 100% { opacity: 1; } }
+  @keyframes press { 0%, 8% { transform: translateY(0); } 12%, 20% { transform: translateY(3px); } 24%, 100% { transform: translateY(0); } }
+  @keyframes rise { 0%, 22% { transform: translateY(110px); } 45%, 100% { transform: translateY(0); } }
+  @keyframes blink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
+  @keyframes dots { 0% { opacity: .25; } 100% { opacity: 1; } }
+  @keyframes slideRight { 0%, 60% { transform: translateX(0); opacity: 1; } 78%, 100% { transform: translateX(150px); opacity: 1; } }
+  @keyframes arrow { 0%, 55% { opacity: 0; } 65%, 100% { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { .loop { animation: none !important; } }
+</style>
+</head>
+<body>
+<header>
+  <span class="mk" aria-hidden="true"></span>
+  <b>Loop Engineering · 3 分鐘上手</b>
+  <span class="grow"></span>
+  <a class="btn" href="/">回到對話 ↗</a>
+  <a class="btn" href="/docs/操作說明.html">完整說明</a>
+  <button class="btn" type="button" id="theme">☾</button>
+</header>
+<main>
+  <h1>一個對話框，整台 Spark 都在後面</h1>
+  <p class="lead">進站就是對話。要查資料、看模型、開 shell、寫需求、下任務——都從這裡出發，右邊一排圖示切面板，鍵盤 <kbd>Alt</kbd>+數字直達。</p>
+
+  <div class="grid">
+
+    <!-- 1 chat -->
+    <section class="step">
+      <h2><span class="n">1</span>問問題，答案附出處</h2>
+      <div class="fig" aria-hidden="true"><svg viewBox="0 0 400 175">
+        <rect x="14" y="14" width="372" height="147" rx="12" class="card"/>
+        <rect x="200" y="30" width="170" height="26" rx="13" class="blues"/>
+        <text x="212" y="47">RDMA 為什麼掉幀？</text>
+        <rect x="30" y="72" width="0" height="10" rx="5" class="accs loop" style="animation: typing 6s infinite"/>
+        <g class="loop" style="animation: pop 6s infinite">
+          <rect x="30" y="70" width="230" height="14" rx="4" class="accs"/>
+          <text x="36" y="81">因為佇列深度不足，改用 SEND/RECV <tspan class="acc" font-weight="700">[2]</tspan></text>
+        </g>
+        <g class="loop" style="animation: pop2 6s infinite">
+          <rect x="30" y="94" width="200" height="14" rx="4" class="accs"/>
+          <text x="36" y="105">同時把 slot 覆寫的 guard 打開 <tspan class="acc" font-weight="700">[1]</tspan></text>
+          <text x="30" y="128" class="muted">▸ 參考資料 2 則（CF-AOI 知識庫）</text>
+          <text x="30" y="146" class="muted">首字 0.3 s · 26 tok/s · 全程在本機，不花 token</text>
+        </g>
+      </svg></div>
+      <p>回答完全在這台 Spark 上產生。勾著「引用知識庫」時，先檢索 CF-AOI 程式碼與文件，句尾標 [n] 出處。</p>
+      <div class="how"><b>做法</b>：輸入問題 → <kbd>Shift</kbd>+<kbd>Enter</kbd>。可 <kbd>Ctrl</kbd>+<kbd>V</kbd> 貼截圖；答完可「重答」「存進知識庫」「轉成任務」「請雲端複核」。</div>
+    </section>
+
+    <!-- 2 icon bar -->
+    <section class="step">
+      <h2><span class="n">2</span>右側圖示列：七個面板</h2>
+      <div class="fig" aria-hidden="true"><svg viewBox="0 0 400 175">
+        <rect x="14" y="10" width="300" height="155" rx="12" class="card"/>
+        <rect x="330" y="10" width="56" height="155" rx="12" class="card"/>
+        <rect x="336" y="14" width="44" height="22" rx="7" class="accs loop" style="animation: cycle 9s infinite"/>
+        <g class="muted" font-size="10" text-anchor="middle">
+          <text x="358" y="29">任務</text><text x="358" y="53">調參</text><text x="358" y="77">知識庫</text><text x="358" y="101">PRD</text><text x="358" y="125">模型</text><text x="358" y="149">機台</text><text x="358" y="171">評比</text>
+        </g>
+        <g class="loop" style="animation: paneIn 9s infinite">
+          <text x="30" y="36" font-weight="700">任務狀態</text>
+          <rect x="30" y="48" width="180" height="26" rx="8" class="blues"/><text x="38" y="65">調參建議：ROI 邊緣誤判</text>
+          <rect x="30" y="82" width="140" height="26" rx="8" class="oks"/><text x="38" y="99">RDMA 收圖改 SEND/RECV</text>
+          <text x="30" y="150" class="muted">開啟完整看板 ↗ · ＋ 新增 task</text>
+        </g>
+      </svg></div>
+      <p>任務／調參／知識庫／PRD ─ 模型／機台／評比。點一下切換，再點同一個收起；圖示永遠在，面板不會「不見」。</p>
+      <div class="how"><b>快捷鍵</b>：<kbd>Alt</kbd>+<kbd>1</kbd>～<kbd>7</kbd>；<kbd>☰</kbd> 收左欄、<kbd>▤</kbd> 收右欄，兩邊都收起時對話幾乎全螢幕。</div>
+    </section>
+
+    <!-- 3 models -->
+    <section class="step">
+      <h2><span class="n">3</span>模型面板：下載 → 建置 → 切換</h2>
+      <div class="fig" aria-hidden="true"><svg viewBox="0 0 400 175">
+        <rect x="14" y="14" width="372" height="147" rx="12" class="card"/>
+        <rect x="28" y="28" width="60" height="18" rx="9" class="accs"/><text x="38" y="41" class="acc" font-weight="700">小而快</text>
+        <text x="98" y="41" font-weight="700">Qwen3.6-35B-A3B-NVFP4</text>
+        <text x="28" y="66" class="muted">約 21.9 GB · 尚未下載權重</text>
+        <rect x="28" y="80" width="168" height="10" rx="5" class="line" fill="var(--sunk)" stroke-width="1"/>
+        <rect x="28" y="80" width="0" height="10" rx="5" class="acc loop" style="animation: fill 8s infinite"/>
+        <g class="loop" style="animation: swapText1 8s infinite"><rect x="28" y="104" width="118" height="24" rx="8" class="accs"/><text x="40" y="120" class="acc" font-weight="700">下載（≈21.9 GB）</text></g>
+        <g class="loop" style="animation: swapText2 8s infinite"><rect x="28" y="104" width="150" height="24" rx="8" class="blues"/><text x="40" y="120" class="blue" font-weight="700">建置映像（vllm-node）</text></g>
+        <g class="loop" style="animation: swapText3 8s infinite"><rect x="28" y="104" width="64" height="24" rx="8" class="oks"/><text x="40" y="120" class="ok" font-weight="700">切換</text></g>
+        <text x="220" y="66" class="muted">使用中 · Qwen3.8 Flash Next</text>
+        <text x="220" y="84" class="muted">磁碟剩餘 3.0 TB · 34 個配方</text>
+        <text x="220" y="120" class="muted">下載／建置在背景跑，</text>
+        <text x="220" y="136" class="muted">不影響正在服務的模型。</text>
+      </svg></div>
+      <p>列出 spark-vllm-docker 裡每一個 recipe，每列只有一個下一步。三張推薦卡：對話、寫程式、小而快。</p>
+      <div class="how"><b>做法</b>：<kbd>Alt</kbd>+<kbd>5</kbd> → 按卡片上的按鈕。切換會重啟 vLLM（幾分鐘），先跳確認。「機台」（<kbd>Alt</kbd>+<kbd>6</kbd>）看記憶體、GPU、這次回答的速度。</div>
+    </section>
+
+    <!-- 4 tools -->
+    <section class="step">
+      <h2><span class="n">4</span>上網／工具：讓模型去查</h2>
+      <div class="fig" aria-hidden="true"><svg viewBox="0 0 400 175">
+        <rect x="14" y="14" width="372" height="147" rx="12" class="card"/>
+        <rect x="28" y="126" width="78" height="22" rx="11" class="loop" style="animation: chipOn 7s infinite" stroke="var(--line)"/>
+        <text x="40" y="141" font-weight="700">上網／工具</text>
+        <text x="28" y="44">vLLM 最新版本是多少？</text>
+        <g class="loop" style="animation: fly 7s infinite"><text x="52" y="70" font-size="18">🔎</text></g>
+        <g class="loop" style="animation: pop 7s infinite">
+          <rect x="176" y="24" width="196" height="46" rx="10" class="accs"/>
+          <text x="186" y="42" font-weight="700">🔎 web_search「vllm latest」 5 筆 · 1.5 s</text>
+          <text x="186" y="60" class="acc">github.com/vllm-project/vllm/releases</text>
+        </g>
+        <g class="loop" style="animation: pop2 7s infinite">
+          <text x="176" y="94">最新正式版是 <tspan font-weight="700">v0.29.0</tspan>（2026-09-09）</text>
+          <text x="176" y="112" class="muted">來源：https://github.com/vllm-project/…</text>
+        </g>
+      </svg></div>
+      <p>模型自己不會上網；勾了晶片才把 web_search／fetch_url 交給它。搜尋走自架 SearXNG，不經第三方 API；內網一律擋。</p>
+      <div class="how"><b>做法</b>：點「上網／工具」晶片再問。回答下方多一張工具卡（查了什麼、多久、來源網址）。</div>
+    </section>
+
+    <!-- 5 mcp -->
+    <section class="step">
+      <h2><span class="n">5</span>MCP：讀 repo、查 PR</h2>
+      <div class="fig" aria-hidden="true"><svg viewBox="0 0 400 175">
+        <rect x="14" y="14" width="372" height="147" rx="12" class="card"/>
+        <rect x="150" y="34" width="60" height="50" rx="8" class="blues"/><text x="160" y="64" font-size="22">📁</text>
+        <g class="loop" style="animation: plug 7s infinite"><text x="112" y="66" font-size="24">🧩</text></g>
+        <text x="30" y="118" class="muted">loop-fs（唯讀）· loop · gh</text>
+        <g class="loop" style="animation: lines 7s infinite">
+          <text x="236" y="42" font-weight="700">🧩 loop-fs.list_dir ip/</text>
+          <text x="236" y="60" class="muted">config/  models/  src/  tests/</text>
+          <text x="236" y="78" class="muted">CLAUDE.md  CMakeLists.txt</text>
+          <text x="236" y="106" font-weight="700">🧩 gh.pr_list</text>
+          <text x="236" y="124" class="muted">#31 feat/local-models · merged</text>
+        </g>
+        <text x="30" y="142" class="muted">同一份設定也給 opencode 任務端用</text>
+      </svg></div>
+      <p>同一個晶片，多出 🧩 工具：唯讀檔案系統（只在登錄過的 repo 內）、Loop 自己的 API、GitHub（gh）。本地模型跑任務時也拿到同一組。</p>
+      <div class="how"><b>試試</b>：「用工具列出 cf-aoi 的 ip/ 目錄並說明」「最近有哪些 PR？」路徑逃出 repo 會被拒絕。</div>
+    </section>
+
+    <!-- 6 terminal -->
+    <section class="step">
+      <h2><span class="n">6</span>終端機：需要時再叫出來</h2>
+      <div class="fig" aria-hidden="true"><svg viewBox="0 0 400 175">
+        <rect x="14" y="14" width="372" height="147" rx="12" class="card"/>
+        <g class="loop" style="animation: press 7s infinite">
+          <rect x="30" y="30" width="38" height="24" rx="6" class="card" stroke-width="1.5"/><text x="39" y="46" font-size="10" font-weight="700">Ctrl</text>
+          <rect x="74" y="30" width="24" height="24" rx="6" class="card" stroke-width="1.5"/><text x="83" y="46" font-size="12" font-weight="700">`</text>
+        </g>
+        <text x="110" y="46" class="muted">或頂欄 ⌨</text>
+        <clipPath id="tclip"><rect x="14" y="70" width="372" height="91" rx="0"/></clipPath>
+        <g clip-path="url(#tclip)">
+          <g class="loop" style="animation: rise 7s infinite">
+            <rect x="14" y="70" width="372" height="91" class="term"/>
+            <rect x="24" y="76" width="52" height="16" rx="5" fill="rgba(255,255,255,.14)"/><text x="31" y="88" class="termink" font-size="10">shell 1</text>
+            <text x="82" y="88" class="termink" font-size="10" opacity=".6">＋</text>
+            <text x="24" y="112" class="termink" font-size="11">➜ ~ uname -a</text>
+            <text x="24" y="128" class="termink" font-size="11" opacity=".8">Linux spark-c16f 6.14.0-nvidia aarch64</text>
+            <text x="24" y="146" class="termink" font-size="11">➜ ~ <tspan class="loop" style="animation: blink 1s steps(1) infinite">▍</tspan></text>
+          </g>
+        </g>
+      </svg></div>
+      <p>底部抽屜裡是這台 Spark 的真 shell。收起不會關掉 shell，重開接回原畫面；只有白名單身分看得到。</p>
+      <div class="how"><b>做法</b>：<kbd>Ctrl</kbd>+<kbd>`</kbd> 開關；＋ 開分頁、雙擊改名、拖上緣改高度。模型面板工作卡的「看 log」直接開 tail 分頁。</div>
+    </section>
+
+    <!-- 7 PRD -->
+    <section class="step">
+      <h2><span class="n">7</span>PRD 精靈：五步變成任務</h2>
+      <div class="fig" aria-hidden="true"><svg viewBox="0 0 400 175">
+        <rect x="14" y="14" width="372" height="147" rx="12" class="card"/>
+        <g font-size="10" text-anchor="middle">
+          <circle cx="50" cy="50" r="12" class="acc loop" style="animation: dots 1.2s infinite alternate; animation-delay: 0s"/><text x="50" y="54" fill="#fff" font-weight="700">1</text><text x="50" y="76" class="muted">改哪套</text>
+          <circle cx="110" cy="50" r="12" class="acc loop" style="animation: dots 1.2s infinite alternate; animation-delay: .3s"/><text x="110" y="54" fill="#fff" font-weight="700">2</text><text x="110" y="76" class="muted">改什麼</text>
+          <circle cx="170" cy="50" r="12" class="acc loop" style="animation: dots 1.2s infinite alternate; animation-delay: .6s"/><text x="170" y="54" fill="#fff" font-weight="700">3</text><text x="170" y="76" class="muted">怎麼驗證</text>
+          <circle cx="230" cy="50" r="12" class="acc loop" style="animation: dots 1.2s infinite alternate; animation-delay: .9s"/><text x="230" y="54" fill="#fff" font-weight="700">4</text><text x="230" y="76" class="muted">範圍限制</text>
+          <circle cx="290" cy="50" r="12" class="acc loop" style="animation: dots 1.2s infinite alternate; animation-delay: 1.2s"/><text x="290" y="54" fill="#fff" font-weight="700">5</text><text x="290" y="76" class="muted">檢查送出</text>
+        </g>
+        <line x1="62" y1="50" x2="278" y2="50" class="line" stroke-width="2"/>
+        <g class="loop" style="animation: slideRight 6s infinite">
+          <rect x="40" y="100" width="150" height="40" rx="8" class="blues"/>
+          <text x="50" y="117" font-weight="700">PRD：ROI 邊緣誤判修正</text>
+          <text x="50" y="132" class="muted">圖集比對 · gpu · 人工驗收</text>
+        </g>
+        <g class="loop" style="animation: arrow 6s infinite"><text x="330" y="124" font-size="18" class="acc">✓</text><text x="300" y="150" class="muted">看板 · queued</text></g>
+      </svg></div>
+      <p>從「修改軟體」的角度引導：原始碼在哪、症狀→期望、用測試指令／圖集比對／人工清單驗證。本地模型幫找檔案、寫驗收條件；過閘門才建任務。</p>
+      <div class="how"><b>做法</b>：<kbd>Alt</kbd>+<kbd>4</kbd> → 「開新的 PRD」。圖集只以路徑引用，絕不複製。</div>
+    </section>
+
+    <!-- 8 tune -->
+    <section class="step">
+      <h2><span class="n">8</span>調參建議：只建議，人來套用</h2>
+      <div class="fig" aria-hidden="true"><svg viewBox="0 0 400 175">
+        <rect x="14" y="14" width="372" height="147" rx="12" class="card"/>
+        <text x="28" y="40">症狀：ROI 邊緣把正常紋路判成刮傷</text>
+        <g class="loop" style="animation: pop 6s infinite">
+          <rect x="28" y="54" width="344" height="52" rx="8" class="accs"/>
+          <text x="38" y="72" font-weight="700">ip/config/config_optimized.ini · edge_margin_px</text>
+          <text x="38" y="90">目前 4 → 建議 8 · 風險 low · 用圖集 20260615 重跑比對</text>
+        </g>
+        <g class="loop" style="animation: pop2 6s infinite">
+          <rect x="28" y="120" width="86" height="24" rx="8" class="oks"/><text x="40" y="136" class="ok" font-weight="700">轉成任務 →</text>
+          <text x="126" y="136" class="muted">歷次建議都留在面板，點回原對話</text>
+        </g>
+      </svg></div>
+      <p>只引用知識庫裡真的存在的檔名與參數；不會改機台。建議可一鍵變成 Loop 任務，交給工程師驗證。</p>
+      <div class="how"><b>做法</b>：<kbd>Alt</kbd>+<kbd>2</kbd> → 填症狀 → 產生建議；或在對話勾「調參建議」晶片。</div>
+    </section>
+  </div>
+
+  <div class="script">
+    <h2>Demo 腳本（約 5 分鐘）</h2>
+    <ol>
+      <li><b>對話＋知識庫</b>：問「RDMA 收圖為什麼會掉幀？」→ 看 [n] 出處與速度。</li>
+      <li><b>機台</b>：<kbd>Alt</kbd>+<kbd>6</kbd> 看記憶體 92%、GPU、這次回答 tok/s。</li>
+      <li><b>模型</b>：<kbd>Alt</kbd>+<kbd>5</kbd> 三張推薦卡；指出 Coder Next 已「可切換」（映像剛從面板建好）。</li>
+      <li><b>上網</b>：勾「上網／工具」，問「vLLM 最新正式版本？附來源」→ 工具卡 → 引用 GitHub。</li>
+      <li><b>MCP</b>：同一晶片，問「用工具列出 cf-aoi 的 ip/ 目錄並說明」→ 🧩 loop-fs 卡。</li>
+      <li><b>終端機</b>：<kbd>Ctrl</kbd>+<kbd>`</kbd>，<code>nvidia-smi</code>；收起再開，畫面還在。</li>
+      <li><b>PRD → 任務</b>：<kbd>Alt</kbd>+<kbd>4</kbd> 開精靈，走一遍五步（可用草稿），建任務 → 看板。</li>
+    </ol>
+    <div class="keys">
+      <span><kbd>Shift</kbd>+<kbd>Enter</kbd> 送出</span><span><kbd>Alt</kbd>+<kbd>1</kbd>～<kbd>7</kbd> 面板</span><span><kbd>Ctrl</kbd>+<kbd>`</kbd> 終端機</span><span><kbd>Ctrl</kbd>+<kbd>V</kbd> 貼截圖</span><span><kbd>Esc</kbd> 關抽屜／選單</span>
+    </div>
+  </div>
+  <footer>Loop Engineering · CF-AOI 維運大腦 · 全部在這台 DGX Spark 上，不經雲端、不花 token（雲端複核除外）</footer>
+</main>
+<script>
+  (function () {
+    var b = document.getElementById('theme');
+    var mode = function () { return document.documentElement.getAttribute('data-mode') === 'dark' ? 'dark' : 'light'; };
+    var paint = function () { b.textContent = mode() === 'dark' ? '☀' : '☾'; };
+    b.onclick = function () {
+      var next = mode() === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-mode', next);
+      try { localStorage.setItem('loop_mode', next); } catch (e) {}
+      paint();
+    };
+    paint();
+  })();
+</script>
+</body>
+</html>

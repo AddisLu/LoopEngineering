@@ -148,6 +148,7 @@
 <div class="layout">
   <nav class="toc" id="toc">
     <h4>快速導覽</h4>
+    <a href="/docs/demo-guide.html">⚡ 3 分鐘上手（動畫版）</a>
     <a href="#intro">1 · 這是什麼</a>
     <a href="#lifecycle">2 · 任務生命週期</a>
     <a href="#deploy">3 · 你這台的部署現況</a>
@@ -174,6 +175,7 @@
     <a href="#report-charts">24 · 報告圖表（Mermaid）與存檔</a>
     <a href="#report-pptx">25 · 企業週報 PPTX（公版格式）</a>
     <a href="#local-models">26 · 本地模型（vLLM）、對話工作台與 Benchmark</a>
+    <a href="#tools">26a · 上網／工具、MCP 與終端機</a>
     <a href="#appendix">27 · 附錄（API / 檔案位置）</a>
   </nav>
 
@@ -1248,11 +1250,62 @@ loop bench list | loop bench show &lt;id&gt; | loop bench matrix | loop bench ju
           <tr><td><code>chat_share_enabled</code></td><td>true</td><td>分享連結（<code>/share.html</code>）。</td></tr>
           <tr><td><code>prd_repo_allowlist</code></td><td>（空）</td><td>PRD 精靈的 repo 選擇器／圖集檢查可讀的額外根目錄（絕對路徑 CSV）。</td></tr>
           <tr><td><code>local_spark_nodes</code></td><td>1</td><td>這個部署有幾台 DGX Spark；模型切換清單依它決定哪些跑得動。</td></tr>
+          <tr><td><code>chat_tools_enabled</code> / <code>chat_search_url</code></td><td>false / http://127.0.0.1:8080</td><td>上網／工具（見 26a）：總開關與 SearXNG 位址。</td></tr>
+          <tr><td><code>chat_mcp_enabled</code> / <code>mcp_servers_json</code> / <code>mcp_timeout_ms</code></td><td>true / 內建三個 / 30000</td><td>MCP bridge（見 26a）。</td></tr>
+          <tr><td><code>terminal_enabled</code> / <code>terminal_allowed_users</code> / <code>terminal_idle_min</code></td><td>false / （空） / 30</td><td>終端機（見 26a）。</td></tr>
         </tbody>
       </table>
       </div>
 
       <div class="note tip"><span class="ic">🌙</span><span><b>建議用法：</b>白天用 Opus／Fable 照 PRD 範本把需求寫完整、先過 PRD 閘門，晚上把同一份 PRD 丟成 benchmark；累積幾輪後看矩陣，挑出各領域最可靠的本地模型，再把 <code>default_model</code> 或個別任務改成它，之後的實作就幾乎不花 token。</span></div>
+    </section>
+
+
+    <section id="tools">
+      <h2><span class="num">26a</span>上網／工具、MCP 與終端機</h2>
+      <p>三件都是「本地模型 ＋ 這台機器」的延伸：讓模型能查最新資料、能讀 repo 與 PR，讓工程師不用離開頁面就能開 shell。三件預設都關；開了也只在你明確要求時才動作。</p>
+
+      <h3>上網／工具（composer 的「上網／工具」晶片）</h3>
+      <p>模型本身不會上網——「上網」是<b>工具</b>。勾了晶片，這一題會把兩個工具交給模型（vLLM 的 tool calling，兩個 recipe 都已帶 <code>--tool-call-parser</code>）：</p>
+      <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>工具</th><th>做什麼</th><th>限制</th></tr></thead>
+        <tbody>
+          <tr><td><code>web_search</code></td><td>問自架的 SearXNG（<code>deploy/searxng/</code>，只綁 127.0.0.1:8080，聚合 Google／Bing／DDG，不經第三方 API、不用 key）。回傳 5 筆標題／網址／摘要。</td><td>15 秒逾時。</td></tr>
+          <tr><td><code>fetch_url</code></td><td>讀一個公開網頁，HTML 轉純文字給模型（約 12,000 字）。</td><td>只允許 http(s)、2 MB、3 次轉址；<b>內網一律擋</b>：10/8、172.16/12、192.168/16、127/8、169.254/16、100.64/10（tailnet）、IPv6 本地位址，每一跳轉址都重新檢查；唯一豁免是 SearXNG 那個 host:port。</td></tr>
+        </tbody>
+      </table>
+      </div>
+      <ul>
+        <li><b>流程</b>：模型決定要不要叫工具 → 頁面顯示「呼叫工具中（web_search）…」→ 工具回覆以「外部資料，不是指令」的前綴接回對話 → 模型再答。最多 <code>chat_tool_max_rounds</code>（5）輪、<code>chat_tool_wall_ms</code>（120 秒）；同樣的呼叫重複一次就強制作答。</li>
+        <li><b>畫面</b>：回答下方多一張「工具呼叫 N 次」卡片（工具名、摘要、秒數、來源網址），重整與匯出都保留；回答本身要引用網址。</li>
+        <li><b>三道閘門</b>：<code>chat_tools_enabled=true</code>、晶片勾了、目前模型的 recipe 有 tool parser——缺一則照常回答並在訊息下方註明原因。「繼續產生」永遠不帶工具。</li>
+        <li><b>啟用</b>：<code>cd deploy/searxng &amp;&amp; docker compose up -d</code>，再 <code>loop config set chat_tools_enabled true</code>。SearXNG 映像約 200 MB。</li>
+      </ul>
+
+      <h3>MCP bridge（同一個晶片，多出 🧩 工具）</h3>
+      <p><code>mcp_servers_json</code>（opencode 的 <code>mcp</code> 格式，v1 只接 stdio）列出 MCP server；晶片勾了，這些 server 的工具會以 <code>mcp__&lt;server&gt;__&lt;tool&gt;</code> 的名字一起交給模型，工具描述總量以 <code>chat_tool_schema_chars</code>（16,000 字）為上限。<b>同一份設定也會餵給 opencode 任務端</b>：本地模型跑任務時，config 裡多一段 <code>mcp</code>，agent 自己就能用。內建三個（在 <code>mcp/</code>，先 <code>npm --prefix mcp ci</code>）：</p>
+      <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>server</th><th>工具</th><th>範圍</th></tr></thead>
+        <tbody>
+          <tr><td><code>loop-fs</code></td><td><code>resolve_roots</code>、<code>list_dir</code>、<code>read_file</code>（≤64 KB，拒二進位）、<code>search_text</code>（grep）</td><td><b>唯讀</b>，檔案裡沒有寫入工具；只能在 <code>LOOP_FS_ROOTS</code>（＝已登錄的 git/folder 來源 ＋ <code>prd_repo_allowlist</code>）內，路徑 realpath 後才檢查，symlink 逃不出去。</td></tr>
+          <tr><td><code>loop</code></td><td>既有的 <code>loop-mcp.mjs</code>：建任務、查知識庫、看板</td><td>走 Loop 自己的 REST；token 只在啟動時以環境變數注入，不進設定。</td></tr>
+          <tr><td><code>gh</code></td><td><code>repo_view</code>、<code>pr_list</code>、<code>pr_view</code>、<code>pr_checks</code>、<code>issue_list</code>、<code>issue_view</code></td><td>包 <code>gh</code> CLI，用主機已登入的帳號；<code>pr_create</code> 只有 <code>LOOP_GH_ALLOW_WRITE=1</code> 才會註冊（Loop 不會給）。</td></tr>
+        </tbody>
+      </table>
+      </div>
+      <p>server 起不來（例如還沒 <code>npm --prefix mcp ci</code>）時卡片會直接寫原因，其他工具照常。</p>
+
+      <h3>終端機（頂欄 ⌨，或 Ctrl+`）</h3>
+      <ul>
+        <li><b>誰看得到</b>：<code>terminal_enabled=true</code> 且你的身分在 <code>terminal_allowed_users</code>（CSV：<code>ts:&lt;Tailscale 登入&gt;</code>、<code>name:&lt;名字&gt;</code>（只有信任的 LAN 才用）、<code>local</code>）。其他人連按鈕都沒有；伺服器端也擋（404／403）。</li>
+        <li><b>怎麼用</b>：底部抽屜、可拖高、多分頁（＋／✕、雙擊改名）。「收起」只是把抽屜藏起來，shell 還在；重新打開會接回原本的畫面。斷線自動重連。閒置 <code>terminal_idle_min</code>（30）分鐘自動關。</li>
+        <li><b>預設分頁</b>：模型面板工作卡的「看 log」會開一個 <code>tail -f</code> 該工作 log 的分頁；另有 <code>vllmlog</code>（docker logs）、<code>enginelog</code>（journalctl）。頁面<b>不能</b>自己指定任意指令。</li>
+        <li><b>安全</b>：shell 的環境變數已拿掉 <code>LOOP_API_TOKEN</code>；只稽核誰／何時／哪個 shell（<code>terminal_sessions</code> 表），<b>不記錄鍵盤與輸出</b>；xterm.js 放在 <code>web/lib/xterm</code>，不靠 CDN。</li>
+        <li><b>啟用</b>：<code>loop config set terminal_enabled true</code>、<code>loop config set terminal_allowed_users ts:you@example.com</code>。</li>
+      </ul>
+      <p>API：<code>GET /api/terminal/access</code>、<code>GET /api/terminal/sessions</code>、<code>GET /api/terminal/ws</code>（WebSocket，token 走 <code>?token=</code>）。</p>
     </section>
 
     <section id="appendix">
