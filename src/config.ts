@@ -159,6 +159,28 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // prep for the Windows company deployment, testable today from Linux.
   shell: 'auto',
 
+  // 模型對話 history (src/chat/store.ts): server-side, per-user transcripts. ON by default —
+  // the whole page already sits behind local_models_enabled, so the zero-impact default is
+  // satisfied one level up, and a second off-by-default flag would just never get turned on.
+  chat_history_enabled: 'true',
+  // how many past turns of a resumed conversation are replayed INTO the model (the rest stay
+  // visible on screen): validMessages caps at 40 turns and a long thread would blow the context
+  chat_context_turns: '12',
+  chat_retention_days: '0', // 0 = keep forever (loop chat prune uses this)
+  // 請雲端複核 (src/chat/escalate.ts): off by default — it is the one action on the page that
+  // leaves the machine and spends subscription usage, so it must be switched on deliberately.
+  chat_escalate_enabled: 'false',
+  chat_escalate_model: 'opus',
+  // Shorter than bench_judge_timeout_ms (this one blocks a browser request), but not too short:
+  // a real review of one short answer measured 112 s, so 120 s left no margin. If a proxy does
+  // cut the connection first, the review still finishes and is saved — it shows up on reload.
+  chat_escalate_timeout_ms: '240000',
+  // 分享連結: read-only transcript pages. On by default; the token in the URL is the secret.
+  chat_share_enabled: 'true',
+  // PRD 精靈: directories the repo picker / image-set checker may look at, on top of the enabled
+  // git/folder knowledge sources. CSV of absolute paths; '' = only registered sources.
+  prd_repo_allowlist: '',
+
   // usage-fetch cadence + ledger fallback
   usage_refresh_sec: '180',
   ledger_fallback_after_min: '10',
@@ -343,6 +365,45 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   report_pptx_model: '',
   report_pptx_judge: 'true',
   report_pptx_explain_agent: 'false',
+
+  // 本地模型（src/local/*.ts, src/orchestrator/adapters/opencode.ts）：用 DGX Spark 上 vLLM 的本地
+  // 模型取代 `claude` 做實作。off by default = zero behavior change — a task/default_model of
+  // 'local:<id>' stays queued ("local models disabled") and nothing touches docker/vLLM.
+  // One model fits the GPU at a time: the ModelManager swaps it (docker stop + run-recipe.sh)
+  // only while no local run is in flight. local runs skip every quota gate (zero Anthropic
+  // spend) but have their own cap. local_model_loaded / local_model_status are engine STATE
+  // written by the ModelManager, not tunables.
+  local_models_enabled: 'false',
+  local_max_concurrency: '2',
+  local_switch_timeout_sec: '900',
+  local_switch_retry_min: '10',
+  local_timeout_multiplier: '2',
+  local_gap_review: 'false',
+  local_vllm_repo: path.join(os.homedir(), 'Addis', 'spark-vllm-docker'),
+  // How many DGX Sparks this deployment can use. The model switcher only offers models whose
+  // recipe fits (a cluster_only recipe needs 2); raise it when the second machine is wired up.
+  local_spark_nodes: '1',
+  local_vllm_container: 'vllm_node',
+  local_vllm_base_url: 'http://127.0.0.1:8000/v1',
+  local_model_loaded: '',
+  local_model_status: 'idle',
+
+  // Benchmark mode（src/benchmark/*.ts）：同一任務交給多個（本地）模型各做一次，全部結束後由外部高階
+  // 模型評比排名，累積成 模型 × 領域 矩陣。off by default = routes 404, nothing is judged. The judge
+  // call is the only Anthropic spend of a benchmark (one `claude -p` per benchmark).
+  benchmark_enabled: 'false',
+  bench_judge_model: 'opus',
+  bench_diff_cap_chars: '8000',
+  bench_judge_timeout_ms: '600000',
+
+  // PRD 閘門（src/prd/*.ts, web/prd.html）：貼上 PRD → 規則檢查 + 已載入的本地模型審查（零 token），
+  // 不完整就擋下；通過才建成任務（或 benchmark）。off by default = routes 404.
+  // prd_require_llm=true: an unavailable local reviewer blocks instead of passing on lint alone.
+  // prd_default_model: implementation model for PRD tasks ('' = default_model when it is local:<id>).
+  prd_gate_enabled: 'false',
+  prd_require_llm: 'false',
+  prd_default_model: '',
+  local_chat_timeout_ms: '180000',
 };
 
 export const TOKEN_REFRESH_MS = 180_000; // TokenBar cadence

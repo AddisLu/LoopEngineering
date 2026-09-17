@@ -9,6 +9,7 @@ export const PERCENT_KEYS = new Set([
 export const NONNEG_KEYS = new Set([
   'max_concurrency', 'poll_interval_sec', 'min_runway_min', 'max_resumes', 'max_autoqueue',
   'timeout_S', 'timeout_M', 'timeout_L', 'usage_refresh_sec', 'ledger_fallback_after_min',
+  'chat_context_turns', 'chat_retention_days', 'chat_escalate_timeout_ms', 'local_spark_nodes',
   'age_step_min', 'starve_min', 'knowledge_budget_chars', 'verify_step_timeout_min',
   'voice_worker_idle_min',
   // SSoT/RAG Phase 0
@@ -21,11 +22,18 @@ export const NONNEG_KEYS = new Set([
   'report_budget_chars', 'report_timeout_ms',
   // report generation D (PPTX)
   'report_pptx_timeout_ms',
+  // 本地模型 (src/local/*.ts)
+  'local_max_concurrency', 'local_switch_timeout_sec', 'local_switch_retry_min', 'local_timeout_multiplier',
+  // benchmark mode
+  'bench_diff_cap_chars', 'bench_judge_timeout_ms',
+  // PRD gate
+  'local_chat_timeout_ms',
 ]);
 // values must be a number in [0, 1] (a fraction/weight, unlike the 0-100 PERCENT_KEYS)
 export const UNIT_INTERVAL_KEYS = new Set(['rag_hybrid_alpha']);
 // Phase 3 feature flags: stored as 'true'/'false'.
 export const BOOL_KEYS = new Set([
+  'chat_history_enabled', 'chat_escalate_enabled', 'chat_share_enabled',
   'scheduler_paused',
   'window_checkpoint', 'weekly_packing', 'concurrency_reserve', 'priority_aging',
   'dep_auto_queue',
@@ -61,6 +69,12 @@ export const BOOL_KEYS = new Set([
   // report generation D continued (src/report/pptx/{status,quality}.ts, T3) — quality
   // gate on by default; explain_agent only registered, not wired to auto-dispatch yet
   'report_pptx_judge', 'report_pptx_explain_agent',
+  // 本地模型 (src/local/*.ts) — off = local:<id> tasks stay queued, no docker/vLLM access
+  'local_models_enabled', 'local_gap_review',
+  // benchmark mode (src/benchmark/*.ts)
+  'benchmark_enabled',
+  // PRD gate (src/prd/*.ts)
+  'prd_gate_enabled', 'prd_require_llm',
 ]);
 
 /** Accepted `integration_provider` values ('none' = the bridge is fully off). */
@@ -91,10 +105,27 @@ export const TUNABLE_KEYS = [
   'prompt_discipline',
   // mobile voice -> task intake
   'voice_intake_enabled',
+  // 本地模型
+  'local_models_enabled', 'local_max_concurrency', 'local_spark_nodes',
+  // benchmark mode
+  'benchmark_enabled', 'bench_judge_model',
+  // PRD gate
+  'prd_gate_enabled', 'prd_require_llm', 'prd_default_model', 'prd_repo_allowlist',
 ] as const;
 
 /** Accepted model aliases for coding runs ('' / 'default' = the claude CLI default). */
 export const MODEL_VALUES = new Set(['', 'default', 'sonnet', 'opus', 'haiku', 'fable', 'fable-5']);
+
+/** 本地模型 reference for implementation runs: 'local:<registered id>' (src/local/models.ts). */
+export const LOCAL_MODEL_RE = /^local:[A-Za-z0-9][\w.-]*$/;
+
+/** External models allowed to judge a benchmark (src/benchmark/judge.ts). */
+export const BENCH_JUDGE_MODELS = new Set(['opus', 'fable', 'fable-5', 'sonnet']);
+
+/** A cloud alias or a local model — valid for default_model / route_* / task.model. */
+export function isModelValue(value: string): boolean {
+  return MODEL_VALUES.has(value) || LOCAL_MODEL_RE.test(value);
+}
 
 /** Light validation for the settings people actually tune; unknown keys pass through. */
 export function validateSetting(key: string, value: string): string | null {
@@ -111,12 +142,19 @@ export function validateSetting(key: string, value: string): string | null {
     if (!/^\d{2}:\d{2}-\d{2}:\d{2}$/.test(value)) return 'day_window must be HH:MM-HH:MM (e.g. 08:00-23:00)';
   } else if (BOOL_KEYS.has(key)) {
     if (value !== 'true' && value !== 'false') return `${key} must be true or false`;
-  } else if (
-    key === 'default_model' || key === 'voice_structure_model' || key === 'report_model' ||
-    key === 'report_pptx_model' ||
-    key === 'route_S' || key === 'route_M' || key === 'route_L'
-  ) {
+  } else if (key === 'default_model' || key === 'route_S' || key === 'route_M' || key === 'route_L') {
+    // implementation runs may also target a local vLLM model ('local:<id>')
+    if (!isModelValue(value)) return `${key} must be one of: ${[...MODEL_VALUES].filter(Boolean).join(', ')}, local:<id> (or empty for CLI default)`;
+  } else if (key === 'voice_structure_model' || key === 'report_model' || key === 'report_pptx_model') {
+    // these call `claude -p` directly — cloud aliases only
     if (!MODEL_VALUES.has(value)) return `${key} must be one of: ${[...MODEL_VALUES].filter(Boolean).join(', ')} (or empty for CLI default)`;
+  } else if (key === 'prd_repo_allowlist') {
+    const bad = value.split(',').map((s) => s.trim()).filter(Boolean).filter((s) => !s.startsWith('/'));
+    if (bad.length) return `prd_repo_allowlist entries must be absolute paths (got: ${bad.join(', ')})`;
+  } else if (key === 'prd_default_model') {
+    if (value !== '' && !isModelValue(value)) return `prd_default_model must be empty, a model alias or local:<id>`;
+  } else if (key === 'bench_judge_model' || key === 'chat_escalate_model') {
+    if (!BENCH_JUDGE_MODELS.has(value)) return `${key} must be one of: ${[...BENCH_JUDGE_MODELS].join(', ')}`;
   } else if (key === 'integration_provider') {
     if (!INTEGRATION_PROVIDER_VALUES.has(value)) return `integration_provider must be one of: ${[...INTEGRATION_PROVIDER_VALUES].join(', ')}`;
   } else if (key === 'agent_backend') {

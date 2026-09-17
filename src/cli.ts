@@ -3,7 +3,9 @@ import { Command } from 'commander';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { getDb, getSetting, setSetting, getBool } from './db/index.js';
+import { getConversation, messagesFor, pruneConversations } from './chat/store.js';
+import { toMarkdown } from './chat/export.js';
+import { getDb, getSetting, setSetting, getBool, getNum } from './db/index.js';
 import {
   createTask,
   getTask,
@@ -50,6 +52,12 @@ import { listReportTemplates, importReportTemplates } from './report/templates.j
 import { validateDeckSpec } from './report/pptx/spec.js';
 import { renderDeck, qaRender, resolvePythonBin, resolveTemplatePath, resolveManifestPath } from './report/pptx/render.js';
 import { prepareWeekly, renderWeekly, runWeekly } from './report/pptx/weekly.js';
+import { listLocalModels, getLocalModel } from './local/models.js';
+import { getModelManager } from './local/modelManager.js';
+import { activeLocalRunCount } from './tasks.js';
+import { BENCH_DOMAINS, BenchmarkInputError, benchmarkMatrix, createBenchmark, getBenchmark, listBenchmarks } from './benchmark/store.js';
+import { judgeBenchmark } from './benchmark/complete.js';
+import { checkPrd, submitPrd, PrdInputError, type PrdCheck } from './prd/intake.js';
 
 const program = new Command();
 program.name('loop').description('Loop Engineering — token-aware coding-task scheduler').version('0.1.0');
@@ -485,6 +493,252 @@ env
   .action((name: string) => {
     if (!deleteEnvironment(getDb(), name)) return fail(`no such environment: ${name}`);
     console.log(`removed ${name}`);
+  });
+
+const local = program.command('local').description('本地模型: list / load / stop the local vLLM model (see local_models_enabled)');
+
+local
+  .command('list')
+  .description('registered local models and what vLLM is serving (* = loaded)')
+  .action(async () => {
+    const db = getDb();
+    const mm = getModelManager(db);
+    const on = getBool(db, 'local_models_enabled', false);
+    if (on) await mm.reconcile();
+    const st = mm.state();
+    console.log(
+      `local_models_enabled=${on}  status=${st.status}  loaded=${st.loaded ?? '-'}  in-flight=${activeLocalRunCount(db)}` +
+        (st.error ? `\n  error: ${st.error}` : ''),
+    );
+    for (const m of listLocalModels(db)) {
+      const mark = st.loaded === m.id ? '*' : ' ';
+      console.log(`${mark} local:${m.id.padEnd(18)} ${m.enabled ? 'enabled ' : 'disabled'}  ${m.recipe}  (${m.served_model_id})`);
+      if (m.notes) console.log(`    ${m.notes}`);
+    }
+  });
+
+local
+  .command('load <id>')
+  .description('load a local model into vLLM now and wait until it serves (~6 min for a 100 GB model)')
+  .action(async (id: string) => {
+    const db = getDb();
+    if (!getBool(db, 'local_models_enabled', false)) return fail('local models disabled — loop config set local_models_enabled true');
+    if (!getLocalModel(db, id)) return fail(`unknown local model: ${id} (see loop local list)`);
+    if (getSetting(db, 'local_model_status') === 'starting') return fail('a model switch is already in progress (engine or another CLI)');
+    const mm = getModelManager(db);
+    await mm.reconcile();
+    const inflight = activeLocalRunCount(db);
+    if (inflight > 0 && mm.state().loaded !== id) return fail(`${inflight} local run(s) in flight — load after they finish`);
+    const r = mm.ensureLoaded(id);
+    if (r === 'busy') return fail(`cannot load ${id}: ${mm.state().error ?? 'busy'}`);
+    const started = Date.now();
+    const iv = setInterval(() => console.log(`  … ${mm.state().status} (${Math.round((Date.now() - started) / 1000)}s)`), 30_000);
+    await mm.waitForSwitch();
+    clearInterval(iv);
+    const st = mm.state();
+    if (st.status !== 'ready') return fail(`load failed: ${st.error ?? st.status}`);
+    console.log(`local:${id} ready`);
+  });
+
+local
+  .command('stop')
+  .description('stop vLLM and free the GPU')
+  .action(async () => {
+    const db = getDb();
+    const inflight = activeLocalRunCount(db);
+    if (inflight > 0) return fail(`${inflight} local run(s) in flight — stop after they finish`);
+    await getModelManager(db).stop();
+    console.log('vLLM stopped');
+  });
+
+const bench = program
+  .command('bench')
+  .description('benchmark mode: run one task on several models; an external model judges and ranks them');
+
+const csvList = (v?: string): string[] => (v ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+const benchOn = (): boolean => {
+  if (getBool(getDb(), 'benchmark_enabled', false)) return true;
+  fail('benchmark mode disabled — loop config set benchmark_enabled true');
+  return false;
+};
+
+bench
+  .command('add')
+  .description('create a benchmark: one arm task per model, queued now, judged when all arms finish')
+  .requiredOption('--title <title>')
+  .requiredOption('--goal <goal>')
+  .requiredOption('--models <csv>', 'e.g. local:qwen38-flash,local:qwen3-coder-next (2+)')
+  .requiredOption('--repo <path>', 'git repo every arm branches from')
+  .requiredOption('--verify <csv>', 'verification commands every arm must pass')
+  .option('--base <branch>', 'base branch', 'main')
+  .option('--plan <ref>', 'plan/PRD file path or URL every arm follows')
+  .option('--setup <cmd>', 'setup command (e.g. npm ci)')
+  .option('--rubric <text>', 'acceptance criteria shown to the judge')
+  .option('--domain <domain>', BENCH_DOMAINS.join('|'), 'other')
+  .option('--complexity <c>', 'S|M|L', 'M')
+  .option('--judge <model>', 'opus|fable|fable-5|sonnet (default: bench_judge_model)')
+  .option('--priority <n>', 'arm task priority')
+  .action((o) => {
+    if (!benchOn()) return;
+    const plan = o.plan && !/^https?:\/\//i.test(o.plan) ? path.resolve(o.plan) : o.plan;
+    try {
+      const { benchmark, arms } = createBenchmark(getDb(), {
+        title: o.title,
+        goal: o.goal,
+        models: csvList(o.models),
+        repo_path: path.resolve(o.repo),
+        base_branch: o.base,
+        verification_steps: csvList(o.verify),
+        plan_ref: plan ?? null,
+        setup_cmd: o.setup ?? null,
+        verify_rubric: o.rubric ?? null,
+        domain: o.domain,
+        complexity: o.complexity as Complexity,
+        judge_model: o.judge,
+        priority: o.priority != null ? Number(o.priority) : undefined,
+      });
+      console.log(`benchmark ${benchmark.id}  domain=${benchmark.domain} judge=${benchmark.judge_model}`);
+      for (const a of arms) console.log(`  ${pad(a.model, 28)} task ${a.task_id} [${a.task_status}]`);
+    } catch (err) {
+      if (err instanceof BenchmarkInputError) return fail(err.message);
+      throw err;
+    }
+  });
+
+bench
+  .command('list')
+  .description('recent benchmarks')
+  .action(() => {
+    if (!benchOn()) return;
+    const rows = listBenchmarks(getDb());
+    if (!rows.length) return console.log('(no benchmarks)');
+    for (const b of rows) {
+      console.log(`${b.id}  ${pad(b.status, 12)} ${pad(b.domain, 10)} arms ${b.arms_done}/${b.arm_count}  winner=${b.winner ?? '-'}  ${b.title}`);
+    }
+  });
+
+bench
+  .command('show <id>')
+  .description('per-arm verification, judge scores and ranking')
+  .action((id: string) => {
+    if (!benchOn()) return;
+    const d = getBenchmark(getDb(), id);
+    if (!d) return fail(`no such benchmark: ${id}`);
+    const b = d.benchmark;
+    console.log(`${b.id}  ${b.title}\n  domain=${b.domain} status=${b.status} judge=${b.judge_model} winner=${b.winner ?? '-'}`);
+    if (b.error) console.log(`  error: ${b.error}`);
+    if (b.summary) console.log(`  summary: ${b.summary}`);
+    for (const a of [...d.arms].sort((x, y) => (x.judge_rank ?? 99) - (y.judge_rank ?? 99))) {
+      console.log(
+        `  #${a.judge_rank ?? '-'} ${pad(a.model, 28)} score=${a.judge_score ?? '-'} verify=${a.verify_outcome ?? '-'} ` +
+          `tokens_out=${a.tokens_out ?? '-'} time=${a.duration_s ?? '-'}s task=${a.task_id} [${a.task_status ?? '?'}]`,
+      );
+      if (a.notes) console.log(`      ${a.notes}`);
+    }
+  });
+
+bench
+  .command('matrix')
+  .description('model x domain results over all judged benchmarks')
+  .action(() => {
+    if (!benchOn()) return;
+    const rows = benchmarkMatrix(getDb());
+    if (!rows.length) return console.log('(no judged benchmarks yet)');
+    console.log(`${pad('domain', 11)} ${pad('model', 28)} ${pad('n', 3)} ${pad('score', 6)} ${pad('win', 5)} ${pad('verify', 7)} tokens_out  time`);
+    for (const r of rows) {
+      console.log(
+        `${pad(r.domain, 11)} ${pad(r.model, 28)} ${pad(String(r.n), 3)} ${pad(String(r.avg_score ?? '-'), 6)} ` +
+          `${pad(`${Math.round(r.win_rate * 100)}%`, 5)} ${pad(`${Math.round(r.verify_pass_rate * 100)}%`, 7)} ${pad(String(r.avg_tokens_out ?? '-'), 11)} ${r.avg_duration_s ?? '-'}s`,
+      );
+    }
+  });
+
+bench
+  .command('judge <id>')
+  .description('judge now (e.g. retry after judge_failed); arms must all be finished')
+  .action(async (id: string) => {
+    if (!benchOn()) return;
+    const db = getDb();
+    const d = getBenchmark(db, id);
+    if (!d) return fail(`no such benchmark: ${id}`);
+    const pending = d.arms.filter((a) => !['review', 'attention', 'failed', 'closed'].includes(a.task_status ?? 'failed'));
+    if (pending.length) return fail(`${pending.length} arm(s) still running`);
+    const b = await judgeBenchmark(db, id);
+    if (!b) return fail('judge already in progress');
+    console.log(`${b.id}: ${b.status}${b.winner ? `  winner=${b.winner}` : ''}${b.error ? `  error=${b.error}` : ''}`);
+  });
+
+const prdCmd = program
+  .command('prd')
+  .description('PRD gate: lint + local-model review a PRD, then turn it into a queued task or a benchmark');
+
+function printPrdCheck(r: PrdCheck): void {
+  console.log(r.ok ? 'PRD: OK ✓' : 'PRD: BLOCKED ✗');
+  for (const m of r.missing) console.log(`  ✗ ${m}`);
+  for (const w of r.warnings) console.log(`  ! ${w}`);
+  const llm =
+    r.llm.status === 'ok' ? `ok=${r.llm.ok}`
+      : r.llm.status === 'unavailable' ? 'unavailable (no local model ready)'
+      : r.llm.status === 'error' ? `failed: ${r.llm.error}`
+      : 'skipped (fix the structure first)';
+  console.log(`  local-model review: ${llm}`);
+  for (const q of r.llm.questions) console.log(`  ? ${q}`);
+  for (const n of r.llm.risk_notes) console.log(`  ~ ${n}`);
+}
+const prdOn = (): boolean => {
+  if (getBool(getDb(), 'prd_gate_enabled', false)) return true;
+  fail('PRD gate disabled — loop config set prd_gate_enabled true');
+  return false;
+};
+
+prdCmd
+  .command('template')
+  .description('print the PRD template the gate expects (paste it into Opus/Fable)')
+  .action(() => {
+    process.stdout.write(fs.readFileSync(path.join(ENGINE_REPO_ROOT, 'seed', 'prd-template.md'), 'utf8'));
+  });
+
+prdCmd
+  .command('check <file>')
+  .description('lint + local-model review; exit code 1 when blocked')
+  .action(async (file: string) => {
+    if (!prdOn()) return;
+    const r = await checkPrd(getDb(), fs.readFileSync(file, 'utf8'));
+    printPrdCheck(r);
+    if (!r.ok) process.exitCode = 1;
+  });
+
+prdCmd
+  .command('submit <file>')
+  .option('--verify-llm', 'also run the cloud claude -p judge against the acceptance rubric (spends token)')
+  .description('re-check, save the PRD as the plan, and create a queued task (or a benchmark)')
+  .option('--model <model>', 'implementation model (default prd_default_model / local default_model)')
+  .option('--draft', 'leave the task as a draft instead of queueing it')
+  .option('--bench-models <csv>', '2+ models: create a benchmark from this PRD instead of one task')
+  .action(async (file: string, o) => {
+    if (!prdOn()) return;
+    try {
+      const r = await submitPrd(getDb(), fs.readFileSync(file, 'utf8'), {
+        verify_llm: Boolean(o.verifyLlm),
+        model: o.model,
+        queue: !o.draft,
+        benchmark_models: o.benchModels ? csvList(o.benchModels) : undefined,
+      });
+      if (!r.ok) {
+        printPrdCheck(r.check);
+        process.exitCode = 1;
+        return;
+      }
+      if (r.kind === 'benchmark') {
+        console.log(`benchmark ${r.benchmark.id} created from PRD (${r.arms.map((a) => a.model).join(', ')})`);
+      } else {
+        console.log(`${r.task.id} -> ${r.task.status}  model=${r.task.model ?? '(default_model)'}  plan=${r.plan_ref}`);
+        if (!r.gate.ok) console.log(`  gate: MISSING -> ${r.gate.missing.join('; ')}`);
+      }
+    } catch (err) {
+      if (err instanceof PrdInputError || err instanceof BenchmarkInputError) return fail(err.message);
+      throw err;
+    }
   });
 
 // Plain (not required) options on the parent: `loop deploy rollback <env>` dispatches to
@@ -971,6 +1225,48 @@ ingest
     const results = await ingestAll(db);
     if (!results.length) return console.log('(no enabled sources)');
     for (const r of results) report(r);
+  });
+
+// ---- 模型對話 (web/index.html) --------------------------------------------
+const chat = program.command('chat').description('模型對話 history (web/index.html)');
+
+chat
+  .command('prune')
+  .description('delete conversations older than the retention window (dry-run unless --yes)')
+  .option('--days <n>', 'override chat_retention_days for this run', (v) => parseInt(v, 10))
+  .option('--yes', 'actually delete (otherwise dry-run)')
+  .action((o) => {
+    const db = getDb();
+    const days = Number.isFinite(o.days) ? o.days : getNum(db, 'chat_retention_days', 0);
+    if (!days || days <= 0) {
+      console.log('chat_retention_days = 0 (keep forever). Pass --days <n> to prune anyway.');
+      return;
+    }
+    const doomed = db
+      .prepare(`SELECT id, title, updated_at FROM chat_conversations WHERE updated_at < datetime('now', ?)`)
+      .all(`-${Math.floor(days)} days`) as { id: string; title: string; updated_at: string }[];
+    if (!doomed.length) return console.log(`nothing older than ${days} day(s)`);
+    for (const c of doomed) console.log(`  ${o.yes ? 'delete' : 'would delete'} ${c.id}  ${c.updated_at}  ${c.title}`);
+    if (!o.yes) {
+      console.log(`\n${doomed.length} conversation(s) — dry-run. Re-run with --yes to delete.`);
+      return;
+    }
+    const { conversations, files } = pruneConversations(db, days);
+    console.log(`\npruned ${conversations} conversation(s), ${files} image file(s)`);
+  });
+
+chat
+  .command('export <id>')
+  .description('print one conversation as Markdown')
+  .option('--user <key>', "user_key that owns it (default: the conversation's own)")
+  .option('--reasoning', 'include 思考過程')
+  .action((id: string, o) => {
+    const db = getDb();
+    const owner =
+      o.user ?? (db.prepare('SELECT user_key FROM chat_conversations WHERE id = ?').get(id) as { user_key?: string } | undefined)?.user_key;
+    const conv = owner ? getConversation(db, id, owner) : null;
+    if (!conv) return fail(`no such conversation: ${id}`);
+    process.stdout.write(toMarkdown(conv, messagesFor(db, id), { includeReasoning: Boolean(o.reasoning) }));
   });
 
 program.parseAsync();

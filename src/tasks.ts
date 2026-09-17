@@ -31,6 +31,7 @@ export interface NewTaskInput {
   stage_name?: string | null;
   source_ref?: string | null;
   experiment?: string | null;
+  benchmark_id?: string | null;
 }
 
 export function createTask(db: Database.Database, input: NewTaskInput): Task {
@@ -39,11 +40,11 @@ export function createTask(db: Database.Database, input: NewTaskInput): Task {
     `INSERT INTO tasks (id, title, goal, plan_ref, plan_kind, coding_tool, verification_steps,
        setup_cmd, repo_path, base_branch, complexity, priority, model, timeout_min, depends_on, environment,
        verify_mode, verify_rubric, verify_timeout_min, requires, owner, created_by, parent_id,
-       pipeline_id, stage_name, source_ref, experiment, status)
+       pipeline_id, stage_name, source_ref, experiment, benchmark_id, status)
      VALUES (@id, @title, @goal, @plan_ref, @plan_kind, @coding_tool, @verification_steps,
        @setup_cmd, @repo_path, @base_branch, @complexity, @priority, @model, @timeout_min, @depends_on, @environment,
        @verify_mode, @verify_rubric, @verify_timeout_min, @requires, @owner, @created_by, @parent_id,
-       @pipeline_id, @stage_name, @source_ref, @experiment, 'draft')`,
+       @pipeline_id, @stage_name, @source_ref, @experiment, @benchmark_id, 'draft')`,
   ).run({
     id,
     title: input.title,
@@ -72,6 +73,7 @@ export function createTask(db: Database.Database, input: NewTaskInput): Task {
     stage_name: input.stage_name ?? null,
     source_ref: input.source_ref ?? null,
     experiment: input.experiment ?? null,
+    benchmark_id: input.benchmark_id ?? null,
   });
   logEvent(db, { task_id: id, kind: 'status', to_status: 'draft', detail: 'created' });
   return getTask(db, id)!;
@@ -307,7 +309,9 @@ export function activeRunCosts(db: Database.Database): ActiveRunCost[] {
               r.weekly_pct_before  AS weekly_pct_before,
               r.model              AS model
          FROM task_runs r JOIN tasks t ON t.id = r.task_id
-        WHERE r.finished_at IS NULL`,
+        WHERE r.finished_at IS NULL
+          AND (r.model IS NULL OR r.model NOT LIKE 'local:%') -- 本地模型 runs reserve no quota
+`,
     )
     .all() as ActiveRunCost[];
 }
@@ -317,4 +321,14 @@ export function latestRun(db: Database.Database, taskId: string): TaskRun | unde
   return db
     .prepare('SELECT * FROM task_runs WHERE task_id = ? ORDER BY started_at DESC LIMIT 1')
     .get(taskId) as TaskRun | undefined;
+}
+
+/** 本地模型: in-flight runs on a local vLLM model (model 'local:<id>'). They cost no Anthropic
+ * quota and have their own concurrency cap (local_max_concurrency) — see tick.ts step 4c. */
+export function activeLocalRunCount(db: Database.Database): number {
+  return (
+    db.prepare("SELECT COUNT(*) AS n FROM task_runs WHERE finished_at IS NULL AND model LIKE 'local:%'").get() as {
+      n: number;
+    }
+  ).n;
 }

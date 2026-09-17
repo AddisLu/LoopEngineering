@@ -1,2 +1,0 @@
-PptxGenJS 3.12.0 — MIT License — https://github.com/gitbrent/PptxGenJS
-Vendored locally (no CDN) for the report deck PPTX export.

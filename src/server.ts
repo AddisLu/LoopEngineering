@@ -10,6 +10,7 @@ import { pumpIngest } from './knowledge/ingest/pump.js';
 import { shutdownWarmWorkers } from './voice/daemon.js';
 import { getTranscribeWarmWorkerSingleton } from './voice/transcribe.js';
 import { getEmbedWarmWorkerSingleton } from './knowledge/embed.js';
+import { checkBenchmarks } from './benchmark/complete.js';
 
 /** Production entry: runs the scheduling loop AND serves the API/board. systemd runs this. */
 export async function main(): Promise<void> {
@@ -53,6 +54,8 @@ export async function main(): Promise<void> {
     void pumpPushback(db, lastPushbackId).then((id) => {
       lastPushbackId = id;
     });
+    // benchmark mode: judge benchmarks whose arms are all terminal, fire-and-forget (src/benchmark/complete.ts)
+    void checkBenchmarks(db).catch((err) => console.error('[bench] error:', err));
     // SSoT Phase 4: periodic incremental re-ingest, fire-and-forget (see knowledge/ingest/pump.ts)
     void pumpIngest(db, lastIngestPumpAt, Date.now()).then((t) => {
       lastIngestPumpAt = t;
@@ -106,6 +109,8 @@ async function pumpNotifications(
       });
       continue;
     }
+    // benchmark arms don't push per arm — the benchmark sends one push when it is judged
+    if ((db.prepare('SELECT benchmark_id FROM tasks WHERE id = ?').get(e.task_id) as { benchmark_id: string | null } | undefined)?.benchmark_id) continue;
     // Enrich review events with the git close-out outcome so the push says how the
     // merge landed; the mapping itself is pure (routeStatusEvent, unit-tested).
     const merge_status =

@@ -4,6 +4,9 @@ import { logEvent } from '../db/index.js';
 import { killRun } from '../orchestrator/kill.js';
 import type { UsageReading } from '../types.js';
 
+/** 本地模型 runs spend no Anthropic quota, so neither quota safety below may interrupt them. */
+const isLocalRun = (run: { model: string | null }): boolean => !!run.model && run.model.startsWith('local:');
+
 /**
  * Circuit breaker: if session% has reached the hard limit, SIGINT every active run
  * (escalating to SIGKILL). Runs are marked interrupted_by='breaker' so runTask sends
@@ -13,7 +16,7 @@ export function checkBreaker(db: Database.Database, reading: UsageReading, hardL
   if (!Number.isFinite(reading.session.percent) || reading.session.percent < hardLimitPct) {
     return false;
   }
-  const runs = activeRuns(db);
+  const runs = activeRuns(db).filter((r) => !isLocalRun(r));
   if (runs.length === 0) return true;
   for (const run of runs) {
     logEvent(db, {
@@ -40,6 +43,7 @@ export function checkBreaker(db: Database.Database, reading: UsageReading, hardL
 export function checkWindowSwitch(db: Database.Database, currentWindow: 'day' | 'night'): void {
   for (const run of activeRuns(db)) {
     if (run.interrupted_by) continue; // already being killed (breaker/timeout/user)
+    if (isLocalRun(run)) continue;
     if (!run.dispatch_window || run.dispatch_window === currentWindow) continue;
     logEvent(db, {
       task_id: run.task_id,

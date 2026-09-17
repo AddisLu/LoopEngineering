@@ -35,6 +35,7 @@ export interface Task {
   owner: string | null; // team-prep: unused passthrough, reserves the multi-user path
   created_by: string | null; // team-prep: unused passthrough, reserves the multi-user path
   experiment: string | null; // A/B cohort label (SDD Phase 1); write-only from intake, read only by metrics.experiment_ab
+  benchmark_id: string | null; // benchmark mode: this task is one arm of benchmarks.id (never integrates; judged)
   created_at: string;
   updated_at: string;
 }
@@ -60,6 +61,9 @@ export interface TaskRun {
   dispatch_window: string | null;
   discipline: number | null;
   model: string | null; // SDD Phase 4: resolved model at dispatch, for model-aware cost calibration
+  tokens_in: number | null; // 本地模型: tokens parsed from the adapter stream (null = not reported)
+  tokens_out: number | null;
+  backend: string | null; // adapter that ran it: claude-code | opencode | mock
   started_at: string;
   finished_at: string | null;
 }

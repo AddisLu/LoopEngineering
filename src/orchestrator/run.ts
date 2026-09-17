@@ -39,6 +39,7 @@ import type { Adapter, DispatchResult } from './adapters/types.js';
 import { runPlanner, type PlannerExec } from './planner.js';
 import { runDeployTask, type DeployExec } from './deployTask.js';
 import { getEnvironment } from '../deploy/store.js';
+import { isLocalModel, localId, getLocalModel } from '../local/models.js';
 
 /**
  * `coding_tool` (task type) and `agent_backend` (setting, see adapters/registry.ts) are
@@ -50,6 +51,9 @@ import { getEnvironment } from '../deploy/store.js';
 export function pickAdapter(task: Task, db: Database.Database): Adapter {
   if (task.coding_tool === 'mock') return mockAdapter;
   if (task.coding_tool === 'claude-code' || task.coding_tool === 'generic') {
+    // 本地模型: a resolved 'local:<id>' model always runs through opencode against vLLM,
+    // whatever agent_backend says (that setting only picks the CLOUD backend).
+    if (isLocalModel(resolveModel(db, task))) return getBackend('opencode');
     return getBackend(getSetting(db, 'agent_backend') || 'claude-code');
   }
   throw new Error(`unknown coding_tool: ${task.coding_tool}`);
@@ -138,11 +142,14 @@ export async function runTask(
 
   const isMock = task.coding_tool === 'mock';
   const isGeneric = task.coding_tool === 'generic';
+  // 本地模型 run (model 'local:<id>' -> opencode + vLLM): zero Anthropic spend, so it skips the
+  // forced live usage reads, the claude-only budget-guard hook and (by default) the gap review.
+  const isLocal = !isMock && isLocalModel(resolveModel(db, task));
   const hardLimit = getNum(db, 'hard_limit_pct', 95);
   // Bill the run against a fresh reading at both boundaries. A cached reading (TTL
   // 180s) can make a short run look like ~0% delta and bias the estimator toward
   // zero. Mock runs stay on the cache (zero-token / deterministic tests).
-  const beforeReading = readUsage({ force: !isMock });
+  const beforeReading = readUsage({ force: !isMock && !isLocal });
   const before = beforeReading.session.percent;
   const weeklyBefore = beforeReading.weekly.percent;
   // Window this run is dispatched under, so the tick can checkpoint it if the
@@ -234,22 +241,22 @@ export async function runTask(
       return;
     }
   }
-  if (!isMock) writeSettingsLocal(worktreePath, hardLimit);
+  if (!isMock && !isLocal) writeSettingsLocal(worktreePath, hardLimit);
 
-  const est = estimatePct(db, task.complexity, modelKey);
+  const est = isLocal ? 0 : estimatePct(db, task.complexity, modelKey);
   db.prepare('UPDATE tasks SET est_session_pct = ? WHERE id = ?').run(est, task.id);
   setStatus(db, task.id, 'running', { run_id: run.id, session_pct: before });
   logEvent(db, {
     task_id: task.id,
     run_id: run.id,
     kind: 'dispatch',
-    detail: `tool=${task.coding_tool} est=${est}%${opts.resume ? ' resume' : ''}`,
+    detail: `tool=${task.coding_tool} est=${est}%${isLocal ? ` model=${dispatchModel}` : ''}${opts.resume ? ' resume' : ''}`,
   });
 
   const adapter = opts.adapter ?? pickAdapter(task, db);
   const timeoutMs = process.env.LOOP_TEST_TIMEOUT_MS
     ? Number(process.env.LOOP_TEST_TIMEOUT_MS)
-    : timeoutMinFor(db, task) * 60_000;
+    : timeoutMinFor(db, task, dispatchModel) * 60_000;
 
   // On resume, restore the prior work state (verify-failure context + HANDOFF.md) so the
   // resume prompt can point the agent at where it left off instead of restarting.
@@ -271,13 +278,17 @@ export async function runTask(
       // else default_model. null/'default' -> no --model (CLI default). See resolveModel.
       model: dispatchModel,
       timeoutMs,
+      local: isLocal ? (getLocalModel(db, localId(dispatchModel!)) ?? null) : null,
+      localBaseUrl: getSetting(db, 'local_vllm_base_url') || undefined,
       resumeSessionId: resumeSid,
       resume: !!opts.resume,
       handoff,
       onEvent: (evt) => {
-        if (!sidSaved && evt?.session_id) {
+        // claude stream-json carries session_id; opencode --format json carries sessionID
+        const sid = evt?.session_id ?? evt?.sessionID;
+        if (!sidSaved && typeof sid === 'string' && sid) {
           sidSaved = true;
-          updateRun(db, run.id, { session_id: evt.session_id });
+          updateRun(db, run.id, { session_id: sid });
         }
       },
     });
@@ -287,7 +298,7 @@ export async function runTask(
     const timeoutTimer = setTimeout(() => {
       const cur = getRun(db, run.id);
       if (cur && !cur.finished_at) {
-        logEvent(db, { task_id: task.id, run_id: run.id, kind: 'timeout', detail: `>${timeoutMinFor(db, task)}m` });
+        logEvent(db, { task_id: task.id, run_id: run.id, kind: 'timeout', detail: `>${timeoutMinFor(db, task, dispatchModel)}m` });
         killRun(db, { id: run.id, pid: handle.pid }, 'timeout');
       }
     }, timeoutMs);
@@ -315,13 +326,16 @@ export async function runTask(
 
   // Force a live read at the closing boundary so the recorded delta reflects real
   // spend (see the `before` note); the calibrator depends on this being accurate.
-  const afterReading = readUsage({ force: !isMock });
+  const afterReading = readUsage({ force: !isMock && !isLocal });
   const after = afterReading.session.percent;
   finishRun(db, run.id, {
     exit_code: result.exitCode,
     // keep the mid-stream session_id if the final event didn't carry one
     ...(result.sessionId ? { session_id: result.sessionId } : {}),
     usage_json: result.usageJson,
+    tokens_in: result.tokensIn ?? null,
+    tokens_out: result.tokensOut ?? null,
+    backend: adapter.name,
     session_pct_after: after,
     weekly_pct_after: afterReading.weekly.percent,
     error: result.error ?? null,
@@ -414,7 +428,11 @@ export async function runTask(
   // diffstat -> gap-review -> PR flow. A 'manual' verify outcome defers auto-integrate
   // entirely (still pushes + opens a backup PR) so a human can merge after verifying on
   // hardware/at the company.
-  if (!isMock && !isGeneric && branch && task.base_branch && task.repo_path) {
+  // A benchmark arm (task.benchmark_id) never integrates: its branch stays in the worktree until
+  // the benchmark judge has read the diff (src/benchmark/complete.ts), so every arm is judged
+  // against the same untouched base.
+  if (task.benchmark_id && !manualVerify) reviewDetail = 'benchmark arm: verification passed — waiting for the judge';
+  if (!isMock && !isGeneric && branch && task.base_branch && task.repo_path && !task.benchmark_id) {
     const base = task.base_branch;
     const autoPush = getBool(db, 'auto_push_branch', true);
     const autoMerge = getBool(db, 'auto_merge', true) && !manualVerify;
@@ -475,11 +493,14 @@ export async function runTask(
     const stat = diffstat(worktreePath, base);
     if (stat) logEvent(db, { task_id: task.id, run_id: run.id, kind: 'note', detail: `diffstat:\n${stat}` });
 
-    try {
-      const reviewPath = runGapReview(task, worktreePath);
-      if (reviewPath) db.prepare('UPDATE tasks SET review_md_path = ? WHERE id = ?').run(reviewPath, task.id);
-    } catch (err) {
-      logEvent(db, { task_id: task.id, run_id: run.id, kind: 'note', detail: `gap-review skipped: ${String(err)}` });
+    // the gap reviewer spawns `claude` — a local run skips it unless local_gap_review is on
+    if (!isLocal || getBool(db, 'local_gap_review', false)) {
+      try {
+        const reviewPath = runGapReview(task, worktreePath);
+        if (reviewPath) db.prepare('UPDATE tasks SET review_md_path = ? WHERE id = ?').run(reviewPath, task.id);
+      } catch (err) {
+        logEvent(db, { task_id: task.id, run_id: run.id, kind: 'note', detail: `gap-review skipped: ${String(err)}` });
+      }
     }
 
     // 4. PR (its internal push is now a cheap re-push)

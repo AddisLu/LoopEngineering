@@ -132,7 +132,7 @@ server.registerTool('loop_add_task', {
     coding_tool: z.enum(['claude-code', 'mock', 'generic', 'plan']).optional().describe('default "claude-code"; "mock" is a zero-token dry run; "generic" runs the real agent in a persistent output dir with NO git/repo/PR — for non-coding work (reports, data analysis, one-off scripts); "plan" is an EPIC — hand it one big goal and an AI planner decomposes it into 2-6 concrete subtasks, chains them with depends_on, and executes them autonomously one after another (use this instead of decomposing a large feature into multiple loop_add_task calls yourself). repo/base are skipped for generic; optional for plan (inherited by its children if given). give generic verify_mode=manual or llm (or explicit verification_steps); plan needs no verification_steps at all.'),
     complexity: z.enum(['S', 'M', 'L']).optional().describe('S/M/L — sets timeout, estimate, model routing (default M).'),
     priority: z.number().int().optional().describe('integer priority (default 2; lower runs first).'),
-    model: z.string().optional().describe('sonnet | opus | default (optional).'),
+    model: z.string().optional().describe('sonnet | opus | default | local:<id> (optional). local:<id> runs on the local vLLM model via opencode — zero Anthropic tokens; list ids with loop_local_models.'),
     queue: z.boolean().optional().describe('default TRUE — queue for execution if the gate passes. false = leave as draft.'),
     depends_on: z.string().optional().describe('Task id this one waits for (serial chain): held until that task is CLOSED, then auto-queued. Use to run tasks strictly one after another.'),
     environment: z.string().optional().describe('Environment label (e.g. "company", "home") this task should be scoped to — pulls in matching env:<name> knowledge nodes when the task runs.'),
@@ -460,6 +460,150 @@ server.registerTool('loop_cleanup', {
     return { content: [{ type: 'text', text: head + list + hint }] };
   } catch (e) {
     return { content: [{ type: 'text', text: `Cleanup failed: ${e.message}` }] };
+  }
+});
+
+// ---- 本地模型 + benchmark mode ----
+
+server.registerTool('loop_local_models', {
+  title: 'List local vLLM models',
+  description: 'List the local models Loop can run coding tasks on (pass model "local:<id>" to loop_add_task — zero Anthropic tokens), which one vLLM currently has loaded, and whether local models are enabled.',
+  inputSchema: {},
+}, async () => {
+  try {
+    const { enabled, models, state, inflight } = await api('/api/local/models');
+    const head = `local_models_enabled=${enabled} status=${state.status} loaded=${state.loaded ?? '-'} in-flight=${inflight}${state.error ? ` error=${state.error}` : ''}`;
+    const rows = (models || []).map((m) =>
+      `${state.loaded === m.id ? '*' : ' '} local:${m.id}  ${m.enabled ? 'enabled' : 'disabled'}  ${m.display_name}${m.notes ? ` — ${m.notes}` : ''}`);
+    return { content: [{ type: 'text', text: [head, ...rows].join('\n') }] };
+  } catch (e) {
+    return { content: [{ type: 'text', text: `Could not list local models: ${e.message}` }] };
+  }
+});
+
+server.registerTool('loop_bench_add', {
+  title: 'Create a model benchmark',
+  description: 'Run the SAME coding task on 2+ models (usually local:<id>) in separate worktrees. When every arm has finished, an external judge model (default opus) scores and ranks them; results accumulate in a model x domain matrix. Arms never merge into the base branch. Requires benchmark_enabled=true.',
+  inputSchema: {
+    title: z.string(),
+    goal: z.string(),
+    models: z.array(z.string()).min(2).describe('e.g. ["local:qwen38-flash","local:qwen3-coder-next"]'),
+    repo_path: z.string().describe('absolute path of the git repository'),
+    verification_steps: z.array(z.string()).min(1).describe('shell commands every arm must pass, e.g. ["npm test"]'),
+    base_branch: z.string().optional().describe('default main'),
+    plan_ref: z.string().optional().describe('absolute path or URL of the plan/PRD all arms follow'),
+    domain: z.enum(['cuda', 'cv', 'cpp', 'csharp', 'typescript', 'python', 'other']).optional(),
+    verify_rubric: z.string().optional(),
+    setup_cmd: z.string().optional(),
+    complexity: z.enum(['S', 'M', 'L']).optional(),
+    judge_model: z.enum(['opus', 'fable', 'fable-5', 'sonnet']).optional(),
+  },
+}, async (a) => {
+  try {
+    const { benchmark, arms } = await api('/api/benchmarks', { method: 'POST', body: { ...a, base_branch: a.base_branch ?? 'main' } });
+    const lines = [
+      `Benchmark ${benchmark.id} created (domain=${benchmark.domain}, judge=${benchmark.judge_model}).`,
+      ...arms.map((x) => `  ${x.model} -> task ${x.task_id} [${x.task_status}]`),
+      'Check progress/results with loop_bench_status.',
+    ];
+    return { content: [{ type: 'text', text: lines.join('\n') }] };
+  } catch (e) {
+    return { content: [{ type: 'text', text: `Could not create benchmark: ${e.message}` }] };
+  }
+});
+
+server.registerTool('loop_bench_status', {
+  title: 'Benchmark status / results',
+  description: 'Without id: recent benchmarks plus the model x domain matrix. With id: per-arm verification outcome, judge scores, ranks and the judge summary.',
+  inputSchema: { id: z.string().optional() },
+}, async ({ id }) => {
+  try {
+    if (id) {
+      const { benchmark: b, arms } = await api(`/api/benchmarks/${encodeURIComponent(id)}`);
+      const lines = [`${b.id} ${b.title} — ${b.status} (domain=${b.domain}, judge=${b.judge_model}) winner=${b.winner ?? '-'}`];
+      if (b.error) lines.push(`error: ${b.error}`);
+      if (b.summary) lines.push(`summary: ${b.summary}`);
+      for (const x of [...arms].sort((p, q) => (p.judge_rank ?? 99) - (q.judge_rank ?? 99))) {
+        lines.push(`  #${x.judge_rank ?? '-'} ${x.model} score=${x.judge_score ?? '-'} verify=${x.verify_outcome ?? '-'} tokens_out=${x.tokens_out ?? '-'} task=${x.task_id} [${x.task_status}]${x.notes ? ` — ${x.notes}` : ''}`);
+      }
+      return { content: [{ type: 'text', text: lines.join('\n') }] };
+    }
+    const [{ benchmarks }, { matrix }] = await Promise.all([api('/api/benchmarks'), api('/api/benchmarks/matrix')]);
+    const lines = ['Recent benchmarks:', ...(benchmarks || []).slice(0, 15).map((b) => `  ${b.id} ${b.status} ${b.domain} arms ${b.arms_done}/${b.arm_count} winner=${b.winner ?? '-'} — ${b.title}`)];
+    lines.push('', 'Model x domain matrix (judged only):');
+    for (const r of matrix || []) {
+      lines.push(`  ${r.domain} ${r.model}: n=${r.n} score=${r.avg_score ?? '-'} win=${Math.round(r.win_rate * 100)}% verify=${Math.round(r.verify_pass_rate * 100)}%`);
+    }
+    return { content: [{ type: 'text', text: lines.join('\n') }] };
+  } catch (e) {
+    return { content: [{ type: 'text', text: `Could not read benchmarks: ${e.message}` }] };
+  }
+});
+
+// ---- PRD gate ----
+
+const prdText = (a) => {
+  if (a.markdown && a.markdown.trim()) return a.markdown;
+  if (a.path) return fs.readFileSync(a.path, 'utf8');
+  throw new Error('pass markdown or path');
+};
+const prdReport = (c) => [
+  c.ok ? 'PRD: OK ✓' : 'PRD: BLOCKED ✗',
+  ...c.missing.map((m) => `  ✗ ${m}`),
+  ...c.warnings.map((w) => `  ! ${w}`),
+  `  local-model review: ${c.llm.status}${c.llm.status === 'ok' ? ` (ok=${c.llm.ok})` : ''}${c.llm.error ? ` — ${c.llm.error}` : ''}`,
+  ...c.llm.questions.map((q) => `  ? ${q}`),
+  ...c.llm.risk_notes.map((n) => `  ~ ${n}`),
+].join('\n');
+
+server.registerTool('loop_prd_template', {
+  title: 'Get the Loop PRD template',
+  description: 'The section skeleton the PRD gate expects (目標/範圍/非範圍/驗收標準/驗證指令/Repo/領域/複雜度). Write PRDs in this shape so a local model can implement them unattended.',
+  inputSchema: {},
+}, async () => {
+  try {
+    const { markdown } = await api('/api/prd/template');
+    return { content: [{ type: 'text', text: markdown }] };
+  } catch (e) {
+    return { content: [{ type: 'text', text: `Could not read the PRD template: ${e.message}` }] };
+  }
+});
+
+server.registerTool('loop_prd_check', {
+  title: 'Check a PRD against the gate',
+  description: 'Deterministic lint + a review by the loaded local model (zero Anthropic tokens). Returns every missing item; fix them before loop_prd_submit.',
+  inputSchema: {
+    markdown: z.string().optional().describe('the PRD markdown'),
+    path: z.string().optional().describe('or an absolute path to a PRD .md file'),
+  },
+}, async (a) => {
+  try {
+    const check = await api('/api/prd/check', { method: 'POST', body: { markdown: prdText(a) } });
+    return { content: [{ type: 'text', text: prdReport(check) }] };
+  } catch (e) {
+    return { content: [{ type: 'text', text: `PRD check failed: ${e.message}` }] };
+  }
+});
+
+server.registerTool('loop_prd_submit', {
+  title: 'Submit a PRD as a task (or benchmark)',
+  description: 'Re-checks the PRD; if it passes, saves it as the plan and creates a queued task that runs on the local model (or, with benchmark_models, a benchmark across those models). A blocked PRD creates nothing and returns the missing items.',
+  inputSchema: {
+    markdown: z.string().optional(),
+    path: z.string().optional(),
+    model: z.string().optional().describe('implementation model, e.g. local:qwen38-flash (default: prd_default_model)'),
+    queue: z.boolean().optional().describe('default true'),
+    benchmark_models: z.array(z.string()).optional().describe('2+ models -> create a benchmark instead of one task'),
+  },
+}, async (a) => {
+  try {
+    const r = await api('/api/prd', { method: 'POST', body: { markdown: prdText(a), model: a.model, queue: a.queue, benchmark_models: a.benchmark_models } });
+    const head = r.kind === 'benchmark'
+      ? `Benchmark ${r.benchmark.id} created from the PRD: ${r.arms.map((x) => x.model).join(', ')}`
+      : `Task ${r.task.id} -> ${r.task.status} (model ${r.task.model ?? 'default_model'})${r.gate.ok ? '' : ` — gate MISSING: ${r.gate.missing.join('; ')}`}`;
+    return { content: [{ type: 'text', text: `${head}\n${prdReport(r.check)}` }] };
+  } catch (e) {
+    return { content: [{ type: 'text', text: `PRD not submitted: ${e.message}` }] };
   }
 });
 

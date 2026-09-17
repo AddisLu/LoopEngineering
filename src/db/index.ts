@@ -6,6 +6,7 @@ import { paths, ensureDirs, DEFAULT_SETTINGS } from '../config.js';
 import { seedPipelines } from '../pipeline/store.js';
 import { seedReportTemplates } from '../report/templates.js';
 import { loadVec } from '../knowledge/vec.js';
+import { seedLocalModels } from '../local/models.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -26,8 +27,10 @@ export function getDb(dbPath: string = paths.db): Database.Database {
   seedEnvironments(db);
   seedPipelines(db);
   seedReportTemplates(db);
+  seedLocalModels(db);
   loadVec(db, getNum(db, 'embed_dim', 1024));
   backfillChunksFts(db);
+  backfillChatMessagesFts(db);
 
   _db = db;
   return db;
@@ -45,8 +48,10 @@ export function openTestDb(): Database.Database {
   seedEnvironments(db);
   seedPipelines(db);
   seedReportTemplates(db);
+  seedLocalModels(db);
   loadVec(db, getNum(db, 'embed_dim', 1024));
   backfillChunksFts(db);
+  backfillChatMessagesFts(db);
   return db;
 }
 
@@ -56,6 +61,18 @@ export function openTestDb(): Database.Database {
  * existed). One-time idempotent rebuild: only runs when the index is empty but chunks
  * has data, so a normally-synced DB (triggers keep it current) pays nothing on startup.
  */
+/** Same one-time rebuild for chat_messages_fts on a DB that already holds conversations. */
+function backfillChatMessagesFts(db: Database.Database): void {
+  try {
+    const indexed = (db.prepare(`SELECT count(*) AS n FROM chat_messages_fts`).get() as { n: number }).n;
+    if (indexed > 0) return;
+    const rows = (db.prepare(`SELECT count(*) AS n FROM chat_messages`).get() as { n: number }).n;
+    if (rows > 0) db.exec(`INSERT INTO chat_messages_fts(chat_messages_fts) VALUES ('rebuild')`);
+  } catch {
+    /* FTS5 unavailable — search degrades to LIKE, see src/chat/store.ts */
+  }
+}
+
 function backfillChunksFts(db: Database.Database): void {
   const ftsCount = (db.prepare(`SELECT count(*) AS n FROM chunks_fts`).get() as { n: number }).n;
   if (ftsCount > 0) return;
@@ -132,6 +149,32 @@ function migrate(db: Database.Database): void {
   // auto-relate (see src/knowledge/relate.ts): edges get a review state just like nodes —
   // existing rows default to 'approved' (unaffected), LLM-suggested edges land as 'draft'.
   add('knowledge_edges', [["status", "TEXT NOT NULL DEFAULT 'approved'"]]);
+  // 本地模型: per-run token counts parsed from the adapter stream (opencode step_finish sums /
+  // claude result.usage) + which adapter actually ran it ('claude-code' | 'opencode' | 'mock').
+  add('task_runs', [
+    ['tokens_in', 'INTEGER'],
+    ['tokens_out', 'INTEGER'],
+    ['backend', 'TEXT'],
+  ]);
+  // benchmark mode (src/benchmark/*.ts): which benchmark this task is an arm of. Nullable.
+  add('tasks', [['benchmark_id', 'TEXT']]);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_tasks_benchmark ON tasks(benchmark_id)');
+  // 模型對話 actions: what a single answer turned into. escalated_from points at the local answer
+  // a cloud review was asked about; captured_path / task_id make 存進知識庫 and 轉成任務 idempotent.
+  add('chat_messages', [
+    ['escalated_from', 'TEXT'],
+    ['captured_path', 'TEXT'],
+    ['task_id', 'TEXT'],
+  ]);
+  // 分享連結: an unguessable token makes one conversation readable without a login. Partial index
+  // so the many NULLs (every unshared conversation) do not collide.
+  add('chat_conversations', [
+    ['share_token', 'TEXT'],
+    ['shared_at', 'TEXT'],
+  ]);
+  db.exec(
+    'CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_conversations_share ON chat_conversations(share_token) WHERE share_token IS NOT NULL',
+  );
 }
 
 function seedSettings(db: Database.Database): void {

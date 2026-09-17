@@ -1,5 +1,7 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { paths, TOKEN_REFRESH_MS, USAGE_CACHE_FILE } from '../config.js';
 import type { UsageReading, UsageLimit } from '../types.js';
@@ -10,6 +12,48 @@ const CACHE_FILE = USAGE_CACHE_FILE;
 interface CacheEnvelope {
   reading: UsageReading;
   ts: number;
+  /** Account-wide 429 cooldown (epoch ms) — written by TokenBar's usage-core and by us. */
+  blockedUntil?: number;
+}
+
+/**
+ * 429 cooldown shared with TokenBar (mcp/usage-core.mjs).
+ *
+ * The limiter is per ACCOUNT, and its hour-long penalty restarts on every request made while it
+ * is in force — so a failed read must park every consumer, not just the one that got the 429.
+ * TokenBar publishes `blockedUntil` alongside {reading, ts} in the same cross-tool cache file
+ * (~/.local/share/claude-usage/usage-cache.json, or $LOOP_USAGE_CACHE here / $CLAUDE_USAGE_CACHE
+ * there); honouring it keeps the two tools from taking turns re-triggering the limiter.
+ * It also stops this process from retrying on every board tick when the network is simply down:
+ * before this, a failed fetch left the cache untouched, so the next call — a second later — tried
+ * again, which is how an offline Spark produced hundreds of 429s an hour.
+ */
+const COOLDOWN_MIN_MS = 60_000;
+const COOLDOWN_MAX_MS = 3_900_000;
+const COOLDOWN_DEFAULT_MS = 300_000;
+const clampCooldown = (ms: number) => Math.min(COOLDOWN_MAX_MS, Math.max(COOLDOWN_MIN_MS, ms));
+/** Remaining cooldown, clamped so a peer's skewed clock can't park us for a week. */
+const waitFor = (until?: number) => (typeof until === 'number' && until > Date.now() ? Math.min(until - Date.now(), COOLDOWN_MAX_MS) : 0);
+
+/** A failed live read, carrying the server's Retry-After when it gave one. */
+class UsageFetchError extends Error {
+  constructor(
+    message: string,
+    readonly cooldownMs?: number,
+  ) {
+    super(message);
+  }
+}
+
+/** Park every consumer without disturbing the last good reading either tool draws from. */
+function publishCooldown(cache: CacheEnvelope | null, ms: number): void {
+  try {
+    fs.mkdirSync(path.dirname(CACHE_FILE), { recursive: true });
+    const base: Record<string, unknown> = cache ? { ...cache } : { ts: 0 };
+    fs.writeFileSync(CACHE_FILE, JSON.stringify({ ...base, blockedUntil: Date.now() + clampCooldown(ms) }));
+  } catch {
+    /* best effort */
+  }
 }
 
 /**
@@ -42,20 +86,58 @@ export function readUsage(opts: { force?: boolean; refreshMs?: number } = {}): U
     return { ...cache.reading, source: 'cache' };
   }
 
+  // A cooldown published by TokenBar (or by our own last failure) means: make no request.
+  const wait = waitFor(cache?.blockedUntil);
+  if (wait > 0 && !opts.force) {
+    const msg = `cooldown ${Math.ceil(wait / 1000)}s (shared 429 backoff)`;
+    return cache?.reading ? { ...cache.reading, source: 'cache', error: msg } : degraded(msg);
+  }
+
   try {
     const reading = fetchLive();
     writeCache(reading);
     return reading;
   } catch (err) {
-    if (cache) {
+    const cooldownMs = err instanceof UsageFetchError && err.cooldownMs ? err.cooldownMs : COOLDOWN_MIN_MS;
+    publishCooldown(cache, cooldownMs);
+    if (cache?.reading) {
       return { ...cache.reading, source: 'cache', error: `stale: ${String((err as Error).message)}` };
     }
     return degraded(String((err as Error).message));
   }
 }
 
+/** TokenBar's usage-core, when this machine has it (TOKENBAR_MCP_DIR). */
+function tokenbarCore(): string | null {
+  const raw = (process.env.TOKENBAR_MCP_DIR ?? paths.tokenbarMcpDir ?? '').trim();
+  if (!raw) return null;
+  const dir = raw.startsWith('~') ? path.join(os.homedir(), raw.slice(1)) : raw;
+  const file = path.join(dir, 'usage-core.mjs');
+  return fs.existsSync(file) ? file : null;
+}
+
+/**
+ * Delegate to TokenBar instead of re-implementing it: one token-resolution order, one shared
+ * cache, one 429 cooldown across every tool on the account. Falls back to the port below when
+ * TOKENBAR_MCP_DIR isn't configured.
+ */
+function fetchViaTokenBar(core: string): UsageReading {
+  const script = `import { fetchUsage } from ${JSON.stringify(pathToFileURL(core).href)};
+    const u = await fetchUsage();
+    process.stdout.write(JSON.stringify(u));`;
+  const out = execFileSync(process.execPath, ['--input-type=module', '-e', script], { encoding: 'utf8', timeout: 20000 });
+  const u = JSON.parse(out) as LooseReading & { ok?: boolean; error?: string; retryAfterSeconds?: number; fromSharedCache?: boolean };
+  if (u.ok === false) {
+    throw new UsageFetchError(`tokenbar: ${u.error ?? 'unknown'}`, u.retryAfterSeconds ? u.retryAfterSeconds * 1000 : undefined);
+  }
+  return normalize(u, u.fromSharedCache ? 'cache' : 'api');
+}
+
 /** Live fetch + parse of oauth/usage. Throws on any failure. */
 function fetchLive(): UsageReading {
+  const core = tokenbarCore();
+  if (core) return fetchViaTokenBar(core);
+
   const token = pickToken();
   if (!token) throw new Error('no oauth token (not logged in to Claude Code)');
 
@@ -74,7 +156,10 @@ function fetchLive(): UsageReading {
       },
       signal: AbortSignal.timeout(15000),
     });
-    if (!r.ok) { console.error('HTTP ' + r.status); process.exit(3); }
+    if (!r.ok) {
+      process.stdout.write(JSON.stringify({ __status: r.status, retryAfter: r.headers.get('retry-after') }));
+      process.exit(0);
+    }
     const d = await r.json();
     process.stdout.write(JSON.stringify(d));
   `;
@@ -84,6 +169,10 @@ function fetchLive(): UsageReading {
     timeout: 20000,
   });
   const d = JSON.parse(out);
+  if (typeof d.__status === 'number') {
+    const retry = Number(d.retryAfter);
+    throw new UsageFetchError(`HTTP ${d.__status}`, d.__status === 429 ? (Number.isFinite(retry) ? retry * 1000 : COOLDOWN_DEFAULT_MS) : undefined);
+  }
   const limits: any[] = Array.isArray(d.limits) ? d.limits : [];
   const s = limits.find((l) => l.kind === 'session');
   const w = limits.find((l) => l.kind === 'weekly_all');

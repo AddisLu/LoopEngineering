@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="zh-Hant" data-mode="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Benchmark · Loop Engineering</title>
+    <script>
+      // Set theme before first paint to avoid a flash of the wrong mode.
+      (function () {
+        try {
+          var m = localStorage.getItem('loop_mode');
+          if (m !== 'light' && m !== 'dark') {
+            m = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+          }
+          document.documentElement.setAttribute('data-mode', m);
+        } catch (e) {}
+      })();
+    </script>
+    <link rel="stylesheet" href="/styles.css" />
+    <style>
+      main.bench { max-width: 1180px; margin: 0 auto; padding: 18px 20px 60px; display: grid; gap: 22px; }
+      .bench h2 { font-size: 16px; margin: 0 0 10px; }
+      .bench section { background: var(--surface); border: 1px solid var(--line, var(--border, #ddd)); border-radius: 12px; padding: 16px 18px; }
+      .bench .off { color: var(--warn); }
+      .bench table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+      .bench th, .bench td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line, var(--border, #e5e5e5)); vertical-align: top; }
+      .bench th { font-weight: 600; color: var(--text-2, inherit); }
+      .bench tr.clickable { cursor: pointer; }
+      .bench tr.clickable:hover, .bench tr.selected { background: var(--accent-soft, rgba(0, 0, 0, 0.04)); }
+      .bench form { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px 16px; }
+      .bench form label { display: grid; gap: 4px; font-size: 13px; }
+      .bench form .wide { grid-column: 1 / -1; }
+      .bench form input, .bench form select, .bench form textarea { font: inherit; padding: 6px 8px; }
+      .bench .models { display: flex; flex-wrap: wrap; gap: 6px 16px; }
+      .bench .models label { display: flex; gap: 6px; align-items: center; }
+      .bench .err { color: var(--danger); white-space: pre-wrap; }
+      .bench .summary { white-space: pre-wrap; margin: 8px 0 12px; }
+      .bench .heat { font-weight: 600; }
+      .bench .scroll { overflow-x: auto; }
+    </style>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span class="brand-text">
+          <strong class="brand-name">Loop Engineering</strong>
+          <span class="brand-sub">Benchmark · 本地模型評比</span>
+        </span>
+      </div>
+      <div class="controls">
+        <a class="btn" href="/">← 回到對話</a>
+        <a class="btn" href="/board.html">任務看板</a>
+        <button class="btn" id="theme-btn" type="button" title="切換深淺色">☾</button>
+      </div>
+    </header>
+
+    <main class="bench">
+      <p class="off" id="disabled-note" hidden>Benchmark 模式未啟用：<code>loop config set benchmark_enabled true</code></p>
+
+      <section>
+        <h2>模型 × 領域 矩陣</h2>
+        <div class="scroll"><table id="matrix"></table></div>
+        <p class="empty" id="matrix-empty">還沒有評比完成的 benchmark</p>
+      </section>
+
+      <section>
+        <h2>Benchmarks</h2>
+        <div class="scroll"><table id="bench-list"></table></div>
+        <p class="empty" id="list-empty">尚無 benchmark</p>
+      </section>
+
+      <section id="detail" hidden>
+        <h2 id="detail-title">–</h2>
+        <p class="summary" id="detail-summary"></p>
+        <p class="err" id="detail-error" hidden></p>
+        <div class="scroll"><table id="detail-arms"></table></div>
+        <p><button class="btn sm" id="rejudge-btn" type="button" hidden>重新評比</button></p>
+      </section>
+
+      <section>
+        <h2>新增 Benchmark（同一題交給多個模型各做一次）</h2>
+        <form id="bench-form">
+          <label>標題 <input name="title" required /></label>
+          <label>領域
+            <select name="domain">
+              <option value="cuda">cuda</option>
+              <option value="cv">cv</option>
+              <option value="cpp">cpp</option>
+              <option value="csharp">csharp</option>
+              <option value="typescript">typescript</option>
+              <option value="python">python</option>
+              <option value="other" selected>other</option>
+            </select>
+          </label>
+          <label class="wide">目標 <textarea name="goal" rows="2" required></textarea></label>
+          <label>Plan / PRD（檔案路徑或 URL） <input name="plan_ref" /></label>
+          <label>Repo 路徑 <input name="repo_path" required /></label>
+          <label>Base branch <input name="base_branch" value="main" /></label>
+          <label>驗證指令（逗號分隔） <input name="verification_steps" placeholder="npm test" required /></label>
+          <label>Setup 指令 <input name="setup_cmd" placeholder="npm ci" /></label>
+          <label>複雜度
+            <select name="complexity"><option>S</option><option selected>M</option><option>L</option></select>
+          </label>
+          <label>評審模型
+            <select name="judge_model">
+              <option value="opus" selected>opus</option>
+              <option value="fable">fable</option>
+              <option value="fable-5">fable-5</option>
+              <option value="sonnet">sonnet</option>
+            </select>
+          </label>
+          <label class="wide">驗收標準（給評審看） <textarea name="verify_rubric" rows="2"></textarea></label>
+          <div class="wide">
+            <div>參賽模型（至少 2 個）</div>
+            <div class="models" id="model-choices"></div>
+          </div>
+          <div class="wide">
+            <button class="btn primary" type="submit" id="bench-submit">建立並排入佇列</button>
+            <span class="err" id="form-err" hidden></span>
+          </div>
+        </form>
+      </section>
+    </main>
+
+    <script src="/benchmarks.js"></script>
+  </body>
+</html>

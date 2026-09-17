@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3';
 import { spawn } from 'node:child_process';
-import { getDb, getNum } from './db/index.js';
+import { getBool, getDb, getNum } from './db/index.js';
+import { getModelManager } from './local/modelManager.js';
 import type { Task } from './types.js';
 import { runTask } from './orchestrator/run.js';
 import { recoverOnStartup } from './orchestrator/recovery.js';
@@ -67,10 +68,16 @@ export function createEngine(db: Database.Database = getDb()): Engine {
     inflight.set(task.id, p);
   }
 
+  // 本地模型: one process-wide manager (the API shares it). Adopt whatever vLLM is already serving
+  // before the first tick decides whether to switch — only when enabled (no localhost probe otherwise).
+  const modelManager = getModelManager(db);
+  if (getBool(db, 'local_models_enabled', false)) void modelManager.reconcile();
+
   const deps = {
     inflightCount: () => inflight.size,
     startRun,
     selfUpdate,
+    modelManager,
   };
 
   recoverOnStartup(db);

@@ -14,7 +14,7 @@ export function checkWatchdog(db: Database.Database, now: Date = new Date()): vo
     if (run.interrupted_by) continue; // already being killed
     const task = getTask(db, run.task_id);
     if (!task) continue;
-    const timeoutMin = timeoutMinFor(db, task);
+    const timeoutMin = timeoutMinFor(db, task, run.model);
     const startedMs = new Date(run.started_at.replace(' ', 'T') + 'Z').getTime();
     const elapsedMin = (now.getTime() - startedMs) / 60_000;
     if (elapsedMin > timeoutMin + 1) {

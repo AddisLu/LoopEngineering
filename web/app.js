@@ -129,6 +129,19 @@
       chip.title =
         `待處理任務預計再吃 weekly ${bk}%（目前 ${now}% / 上限 ${max}%）→ 跑完後距上限還剩 ${head}%，約可再加 ${cap} 個 M 任務`;
     }
+
+    // 本地模型 chip: shown once local models are on (or vLLM is doing something anyway).
+    const lc = s.local;
+    const localChip = $('local-chip');
+    if (localChip && lc) {
+      localChip.hidden = !(lc.enabled || lc.status !== 'idle' || lc.inflight > 0);
+      const label = { ready: '就緒', starting: '載入中', error: '載入失敗', idle: '閒置' }[lc.status] || lc.status;
+      localChip.setAttribute('data-state', lc.status === 'error' ? 'danger' : lc.status === 'starting' ? 'warn' : 'ok');
+      localChip.textContent = `本地模型 · ${lc.loaded || '未載入'} · ${label}${lc.inflight ? ` · 執行中 ${lc.inflight}` : ''}`;
+      localChip.title = lc.enabled
+        ? '本地模型已啟用：local:… 任務由 vLLM + opencode 執行（不耗 token），切換模型約需數分鐘'
+        : '本地模型未啟用（local_models_enabled=false）：local:… 任務會停在佇列';
+    }
   }
 
   // ---- card rendering --------------------------------------------------
@@ -432,7 +445,29 @@
   }
   toolSelect.addEventListener('change', syncRepoRow);
 
-  $('new-btn').onclick = () => { fillEnvList(); syncRepoRow(); dialog.showModal(); };
+  // 本地模型 <option>s for the task Model and default_model selects — refreshed whenever a dialog
+  // opens (the registry changes rarely). Only enabled models are offered.
+  async function fillLocalModels() {
+    let models = [];
+    try {
+      ({ models } = await api('/api/local/models', 'GET'));
+    } catch (e) { /* server without local models: leave the groups empty */ }
+    for (const id of ['model-local-group', 'default-model-local-group']) {
+      const group = $(id);
+      if (!group) continue;
+      group.replaceChildren();
+      for (const m of models || []) {
+        if (!m.enabled) continue;
+        const opt = document.createElement('option');
+        opt.value = `local:${m.id}`;
+        opt.textContent = `local:${m.id}（${m.display_name}）`;
+        group.appendChild(opt);
+      }
+      group.hidden = group.children.length === 0;
+    }
+  }
+
+  $('new-btn').onclick = () => { fillEnvList(); fillLocalModels(); syncRepoRow(); dialog.showModal(); };
   $('new-cancel').onclick = () => dialog.close();
 
   $('new-form').addEventListener('submit', async (e) => {
@@ -559,6 +594,7 @@
   const settingsErr = $('settings-err');
   $('settings-btn').onclick = async () => {
     settingsErr.hidden = true;
+    await fillLocalModels(); // options must exist before a saved local:… default_model can be selected
     try {
       const { settings } = await api('/api/settings', 'GET');
       for (const [k, v] of Object.entries(settings || {})) {
@@ -839,6 +875,17 @@
     conn.querySelector('.conn-text').textContent = text;
   }
 
+  // The chat shell links here with #task=<id> (open that card's detail) or #new (new-task
+  // dialog). Applied once, after the first board snapshot, so the card exists to open.
+  let hashApplied = false;
+  function applyHash() {
+    if (hashApplied) return;
+    hashApplied = true;
+    const h = location.hash.slice(1);
+    if (h === 'new') $('new-btn').click();
+    else if (h.startsWith('task=')) openDetail(decodeURIComponent(h.slice(5)));
+  }
+
   function connect() {
     setConn('connecting', '連線中');
     const url = '/api/stream' + (TOKEN ? `?token=${encodeURIComponent(TOKEN)}` : '');
@@ -846,6 +893,7 @@
     es.onopen = () => setConn('live', '即時連線');
     es.onmessage = (m) => {
       try { render(JSON.parse(m.data)); } catch (e) {}
+      applyHash();
     };
     es.onerror = () => {
       setConn('down', '重新連線…');
