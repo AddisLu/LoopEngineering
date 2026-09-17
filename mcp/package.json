@@ -3,8 +3,13 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "MCP server exposing Loop Engineering task creation/management to any MCP client (Claude Code in VS Code).",
-  "bin": { "loop-mcp": "./loop-mcp.mjs", "loop-ssot-mcp": "./loop-ssot-mcp.mjs" },
+  "description": "MCP servers for Loop Engineering: task creation/management (stdio), read-only SSoT search (HTTP), read-only filesystem, GitHub via gh.",
+  "bin": {
+    "loop-mcp": "./loop-mcp.mjs",
+    "loop-ssot-mcp": "./loop-ssot-mcp.mjs",
+    "loop-fs-mcp": "./loop-fs-mcp.mjs",
+    "loop-gh-mcp": "./loop-gh-mcp.mjs"
+  },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0"
   }

@@ -49,6 +49,9 @@ import { registerPrdRoutes, type PrdRouteOptions } from './prdRoutes.js';
 import { registerChatRoutes, type ChatRouteOptions } from './chatRoutes.js';
 import fastifyWebsocket from '@fastify/websocket';
 import { registerTerminalRoutes, type TerminalRouteOptions } from './terminalRoutes.js';
+import { McpPool } from '../mcp/client.js';
+import { parseMcpServers, runtimeEnvFor } from '../mcp/config.js';
+import { paths } from '../config.js';
 import type { PrdReviewExec } from '../prd/review.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -99,6 +102,8 @@ export interface AppOptions {
   /** Test-only: HF size lookup / free-disk probe / clock for the model catalog. */
   localCatalog?: LocalRouteOptions['catalog'];
   /** Test-only: fake pty factory / identity for the terminal drawer (never spawns a shell). */
+  /** Test-only: an MCP pool with in-memory transports; null disables the bridge. */
+  mcpPool?: McpPool | null;
   chatToolFetch?: ChatRouteOptions['toolFetch'];
   chatToolLookup?: ChatRouteOptions['toolLookup'];
   terminalSpawnPty?: TerminalRouteOptions['spawnPty'];
@@ -521,7 +526,25 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
     identity: opts.prdIdentity,
     git: opts.prdGit,
   });
-  registerChatRoutes(app, db, { identity: opts.chatIdentity, toolFetch: opts.chatToolFetch, toolLookup: opts.chatToolLookup });
+  // MCP bridge for the chat page: servers from mcp_servers_json, secrets injected at spawn
+  const mcpPool =
+    opts.mcpPool !== undefined
+      ? opts.mcpPool
+      : new McpPool({
+          cfgs: () => {
+            try {
+              return parseMcpServers(getSetting(db, 'mcp_servers_json') || '');
+            } catch {
+              return [];
+            }
+          },
+          env: (name) => runtimeEnvFor(name, db, { apiUrl: `http://127.0.0.1:${process.env.LOOP_PORT || 4711}`, apiToken: apiToken ?? '', dataDir: paths.dataDir }),
+          timeoutMs: () => getNum(db, 'mcp_timeout_ms', 30_000),
+        });
+  app.addHook('onClose', async () => {
+    await mcpPool?.close();
+  });
+  registerChatRoutes(app, db, { identity: opts.chatIdentity, toolFetch: opts.chatToolFetch, toolLookup: opts.chatToolLookup, mcpPool });
   // inside a child plugin so it loads after @fastify/websocket (a `websocket: true` route
   // declared in the root scope runs before the plugin has decorated the instance)
   app.register(async (inst) => {

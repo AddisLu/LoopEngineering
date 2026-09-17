@@ -604,6 +604,10 @@ function onToolFrame(a, t, answer) {
     a.wrap.append(el('div', 'note tool-note', t.unsupported || `工具：${t.error}`));
     return;
   }
+  if (t.skipped && t.skipped.length) {
+    a.wrap.append(el('div', 'note tool-note', t.skipped.map((x) => `MCP ${x.server} 未載入：${x.reason}`).join('；')));
+    return;
+  }
   if (t.round) {
     a.toolRounds = a.toolRounds || [];
     a.toolRounds.push(t);

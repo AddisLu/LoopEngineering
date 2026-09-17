@@ -40,6 +40,24 @@ import { runPlanner, type PlannerExec } from './planner.js';
 import { runDeployTask, type DeployExec } from './deployTask.js';
 import { getEnvironment } from '../deploy/store.js';
 import { isLocalModel, localId, getLocalModel } from '../local/models.js';
+import { parseMcpServers, runtimeEnvFor, type McpServerCfg } from '../mcp/config.js';
+
+/**
+ * MCP servers a local-model task may use (mcp_servers_json), with the runtime env the chat page
+ * would inject — read-only fs roots, Loop's own API. A bad setting means no servers, not a
+ * failed dispatch.
+ */
+function mcpServersForTask(db: Database.Database): McpServerCfg[] {
+  try {
+    const apiUrl = `http://127.0.0.1:${process.env.LOOP_PORT || 4711}`;
+    return parseMcpServers(getSetting(db, 'mcp_servers_json') || '').map((s) => ({
+      ...s,
+      environment: { ...(s.environment ?? {}), ...runtimeEnvFor(s.name, db, { apiUrl, apiToken: process.env.LOOP_API_TOKEN ?? '', dataDir: paths.dataDir }) },
+    }));
+  } catch {
+    return [];
+  }
+}
 
 /**
  * `coding_tool` (task type) and `agent_backend` (setting, see adapters/registry.ts) are
@@ -280,6 +298,7 @@ export async function runTask(
       timeoutMs,
       local: isLocal ? (getLocalModel(db, localId(dispatchModel!)) ?? null) : null,
       localBaseUrl: getSetting(db, 'local_vllm_base_url') || undefined,
+      mcpServers: isLocal ? mcpServersForTask(db) : undefined,
       resumeSessionId: resumeSid,
       resume: !!opts.resume,
       handoff,

@@ -1,5 +1,6 @@
 import type { Task, TaskRun } from '../../types.js';
 import type { LocalModel } from '../../local/models.js';
+import type { McpServerCfg } from '../../mcp/config.js';
 
 export interface DispatchContext {
   task: Task;
@@ -16,6 +17,8 @@ export interface DispatchContext {
   local?: LocalModel | null;
   /** 本地模型: OpenAI-compatible base URL of the vLLM server (setting local_vllm_base_url). */
   localBaseUrl?: string;
+  /** MCP servers (mcp_servers_json, with runtime env already merged) the opencode adapter passes on. */
+  mcpServers?: McpServerCfg[];
   onEvent?: (evt: any) => void; // live stream (SSE later)
 }
 

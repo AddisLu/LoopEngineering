@@ -12,6 +12,11 @@ function expand(p: string): string {
 // (built) — one level up is the engine's own repo root in both layouts.
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const ENGINE_REPO_ROOT = path.join(__dirname, '..');
+const MCP_DEFAULT_SERVERS_JSON = JSON.stringify({
+  'loop-fs': { type: 'local', command: ['node', path.join(ENGINE_REPO_ROOT, 'mcp', 'loop-fs-mcp.mjs')], enabled: true },
+  loop: { type: 'local', command: ['node', path.join(ENGINE_REPO_ROOT, 'mcp', 'loop-mcp.mjs')], enabled: true },
+  gh: { type: 'local', command: ['node', path.join(ENGINE_REPO_ROOT, 'mcp', 'loop-gh-mcp.mjs')], enabled: true },
+});
 
 /** True when `repoPath` IS the engine's own repo (a self-improvement task). */
 export function isEngineRepo(repoPath: string): boolean {
@@ -194,6 +199,13 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   terminal_idle_min: '30',
   terminal_max_sessions: '4',
   terminal_scrollback_kb: '256',
+  // MCP bridge (src/mcp/*): servers in opencode's `mcp` shape, shared by the chat tool loop and
+  // the opencode task adapter. Seeded with the three servers under mcp/ (read-only fs, Loop's own
+  // API, GitHub via gh). They only start when a question ticks 上網／工具.
+  mcp_servers_json: MCP_DEFAULT_SERVERS_JSON,
+  mcp_timeout_ms: '30000',
+  chat_mcp_enabled: 'true',
+  chat_tool_schema_chars: '16000',
   // PRD 精靈: directories the repo picker / image-set checker may look at, on top of the enabled
   // git/folder knowledge sources. CSV of absolute paths; '' = only registered sources.
   prd_repo_allowlist: '',

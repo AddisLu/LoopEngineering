@@ -2,6 +2,7 @@ import type { Adapter, DispatchContext, DispatchHandle } from './types.js';
 import { spawnStreaming } from './spawn.js';
 import { promptFor } from './claudeCode.js';
 import type { LocalModel } from '../../local/models.js';
+import type { McpServerCfg } from '../../mcp/config.js';
 
 /**
  * 本地模型 backend: drives a model served by vLLM through opencode's headless mode
@@ -14,7 +15,11 @@ import type { LocalModel } from '../../local/models.js';
 export const OPENCODE_PROVIDER_ID = 'loop-local';
 export const DEFAULT_LOCAL_BASE_URL = 'http://127.0.0.1:8000/v1';
 
-export function buildOpencodeConfig(model: LocalModel, baseUrl: string = DEFAULT_LOCAL_BASE_URL): string {
+export function buildOpencodeConfig(model: LocalModel, baseUrl: string = DEFAULT_LOCAL_BASE_URL, mcp: McpServerCfg[] = []): string {
+  // the same servers the chat page bridges (mcp_servers_json); opencode speaks MCP natively
+  const mcpBlock = Object.fromEntries(
+    mcp.filter((s) => s.enabled).map((s) => [s.name, { type: 'local', command: s.command, ...(s.cwd ? { cwd: s.cwd } : {}), environment: s.environment ?? {}, enabled: true, ...(s.timeout ? { timeout: s.timeout } : {}) }]),
+  );
   return JSON.stringify({
     $schema: 'https://opencode.ai/config.json',
     provider: {
@@ -26,6 +31,7 @@ export function buildOpencodeConfig(model: LocalModel, baseUrl: string = DEFAULT
       },
     },
     model: `${OPENCODE_PROVIDER_ID}/${model.served_model_id}`,
+    ...(Object.keys(mcpBlock).length ? { mcp: mcpBlock } : {}),
     // `--auto` approves every permission that is not explicitly denied, so deny what an
     // unattended run must never do: fetch from the network, push (integration is the engine's
     // FF-only close-out, never the agent's), escalate, or wipe outside the worktree.
@@ -79,7 +85,7 @@ export const opencodeAdapter: Adapter = {
     }
     const env: NodeJS.ProcessEnv = {
       ...process.env,
-      OPENCODE_CONFIG_CONTENT: buildOpencodeConfig(local, ctx.localBaseUrl || DEFAULT_LOCAL_BASE_URL),
+      OPENCODE_CONFIG_CONTENT: buildOpencodeConfig(local, ctx.localBaseUrl || DEFAULT_LOCAL_BASE_URL, ctx.mcpServers ?? []),
     };
     // LOOP_OPENCODE_BIN: test seam (a replay script) / non-PATH installs.
     return spawnStreaming(process.env.LOOP_OPENCODE_BIN || 'opencode', buildOpencodeArgs({ ...ctx, local }), ctx, env);

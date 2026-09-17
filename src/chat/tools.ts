@@ -2,6 +2,7 @@ import type Database from 'better-sqlite3';
 import { getNum, getSetting } from '../db/index.js';
 import { htmlToText } from './html.js';
 import { BlockedUrlError, fetchBounded, type Lookup } from './netGuard.js';
+import type { McpPool } from '../mcp/client.js';
 
 /**
  * Tools the chat page can hand to the local model (OpenAI function-calling shape, which vLLM
@@ -176,4 +177,55 @@ export function builtinTools(db: Database.Database): ToolDef[] {
   if (ws) out.push(ws);
   out.push(fetchUrlTool(db));
   return out;
+}
+
+// ---- MCP bridge --------------------------------------------------------------------------------
+// vLLM's tool parsers accept [A-Za-z0-9_] names, so `loop-fs`.`list_dir` becomes mcp__loop_fs__list_dir
+// and the ToolDef remembers the real server name.
+export const MCP_PREFIX = 'mcp__';
+export const mcpToolName = (server: string, tool: string): string => `${MCP_PREFIX}${server.replace(/-/g, '_')}__${tool.replace(/[^A-Za-z0-9_]/g, '_')}`;
+
+export interface McpToolsResult {
+  tools: ToolDef[];
+  /** servers left out because the schema budget ran out, or that failed to start */
+  skipped: Array<{ server: string; reason: string }>;
+}
+
+/**
+ * Every tool the configured MCP servers offer, as ToolDefs, in config order until the schema
+ * budget (characters of JSON the model must read per question) is used up.
+ */
+export async function mcpTools(pool: McpPool, budgetChars: number): Promise<McpToolsResult> {
+  const tools: ToolDef[] = [];
+  const skipped: McpToolsResult['skipped'] = [];
+  let used = 0;
+  for (const srv of await pool.listTools()) {
+    if (srv.error) {
+      skipped.push({ server: srv.server, reason: srv.error });
+      continue;
+    }
+    const defs: ToolDef[] = srv.tools.map((t) => ({
+      name: mcpToolName(srv.server, t.name),
+      description: `[${srv.server}] ${t.description}`.slice(0, 600),
+      parameters: t.inputSchema,
+      run: async (args, ctx) => {
+        try {
+          const r = await pool.callTool(srv.server, t.name, args, ctx.signal);
+          const text = r.text || '（沒有輸出）';
+          return { ok: !r.isError, text, summary: r.isError ? text.slice(0, 120) : `${text.split('\n').length} 行` };
+        } catch (err) {
+          const msg = (err as Error).message.slice(0, 200);
+          return { ok: false, text: `MCP 呼叫失敗：${msg}`, summary: msg };
+        }
+      },
+    }));
+    const cost = JSON.stringify(toOpenAiTools(defs)).length;
+    if (used + cost > budgetChars) {
+      skipped.push({ server: srv.server, reason: `工具描述超過預算（chat_tool_schema_chars=${budgetChars}）` });
+      continue;
+    }
+    used += cost;
+    tools.push(...defs);
+  }
+  return { tools, skipped };
 }

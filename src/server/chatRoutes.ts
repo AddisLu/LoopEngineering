@@ -17,7 +17,8 @@ import { createTask, getTask, getTaskBySourceRef } from '../tasks.js';
 import { parseTuneBlock, plainTaskInput, tuneTaskInput } from '../chat/tune.js';
 import { escalateMessage } from '../chat/escalate.js';
 import { exportFilename, toMarkdown } from '../chat/export.js';
-import { builtinTools, type ToolDef } from '../chat/tools.js';
+import { builtinTools, mcpTools, type ToolDef } from '../chat/tools.js';
+import type { McpPool } from '../mcp/client.js';
 import { runToolLoop } from '../chat/toolLoop.js';
 import type { Lookup } from '../chat/netGuard.js';
 import { recipeInfo } from '../local/recipes.js';
@@ -118,6 +119,8 @@ export interface ChatRouteOptions {
   toolLookup?: Lookup;
   /** Test injection: replace the built-in tool set (defaults to web_search + fetch_url). */
   tools?: (db: Database.Database) => ToolDef[];
+  /** MCP servers bridged into the tool set (src/mcp/client.ts); absent = no MCP tools. */
+  mcpPool?: McpPool | null;
 }
 
 interface ModelFiles {
@@ -1053,6 +1056,7 @@ export function registerChatRoutes(app: FastifyInstance, db: Database.Database, 
     // recipe has a tool parser. Otherwise the request takes the untouched passthrough path below.
     let tools: ToolDef[] = [];
     let toolsNote: string | null = null;
+    let mcpSkipped: Array<{ server: string; reason: string }> = [];
     if (body.tools === true && !cont) {
       if (!getBool(db, 'chat_tools_enabled', false)) toolsNote = '上網／工具已停用（chat_tools_enabled=false）';
       else {
@@ -1060,7 +1064,12 @@ export function registerChatRoutes(app: FastifyInstance, db: Database.Database, 
         if (!parser) toolsNote = `目前模型（${model.display_name}）的 recipe 沒有 --tool-call-parser，無法呼叫工具`;
         else {
           tools = (opts.tools ?? builtinTools)(db);
-          if (!tools.length) toolsNote = '沒有可用的工具（chat_search_url 未設定）';
+          if (opts.mcpPool && getBool(db, 'chat_mcp_enabled', true)) {
+            const m = await mcpTools(opts.mcpPool, getNum(db, 'chat_tool_schema_chars', 16_000));
+            tools = [...tools, ...m.tools];
+            mcpSkipped = m.skipped;
+          }
+          if (!tools.length) toolsNote = '沒有可用的工具（chat_search_url 未設定、MCP 也沒有 server）';
         }
       }
     }
@@ -1095,6 +1104,7 @@ export function registerChatRoutes(app: FastifyInstance, db: Database.Database, 
       res.writeHead(200, sseHead);
       res.on('close', () => ac.abort());
       if (knowledgeFrame) res.write(knowledgeFrame);
+      if (mcpSkipped.length) res.write(`data: ${JSON.stringify({ loop_tool: { skipped: mcpSkipped } })}\n\n`);
       try {
         const out = await runToolLoop({
           fetch: (url, init) => fetchImpl(String(url), init),
