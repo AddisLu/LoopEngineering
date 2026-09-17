@@ -8,7 +8,7 @@ const WEB_DIR = path.join(__dirname, '..', '..', 'web');
 const read = (f: string) => fs.readFileSync(path.join(WEB_DIR, f), 'utf8');
 const html = () => read('index.html');
 /** every script that renders model output or talks to /api/chat */
-const scripts = () => ['chat.js', 'chat-md.js', 'shell.js', 'dock.js'].filter((f) => fs.existsSync(path.join(WEB_DIR, f)));
+const scripts = () => ['chat.js', 'chat-md.js', 'shell.js', 'dock.js', 'terminal.js'].filter((f) => fs.existsSync(path.join(WEB_DIR, f)));
 
 describe('模型對話 scripts', () => {
   it('never uses innerHTML (model output and task titles are untrusted text)', () => {

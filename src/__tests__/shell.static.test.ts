@@ -79,6 +79,14 @@ describe('chat-first shell', () => {
       'pane-bench',
       'svc-state',
       'theme-btn',
+      'term-toggle',
+      'term-drawer',
+      'term-handle',
+      'term-tabs',
+      'term-new',
+      'term-close',
+      'term-panes',
+      'model-job-log',
       'chat-drawer',
       'drawer-body',
       'drawer-close',
@@ -223,6 +231,24 @@ describe('chat-first shell', () => {
     expect(dock).toContain('/api/local/jobs');
     expect(dock).not.toContain("api('/api/local/models')");
     expect(page).toContain('切換會重新啟動 vLLM');
+  });
+
+  it('ships the terminal drawer without a CDN and only for the allowlist', () => {
+    const page = read('index.html');
+    // no external scripts: xterm is committed under web/lib (this box is Wi-Fi only)
+    expect(page).not.toMatch(/<script[^>]+src="https?:/);
+    for (const f of ['xterm.js', 'xterm.css', 'addon-fit.js', 'LICENSE']) {
+      expect(fs.existsSync(path.join(WEB_DIR, 'lib', 'xterm', f)), f).toBe(true);
+    }
+    const term = read('terminal.js');
+    expect(term).toContain('/lib/xterm/xterm.js');
+    expect(term).toContain('/api/terminal/ws');
+    expect(term).toContain("e.code !== 'Backquote'");
+    // the button starts hidden and the module is only imported after the access check
+    expect(page).toMatch(/id="term-toggle" hidden/);
+    expect(read('shell.js')).toContain("api('/api/terminal/access')");
+    expect(read('shell.js')).toContain("import('./terminal.js')");
+    expect(page).toContain('/terminal.css');
   });
 
   it('wires the 智慧調整參數 panel through events, never a cross-import', () => {

@@ -47,6 +47,8 @@ import { registerBenchmarkRoutes } from './benchmarkRoutes.js';
 import type { BenchJudgeExec } from '../benchmark/judge.js';
 import { registerPrdRoutes, type PrdRouteOptions } from './prdRoutes.js';
 import { registerChatRoutes, type ChatRouteOptions } from './chatRoutes.js';
+import fastifyWebsocket from '@fastify/websocket';
+import { registerTerminalRoutes, type TerminalRouteOptions } from './terminalRoutes.js';
 import type { PrdReviewExec } from '../prd/review.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -96,6 +98,11 @@ export interface AppOptions {
   localJobRunner?: LocalRouteOptions['jobRunner'];
   /** Test-only: HF size lookup / free-disk probe / clock for the model catalog. */
   localCatalog?: LocalRouteOptions['catalog'];
+  /** Test-only: fake pty factory / identity for the terminal drawer (never spawns a shell). */
+  chatToolFetch?: ChatRouteOptions['toolFetch'];
+  chatToolLookup?: ChatRouteOptions['toolLookup'];
+  terminalSpawnPty?: TerminalRouteOptions['spawnPty'];
+  terminalIdentity?: TerminalRouteOptions['identity'];
   /** Test-only injection point for POST /api/benchmarks/:id/judge (zero tokens). */
   benchJudgeExec?: BenchJudgeExec;
   /** Test-only injection point for the PRD gate's local-model review (zero GPU). */
@@ -143,6 +150,8 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
     opts.corsOrigins ?? (process.env.LOOP_CORS_ORIGINS ?? '').split(',').map((s) => s.trim()).filter(Boolean);
   const app = Fastify({ logger: false });
   app.register(fastifyMultipart, { limits: { fileSize: 25 * 1024 * 1024 } });
+  // one WebSocket route today (/api/terminal/ws); frames are small JSON, so a modest cap
+  app.register(fastifyWebsocket, { options: { maxPayload: 256 * 1024 } });
 
   // CORS is opt-in via LOOP_CORS_ORIGINS: empty (default) registers nothing, so
   // behavior is byte-for-byte identical to before this option existed.
@@ -512,7 +521,12 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
     identity: opts.prdIdentity,
     git: opts.prdGit,
   });
-  registerChatRoutes(app, db, { identity: opts.chatIdentity });
+  registerChatRoutes(app, db, { identity: opts.chatIdentity, toolFetch: opts.chatToolFetch, toolLookup: opts.chatToolLookup });
+  // inside a child plugin so it loads after @fastify/websocket (a `websocket: true` route
+  // declared in the root scope runs before the plugin has decorated the instance)
+  app.register(async (inst) => {
+    registerTerminalRoutes(inst, db, { spawnPty: opts.terminalSpawnPty, identity: opts.terminalIdentity });
+  });
   registerVoiceRoutes(app, db, {
     transcribeExec: opts.voiceTranscribeExec,
     structureExec: opts.voiceStructureExec,

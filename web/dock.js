@@ -79,6 +79,7 @@ $('dock-toggle').onclick = () => setOpen(!isOpen());
 document.addEventListener('keydown', (e) => {
   // e.code, not e.key: Alt+digit types a symbol on macOS
   if (!e.altKey || e.ctrlKey || e.metaKey) return;
+  if (document.querySelector('dialog[open]')) return;
   const m = /^Digit([1-7])$/.exec(e.code);
   if (!m) return;
   e.preventDefault();
@@ -360,6 +361,10 @@ function watchJob() {
   };
   jobTimer = setInterval(tick, 3000);
 }
+
+$('model-job-log').onclick = () => {
+  if (window.LoopTerminal) window.LoopTerminal.openPreset('joblog');
+};
 
 $('model-job-cancel').onclick = async () => {
   if (!window.confirm('取消目前的工作？下載到一半的檔案會留著，之後可以續傳。')) return;

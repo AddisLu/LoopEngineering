@@ -262,3 +262,15 @@ export function rail({ main, key, cls, toggle, defaultOpen, onChange }) {
     },
   };
 }
+
+// ---- 終端機 -----------------------------------------------------------------
+// Only the allowlist sees the drawer: ask once, load the module only on a yes. Any failure
+// (feature off, no permission, offline) just means no button.
+if (document.getElementById('term-drawer')) {
+  api('/api/terminal/access')
+    .then((a) => {
+      if (a && a.allowed) return import('./terminal.js');
+      return null;
+    })
+    .catch(() => null);
+}

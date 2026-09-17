@@ -186,6 +186,14 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   chat_tool_wall_ms: '120000',
   chat_tool_result_chars: '12000',
   chat_fetch_max_bytes: '2097152',
+  // 終端機 (src/terminal/*): a real shell on this machine through the browser. Off by default,
+  // and even when on only the identities in terminal_allowed_users see the button — entries are
+  // `ts:<tailscale login>`, `name:<typed name>` (LAN only, unauthenticated) or `local`.
+  terminal_enabled: 'false',
+  terminal_allowed_users: '',
+  terminal_idle_min: '30',
+  terminal_max_sessions: '4',
+  terminal_scrollback_kb: '256',
   // PRD 精靈: directories the repo picker / image-set checker may look at, on top of the enabled
   // git/folder knowledge sources. CSV of absolute paths; '' = only registered sources.
   prd_repo_allowlist: '',

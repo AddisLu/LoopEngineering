@@ -405,6 +405,22 @@ CREATE TABLE IF NOT EXISTS local_catalog_cache (
   checked_at TEXT NOT NULL
 );
 
+-- 終端機 audit: who opened a shell and when (src/terminal/sessions.ts). Never the keystrokes.
+CREATE TABLE IF NOT EXISTS terminal_sessions (
+  id         TEXT PRIMARY KEY,                    -- t_<nanoid(10)>
+  user_key   TEXT NOT NULL,
+  user_label TEXT,
+  pid        INTEGER,
+  shell      TEXT NOT NULL,
+  preset     TEXT,                                -- joblog / vllmlog / … or NULL for a login shell
+  cols       INTEGER,
+  rows       INTEGER,
+  started_at TEXT NOT NULL,
+  ended_at   TEXT,
+  exit_code  INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_terminal_sessions_user ON terminal_sessions(user_key, started_at);
+
 CREATE TABLE IF NOT EXISTS chat_conversations (
   id           TEXT PRIMARY KEY,                 -- c_<nanoid(10)>
   user_key     TEXT NOT NULL,

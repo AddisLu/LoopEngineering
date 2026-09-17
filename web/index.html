@@ -7,6 +7,7 @@
     <script src="/theme-boot.js"></script>
     <link rel="stylesheet" href="/styles.css" />
     <link rel="stylesheet" href="/shell.css" />
+    <link rel="stylesheet" href="/terminal.css" />
   </head>
   <body>
     <header class="topbar-mini">
@@ -31,6 +32,7 @@
         <span class="chip" id="usage-weekly" data-state="ok" title="每週視窗用量">weekly –</span>
       </span>
       <a class="btn sm" href="/board.html">任務看板 ↗</a>
+      <button class="btn sm icon-btn" type="button" id="term-toggle" hidden aria-controls="term-drawer" aria-expanded="false" title="終端機（Ctrl+`）">⌨</button>
       <button class="btn sm icon-btn" type="button" id="theme-btn" title="切換佈景" aria-label="切換佈景"></button>
       <button class="btn sm icon-btn" type="button" id="dock-toggle" aria-controls="dock" aria-expanded="true" title="顯示或收起右側面板">▤</button>
     </header>
@@ -190,6 +192,7 @@
               <p class="hint" id="model-job-meta"></p>
               <pre class="job-line" id="model-job-line"></pre>
               <div class="row-actions">
+                <button class="btn sm" type="button" id="model-job-log" data-term-preset="joblog" hidden>看 log</button>
                 <button class="btn sm" type="button" id="model-job-cancel">取消</button>
               </div>
             </section>
@@ -321,6 +324,15 @@
       </nav>
     </main>
 
+    <section class="term-drawer" id="term-drawer" hidden aria-label="終端機">
+      <div class="term-handle" id="term-handle" title="拖曳改變高度"></div>
+      <div class="term-tabs" id="term-tabs">
+        <button class="term-btn" type="button" id="term-new" title="開新的終端機">＋</button>
+        <span class="term-hint">Ctrl+` 開關 · 關掉抽屜不會結束 shell</span>
+        <button class="term-btn" type="button" id="term-close" title="收起（shell 繼續跑）">收起</button>
+      </div>
+      <div class="term-panes" id="term-panes"></div>
+    </section>
     <div class="drawer-scrim" id="drawer-scrim" hidden></div>
     <aside class="manage-drawer" id="chat-drawer" hidden aria-label="面板">
       <div class="drawer-head">
