@@ -54,6 +54,8 @@ import { renderDeck, qaRender, resolvePythonBin, resolveTemplatePath, resolveMan
 import { prepareWeekly, renderWeekly, runWeekly } from './report/pptx/weekly.js';
 import { listLocalModels, getLocalModel } from './local/models.js';
 import { getModelManager } from './local/modelManager.js';
+import { getJobRunner, JobBusyError } from './local/jobs.js';
+import { buildCatalog } from './local/catalog.js';
 import { activeLocalRunCount } from './tasks.js';
 import { BENCH_DOMAINS, BenchmarkInputError, benchmarkMatrix, createBenchmark, getBenchmark, listBenchmarks } from './benchmark/store.js';
 import { judgeBenchmark } from './benchmark/complete.js';
@@ -495,7 +497,7 @@ env
     console.log(`removed ${name}`);
   });
 
-const local = program.command('local').description('本地模型: list / load / stop the local vLLM model (see local_models_enabled)');
+const local = program.command('local').description('本地模型: list / load / stop / download / build / jobs (see local_models_enabled)');
 
 local
   .command('list')
@@ -538,6 +540,65 @@ local
     const st = mm.state();
     if (st.status !== 'ready') return fail(`load failed: ${st.error ?? st.status}`);
     console.log(`local:${id} ready`);
+  });
+
+const gbs = (b: number | null) => (b == null ? '?' : `${(b / 1024 ** 3).toFixed(1)} GB`);
+
+/** Start a download/build from the catalog and print progress until it ends. */
+async function localJob(kind: 'download' | 'build', recipe: string): Promise<void> {
+  const db = getDb();
+  if (!getBool(db, 'local_models_enabled', false)) return fail('local models disabled — loop config set local_models_enabled true');
+  const repo = getSetting(db, 'local_vllm_repo') || '';
+  const runner = getJobRunner(db);
+  const cat = await buildCatalog(db, repo, Math.max(1, getNum(db, 'local_spark_nodes', 1)), getModelManager(db).state(), runner.current(), {
+    fetch: globalThis.fetch as never,
+  });
+  const entry = cat.entries.find((e) => e.recipe === recipe);
+  if (!entry) return fail(`unknown recipe: ${recipe} (see ${repo}/recipes)`);
+  if (kind === 'download' && entry.downloaded) return fail(`${entry.name}: weights already downloaded`);
+  if (kind === 'build' && entry.image_ready) return fail(`${entry.name}: image ${entry.container} already built`);
+  if (entry.nodes > cat.sparks) return fail(entry.blocked_by ?? 'needs more Sparks');
+  let job;
+  try {
+    job = runner.start(kind, recipe, { model: entry.model, container: entry.container, size_bytes: entry.size_bytes, repo });
+  } catch (err) {
+    return fail(err instanceof JobBusyError ? err.message : (err as Error).message);
+  }
+  console.log(`${kind} ${recipe} started (pid ${job.pid ?? '?'}, log ${job.log_path})`);
+  for (;;) {
+    await new Promise((r) => setTimeout(r, 5000));
+    const cur = runner.current();
+    if (!cur || cur.id !== job.id) break;
+    if (cur.status !== 'running') {
+      if (cur.status === 'done') console.log(`${kind} ${recipe} done`);
+      else return fail(`${kind} ${recipe} ${cur.status}: ${cur.error ?? ''}`);
+      break;
+    }
+    console.log(`  … ${kind === 'download' ? `${gbs(cur.bytes_now)} / ${gbs(cur.size_bytes)}` : 'building'}  ${cur.last_line}`);
+  }
+}
+
+local
+  .command('download <recipe>')
+  .description('pull a recipe\'s weights in the background (resumable), printing progress until done')
+  .action((recipe: string) => localJob('download', recipe));
+
+local
+  .command('build <recipe>')
+  .description('build/pull the container image a recipe needs (run-recipe.sh --solo --build-only)')
+  .action((recipe: string) => localJob('build', recipe));
+
+local
+  .command('jobs')
+  .description('the current download/build job, if any')
+  .action(() => {
+    const cur = getJobRunner(getDb()).current();
+    if (!cur) return console.log('no job');
+    console.log(`${cur.kind} ${cur.recipe}  ${cur.status}  started ${cur.started_at}${cur.ended_at ? `  ended ${cur.ended_at}` : ''}`);
+    if (cur.kind === 'download') console.log(`  ${gbs(cur.bytes_now)} / ${gbs(cur.size_bytes)}`);
+    if (cur.last_line) console.log(`  ${cur.last_line}`);
+    if (cur.error) console.log(`  error: ${cur.error}`);
+    console.log(`  log: ${cur.log_path}`);
   });
 
 local

@@ -32,11 +32,17 @@ function fakeSpark(): { repo: string; hub: string } {
   return { repo, hub };
 }
 
-/** Put fake weight blobs in the cache for one served model id. */
-function downloaded(hub: string, servedId: string, bytes = 1024): void {
-  const blobs = path.join(hub, `models--${servedId.replace(/\//g, '--')}`, 'blobs');
-  fs.mkdirSync(blobs, { recursive: true });
-  fs.writeFileSync(path.join(blobs, 'w1'), Buffer.alloc(bytes));
+/**
+ * Put fake weights in the cache for one served model id, the way `hf download` leaves them: a
+ * blob plus a snapshot entry. `partial` mimics an interrupted pull (an `*.incomplete` blob).
+ */
+function downloaded(hub: string, servedId: string, bytes = 1024, partial = false): void {
+  const repo = path.join(hub, `models--${servedId.replace(/\//g, '--')}`);
+  fs.mkdirSync(path.join(repo, 'blobs'), { recursive: true });
+  fs.mkdirSync(path.join(repo, 'snapshots', 'main'), { recursive: true });
+  fs.writeFileSync(path.join(repo, 'blobs', 'w1'), Buffer.alloc(bytes));
+  fs.writeFileSync(path.join(repo, 'snapshots', 'main', 'w1'), Buffer.alloc(bytes));
+  if (partial) fs.writeFileSync(path.join(repo, 'blobs', 'w2.incomplete'), Buffer.alloc(bytes));
 }
 
 beforeEach(async () => {
@@ -231,6 +237,143 @@ describe('/api/local', () => {
       const res = await app.inject({ method: 'POST', url: '/api/local/stop' });
       expect(res.statusCode).toBe(200);
       expect(stopped).toBe(1);
+    });
+  });
+
+  describe('catalog + jobs', () => {
+    const started: Array<{ kind: string; recipe: string; model: string | null }> = [];
+    let cancelled = 0;
+    let job: Record<string, unknown> | null = null;
+    let sizes: Record<string, number> = {};
+    let free = 3e12;
+
+    async function catalogApp(hub: string, repo: string, dockerProbe: (i: string) => boolean = () => true) {
+      setSetting(db, 'local_vllm_repo', repo);
+      setSetting(db, 'local_models_enabled', 'true');
+      await app.close();
+      app = buildApp({
+        db,
+        apiToken: null,
+        localHubDir: hub,
+        dockerProbe,
+        modelManager: {
+          state: () => ({ ...st }),
+          ensureLoaded: (id: string) => {
+            ensured.push(id);
+            return 'switching';
+          },
+          stop: async () => {},
+        },
+        localJobRunner: {
+          start: (kind, recipe, entry) => {
+            started.push({ kind, recipe, model: entry.model });
+            job = { id: 'j1', kind, recipe, status: 'running', model: entry.model, size_bytes: entry.size_bytes, log_path: '/x' };
+            return job as never;
+          },
+          current: () => job as never,
+          cancel: () => {
+            if (!job || job.status !== 'running') return null;
+            cancelled += 1;
+            job = { ...job, status: 'cancelled' };
+            return job as never;
+          },
+          tail: (n) => Array.from({ length: Math.min(n, 5) }, (_, i) => `l${i}`),
+        },
+        localCatalog: {
+          fetch: async (url: string) => {
+            const id = decodeURIComponent(url.replace('https://huggingface.co/api/models/', '').replace('?blobs=true', ''));
+            return { ok: id in sizes, status: id in sizes ? 200 : 404, json: async () => ({ siblings: [{ lfs: { size: sizes[id] } }] }) };
+          },
+          diskFree: () => free,
+        },
+      });
+      await app.ready();
+    }
+
+    beforeEach(() => {
+      started.length = 0;
+      cancelled = 0;
+      job = null;
+      free = 3e12;
+      sizes = { 'nvidia/Qwen3.6-35B-A3B-NVFP4': 24e9, 'Intel/Qwen3-Coder-Next-int4-AutoRound': 44e9 };
+    });
+
+    it('is 404 while disabled', async () => {
+      setSetting(db, 'local_models_enabled', 'false');
+      expect((await app.inject({ method: 'GET', url: '/api/local/catalog' })).statusCode).toBe(404);
+      expect((await app.inject({ method: 'POST', url: '/api/local/jobs', payload: { kind: 'build', recipe: 'x' } })).statusCode).toBe(404);
+      expect((await app.inject({ method: 'GET', url: '/api/local/jobs/current' })).statusCode).toBe(404);
+    });
+
+    it('lists every recipe with its next action, and starts the right job', async () => {
+      const { repo, hub } = fakeSpark();
+      fs.writeFileSync(path.join(repo, 'recipes', 'qwen3.6-35b-a3b-nvfp4.yaml'), 'name: Qwen3.6\nmodel: nvidia/Qwen3.6-35B-A3B-NVFP4\ncontainer: vllm-node\n');
+      fs.writeFileSync(path.join(repo, 'recipes', 'qwen3-coder-next-int4-autoround.yaml'), 'name: Coder\nmodel: Intel/Qwen3-Coder-Next-int4-AutoRound\ncontainer: vllm-node\n');
+      downloaded(hub, 'Intel/Qwen3-Coder-Next-int4-AutoRound');
+      await catalogApp(hub, repo, (img) => img !== 'vllm-node');
+
+      const cat = (await app.inject({ method: 'GET', url: '/api/local/catalog' })).json();
+      const by = Object.fromEntries(cat.entries.map((e: { recipe: string }) => [e.recipe, e]));
+      expect(by['qwen3.6-35b-a3b-nvfp4']).toMatchObject({ action: 'download', size_bytes: 24e9, recommend: 'fast', registered_id: 'qwen36-35b' });
+      expect(by['qwen3-coder-next-int4-autoround']).toMatchObject({ action: 'build', downloaded: true });
+      expect(by['glm-5.3-flash']).toMatchObject({ action: 'none', nodes: 2 });
+      expect(cat.images.find((i: { container: string }) => i.container === 'vllm-node')).toMatchObject({ ready: false, kind: 'pull', waiting: 2 });
+      expect(cat.job).toBeNull();
+
+      // download job carries the model and size the panel shows
+      const dl = await app.inject({ method: 'POST', url: '/api/local/jobs', payload: { kind: 'download', recipe: 'qwen3.6-35b-a3b-nvfp4' } });
+      expect(dl.statusCode).toBe(202);
+      expect(started).toEqual([{ kind: 'download', recipe: 'qwen3.6-35b-a3b-nvfp4', model: 'nvidia/Qwen3.6-35B-A3B-NVFP4' }]);
+      expect((await app.inject({ method: 'GET', url: '/api/local/jobs/current' })).json().job).toMatchObject({ id: 'j1', status: 'running' });
+      expect((await app.inject({ method: 'GET', url: '/api/local/catalog' })).json().job).toMatchObject({ id: 'j1' });
+
+      const log = (await app.inject({ method: 'GET', url: '/api/local/jobs/current/log?lines=999' })).json();
+      expect(log.lines).toHaveLength(5); // clamped by the runner, path never taken from the request
+      expect((await app.inject({ method: 'POST', url: '/api/local/jobs/current/cancel' })).statusCode).toBe(200);
+      expect(cancelled).toBe(1);
+      expect((await app.inject({ method: 'POST', url: '/api/local/jobs/current/cancel' })).statusCode).toBe(404);
+    });
+
+    it('refuses jobs that make no sense: bad kind, unknown recipe, already done, cluster-only, no disk', async () => {
+      const { repo, hub } = fakeSpark();
+      fs.writeFileSync(path.join(repo, 'recipes', 'qwen3.6-35b-a3b-nvfp4.yaml'), 'model: nvidia/Qwen3.6-35B-A3B-NVFP4\ncontainer: vllm-node\n');
+      fs.writeFileSync(path.join(repo, 'recipes', 'qwen3-coder-next-int4-autoround.yaml'), 'model: Intel/Qwen3-Coder-Next-int4-AutoRound\ncontainer: vllm-node\n');
+      downloaded(hub, 'Intel/Qwen3-Coder-Next-int4-AutoRound');
+      await catalogApp(hub, repo);
+      const post = (payload: unknown) => app.inject({ method: 'POST', url: '/api/local/jobs', payload });
+      expect((await post({ kind: 'run', recipe: 'x' })).statusCode).toBe(400);
+      expect((await post({ kind: 'build' })).statusCode).toBe(400);
+      expect((await post({ kind: 'build', recipe: 'nope' })).statusCode).toBe(400);
+      expect((await post({ kind: 'download', recipe: 'qwen3-coder-next-int4-autoround' })).statusCode).toBe(409); // already downloaded
+      expect((await post({ kind: 'build', recipe: 'qwen3-coder-next-int4-autoround' })).statusCode).toBe(409); // image present
+      expect((await post({ kind: 'download', recipe: 'glm-5.3-flash' })).statusCode).toBe(409); // needs 2 Sparks
+      free = 30e9;
+      const full = await post({ kind: 'download', recipe: 'qwen3.6-35b-a3b-nvfp4' });
+      expect(full.statusCode).toBe(507);
+      expect(full.json().error).toContain('磁碟');
+      expect(started).toEqual([]);
+    });
+
+    it('load from the catalog registers the recipe first, and shares the switch guards', async () => {
+      const { repo, hub } = fakeSpark();
+      fs.writeFileSync(path.join(repo, 'recipes', 'qwen3.6-35b-a3b-fp8-dflash.yaml'), 'name: Qwen36-35B-A3B\nmodel: Qwen/Qwen3.6-35B-A3B-FP8\ncontainer: vllm-node\n');
+      downloaded(hub, 'Qwen/Qwen3.6-35B-A3B-FP8');
+      await catalogApp(hub, repo);
+
+      expect((await app.inject({ method: 'POST', url: '/api/local/catalog/nope/load' })).statusCode).toBe(404);
+      expect((await app.inject({ method: 'POST', url: '/api/local/catalog/glm-5.3-flash/load' })).statusCode).toBe(409);
+      const ok = await app.inject({ method: 'POST', url: '/api/local/catalog/qwen3.6-35b-a3b-fp8-dflash/load' });
+      expect(ok.statusCode).toBe(200);
+      expect(ok.json().id).toBe('qwen3.6-35b-a3b-fp8-dflash');
+      expect(ensured).toEqual(['qwen3.6-35b-a3b-fp8-dflash']);
+      // now a registered model, visible to the plain list and the chat picker
+      const list = (await app.inject({ method: 'GET', url: '/api/local/models' })).json();
+      expect(list.models.find((m: { id: string }) => m.id === 'qwen3.6-35b-a3b-fp8-dflash')).toMatchObject({ enabled: 1, runnable: true });
+      // a partial download is reported as such, and refused by the guard
+      downloaded(hub, 'Qwen/Qwen3.6-35B-A3B-FP8', 1024, true);
+      const half = await app.inject({ method: 'POST', url: '/api/local/catalog/qwen3.6-35b-a3b-fp8-dflash/load' });
+      expect(half.statusCode).toBe(409);
+      expect(half.json().error).toContain('續傳');
     });
   });
 

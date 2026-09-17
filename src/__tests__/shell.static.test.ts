@@ -47,6 +47,7 @@ describe('chat-first shell', () => {
       'act-kb',
       'act-prd',
       'act-model',
+      'act-status',
       'act-bench',
       'pane-tasks',
       'pane-tune',
@@ -63,6 +64,17 @@ describe('chat-first shell', () => {
       'pane-kb',
       'pane-prd',
       'pane-model',
+      'model-switch',
+      'switch-state',
+      'model-job',
+      'model-job-bar',
+      'model-job-cancel',
+      'model-image-notice',
+      'model-image-build',
+      'model-reco-list',
+      'model-all',
+      'model-list',
+      'pane-status',
       'pane-bench',
       'svc-state',
       'theme-btn',
@@ -173,17 +185,43 @@ describe('chat-first shell', () => {
     const js = read('dock.js');
     // the first paint reads `let` state declared throughout the module; calling it any earlier is a
     // temporal-dead-zone crash that silently disables every handler after it
-    for (const decl of ['let benchLoaded', 'let switching', 'let tuneLatest', 'let tuneBusy', 'let dockRail']) {
+    for (const decl of ['let benchLoaded', 'let switching', 'let jobTimer', 'let catalogData', 'let tuneLatest', 'let tuneBusy', 'let dockRail']) {
       expect(js.lastIndexOf('paintTabs();'), decl).toBeGreaterThan(js.indexOf(decl));
     }
     // Alt+digit types a symbol on macOS — the shortcut must read e.code
     expect(js).toContain('e.code');
+    expect(js).toContain('Digit([1-7])'); // seven panels since 模型／機台 split
     // one owner for the panel: selection and open/closed both live here now
     expect(js).toContain('loop_shell_dock');
     // one drawer owner: both rails borrow shell.js's drawer, nobody moves nodes by hand
     expect(read('shell.js')).toContain('export const drawer');
     expect(js).not.toContain('drawer-body');
     expect(read('chat.js')).not.toContain("$('drawer-body')");
+  });
+
+  it('keeps model switching and machine status on separate icons', () => {
+    const page = read('index.html');
+    const slice = (id: string) => {
+      const start = page.indexOf(`id="${id}"`);
+      const end = page.indexOf('<div class="dock-pane"', start + 1);
+      return page.slice(start, end === -1 ? undefined : end);
+    };
+    // the response/memory/GPU tiles live under 機台 now, not under the switcher
+    expect(slice('pane-status')).toContain('id="r-ttft"');
+    expect(slice('pane-status')).toContain('id="mem-bar"');
+    expect(slice('pane-model')).not.toContain('id="r-ttft"');
+    expect(page).toContain('title="機台狀況（Alt+6）"');
+    expect(page).toContain('title="Benchmark（Alt+7）"');
+    // chat.js polls stats only while 機台 is showing
+    const chat = read('chat.js');
+    expect(chat).toContain("$('pane-status')");
+    expect(chat).not.toContain("$('pane-model')");
+    // the switcher is built on the catalog (every recipe on disk), with background jobs
+    const dock = read('dock.js');
+    expect(dock).toContain('/api/local/catalog');
+    expect(dock).toContain('/api/local/jobs');
+    expect(dock).not.toContain("api('/api/local/models')");
+    expect(page).toContain('切換會重新啟動 vLLM');
   });
 
   it('wires the 智慧調整參數 panel through events, never a cross-import', () => {
@@ -211,7 +249,7 @@ describe('chat-first shell', () => {
     const js = read('dock.js');
     expect(js).toContain('window.confirm'); // a switch takes minutes and kills the chat meanwhile
     expect(js).toContain('還有回答正在產生'); // and never mid-answer
-    expect(js).toContain('runnable'); // the list is grouped by what this deployment can run
+    expect(js).toContain("e.action === 'switch'"); // one action per row, decided server-side
   });
 
   it('only declares a JSON body when it sends one', () => {

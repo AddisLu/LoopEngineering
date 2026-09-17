@@ -301,9 +301,9 @@
 
       <h3>對話工作台（<code>/</code>）</h3>
       <ul>
-        <li><b>最右邊一排圖示鈕永遠看得到</b>：由上而下是 任務／調參／知識庫／PRD ─ 模型／評比。點一下切換面板、再點同一個收起；<b>Alt+1～6</b> 直接切換。面板收起時圖示仍在（亮著的那個留一道標記），所以「面板不見了、切不回來」不會發生。任務有待處理時，圖示右上角會出現數字。</li>
+        <li><b>最右邊一排圖示鈕永遠看得到</b>：由上而下是 任務／調參／知識庫／PRD ─ 模型／機台／評比。點一下切換面板、再點同一個收起；<b>Alt+1～7</b> 直接切換。面板收起時圖示仍在（亮著的那個留一道標記），所以「面板不見了、切不回來」不會發生。任務有待處理時，圖示右上角會出現數字。</li>
         <li><b>三欄可收折</b>：頂欄 ☰ 收左欄、▤ 或點亮著的圖示收右側面板；兩邊都收起時對話區幾乎佔滿視窗（1920 寬螢幕實測 1868px）。收合狀態與上次看的面板記在瀏覽器（<code>loop_shell_rail</code>／<code>loop_shell_dock</code>／<code>loop_shell_tab</code>）。手機寬度左欄與面板都變成側滑抽屜，圖示列改成最上面一排。</li>
-        <li><b>右側面板</b>：<b>調參</b>＝智慧調整參數（見第 26 章）；<b>任務</b>＝看板的即時精簡版（同一條 SSE，計數＋依狀態分組的卡片，點卡直接開看板該張卡的細節）；<b>知識庫</b>＝文件／片段數、RAG 搜尋、快速記一筆；<b>PRD</b>＝開新的 PRD（五步精靈，見第 26 章）＋最近的草稿；<b>模型</b>＝這次回答的速度、模型與記憶體；<b>Benchmark</b>＝清單。</li>
+        <li><b>右側面板</b>：<b>調參</b>＝智慧調整參數（見第 26 章）；<b>任務</b>＝看板的即時精簡版（同一條 SSE，計數＋依狀態分組的卡片，點卡直接開看板該張卡的細節）；<b>知識庫</b>＝文件／片段數、RAG 搜尋、快速記一筆；<b>PRD</b>＝開新的 PRD（五步精靈，見第 26 章）＋最近的草稿；<b>模型</b>＝切換、下載、建置映像（見第 26 章）；<b>機台</b>＝這次回答的速度、目前模型、記憶體、GPU；<b>Benchmark</b>＝清單。</li>
         <li><b>對話標題</b>：頂欄標題點一下即可改名；「⋯」選單有匯出 Markdown／匯出 HTML／分享連結／刪除。</li>
       </ul>
 
@@ -1199,20 +1199,23 @@ loop bench list | loop bench show &lt;id&gt; | loop bench matrix | loop bench ju
           <tr><td><code>bench_diff_cap_chars</code> / <code>bench_judge_timeout_ms</code></td><td>8000 / 600000</td><td>每個 arm 給評審的 diff 上限；評審呼叫逾時。</td></tr>
         </tbody>
       </table>
-      <h3>切換模型（對話工作台右側「模型」面板（圖示列第 5 個））</h3>
-      <p>一台 Spark 的統一記憶體一次只放得下一個模型，所以切換＝重啟 vLLM，期間不能對話、通常要幾分鐘。清單依<b>這個部署有幾台 Spark</b>（<code>local_spark_nodes</code>，預設 1）分三組：</p>
+      <h3>模型面板：推薦、切換、下載與建置映像（圖示列第 5 個，Alt+5）</h3>
+      <p>面板列出 <code>spark-vllm-docker/recipes/</code> 裡<b>每一個 recipe</b>（不只註冊過的五個），並依<b>這台機器的現況</b>決定每一列唯一的下一步。一台 Spark 其實能跑二十來個 recipe，卡住的通常只是兩件事：權重還沒下載、或它們共用的容器映像 <code>vllm-node</code> 還沒建——這兩件都能在面板上一鍵完成，在背景跑、一次一件、<b>不影響正在服務的模型</b>。</p>
       <div class="tbl-wrap">
       <table>
-        <thead><tr><th>分組</th><th>意思</th></tr></thead>
+        <thead><tr><th>按鈕</th><th>什麼時候出現</th><th>做什麼</th></tr></thead>
         <tbody>
-          <tr><td><b>可直接切換</b></td><td>權重已下載、容器映像已建置、台數夠——按「切換」會先跳確認。</td></tr>
-          <tr><td><b>需要更多 Spark</b></td><td>recipe 是 <code>cluster_only</code>（<code>run-recipe.py</code> 會拒絕 <code>--solo</code>），例如 GLM-5.3 Flash 需要 2 台。第二台接上後：<code>loop config set local_spark_nodes 2</code>，再把該模型 <code>enabled</code> 打開。</td></tr>
-          <tr><td><b>尚未下載或未啟用</b></td><td>權重不在 HF 快取裡（切過去會先拉幾十 GB），或這筆註冊被停用。</td></tr>
+          <tr><td><b>切換</b></td><td>權重完整、映像已建、台數夠</td><td>先跳確認，再重啟 vLLM（幾分鐘、期間不能對話）。第一次切某個 recipe 會自動把它登錄進 <code>local_models</code>（id＝recipe 檔名），之後對話與 Benchmark 的模型清單也選得到。</td></tr>
+          <tr><td><b>下載（≈NN GB）</b>／<b>續傳</b></td><td>權重不在 HF 快取，或下載到一半</td><td>背景跑 <code>uvx hf download &lt;model&gt;</code>（可續傳；大小來自 HF API，快取一天）。進度條顯示已下載 GB／總量與 log 最後一行，可取消——下載到一半的檔案留著，再按一次會續傳。</td></tr>
+          <tr><td><b>建置 vllm-node</b></td><td>有模型已下載但映像沒建</td><td>只出現一次（上方提示卡，寫著幾個模型在等它）。<code>vllm-node</code>／<code>vllm-node-b12x</code> 其實是拉現成映像再 tag（約 24 GB：有線幾分鐘，這台走 Wi-Fi 實測約 5 MB/s、要 1 小時多）；<code>vllm-node-mxfp4</code> 要真的編譯，20～40 分鐘。跑的是 <code>run-recipe.sh &lt;recipe&gt; --solo --build-only</code>。</td></tr>
+          <tr><td>灰字</td><td>需要 2 台以上 Spark、配方缺 <code>model</code> 欄位、或 HF gated 模型（這台沒有 HF token）</td><td>不給按；第二台接上後 <code>loop config set local_spark_nodes 2</code> 即可。</td></tr>
         </tbody>
       </table>
       </div>
-      <div class="note warn"><span class="ic">⚠️</span><span><b>三道擋下來的檢查（都在伺服器端，不只是畫面上灰掉）：</b>台數不夠、權重沒下載、<b>容器映像還沒建置</b>。最後一項是真實事故：切換時 <code>run-recipe.sh</code> 會先停掉目前的模型，再問「Build now? [y/N]」，在無人互動的環境拿到 EOF——結果舊模型停了、新的起不來。現在會直接回 409 並告訴你先跑 <code>run-recipe.sh &lt;recipe&gt; --solo --build-only</code>，<b>目前正在服務的模型完全不受影響</b>。</span></div>
-      <p>回答產生中不給切換；切換後畫面每 5 秒回報狀態（starting／ready／error）與已經過的分鐘數，對話紀錄不受影響。</p>
+      <p><b>推薦</b>三張卡固定是：對話＝Qwen3.8 Flash Next、寫程式＝Qwen3 Coder Next（int4）、小而快＝Qwen3.6 35B NVFP4；「全部模型」收合區依 可切換／可下載／需要建置映像／需要 2 台以上 Spark 分組，並顯示磁碟剩餘空間。</p>
+      <div class="note warn"><span class="ic">⚠️</span><span><b>三道擋下來的檢查（都在伺服器端，不只是畫面上灰掉）：</b>台數不夠、權重沒下載完（<code>blobs/*.incomplete</code> 存在就算沒下載完）、<b>容器映像還沒建置</b>。最後一項是真實事故：切換時 <code>run-recipe.sh</code> 會先停掉目前的模型，再問「Build now? [y/N]」，在無人互動的環境拿到 EOF——結果舊模型停了、新的起不來。現在會直接回 409，<b>目前正在服務的模型完全不受影響</b>。另外下載<b>不走</b> <code>run-recipe.sh --download-only</code>：它看到 <code>snapshots/</code> 非空就當作已下載，中斷過的下載永遠不會被續傳。</span></div>
+      <p>回答產生中不給切換；切換後畫面每 5 秒回報狀態（starting／ready／error）與已經過的分鐘數，對話紀錄不受影響。工作狀態存在 <code>local_job_json</code>，引擎重啟後會依 pid 重新認領還在跑的下載；log 在 <code>&lt;data&gt;/logs/local-&lt;download|build&gt;-&lt;recipe&gt;-*.log</code>。CLI：<code>loop local download &lt;recipe&gt;</code>、<code>loop local build &lt;recipe&gt;</code>、<code>loop local jobs</code>。</p>
+      <p>API：<code>GET /api/local/catalog</code>（每個 recipe 的 action／size／blocked_by＋images＋job）、<code>POST /api/local/catalog/:recipe/load</code>、<code>POST /api/local/jobs {kind: download|build, recipe}</code>（409 已有工作／507 磁碟不足）、<code>GET /api/local/jobs/current</code>、<code>POST /api/local/jobs/current/cancel</code>、<code>GET /api/local/jobs/current/log?lines=40</code>。</p>
 
       <h3>對話工作台（首頁 <code>/</code>）</h3>
       <ul>

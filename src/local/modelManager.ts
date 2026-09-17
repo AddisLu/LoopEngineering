@@ -7,6 +7,7 @@ import { paths } from '../config.js';
 import { getNum, getSetting, setSetting, logEvent } from '../db/index.js';
 import { notify } from '../notify.js';
 import { getLocalModel, listLocalModels } from './models.js';
+import { weightsComplete } from './weights.js';
 import { shutdownWarmWorkers } from '../voice/daemon.js';
 import { getTranscribeWarmWorkerSingleton } from '../voice/transcribe.js';
 import { getEmbedWarmWorkerSingleton } from '../knowledge/embed.js';
@@ -87,14 +88,7 @@ function defaultExec(cmd: string, args: string[], timeoutMs: number): Promise<nu
 
 /** Weights present and not mid-download (hf leaves `*.incomplete` blobs while fetching). */
 export function hfCached(servedModelId: string): boolean {
-  const hub = path.join(process.env.HF_HOME ?? path.join(os.homedir(), '.cache', 'huggingface'), 'hub');
-  const dir = path.join(hub, `models--${servedModelId.replace(/\//g, '--')}`);
-  try {
-    if (fs.readdirSync(path.join(dir, 'snapshots')).length === 0) return false;
-    return !fs.readdirSync(path.join(dir, 'blobs')).some((f) => f.endsWith('.incomplete'));
-  } catch {
-    return false;
-  }
+  return weightsComplete(servedModelId);
 }
 
 export class ModelManager {

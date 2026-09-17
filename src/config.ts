@@ -387,6 +387,7 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   local_vllm_base_url: 'http://127.0.0.1:8000/v1',
   local_model_loaded: '',
   local_model_status: 'idle',
+  local_job_json: '', // engine STATE: the one download/build job in flight (src/local/jobs.ts)
 
   // Benchmark mode（src/benchmark/*.ts）：同一任務交給多個（本地）模型各做一次，全部結束後由外部高階
   // 模型評比排名，累積成 模型 × 領域 矩陣。off by default = routes 404, nothing is judged. The judge

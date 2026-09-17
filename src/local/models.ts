@@ -88,6 +88,31 @@ export function getLocalModel(db: Database.Database, id: string): LocalModel | u
   return db.prepare('SELECT * FROM local_models WHERE id = ?').get(id) as LocalModel | undefined;
 }
 
+/** The row a recipe is registered under, if any (seeds use their own ids, e.g. qwen38-flash). */
+export function getLocalModelByRecipe(db: Database.Database, recipe: string): LocalModel | undefined {
+  // an enabled row wins over a disabled alias of the same recipe; ties go to the oldest
+  return db.prepare('SELECT * FROM local_models WHERE recipe = ? ORDER BY enabled DESC, created_at, id LIMIT 1').get(recipe) as LocalModel | undefined;
+}
+
+/**
+ * Register a recipe the operator acted on from the catalog (downloaded it, or asked to switch to
+ * it). Lazy on purpose: `local:*` ids also fill the chat and benchmark model pickers, so the 20-odd
+ * recipes on disk must not all appear there. The id is the recipe file name.
+ */
+export function registerRecipe(db: Database.Database, entry: { recipe: string; name: string | null; model: string }): LocalModel {
+  const existing = getLocalModelByRecipe(db, entry.recipe);
+  if (existing) {
+    if (!existing.enabled) db.prepare('UPDATE local_models SET enabled = 1 WHERE id = ?').run(existing.id);
+    return { ...existing, enabled: 1 };
+  }
+  const id = entry.recipe.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || `recipe-${Date.now()}`;
+  db.prepare(
+    `INSERT INTO local_models (id, display_name, recipe, served_model_id, enabled, notes)
+     VALUES (?, ?, ?, ?, 1, ?)`,
+  ).run(id, entry.name || entry.recipe, entry.recipe, entry.model, '由模型面板登錄');
+  return getLocalModel(db, id)!;
+}
+
 /** True for a non-empty 'local:<id>' model reference. */
 export function isLocalModel(model: string | null | undefined): model is string {
   return typeof model === 'string' && model.startsWith(LOCAL_PREFIX) && model.length > LOCAL_PREFIX.length;

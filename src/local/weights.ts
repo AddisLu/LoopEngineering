@@ -42,12 +42,32 @@ export function weightsBytes(servedId: string, dir = hubDir()): number | null {
   }
 }
 
+/**
+ * Weights present and not mid-download. `hf download` links each finished file into
+ * `snapshots/` and leaves `*.incomplete` blobs while fetching, so "some bytes on disk" is not
+ * "usable": a half-pulled model must read as partial here, or the switcher offers it, vLLM
+ * fails to load it, and the machine serves nothing. Same rule the ModelManager applies.
+ */
+export function weightsComplete(servedId: string, dir = hubDir()): boolean {
+  const repo = repoDir(servedId, dir);
+  try {
+    if (fs.readdirSync(path.join(repo, 'snapshots')).length === 0) return false;
+    return !fs.readdirSync(path.join(repo, 'blobs')).some((f) => f.endsWith('.incomplete'));
+  } catch {
+    return false;
+  }
+}
+
 export interface WeightInfo {
+  /** fully in the cache — switching will not pull tens of GB first */
   downloaded: boolean;
+  /** some blobs on disk but not usable yet (interrupted download — resumable) */
+  partial: boolean;
   disk_bytes: number | null;
 }
 
 export function weightInfo(servedId: string, dir = hubDir()): WeightInfo {
   const bytes = weightsBytes(servedId, dir);
-  return { downloaded: bytes != null, disk_bytes: bytes };
+  const complete = bytes != null && weightsComplete(servedId, dir);
+  return { downloaded: complete, partial: bytes != null && !complete, disk_bytes: bytes };
 }

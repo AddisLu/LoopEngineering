@@ -396,6 +396,15 @@ CREATE INDEX IF NOT EXISTS idx_benchmark_arms_task ON benchmark_arms(task_id);
 -- user_key comes from src/server/identity.ts ('ts:<login>' from the headers tailscale serve
 -- injects, 'name:<label>' from the manual picker, or 'local'). Deliberately NOT a foreign key:
 -- there is no users table and a tailnet login can disappear.
+-- Weight sizes looked up from the HF API for the model catalog (src/local/catalog.ts). Recipes do
+-- not declare sizes; the answer changes rarely, so a hit is good for a day and a miss for an hour.
+CREATE TABLE IF NOT EXISTS local_catalog_cache (
+  model      TEXT PRIMARY KEY,                -- HF repo id
+  size_bytes INTEGER,                         -- NULL = lookup failed (offline / 404)
+  gated      INTEGER NOT NULL DEFAULT 0,      -- needs an HF token to download
+  checked_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS chat_conversations (
   id           TEXT PRIMARY KEY,                 -- c_<nanoid(10)>
   user_key     TEXT NOT NULL,

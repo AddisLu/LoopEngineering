@@ -47,7 +47,7 @@ const histRail = rail({
 // The dock (which panel, open or closed) belongs to dock.js — this file only needs to know
 // whether the 模型 panel is on screen, so the 1 s stats poll can stop when it is not.
 const statsVisible = () =>
-  !$('pane-model').hidden && (phone() ? drawer.isOpen() : !shellMain.classList.contains('dock-collapsed'));
+  !$('pane-status').hidden && (phone() ? drawer.isOpen() : !shellMain.classList.contains('dock-collapsed'));
 
 // On a phone there is no width to hand back, so the same markup moves into the shared drawer
 // (shell.js `drawer`); the dock does the same in dock.js. Closing returns both.
@@ -64,7 +64,7 @@ $('rail-toggle').onclick = () => {
 // dock.js tells us when 模型 becomes the visible panel, so it is never stale on arrival
 document.addEventListener('loop-tab', (e) => {
   const d = e.detail || {};
-  if (d.open && d.tab === 'model') refreshStats();
+  if (d.open && d.tab === 'status') refreshStats();
 });
 $('drawer-close').onclick = closeDrawer;
 $('drawer-scrim').onclick = closeDrawer;

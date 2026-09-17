@@ -18,6 +18,7 @@ const TABS = [
   ['kb', '知識庫'],
   ['prd', 'PRD'],
   ['model', '模型'],
+  ['status', '機台'],
   ['bench', 'Benchmark'],
 ];
 const LABEL = Object.fromEntries(TABS);
@@ -78,7 +79,7 @@ $('dock-toggle').onclick = () => setOpen(!isOpen());
 document.addEventListener('keydown', (e) => {
   // e.code, not e.key: Alt+digit types a symbol on macOS
   if (!e.altKey || e.ctrlKey || e.metaKey) return;
-  const m = /^Digit([1-6])$/.exec(e.code);
+  const m = /^Digit([1-7])$/.exec(e.code);
   if (!m) return;
   e.preventDefault();
   select(TABS[Number(m[1]) - 1][0]);
@@ -172,80 +173,211 @@ onBoard((s) => {
 // ---- 模型切換 ---------------------------------------------------------------
 // One model fits the GPU at a time, and a switch restarts vLLM (minutes, chat unavailable), so
 // this is deliberately a confirm + a visible state — never a one-click surprise during a demo.
+// Downloads and image builds are background jobs (one at a time) that never touch the running
+// model, so those are a single click.
 const GiB = 1024 ** 3;
 const size = (b) => (b == null ? '—' : `${(b / GiB).toFixed(b >= 100 * GiB ? 0 : 1)} GB`);
+const tb = (b) => (b == null ? '' : b >= 1024 * GiB ? `${(b / (1024 * GiB)).toFixed(1)} TB` : size(b));
+const RECO_LABEL = { chat: '對話', code: '寫程式', fast: '小而快' };
 let switching = false;
+let jobTimer = null;
+let catalogData = null;
 
-function modelRow(m, loaded) {
-  const row = el('div', `model-row${m.id === loaded ? ' on' : ''}${m.runnable ? '' : ' off'}`);
-  const txt = el('div', 'txt');
-  txt.append(el('div', 'n', m.display_name));
-  // blocked_by already names the node requirement when that is the blocker — don't say it twice
-  const bits = [size(m.disk_bytes), m.blocked_by ?? (m.nodes > 1 ? `${m.nodes} 台 Spark` : null)].filter(Boolean);
-  txt.append(el('div', 's', bits.join(' · ')));
-  if (m.notes) txt.title = m.notes;
-  row.append(txt);
-
-  if (m.id === loaded) {
-    row.append(el('span', 'badge-now', '使用中'));
-  } else if (m.runnable) {
-    const b = el('button', 'mini', '切換');
-    b.type = 'button';
-    b.onclick = () => switchModel(m);
-    row.append(b);
+function actionButton(e, data) {
+  const busy = data.job && data.job.status === 'running';
+  if (e.loaded) return el('span', 'badge-now', '使用中');
+  if (e.action === 'none') return el('span', 's blocked', e.blocked_by || '這台跑不動');
+  const b = el('button', 'mini');
+  b.type = 'button';
+  if (e.action === 'switch') {
+    b.textContent = '切換';
+    b.onclick = () => switchModel(e);
+  } else if (e.action === 'download') {
+    b.classList.add('dl');
+    b.textContent = e.partial
+      ? `續傳（${size(e.disk_bytes)} / ${e.size_bytes ? size(e.size_bytes) : '?'}）`
+      : `下載${e.size_bytes ? `（≈${size(e.size_bytes)}）` : ''}`;
+    b.onclick = () => startJob('download', e.recipe, e.name);
+  } else {
+    b.classList.add('dl');
+    b.textContent = `建置映像（${e.container}）`;
+    b.onclick = () => startJob('build', e.recipe, e.name);
   }
+  if (busy || switching) b.disabled = true;
+  return b;
+}
+
+function modelRow(e, data) {
+  const row = el('div', `model-row${e.loaded ? ' on' : ''}${e.action === 'none' ? ' off' : ''}`);
+  const txt = el('div', 'txt');
+  txt.append(el('div', 'n', e.name));
+  const bits = [];
+  if (e.downloaded) bits.push(`已下載 ${size(e.disk_bytes)}`);
+  else if (e.partial) bits.push(`下載到一半 ${size(e.disk_bytes)}`);
+  else if (e.size_bytes) bits.push(`約 ${size(e.size_bytes)}`);
+  if (e.nodes > 1) bits.push(`${e.nodes} 台 Spark`);
+  if (e.action === 'build') bits.push(`缺映像 ${e.container}`);
+  if (e.recipe !== e.name) bits.push(e.recipe);
+  txt.append(el('div', 's', bits.join(' · ')));
+  if (e.description) txt.title = e.description;
+  row.append(txt, actionButton(e, data));
   return row;
 }
 
-function paintModels(data) {
-  const loaded = data.state.loaded;
-  setText('spark-count', `· 這台部署有 ${data.sparks} 台 Spark`);
+function recoCard(e, data) {
+  const card = el('div', `reco-card${e.loaded ? ' on' : ''}`);
+  const head = el('div', 'head');
+  head.append(el('span', `reco-tag ${e.recommend}`, RECO_LABEL[e.recommend] || '推薦'));
+  head.append(el('span', 'n', e.name));
+  card.append(head);
+  const bits = [e.downloaded ? `已下載 ${size(e.disk_bytes)}` : e.partial ? `下載到一半 ${size(e.disk_bytes)}` : e.size_bytes ? `約 ${size(e.size_bytes)}` : null, e.blocked_by]
+    .filter(Boolean)
+    .join(' · ');
+  card.append(el('div', 's', bits));
+  card.append(actionButton(e, data));
+  return card;
+}
 
-  const ready = data.models.filter((m) => m.runnable);
-  const needMore = data.models.filter((m) => !m.runnable && m.nodes > data.sparks);
-  const other = data.models.filter((m) => !m.runnable && m.nodes <= data.sparks);
-
-  const out = [];
-  const group = (label, list) => {
-    if (!list.length) return;
-    out.push(el('p', 'model-group', label));
-    for (const m of list) out.push(modelRow(m, loaded));
-  };
-  group(`可直接切換（${data.sparks} 台 Spark 跑得動、已下載）`, ready);
-  group('需要更多 Spark', needMore);
-  group('尚未下載或未啟用', other);
-  $('model-list').replaceChildren(...out);
-
+function paintCatalog(data) {
+  catalogData = data;
   const st = data.state;
+  const cur = data.entries.find((e) => e.loaded);
+  setText('spark-count', `· ${data.sparks} 台 Spark`);
   const note = $('switch-state');
   note.classList.toggle('busy', st.status !== 'ready' && st.status !== 'idle');
   note.classList.toggle('bad', st.status === 'error');
   note.textContent =
     st.status === 'ready'
-      ? `目前：${(data.models.find((m) => m.id === loaded) || {}).display_name || loaded}`
+      ? (cur && cur.name) || st.loaded || '目前模型'
       : st.status === 'error'
         ? `載入失敗：${st.error || '未知原因'}`
         : st.status === 'idle'
           ? '目前沒有載入任何模型'
           : `${st.status}：正在準備 ${st.wanted || ''}…`;
+
+  // 推薦: the three we vouch for, in a fixed order, only if this checkout has them
+  const reco = ['chat', 'code', 'fast'].map((k) => data.entries.find((e) => e.recommend === k)).filter(Boolean);
+  $('model-reco-list').replaceChildren(...reco.map((e) => recoCard(e, data)));
+  $('model-reco').hidden = reco.length === 0;
+
+  // one notice for the shared image, not one per row
+  const missing = data.images.filter((i) => !i.ready && i.waiting > 0);
+  const img = missing.find((i) => i.kind === 'pull') || missing[0];
+  $('model-image-notice').hidden = !img;
+  if (img) {
+    setText(
+      'model-image-text',
+      `${img.waiting} 個模型在等容器映像 ${img.container}（${img.kind === 'pull' ? `下載現成映像約 ${img.gb} GB：有線幾分鐘，這台走 Wi-Fi 約 1 小時` : `要編譯，約 ${img.minutes} 分鐘以上`}）。建一次就全部解鎖，在背景跑、不影響目前的模型。`,
+    );
+    const b = $('model-image-build');
+    b.textContent = `建置 ${img.container}`;
+    b.disabled = Boolean(data.job && data.job.status === 'running') || switching;
+    b.onclick = () => startJob('build', img.recipe, img.container);
+  }
+
+  // 全部: grouped by what the operator can do
+  const groups = [
+    ['可切換', (e) => e.action === 'switch'],
+    ['可下載', (e) => e.action === 'download'],
+    ['需要建置映像', (e) => e.action === 'build'],
+    [`需要 2 台以上 Spark`, (e) => e.action === 'none' && e.nodes > data.sparks],
+    ['其他', (e) => e.action === 'none' && e.nodes <= data.sparks],
+  ];
+  const out = [];
+  for (const [label, pick] of groups) {
+    const list = data.entries.filter(pick);
+    if (!list.length) continue;
+    out.push(el('p', 'model-group', `${label}（${list.length}）`));
+    for (const e of list) out.push(modelRow(e, data));
+  }
+  $('model-list').replaceChildren(...out);
+  setText('model-disk', `· ${data.entries.length} 個配方${data.disk_free_bytes != null ? ` · 磁碟剩餘 ${tb(data.disk_free_bytes)}` : ''}`);
+
+  paintJob(data.job);
+}
+
+function paintJob(job) {
+  const card = $('model-job');
+  if (!job || job.status !== 'running') {
+    card.hidden = true;
+    return;
+  }
+  card.hidden = false;
+  const mins = Math.max(0, Math.round((Date.now() - Date.parse(job.started_at)) / 60000));
+  setText('model-job-title', `${job.kind === 'download' ? '下載' : '建置映像'} ${job.kind === 'download' ? job.recipe : job.container || job.recipe} · 已 ${mins} 分鐘`);
+  const bar = $('model-job-bar');
+  const known = job.kind === 'download' && job.size_bytes && job.bytes_now != null;
+  bar.classList.toggle('indeterminate', !known);
+  bar.style.width = known ? `${Math.min(100, (100 * job.bytes_now) / job.size_bytes).toFixed(1)}%` : '';
+  setText('model-job-meta', known ? `${size(job.bytes_now)} / ${size(job.size_bytes)}` : job.kind === 'download' ? `已下載 ${size(job.bytes_now)}` : 'docker 進行中…');
+  setText('model-job-line', job.last_line || '');
 }
 
 async function loadModels() {
   try {
-    paintModels(await api('/api/local/models'));
+    const data = await api('/api/local/catalog');
+    paintCatalog(data);
+    if (data.job && data.job.status === 'running') watchJob();
   } catch (err) {
-    setText('switch-state', `讀不到模型清單：${err.message}`);
+    setText('switch-state', /404/.test(err.message) ? '本地模型未啟用：loop config set local_models_enabled true' : `讀不到模型清單：${err.message}`);
   }
 }
 
-async function switchModel(m) {
+// ---- background jobs (download / build) ----
+async function startJob(kind, recipe, label) {
+  if (jobTimer) return toast('已有工作在跑，等它結束', 'warn');
+  try {
+    const r = await api('/api/local/jobs', { method: 'POST', body: JSON.stringify({ kind, recipe }) });
+    toast(`${kind === 'download' ? '開始下載' : '開始建置'} ${label}，在背景進行`, 'ok');
+    paintJob(r.job);
+    if (catalogData) paintCatalog({ ...catalogData, job: r.job });
+    watchJob();
+  } catch (err) {
+    toast(`起不來：${err.message}`, 'bad');
+  }
+}
+
+function watchJob() {
+  if (jobTimer) return;
+  const tick = async () => {
+    let r;
+    try {
+      r = await api('/api/local/jobs/current');
+    } catch (e) {
+      return;
+    }
+    const job = r.job;
+    paintJob(job);
+    if (!job || job.status !== 'running') {
+      clearInterval(jobTimer);
+      jobTimer = null;
+      const what = job ? (job.kind === 'download' ? '下載' : '建置') : '工作';
+      if (job && job.status === 'done') toast(`${what} ${job.recipe} 完成`, 'ok');
+      else if (job && job.status === 'error') toast(`${what}失敗：${job.error || '看 log'}`, 'bad');
+      else if (job) toast(`${what}${job.status === 'cancelled' ? '已取消' : '結果不明'}：${job.error || ''}`, 'warn');
+      loadModels();
+    }
+  };
+  jobTimer = setInterval(tick, 3000);
+}
+
+$('model-job-cancel').onclick = async () => {
+  if (!window.confirm('取消目前的工作？下載到一半的檔案會留著，之後可以續傳。')) return;
+  try {
+    await api('/api/local/jobs/current/cancel', { method: 'POST', body: '{}' });
+  } catch (err) {
+    toast(`取消失敗：${err.message}`, 'bad');
+  }
+};
+
+async function switchModel(e) {
   if (switching) return;
   if (document.getElementById('stop-btn').disabled === false) {
     return toast('還有回答正在產生，先按停止再切換模型', 'warn');
   }
   const ok = window.confirm(
     [
-      `切換到「${m.display_name}」？`,
+      `切換到「${e.name}」？`,
       '',
       'vLLM 會重新啟動，期間無法對話，通常要幾分鐘（大模型更久）。',
       '目前的對話紀錄不會受影響。',
@@ -255,23 +387,25 @@ async function switchModel(m) {
 
   switching = true;
   try {
-    await api(`/api/local/models/${encodeURIComponent(m.id)}/load`, { method: 'POST', body: '{}' });
-    toast(`正在切換到 ${m.display_name}，載入完成前無法對話`, 'ok');
+    await api(`/api/local/catalog/${encodeURIComponent(e.recipe)}/load`, { method: 'POST', body: '{}' });
+    toast(`正在切換到 ${e.name}，載入完成前無法對話`, 'ok');
     // poll until vLLM answers again (or gives up) — the status line shows progress meanwhile
     const started = Date.now();
     const timer = setInterval(async () => {
       let data;
       try {
-        data = await api('/api/local/models');
-      } catch (e) {
+        data = await api('/api/local/catalog');
+      } catch (err) {
         return;
       }
-      paintModels(data);
+      paintCatalog(data);
       const mins = Math.round((Date.now() - started) / 60000);
-      if (data.state.status === 'ready' && data.state.loaded === m.id) {
+      const now = data.entries.find((x) => x.loaded);
+      if (data.state.status === 'ready' && now && now.recipe === e.recipe) {
         clearInterval(timer);
         switching = false;
-        toast(`${m.display_name} 已就緒（花了約 ${mins} 分鐘）`, 'ok');
+        toast(`${e.name} 已就緒（花了約 ${mins} 分鐘）`, 'ok');
+        paintCatalog(data);
       } else if (data.state.status === 'error') {
         clearInterval(timer);
         switching = false;
@@ -289,7 +423,7 @@ async function switchModel(m) {
   }
 }
 
-// the 模型 panel re-reads on every visit; while a switch is running the poller keeps it fresh
+// the 模型 panel re-reads on every visit; while a switch or job is running the poller keeps it fresh
 document.addEventListener('loop-tab', (e) => {
   if (e.detail && e.detail.open && e.detail.tab === 'model' && !switching) loadModels();
 });

@@ -178,12 +178,39 @@
 
           <div class="dock-pane" id="pane-model" role="tabpanel" aria-labelledby="act-model">
             <section class="card" id="model-switch">
-              <h2>可用模型 <span class="hint" id="spark-count"></span></h2>
+              <h2>使用中 <span class="hint" id="spark-count"></span></h2>
               <p class="hint" id="switch-state">讀取中…</p>
-              <div class="model-list" id="model-list"></div>
-              <p class="hint">切換會重新啟動 vLLM，期間無法對話，通常要幾分鐘。</p>
             </section>
 
+            <section class="card" id="model-job" hidden>
+              <h2>進行中的工作</h2>
+              <p class="job-title" id="model-job-title"></p>
+              <div class="bar"><span class="fill job" id="model-job-bar"></span></div>
+              <p class="hint" id="model-job-meta"></p>
+              <pre class="job-line" id="model-job-line"></pre>
+              <div class="row-actions">
+                <button class="btn sm" type="button" id="model-job-cancel">取消</button>
+              </div>
+            </section>
+
+            <section class="card notice" id="model-image-notice" hidden>
+              <p id="model-image-text"></p>
+              <button class="btn sm primary" type="button" id="model-image-build">建置映像</button>
+            </section>
+
+            <section class="card" id="model-reco">
+              <h2>推薦</h2>
+              <div class="reco-list" id="model-reco-list"></div>
+            </section>
+
+            <details id="model-all">
+              <summary>全部模型 <span class="hint" id="model-disk"></span></summary>
+              <div class="model-list" id="model-list"></div>
+            </details>
+            <p class="hint">切換會重新啟動 vLLM，期間無法對話，通常要幾分鐘。下載與建置在背景跑，不影響目前的模型。</p>
+          </div>
+
+          <div class="dock-pane" id="pane-status" role="tabpanel" aria-labelledby="act-status" hidden>
             <section class="card">
               <h2>這次回答</h2>
               <div class="tiles">
@@ -280,7 +307,12 @@
           <span class="lbl">模型</span>
           <span class="badge" id="act-model-badge" hidden></span>
         </button>
-        <button class="act" type="button" id="act-bench" role="tab" aria-controls="pane-bench" aria-selected="false" title="Benchmark（Alt+6）">
+        <button class="act" type="button" id="act-status" role="tab" aria-controls="pane-status" aria-selected="false" title="機台狀況（Alt+6）">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 16a8 8 0 0 1 16 0"/><path d="M12 16l4-5"/><path d="M4 20h16"/><circle cx="12" cy="16" r="1.2"/></svg>
+          <span class="lbl">機台</span>
+          <span class="badge" id="act-status-badge" hidden></span>
+        </button>
+        <button class="act" type="button" id="act-bench" role="tab" aria-controls="pane-bench" aria-selected="false" title="Benchmark（Alt+7）">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h16"/><path d="M7 20v-6M12 20V6M17 20v-9"/></svg>
           <span class="lbl">評比</span>
           <span class="badge" id="act-bench-badge" hidden></span>

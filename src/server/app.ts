@@ -92,6 +92,10 @@ export interface AppOptions {
   localHubDir?: LocalRouteOptions['hubDir'];
   /** Test-only: stands in for `docker images -q` when checking a recipe's image. */
   dockerProbe?: LocalRouteOptions['dockerProbe'];
+  /** Test-only: a stub download/build runner (never spawns uvx/docker). */
+  localJobRunner?: LocalRouteOptions['jobRunner'];
+  /** Test-only: HF size lookup / free-disk probe / clock for the model catalog. */
+  localCatalog?: LocalRouteOptions['catalog'];
   /** Test-only injection point for POST /api/benchmarks/:id/judge (zero tokens). */
   benchJudgeExec?: BenchJudgeExec;
   /** Test-only injection point for the PRD gate's local-model review (zero GPU). */
@@ -493,7 +497,13 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
   registerDeployRoutes(app, db);
   registerPipelineRoutes(app, db);
   registerIntegrationRoutes(app, db);
-  registerLocalRoutes(app, db, { modelManager: opts.modelManager, hubDir: opts.localHubDir, dockerProbe: opts.dockerProbe });
+  registerLocalRoutes(app, db, {
+    modelManager: opts.modelManager,
+    hubDir: opts.localHubDir,
+    dockerProbe: opts.dockerProbe,
+    jobRunner: opts.localJobRunner,
+    catalog: opts.localCatalog,
+  });
   registerBenchmarkRoutes(app, db, { judgeExec: opts.benchJudgeExec });
   registerPrdRoutes(app, db, {
     reviewExec: opts.prdReviewExec,
