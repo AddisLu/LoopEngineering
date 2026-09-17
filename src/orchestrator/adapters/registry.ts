@@ -1,6 +1,7 @@
 import type { Adapter } from './types.js';
 import { claudeCodeAdapter } from './claudeCode.js';
 import { mockAdapter } from './mock.js';
+import { opencodeAdapter } from './opencode.js';
 
 /**
  * Two axes that today's code conflates and this registry keeps separate:
@@ -15,6 +16,8 @@ import { mockAdapter } from './mock.js';
 const backends: Record<string, Adapter> = {
   'claude-code': claudeCodeAdapter,
   mock: mockAdapter,
+  // 本地模型: chosen by pickAdapter for a 'local:<id>' model, never via agent_backend
+  opencode: opencodeAdapter,
 };
 
 /** Backend ids currently registered (includes any test-only ids added via registerBackend). */

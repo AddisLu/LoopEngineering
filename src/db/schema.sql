@@ -333,3 +333,139 @@ CREATE TABLE IF NOT EXISTS node_chunk_links (
 );
 CREATE INDEX IF NOT EXISTS idx_node_chunk_node ON node_chunk_links(node_id);
 CREATE INDEX IF NOT EXISTS idx_node_chunk_chunk ON node_chunk_links(chunk_id);
+
+-- 本地模型 registry (src/local/models.ts): one row per spark-vllm-docker recipe the ModelManager
+-- can load into vLLM. Tasks reference a row as model='local:<id>'. Seeded INSERT OR IGNORE
+-- (seedLocalModels) so edits survive restarts; only one model is loaded on the GPU at a time.
+CREATE TABLE IF NOT EXISTS local_models (
+  id              TEXT PRIMARY KEY,
+  display_name    TEXT NOT NULL,
+  recipe          TEXT NOT NULL,
+  served_model_id TEXT NOT NULL,
+  enabled         INTEGER NOT NULL DEFAULT 1,
+  notes           TEXT,
+  created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Benchmark mode (src/benchmark/*.ts): the same task run by N models ("arms", usually local
+-- models), each a normal task (tasks.benchmark_id) in its own worktree that never integrates.
+-- Once every arm is terminal an external judge (bench_judge_model, default opus) scores and
+-- ranks them; judged rows feed the model x domain matrix (benchmarkMatrix).
+CREATE TABLE IF NOT EXISTS benchmarks (
+  id                 TEXT PRIMARY KEY,
+  title              TEXT NOT NULL,
+  goal               TEXT NOT NULL,
+  plan_ref           TEXT,
+  repo_path          TEXT,
+  base_branch        TEXT,
+  verification_steps TEXT NOT NULL DEFAULT '[]',
+  setup_cmd          TEXT,
+  verify_rubric      TEXT,
+  domain             TEXT NOT NULL DEFAULT 'other',
+  complexity         TEXT NOT NULL DEFAULT 'M',
+  judge_model        TEXT NOT NULL DEFAULT 'opus',
+  status             TEXT NOT NULL DEFAULT 'running', -- running | judging | judged | judge_failed
+  winner             TEXT,
+  summary            TEXT,
+  result_json        TEXT,
+  error              TEXT,
+  created_at         TEXT NOT NULL DEFAULT (datetime('now')),
+  judged_at          TEXT
+);
+CREATE TABLE IF NOT EXISTS benchmark_arms (
+  benchmark_id   TEXT NOT NULL REFERENCES benchmarks(id) ON DELETE CASCADE,
+  model          TEXT NOT NULL,
+  task_id        TEXT NOT NULL,
+  verify_outcome TEXT,  -- pass | manual | fail (filled when judged)
+  judge_score    REAL,  -- mean of the judge's 0-10 criterion scores
+  judge_rank     INTEGER,
+  scores_json    TEXT,
+  notes          TEXT,
+  tokens_in      INTEGER,
+  tokens_out     INTEGER,
+  duration_s     INTEGER,
+  diff_stat      TEXT,
+  PRIMARY KEY (benchmark_id, model)
+);
+CREATE INDEX IF NOT EXISTS idx_benchmark_arms_task ON benchmark_arms(task_id);
+
+
+-- 模型對話 history (src/chat/store.ts, web/chat.html): server-side transcripts for the local-LLM
+-- CF-AOI assistant, separated per user. These are conversations, not curated knowledge — an answer
+-- only reaches the SSoT corpus when a human presses 存進知識庫 (captureNote).
+-- user_key comes from src/server/identity.ts ('ts:<login>' from the headers tailscale serve
+-- injects, 'name:<label>' from the manual picker, or 'local'). Deliberately NOT a foreign key:
+-- there is no users table and a tailnet login can disappear.
+CREATE TABLE IF NOT EXISTS chat_conversations (
+  id           TEXT PRIMARY KEY,                 -- c_<nanoid(10)>
+  user_key     TEXT NOT NULL,
+  user_label   TEXT,
+  title        TEXT NOT NULL DEFAULT '新對話',
+  title_source TEXT NOT NULL DEFAULT 'auto',     -- auto (local model) | manual (renamed by hand)
+  knowledge    INTEGER NOT NULL DEFAULT 1,       -- 引用 CF-AOI 知識庫 state this thread was started with
+  thinking     INTEGER NOT NULL DEFAULT 0,
+  model_id     TEXT,                             -- local_models.id serving when it started
+  last_msg_at  TEXT,                             -- denormalised for the sidebar ORDER BY only
+  invalid_at   TEXT,                             -- soft delete (same convention as knowledge_nodes)
+  created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_chat_conversations_user
+  ON chat_conversations(user_key, invalid_at, last_msg_at DESC);
+
+-- ord is monotone over ALL rows including soft-deleted ones: 重答 soft-deletes the tail and appends,
+-- so scoping MAX(ord) to live rows would reuse an ord and scramble the replay order.
+CREATE TABLE IF NOT EXISTS chat_messages (
+  id              TEXT PRIMARY KEY,              -- m_<nanoid(10)>
+  conversation_id TEXT NOT NULL REFERENCES chat_conversations(id) ON DELETE CASCADE,
+  ord             INTEGER NOT NULL,
+  role            TEXT NOT NULL,                 -- user | assistant
+  content         TEXT NOT NULL DEFAULT '',
+  reasoning       TEXT,                          -- 思考模式 transcript
+  images_json     TEXT,                          -- [{file,name,bytes,mime}] — files on disk, never data URLs
+  sources_json    TEXT,                          -- KnowledgeSource[] snapshot (snippets truncated)
+  keywords_json   TEXT,                          -- the expandQuery keywords behind those sources
+  finish_reason   TEXT,                          -- stop | length | abort | error
+  ttft_ms         INTEGER,
+  duration_ms     INTEGER,
+  tokens_in       INTEGER,
+  tokens_out      INTEGER,
+  model_id        TEXT,
+  invalid_at      TEXT,                          -- soft delete: superseded by 重答 / 編輯重問
+  created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_chat_messages_conv ON chat_messages(conversation_id, invalid_at, ord);
+
+-- Trigram FTS over transcripts (Chinese — same rationale as knowledge_fts/chunks_fts). Unlike
+-- chunks_fts this needs the AFTER UPDATE trigger too: a streaming answer is written empty and
+-- UPDATEd on commit, and 繼續產生 rewrites it again.
+CREATE VIRTUAL TABLE IF NOT EXISTS chat_messages_fts USING fts5(
+  content, content='chat_messages', content_rowid='rowid', tokenize='trigram'
+);
+CREATE TRIGGER IF NOT EXISTS chat_messages_ai AFTER INSERT ON chat_messages BEGIN
+  INSERT INTO chat_messages_fts(rowid, content) VALUES (new.rowid, new.content);
+END;
+CREATE TRIGGER IF NOT EXISTS chat_messages_ad AFTER DELETE ON chat_messages BEGIN
+  INSERT INTO chat_messages_fts(chat_messages_fts, rowid, content) VALUES ('delete', old.rowid, old.content);
+END;
+CREATE TRIGGER IF NOT EXISTS chat_messages_au AFTER UPDATE ON chat_messages BEGIN
+  INSERT INTO chat_messages_fts(chat_messages_fts, rowid, content) VALUES ('delete', old.rowid, old.content);
+  INSERT INTO chat_messages_fts(rowid, content) VALUES (new.rowid, new.content);
+END;
+
+-- PRD 精靈 drafts (src/prd/drafts.ts, web/prd.html): a half-written PRD, per user, so an engineer
+-- can leave the five-step wizard and come back. form_json is the wizard state; markdown is what
+-- the composer produced from it (or the hand-edited override). Submitting turns it into a task.
+CREATE TABLE IF NOT EXISTS prd_drafts (
+  id         TEXT PRIMARY KEY,                 -- d_<nanoid(10)>
+  user_key   TEXT NOT NULL,                    -- src/server/identity.ts (same convention as chat)
+  title      TEXT NOT NULL DEFAULT '未命名 PRD',
+  form_json  TEXT NOT NULL,
+  markdown   TEXT NOT NULL DEFAULT '',
+  step       INTEGER NOT NULL DEFAULT 1,       -- highest wizard step reached (1..5)
+  status     TEXT NOT NULL DEFAULT 'draft',    -- draft | submitted
+  task_id    TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_prd_drafts_user ON prd_drafts(user_key, status, updated_at DESC);

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type Database from 'better-sqlite3';
 import { getBool, getSetting } from '../db/index.js';
-import { listTasks, countByStatus, activeRuns, getTask, latestRun, dependencyState } from '../tasks.js';
+import { listTasks, countByStatus, activeRuns, getTask, latestRun, dependencyState, activeLocalRunCount } from '../tasks.js';
 import { readUsage } from '../token/usage.js';
 import { resolvePolicy } from '../scheduler/policy.js';
 import { validateTask } from '../gate/validateTask.js';
@@ -91,6 +91,8 @@ export interface BoardState {
   pipelines: PipelineRollup[];
   // compact backlog-usage forecast for the topbar chip — see forecastBacklog() for the full shape.
   forecast: { weekly_backlog_pct: number; weekly_headroom: number; capacity_more_M: number; verdict: string };
+  // 本地模型 topbar chip: what vLLM serves (ModelManager state persisted in settings) + local runs in flight.
+  local: { enabled: boolean; loaded: string | null; status: string; inflight: number };
 }
 
 /** Render one tool_use content block as a compact activity line (→ Edit src/foo.ts). */
@@ -374,6 +376,12 @@ export function boardState(db: Database.Database): BoardState {
     counts: countByStatus(db),
     cards,
     pipelines: pipelineRollups(allTasks),
+    local: {
+      enabled: getBool(db, 'local_models_enabled', false),
+      loaded: getSetting(db, 'local_model_loaded') || null,
+      status: getSetting(db, 'local_model_status') || 'idle',
+      inflight: activeLocalRunCount(db),
+    },
     forecast: {
       weekly_backlog_pct: fc.weekly_backlog_pct,
       weekly_headroom: fc.weekly_headroom,

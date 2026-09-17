@@ -31,7 +31,7 @@ const RESUME_PROMPT =
   '請先讀 LOOP_TASK.md、HANDOFF.md 與 LOOP_RESUME_CONTEXT.md，從未完成處接續，' +
   '不要重頭來過；修到 verification steps 全綠，並持續更新／commit HANDOFF.md。';
 
-function promptFor(ctx: DispatchContext): string {
+export function promptFor(ctx: DispatchContext): string {
   if (!ctx.resume) return PROMPT;
   const h = ctx.handoff?.trim();
   return h ? `${RESUME_PROMPT}\n\n先前交接摘要（節錄）：\n${h.slice(0, 1500)}` : RESUME_PROMPT;

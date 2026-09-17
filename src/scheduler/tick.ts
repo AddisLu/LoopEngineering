@@ -1,10 +1,20 @@
 import type Database from 'better-sqlite3';
 import { getBool, getNum, getSetting, setSetting, logEvent } from '../db/index.js';
-import { countByStatus, listTasks, latestRun, activeRunCosts, dependencyState, setStatus } from '../tasks.js';
+import {
+  countByStatus,
+  listTasks,
+  latestRun,
+  activeRunCosts,
+  activeLocalRunCount,
+  dependencyState,
+  setStatus,
+} from '../tasks.js';
 import { validateTask } from '../gate/validateTask.js';
 import { readUsage } from '../token/usage.js';
 import { estimatePct, estimateWeeklyPct } from '../token/accounting.js';
 import { resolveModel } from '../orchestrator/run.js';
+import { isLocalModel, localId } from '../local/models.js';
+import type { ModelManager } from '../local/modelManager.js';
 import type { Task, UsageReading } from '../types.js';
 import { resolvePolicy, type Policy } from './policy.js';
 import { checkBreaker, checkWindowSwitch } from './breaker.js';
@@ -18,6 +28,9 @@ export interface TickDeps {
   // Rebuild+restart the engine (real impl spawns a detached process; tests inject a
   // spy). Invoked by the tick when self_update_pending is set and the engine is idle.
   selfUpdate?(): void;
+  // 本地模型: loads/switches the vLLM model (src/local/modelManager.ts; tests inject a stub).
+  // Only consulted when local_models_enabled is on.
+  modelManager?: Pick<ModelManager, 'state' | 'ensureLoaded' | 'unavailable' | 'refresh'>;
   now?: Date;
 }
 
@@ -62,18 +75,24 @@ export function tick(db: Database.Database, deps: TickDeps): TickInfo {
   const active = (counts.running ?? 0) + (counts.verifying ?? 0) + (counts.queued ?? 0) + deps.inflightCount();
   updatePower(active > 0);
 
+  // 本地模型 status fragment appended to the scheduler reason (null when there is no local work,
+  // so with local models off every reason string is exactly what it was before).
+  let localReason: string | null = null;
   const info = (paused: boolean, reason: string): TickInfo => ({
     reading,
     policy,
     paused,
     breakerTripped,
     dispatched,
-    reason,
+    reason: localReason ? `${reason}; ${localReason}` : reason,
   });
 
   // 4. pause only blocks NEW dispatch
   if (getBool(db, 'scheduler_paused')) return info(true, 'paused');
-  if (breakerTripped) return info(false, 'breaker tripped');
+  // Local runs cost no Anthropic quota, so with local models on a tripped breaker must not hold
+  // them: its return moves below the local dispatch step (4c). Off = the original order.
+  const localEnabled = getBool(db, 'local_models_enabled', false);
+  if (breakerTripped && !localEnabled) return info(false, 'breaker tripped');
 
   // 4a. self-update: a task targeting the engine's OWN repo merged into main — rebuild
   // + restart once idle, so later chain tasks run the new code. An in-flight run keeps
@@ -107,8 +126,20 @@ export function tick(db: Database.Database, deps: TickDeps): TickInfo {
     }
   }
 
-  // 5. capacity
-  let cap = getNum(db, 'max_concurrency', 1) - deps.inflightCount();
+  const aging = getBool(db, 'priority_aging', false);
+  const ageStepMin = aging ? getNum(db, 'age_step_min', 30) : 0;
+
+  // 4c. 本地模型 dispatch: candidates whose resolved model is 'local:<id>' run on the vLLM box —
+  // no session/weekly/fit gates (zero Anthropic spend), but one GPU: only the LOADED model's
+  // tasks dispatch (local_max_concurrency), and a switch waits until no local run is in flight.
+  if (localEnabled) {
+    localReason = dispatchLocal(db, deps, buildCandidates(db, policy, now, ageStepMin), dispatched);
+  }
+  if (breakerTripped) return info(false, 'breaker tripped');
+
+  // 5. capacity (cloud). Local runs have their own cap (4c) and don't consume cloud slots.
+  const localInflight = localEnabled ? activeLocalRunCount(db) : 0;
+  let cap = getNum(db, 'max_concurrency', 1) - Math.max(0, deps.inflightCount() - localInflight);
   if (cap <= 0) return info(false, 'at concurrency');
 
   // 6. task-independent safe-to-run gates
@@ -147,16 +178,21 @@ export function tick(db: Database.Database, deps: TickDeps): TickInfo {
   }
 
   // 8. candidates: resume blocked first, then queued (aging-aware order #4)
-  const aging = getBool(db, 'priority_aging', false);
   const starveMin = getNum(db, 'starve_min', 60);
-  const candidates = buildCandidates(db, policy, now, aging ? getNum(db, 'age_step_min', 30) : 0);
+  const candidates = buildCandidates(db, policy, now, ageStepMin);
 
   let starveReserved = false;
+  let heldLocal = 0;
   for (const c of candidates) {
     if (cap <= 0) break;
     // Phase 4: fit against the model this task will actually dispatch under (routing-aware),
     // so a cheaper model's smaller footprint lets the gate pack more work into the same headroom.
     const cModel = resolveModel(db, c.task) ?? 'default';
+    // 本地模型 tasks never take the cloud path (dispatched in 4c, or held while local models are off).
+    if (isLocalModel(cModel)) {
+      heldLocal += 1;
+      continue;
+    }
     const est = estimatePct(db, c.task.complexity, cModel);
     const estW = weeklyPacking ? estimateWeeklyPct(db, c.task.complexity, cModel) : 0;
     if (est > headroom || estW > weeklyHeadroom) {
@@ -175,6 +211,7 @@ export function tick(db: Database.Database, deps: TickDeps): TickInfo {
     weeklyHeadroom -= estW;
     cap -= 1;
   }
+  if (!localEnabled && heldLocal > 0) localReason = `${heldLocal} local task(s) held: local_models_enabled=false`;
 
   return info(
     false,
@@ -186,6 +223,56 @@ interface Candidate {
   task: Task;
   resume: boolean;
   waitedMin: number;
+}
+
+/**
+ * Tick step 4c (本地模型). Returns a short scheduler-reason fragment, or null when no candidate
+ * uses a local model. Stay on the loaded model while it still has work (a switch costs ~6 min);
+ * otherwise move to the highest-priority model that isn't in an error cool-down — but only once
+ * every local run has finished, because a switch restarts vLLM under them.
+ */
+function dispatchLocal(
+  db: Database.Database,
+  deps: TickDeps,
+  candidates: Candidate[],
+  dispatched: TickInfo['dispatched'],
+): string | null {
+  const local: (Candidate & { localModel: string })[] = [];
+  for (const c of candidates) {
+    const m = resolveModel(db, c.task);
+    if (isLocalModel(m)) local.push({ ...c, localModel: localId(m) });
+  }
+  if (local.length === 0) return null;
+
+  const mm = deps.modelManager;
+  if (!mm) return `${local.length} local task(s) held: no model manager`;
+  mm.refresh();
+  const st = mm.state();
+  const inflight = activeLocalRunCount(db);
+
+  const wanted =
+    st.loaded && local.some((x) => x.localModel === st.loaded)
+      ? st.loaded
+      : (local.map((x) => x.localModel).find((m) => !mm.unavailable(m)) ?? null);
+  if (!wanted) return `local: no loadable model (${st.error ?? 'cooling down'})`;
+
+  if (st.status === 'ready' && st.loaded === wanted) {
+    let cap = getNum(db, 'local_max_concurrency', 2) - inflight;
+    let n = 0;
+    for (const x of local) {
+      if (cap <= 0) break;
+      if (x.localModel !== wanted) continue;
+      deps.startRun(x.task, { resume: x.resume });
+      dispatched.push({ taskId: x.task.id, resume: x.resume });
+      cap -= 1;
+      n += 1;
+    }
+    return n > 0 ? `local: dispatched ${n} on ${wanted}` : `local: at concurrency on ${wanted}`;
+  }
+  if (inflight > 0) return `local: ${inflight} run(s) still in flight; switch to ${wanted} waits`;
+  return mm.ensureLoaded(wanted) === 'busy'
+    ? `local: ${wanted} unavailable (${st.error ?? st.status})`
+    : `local: loading ${wanted}`;
 }
 
 /** Minutes a task has waited in its current status (updated_at is UTC "YYYY-MM-DD HH:MM:SS"). */

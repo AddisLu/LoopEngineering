@@ -64,6 +64,8 @@ export function spawnStreaming(
         usageJson: r.usageJson,
         resultSubtype: r.resultSubtype,
         signal: signal ?? null,
+        tokensIn: r.tokensIn,
+        tokensOut: r.tokensOut,
       });
     });
   });
