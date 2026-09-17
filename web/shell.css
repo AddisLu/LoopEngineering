@@ -170,6 +170,16 @@ aside.rail, aside.dock { min-width: 0; min-height: 0; overflow: hidden; }
   padding: 8px 10px; margin: 4px 0 0;
 }
 .refs .err { color: var(--warn); }
+.tools { font-size: 13px; }
+.tools > summary { cursor: pointer; opacity: .75; }
+.tools > summary.err { color: var(--warn); }
+.tools ol { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 6px; }
+.tools .call { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.tools .call .s { opacity: .7; font-size: 12px; }
+.tools li.bad .call b { color: var(--warn); }
+.tools ul { margin: 2px 0 0 22px; padding: 0; font-size: 12.5px; }
+.tools ul li { list-style: disc; overflow-wrap: anywhere; }
+.msg .tool-note { opacity: .7; font-size: 12.5px; }
 .trim-note { font-size: 12px; opacity: .6; text-align: center; padding: 6px 0; border-bottom: 1px dashed var(--border); }
 
 .imgs { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }

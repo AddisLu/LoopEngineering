@@ -357,6 +357,8 @@ const SAMPLES = [
 setChip('kb-box', stored('loop_chat_kb') !== 'off');
 wireChip('kb-box', (on) => store('loop_chat_kb', on ? 'on' : 'off'));
 wireChip('think-box');
+setChip('tools-box', stored('loop_chat_tools') === 'on');
+wireChip('tools-box', (on) => store('loop_chat_tools', on ? 'on' : 'off'));
 // 調參建議 always needs the knowledge base: a parameter suggestion with no source is a guess
 wireChip('tune-box', (on) => {
   $('tune-note').hidden = !on;
@@ -449,6 +451,8 @@ async function send(raw, opts = {}) {
   const a = addMsg('assistant');
   a.wrap.classList.add('pending');
   a.knowledge = chipOn('kb-box');
+  a.tools = chipOn('tools-box');
+  a.toolRounds = [];
   a.mode = mode;
   a.userOrd = u.ord;
   a.body.textContent = a.knowledge ? '正在查 CF-AOI 知識庫…' : images.length ? '正在看圖…' : '等待模型回應…';
@@ -475,6 +479,8 @@ const actionCtx = {
     const next = addMsg('assistant');
     next.wrap.classList.add('pending');
     next.knowledge = a.knowledge;
+    next.tools = a.tools;
+    next.toolRounds = [];
     next.userOrd = a.userOrd;
     next.body.textContent = '重新回答中…';
     await saveAssistantRow(next);
@@ -548,6 +554,62 @@ function renderRefs(a, k) {
   }
   a.body.after(box);
   a.refs = box;
+}
+
+// 上網／工具: one collapsible card per answer, kept under the citations. Everything shown is the
+// server's summary of each call (name, outcome, source URLs) — never page bodies.
+const TOOL_ICON = { web_search: '🔎', fetch_url: '📄' };
+const toolIcon = (name) => TOOL_ICON[name] || (name.startsWith('mcp__') ? '🧩' : '🛠');
+const toolLabel = (name) => (name.startsWith('mcp__') ? name.slice(5).replace('__', '.') : name);
+function renderTools(a, rounds) {
+  if (a.toolBox) a.toolBox.remove();
+  if (!rounds || !rounds.length) return;
+  const box = el('details', 'tools');
+  const calls = rounds.flatMap((r) => r.calls || []);
+  const failed = calls.filter((c) => c.ok === false).length;
+  box.append(el('summary', failed ? 'err' : null, `工具呼叫 ${calls.length} 次（${rounds.length} 輪）${failed ? ` · ${failed} 次失敗` : ''}`));
+  const list = el('ol');
+  for (const c of calls) {
+    const item = el('li', c.ok === false ? 'bad' : null);
+    const head = el('div', 'call');
+    head.append(el('span', 'ic', toolIcon(c.name)), el('b', null, toolLabel(c.name)), el('span', 's', ` ${c.summary || ''} · ${((c.ms || 0) / 1000).toFixed(1)} s`));
+    item.append(head);
+    if (c.sources && c.sources.length) {
+      const ul = el('ul');
+      for (const src of c.sources) {
+        const li = el('li');
+        const link = el('a', null, src.title || src.url);
+        link.href = src.url;
+        link.target = '_blank';
+        link.rel = 'noopener';
+        li.append(link);
+        ul.append(li);
+      }
+      item.append(ul);
+    }
+    list.append(item);
+  }
+  box.append(list);
+  (a.refs || a.body).after(box);
+  a.toolBox = box;
+}
+
+function onToolFrame(a, t, answer) {
+  if (t.status === 'running') {
+    if (!answer()) a.body.textContent = `呼叫工具中（${(t.names || []).map(toolLabel).join('、')}）…`;
+    announce('tool', { names: t.names });
+    return;
+  }
+  if (t.unsupported || t.error) {
+    a.wrap.append(el('div', 'note tool-note', t.unsupported || `工具：${t.error}`));
+    return;
+  }
+  if (t.round) {
+    a.toolRounds = a.toolRounds || [];
+    a.toolRounds.push(t);
+    renderTools(a, a.toolRounds);
+    if (!answer()) a.body.textContent = '工具已回覆，等待模型作答…';
+  }
 }
 
 // 繼續產生 is offered only on the newest answer: history must still end with that exact turn.
@@ -632,6 +694,7 @@ async function generate(a, { thinking, cont, mode }) {
         thinking,
         continue: cont,
         knowledge: Boolean(a.knowledge),
+        ...(a.tools && !cont ? { tools: true } : {}),
         ...(mode === 'tune' ? { mode } : {}),
       }),
       signal: controller.signal,
@@ -666,6 +729,10 @@ async function generate(a, { thinking, cont, mode }) {
             a.keywords = j.loop_knowledge.keywords || [];
             renderRefs(a, j.loop_knowledge);
             if (!answer()) a.body.textContent = j.loop_knowledge.sources.length ? '已找到參考資料，等待模型回應…' : '等待模型回應…';
+            continue;
+          }
+          if (j.loop_tool) {
+            onToolFrame(a, j.loop_tool, answer);
             continue;
           }
           if (j.usage) usage = j.usage;
@@ -725,6 +792,7 @@ async function generate(a, { thinking, cont, mode }) {
         tokens_out: tokens,
         sources: a.sources || [],
         keywords: a.keywords || [],
+        tools: a.toolRounds || [],
       }),
     ).then(() => announce('done', { content: answer() }));
     nameThread();
@@ -1081,6 +1149,10 @@ function replayMsg(m) {
       v.thinkText.textContent = m.reasoning;
     }
     if (m.sources && m.sources.length) renderRefs(v, { sources: m.sources, ms: 0, keywords: m.keywords });
+    if (m.tools && m.tools.length) {
+      v.toolRounds = m.tools;
+      renderTools(v, m.tools);
+    }
     const bits = [
       m.ttft_ms != null ? `首字 ${fmtSec(m.ttft_ms)}` : null,
       m.tokens_out != null ? `輸出 ${fmtInt(m.tokens_out)} tokens` : null,

@@ -10,6 +10,7 @@ export const NONNEG_KEYS = new Set([
   'max_concurrency', 'poll_interval_sec', 'min_runway_min', 'max_resumes', 'max_autoqueue',
   'timeout_S', 'timeout_M', 'timeout_L', 'usage_refresh_sec', 'ledger_fallback_after_min',
   'chat_context_turns', 'chat_retention_days', 'chat_escalate_timeout_ms', 'local_spark_nodes',
+  'chat_tool_max_rounds', 'chat_tool_timeout_ms', 'chat_tool_wall_ms', 'chat_tool_result_chars', 'chat_fetch_max_bytes',
   'age_step_min', 'starve_min', 'knowledge_budget_chars', 'verify_step_timeout_min',
   'voice_worker_idle_min',
   // SSoT/RAG Phase 0
@@ -33,7 +34,7 @@ export const NONNEG_KEYS = new Set([
 export const UNIT_INTERVAL_KEYS = new Set(['rag_hybrid_alpha']);
 // Phase 3 feature flags: stored as 'true'/'false'.
 export const BOOL_KEYS = new Set([
-  'chat_history_enabled', 'chat_escalate_enabled', 'chat_share_enabled',
+  'chat_history_enabled', 'chat_escalate_enabled', 'chat_share_enabled', 'chat_tools_enabled',
   'scheduler_paused',
   'window_checkpoint', 'weekly_packing', 'concurrency_reserve', 'priority_aging',
   'dep_auto_queue',
@@ -148,6 +149,8 @@ export function validateSetting(key: string, value: string): string | null {
   } else if (key === 'voice_structure_model' || key === 'report_model' || key === 'report_pptx_model') {
     // these call `claude -p` directly — cloud aliases only
     if (!MODEL_VALUES.has(value)) return `${key} must be one of: ${[...MODEL_VALUES].filter(Boolean).join(', ')} (or empty for CLI default)`;
+  } else if (key === 'chat_search_url') {
+    if (value !== '' && !/^https?:\/\/[^\s/]+(\/\S*)?$/.test(value)) return 'chat_search_url must be an http(s) URL or empty';
   } else if (key === 'prd_repo_allowlist') {
     const bad = value.split(',').map((s) => s.trim()).filter(Boolean).filter((s) => !s.startsWith('/'));
     if (bad.length) return `prd_repo_allowlist entries must be absolute paths (got: ${bad.join(', ')})`;

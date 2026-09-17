@@ -235,7 +235,7 @@ function exportHtml() {
     '.msg.user .body{background:#e7eef7;padding:10px 14px;border-radius:12px;white-space:pre-wrap}',
     'pre{background:#efeae0;padding:10px 12px;border-radius:8px;overflow-x:auto}',
     'table{border-collapse:collapse}th,td{border:1px solid #e4ddd0;padding:6px 10px}',
-    '.meta{font-size:12px;opacity:.6}.refs{font-size:13px}',
+    '.meta{font-size:12px;opacity:.6}.refs{font-size:13px}.tools{font-size:13px}.tools ol{list-style:none;padding:0}.tools ul{font-size:12.5px}',
   ].join('');
   const doc = `<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><title>${title}</title><style>${css}</style></head><body><h1>${title}</h1>${log.outerHTML}</body></html>`;
   const a = el('a');

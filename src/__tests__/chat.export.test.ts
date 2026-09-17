@@ -20,6 +20,7 @@ describe('toMarkdown', () => {
       content: '因為佇列深度不足。',
       reasoning: '先看 flight recorder…',
       sources: [{ n: 1, source: 'cf-aoi', path: 'docs/rdma.md', section: '收圖', start_line: 12, end_line: 20, snippet: 'x' }],
+      tools: [{ round: 1, calls: [{ id: 'c1', name: 'web_search', args: { query: 'rdma' }, ms: 900, ok: true, summary: '「rdma」2 筆', sources: [{ title: 'RDMA intro', url: 'https://ex.com/rdma' }] }] }],
     });
     appendMessage(db, conv.id, USER, { role: 'assistant', content: '複核意見', model_id: 'cloud:opus' });
 
@@ -28,6 +29,9 @@ describe('toMarkdown', () => {
     expect(md).toContain('# RDMA 掉幀');
     expect(md).toContain('對話者：呂侑儒');
     expect(md).toContain('## 你');
+    expect(md).toContain('> 工具呼叫（上網／工具）');
+    expect(md).toContain('> - web_search：「rdma」2 筆');
+    expect(md).toContain('<https://ex.com/rdma>');
     expect(md).toContain('## 本地模型');
     expect(md).toContain('## 雲端複核 · opus'); // a shared doc must not blur who said what
     expect(md).toContain('[1] cf-aoi/docs/rdma.md · 收圖 第 12–20 行');

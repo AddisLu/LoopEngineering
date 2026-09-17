@@ -177,6 +177,15 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   chat_escalate_timeout_ms: '240000',
   // 分享連結: read-only transcript pages. On by default; the token in the URL is the secret.
   chat_share_enabled: 'true',
+  // 上網／工具 (src/chat/tools.ts, toolLoop.ts): off by default, and even when on the page must
+  // tick the chip per question — a tool round adds seconds and leaves the machine.
+  chat_tools_enabled: 'false',
+  chat_search_url: 'http://127.0.0.1:8080', // self-hosted SearXNG (deploy/searxng); '' = no web_search
+  chat_tool_max_rounds: '5',
+  chat_tool_timeout_ms: '15000',
+  chat_tool_wall_ms: '120000',
+  chat_tool_result_chars: '12000',
+  chat_fetch_max_bytes: '2097152',
   // PRD 精靈: directories the repo picker / image-set checker may look at, on top of the enabled
   // git/folder knowledge sources. CSV of absolute paths; '' = only registered sources.
   prd_repo_allowlist: '',

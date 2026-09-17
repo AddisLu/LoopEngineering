@@ -1,0 +1,13 @@
+# SearXNG settings for Loop Engineering. use_default_settings keeps upstream engine
+# defaults; only what the web_search tool needs is overridden.
+use_default_settings: true
+server:
+  secret_key: "3f851b1e0dc9a820fee600e96f17a0918ecadf9916278c2bf6aae3826651145f"
+  limiter: false
+  image_proxy: false
+search:
+  safe_search: 0
+  default_lang: zh-TW
+  formats: [html, json]
+ui:
+  static_use_hash: true

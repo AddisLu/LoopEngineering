@@ -28,6 +28,8 @@ export interface RecipeInfo {
   max_model_len: number | null;
   /** docker image the recipe runs in; run-recipe.sh offers to build it when missing */
   container: string | null;
+  /** vllm serve --tool-call-parser value — null means the served model cannot call tools */
+  tool_parser: string | null;
 }
 
 const cache = new Map<string, RecipeInfo | null>();
@@ -72,6 +74,7 @@ export function recipeInfo(recipe: string, repo: string): RecipeInfo | null {
       tensor_parallel: num(text_, 'tensor_parallel'),
       max_model_len: num(text_, 'max_model_len'),
       container: str(text_, 'container'),
+      tool_parser: /--tool-call-parser\s+(\S+)/.exec(text_)?.[1] ?? null,
     };
   } catch {
     info = null; // not on this machine — the caller falls back to "assume a single node"

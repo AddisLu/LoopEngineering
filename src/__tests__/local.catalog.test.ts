@@ -100,7 +100,10 @@ describe('recipes', () => {
       cluster_only: false,
       nodes: 1,
     });
-    expect(recipeInfo('broken', repo)).toMatchObject({ model: null, name: 'Broken' });
+    expect(recipeInfo('broken', repo)).toMatchObject({ model: null, name: 'Broken', tool_parser: null });
+    // the chat tool loop is offered only when the served recipe can parse tool calls
+    fs.writeFileSync(path.join(repo, 'recipes', 'tooly.yaml'), 'model: o/m\ncommand: |\n  vllm serve o/m \\\n    --tool-call-parser qwen3_xml \\\n    --enable-auto-tool-choice\n');
+    expect(recipeInfo('tooly', repo)!.tool_parser).toBe('qwen3_xml');
   });
 });
 

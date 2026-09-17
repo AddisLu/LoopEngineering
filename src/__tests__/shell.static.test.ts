@@ -35,6 +35,7 @@ describe('chat-first shell', () => {
       'prompt',
       'kb-box',
       'think-box',
+      'tools-box',
       'file-input',
       'file-btn',
       'stop-btn',

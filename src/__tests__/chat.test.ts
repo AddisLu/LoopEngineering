@@ -19,6 +19,7 @@ import {
   registerChatRoutes,
 } from '../server/chatRoutes.js';
 import type { RetrievedChunk } from '../knowledge/retrieve.js';
+import { clearRecipeCache } from '../local/recipes.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WEB_DIR = path.join(__dirname, '..', '..', 'web');
@@ -216,6 +217,63 @@ describe('/api/chat with a fake vLLM', () => {
     expect(s.requests).toEqual({ running: 1, waiting: 0 });
     expect(s.spec_decode.acceptance_rate).toBeCloseTo(0.425);
     expect(s.gpu.name).toBe('NVIDIA GB10');
+  });
+
+  describe('上網／工具 gates', () => {
+    const ask = (payload: Record<string, unknown>) => app.inject({ method: 'POST', url: '/api/chat', payload: { messages: [{ role: 'user', content: 'hi' }], ...payload } });
+    const upstream = () => calls.find((c) => c.url.endsWith('/chat/completions'))?.body as Record<string, unknown>;
+    beforeEach(() => {
+      setSetting(db, 'local_model_status', 'ready');
+      setSetting(db, 'local_model_loaded', 'qwen38-flash');
+    });
+
+    it('chip off: no tools in the upstream body and the prompt still says there are none', async () => {
+      const res = await ask({});
+      expect(res.statusCode).toBe(200);
+      expect(upstream().tools).toBeUndefined();
+      const sys = (upstream().messages as Array<{ role: string; content: string }>)[0]!;
+      expect(sys.content).toContain('你沒有任何工具');
+      expect(res.body).not.toContain('loop_tool');
+    });
+
+    it('chip on but the setting off: plain answer plus an unsupported note', async () => {
+      const res = await ask({ tools: true });
+      expect(res.statusCode).toBe(200);
+      expect(upstream().tools).toBeUndefined();
+      expect(res.body).toContain('"unsupported":"上網／工具已停用');
+    });
+
+    it('chip on, setting on, but the recipe has no tool parser: unsupported', async () => {
+      setSetting(db, 'chat_tools_enabled', 'true');
+      setSetting(db, 'local_vllm_repo', '/nonexistent');
+      const res = await ask({ tools: true });
+      expect(res.body).toContain('tool-call-parser');
+      expect(upstream().tools).toBeUndefined();
+    });
+
+    it('all three satisfied: the loop sends tool schemas and a tool-aware prompt', async () => {
+      setSetting(db, 'chat_tools_enabled', 'true');
+      const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-repo-'));
+      fs.mkdirSync(path.join(repo, 'recipes'));
+      fs.writeFileSync(path.join(repo, 'recipes', 'qwen3.8-flash-next-nvfp4-solo.yaml'), 'model: x\ncommand: |\n  vllm serve x --tool-call-parser qwen3_xml --enable-auto-tool-choice\n');
+      setSetting(db, 'local_vllm_repo', repo);
+      clearRecipeCache();
+      const res = await ask({ tools: true });
+      expect(res.statusCode).toBe(200);
+      const body = upstream();
+      expect((body.tools as unknown[]).length).toBe(2);
+      expect(body.tool_choice).toBe('auto');
+      const sys = (body.messages as Array<{ role: string; content: string }>)[0]!;
+      expect(sys.content).toContain('web_search');
+      expect(sys.content).not.toContain('你沒有任何工具');
+      expect(res.body).toContain('"content":"hi"');
+      expect(res.body.trim().endsWith('data: [DONE]')).toBe(true);
+      // 繼續產生 never carries tools
+      calls.length = 0;
+      await ask({ tools: true, continue: true, messages: [{ role: 'user', content: 'q' }, { role: 'assistant', content: 'partial' }] });
+      expect(upstream().tools).toBeUndefined();
+      fs.rmSync(repo, { recursive: true, force: true });
+    });
   });
 
   it('refuses to chat when no local model is ready', async () => {

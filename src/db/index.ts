@@ -166,6 +166,8 @@ function migrate(db: Database.Database): void {
     ['captured_path', 'TEXT'],
     ['task_id', 'TEXT'],
   ]);
+  // 上網／工具: the tool rounds (name, args, outcome, source URLs) behind an answer
+  add('chat_messages', [['tools_json', 'TEXT']]);
   // 分享連結: an unguessable token makes one conversation readable without a login. Partial index
   // so the many NULLs (every unshared conversation) do not collide.
   add('chat_conversations', [

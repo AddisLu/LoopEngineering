@@ -1,0 +1,18 @@
+# Self-hosted SearXNG for the chat page's web_search tool (src/chat/tools.ts).
+# Bound to loopback only: Loop talks to it from the same machine, nothing else can.
+services:
+  searxng:
+    image: searxng/searxng:latest
+    container_name: loop-searxng
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./settings.yml:/etc/searxng/settings.yml:ro
+      - searxng-cache:/var/cache/searxng
+    environment:
+      - SEARXNG_BASE_URL=http://127.0.0.1:8080/
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETGID, SETUID]
+volumes:
+  searxng-cache: {}
