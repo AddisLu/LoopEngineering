@@ -1166,6 +1166,7 @@ function replayMsg(m) {
   }
   v.capturedPath = m.captured_path || null;
   v.taskId = m.task_id || null;
+  v.draftId = m.draft_id || null;
   const cloud = String(m.model_id || '').startsWith('cloud:');
   if (cloud) {
     v.wrap.classList.add('cloud');

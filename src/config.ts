@@ -206,6 +206,8 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   mcp_timeout_ms: '30000',
   chat_mcp_enabled: 'true',
   chat_tool_schema_chars: '16000',
+  // 轉成任務 → 驗證新技術: where spike repos (and their bare origins under .origins/) are created
+  spike_root: path.join(os.homedir(), 'Addis', 'spikes'),
   // PRD 精靈: directories the repo picker / image-set checker may look at, on top of the enabled
   // git/folder knowledge sources. CSV of absolute paths; '' = only registered sources.
   prd_repo_allowlist: '',

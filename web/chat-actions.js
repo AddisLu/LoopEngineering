@@ -68,22 +68,222 @@ async function capture(view, btn) {
   }
 }
 
-/** 轉成任務: one draft task per answer, whatever the button is pressed (source_ref idempotency). */
+/**
+ * 轉成任務: first ask the server what kind of work this answer looks like (local model, keyword
+ * fallback), then let the operator confirm in a small dialog. Each choice has its own exit:
+ * fix/feature/perf → a pre-filled PRD-wizard draft, spike → a fresh repo + task, todo → the
+ * plain draft task. All idempotent on the server (one task or draft per answer).
+ */
+const INTENTS = [
+  ['fix', '軟體修正', '機況／判錯／crash — 帶著症狀與參考資料進 PRD 精靈，改現有程式'],
+  ['feature', '功能或效能', '要多一個功能，或要更快 — 進 PRD 精靈'],
+  ['spike', '驗證新技術／套件', '在 ~/Addis/spikes 開一個新 repo，裝起來跑 demo、寫 REPORT.md'],
+  ['todo', '待辦／純紀錄', '只留一張草稿任務，內容就是這則回答'],
+];
+const KIND_OPTS = [['algo', '演算法／判定規則'], ['bugfix', '程式錯誤'], ['feature', '功能新增'], ['perf', '效能']];
+
+function linkDraft(btn, draftId) {
+  btn.textContent = 'PRD 草稿 ↗';
+  btn.classList.add('done');
+  btn.disabled = false;
+  btn.onclick = () => window.open(`/prd.html?draft=${encodeURIComponent(draftId)}`, '_blank', 'noopener');
+}
+
+function field(labelText, input) {
+  const l = el('label');
+  l.append(el('span', null, labelText), input);
+  return l;
+}
+function textInput(value, placeholder) {
+  const i = el('input');
+  i.type = 'text';
+  i.value = value || '';
+  if (placeholder) i.placeholder = placeholder;
+  return i;
+}
+
+async function repoOptions(hint) {
+  const sel = el('select');
+  let uris = [];
+  try {
+    const r = await api('/api/sources');
+    uris = (r.sources || []).filter((x) => x.kind === 'git' && x.enabled).map((x) => x.uri);
+  } catch (e) {
+    /* no sources → manual only */
+  }
+  for (const u of uris) {
+    const o = el('option', null, u);
+    o.value = u;
+    sel.append(o);
+  }
+  const manual = el('option', null, '（在精靈裡再選）');
+  manual.value = '';
+  sel.append(manual);
+  sel.value = hint && uris.includes(hint) ? hint : uris[0] || '';
+  return sel;
+}
+
+async function openTaskChooser(view, s) {
+  const dlg = el('dialog', 'task-chooser');
+  dlg.append(el('h3', null, '這則回答要變成什麼任務？'));
+  const why = s.model_ready && s.confidence !== 'low' ? `建議：${s.reason}` : `不太確定（${s.reason}），請你選`;
+  dlg.append(el('p', 'dialog-hint', why));
+
+  let intent = s.intent === 'perf' ? 'feature' : s.intent;
+  const opts = el('div', 'opts');
+  const cards = new Map();
+  for (const [key, label, blurb] of INTENTS) {
+    const c = el('button', 'opt');
+    c.type = 'button';
+    c.append(el('b', null, label), el('span', null, blurb));
+    c.onclick = () => choose(key);
+    cards.set(key, c);
+    opts.append(c);
+  }
+  dlg.append(opts);
+
+  const title = textInput(s.title, '任務標題');
+  dlg.append(field('標題', title));
+
+  // fix / feature: PRD wizard prefill
+  const fixBox = el('div', 'intent-fields');
+  const kindSel = el('select');
+  for (const [k, l] of KIND_OPTS) {
+    const o = el('option', null, l);
+    o.value = k;
+    kindSel.append(o);
+  }
+  kindSel.value = (s.fix && s.fix.kind) || (s.intent === 'perf' ? 'perf' : s.intent === 'feature' ? 'feature' : 'algo');
+  const repoSel = await repoOptions(s.repo_hint);
+  const symptom = textInput(s.fix ? s.fix.symptom : '', '現況／症狀');
+  const expected = textInput(s.fix ? s.fix.expected : '', '期望行為');
+  fixBox.append(field('改動類型', kindSel), field('Repo', repoSel), field('現況／症狀', symptom), field('期望行為', expected));
+  if (s.sources && s.sources.length) fixBox.append(el('p', 'dialog-hint', `會帶入 ${Math.min(5, s.sources.length)} 個參考來源到精靈的範圍段落`));
+  dlg.append(fixBox);
+
+  // spike
+  const spikeBox = el('div', 'intent-fields');
+  const spName = textInput(s.spike ? s.spike.name : '', '英文短名，例如 tgv-inspector');
+  const slugNote = el('p', 'dialog-hint', '');
+  const paintSlug = () => (slugNote.textContent = `會建立 ~/Addis/spikes/${(spName.value || 'spike').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}（含 git origin）`);
+  spName.oninput = paintSlug;
+  paintSlug();
+  const spGoal = el('textarea');
+  spGoal.rows = 3;
+  spGoal.value = s.spike ? s.spike.goal : '';
+  spGoal.placeholder = '要驗證什麼、怎樣算成功';
+  const urlBox = el('div', 'url-list');
+  const urlChecks = [];
+  const urls = [...new Set([...(s.spike ? s.spike.urls : []), ...(s.sources || []).map((x) => x.url)])].slice(0, 8);
+  for (const u of urls) {
+    const l = el('label', 'url');
+    const cb = el('input');
+    cb.type = 'checkbox';
+    cb.checked = true;
+    cb.value = u;
+    l.append(cb, el('span', null, u));
+    urlChecks.push(cb);
+    urlBox.append(l);
+  }
+  spikeBox.append(field('名稱', spName), slugNote, field('目標', spGoal));
+  if (urls.length) spikeBox.append(field('來源網址', urlBox));
+  dlg.append(spikeBox);
+
+  const menu = el('menu');
+  const cancel = el('button', 'btn', '取消');
+  cancel.type = 'button';
+  cancel.onclick = () => dlg.close();
+  const go = el('button', 'btn primary', '建立');
+  go.type = 'button';
+  menu.append(cancel, go);
+  dlg.append(menu);
+
+  const NOTE = { fix: '開精靈 ↗', feature: '開精靈 ↗', spike: '建立 spike', todo: '建立待辦' };
+  function choose(key) {
+    intent = key;
+    for (const [k, c] of cards) c.classList.toggle('on', k === key);
+    fixBox.hidden = !(key === 'fix' || key === 'feature');
+    spikeBox.hidden = key !== 'spike';
+    go.textContent = NOTE[key];
+    if (key === 'fix' && !['algo', 'bugfix'].includes(kindSel.value)) kindSel.value = 'algo';
+    if (key === 'feature' && !['feature', 'perf'].includes(kindSel.value)) kindSel.value = 'feature';
+  }
+  choose(intent);
+  if (!s.prd_gate_enabled) {
+    for (const k of ['fix', 'feature']) {
+      cards.get(k).disabled = true;
+      cards.get(k).title = 'PRD 精靈未啟用（prd_gate_enabled）';
+    }
+    if (intent === 'fix' || intent === 'feature') choose('todo');
+  }
+
+  go.onclick = async () => {
+    go.disabled = true;
+    const body = { intent, title: title.value.trim() };
+    if (intent === 'fix' || intent === 'feature') {
+      Object.assign(body, {
+        intent: kindSel.value === 'perf' ? 'perf' : intent,
+        kind: kindSel.value,
+        repo_path: repoSel.value,
+        symptom: symptom.value.trim(),
+        expected: expected.value.trim(),
+        sources: (s.sources || []).slice(0, 5),
+      });
+    } else if (intent === 'spike') {
+      body.spike = { name: spName.value.trim(), goal: spGoal.value.trim(), urls: urlChecks.filter((c) => c.checked).map((c) => c.value) };
+    }
+    try {
+      const r = await api(`/api/chat/messages/${view.messageId}/task`, { method: 'POST', body: JSON.stringify(body) });
+      applyTaskResult(view, r);
+      dlg.close();
+    } catch (err) {
+      go.disabled = false;
+      toast(`建立失敗：${err.message}`, 'bad');
+    }
+  };
+  dlg.addEventListener('close', () => dlg.remove());
+  document.body.append(dlg);
+  dlg.showModal();
+}
+
+function applyTaskResult(view, r) {
+  const btn = view.taskBtn;
+  if (r.kind === 'draft') {
+    view.draftId = r.draft.id;
+    if (btn) linkDraft(btn, r.draft.id);
+    if (!r.existing) window.open(r.url, '_blank', 'noopener');
+    toast(r.existing ? '這則回答已經有一份 PRD 草稿' : '已開 PRD 草稿，精靈在新分頁', 'ok', { text: '開精靈 ↗', href: r.url });
+    return;
+  }
+  view.taskId = r.task.id;
+  if (btn) linkTask(btn, r.task.id);
+  toast(
+    r.existing ? `這則回答已經開過任務 ${r.task.id}` : r.repo_path ? `已建立 spike：${r.repo_path}（任務 ${r.task.id}，還沒排程）` : `已建立草稿任務 ${r.task.id}（還沒排程）`,
+    'ok',
+    { text: '在看板打開 ↗', href: `/board.html#task=${r.task.id}` },
+  );
+}
+
 async function toTask(view, btn) {
   if (!view.messageId) return toast('這則回答還沒存進歷史，稍等一下再試', 'warn');
   btn.disabled = true;
+  const was = btn.textContent;
+  btn.textContent = '判斷中…';
   try {
-    const r = await api(`/api/chat/messages/${view.messageId}/task`, { method: 'POST', body: '{}' });
-    view.taskId = r.task.id;
-    linkTask(btn, r.task.id);
-    toast(
-      r.existing ? `這則回答已經開過任務 ${r.task.id}` : `已建立草稿任務 ${r.task.id}（還沒排程）`,
-      'ok',
-      { text: '在看板打開 ↗', href: `/board.html#task=${r.task.id}` },
-    );
+    const s = await api(`/api/chat/messages/${view.messageId}/intent`, { method: 'POST', body: '{}' });
+    if (s.existing_task_id || s.existing_draft_id) {
+      // already turned into something — the server returns it without a dialog
+      applyTaskResult(view, await api(`/api/chat/messages/${view.messageId}/task`, { method: 'POST', body: '{}' }));
+      return;
+    }
+    await openTaskChooser(view, s);
   } catch (err) {
-    btn.disabled = false;
-    toast(`建立任務失敗：${err.message}`, 'bad');
+    toast(`無法判斷：${err.message}`, 'bad');
+  } finally {
+    if (!view.taskId && !view.draftId) {
+      btn.disabled = false;
+      btn.textContent = was;
+    }
   }
 }
 
@@ -265,11 +465,14 @@ export function mountActions(view, ctx) {
       actionBtn('重答', '丟掉這個回答，請模型重新回答一次', () => ctx.regenerate(view)),
       actionBtn('複製', '複製這個回答的原始文字', (b) => copyText(text(), b)),
       actionBtn('存進知識庫', '把這個回答存成知識庫筆記，之後對話查得到', (b) => capture(view, b)),
-      actionBtn('轉成任務', '開一張 Loop 草稿任務（調參建議會帶上整張建議表）', (b) => toTask(view, b)),
+      actionBtn('轉成任務', '先判斷這則回答該變成哪種工作（軟體修正／功能／驗證新技術／待辦），確認後再開', (b) => toTask(view, b)),
       actionBtn('請雲端複核', '把這個回答送給雲端高階模型複核（會花訂閱額度，預設關閉）', (b) => escalate(view, b, ctx)),
     );
-    if (view.capturedPath) markDone(bar.children[2], '已存 KB');
-    if (view.taskId) linkTask(bar.children[3], view.taskId);
+    const byLabel = (label) => [...bar.children].find((c) => c.textContent === label);
+    if (view.capturedPath) markDone(byLabel('存進知識庫'), '已存 KB');
+    view.taskBtn = byLabel('轉成任務');
+    if (view.taskId) linkTask(view.taskBtn, view.taskId);
+    else if (view.draftId) linkDraft(view.taskBtn, view.draftId);
   }
 
   view.wrap.append(bar);

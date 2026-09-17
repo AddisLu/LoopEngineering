@@ -1226,6 +1226,17 @@ loop bench list | loop bench show &lt;id&gt; | loop bench matrix | loop bench ju
         <li><b>模型與記憶體</b>：右側「模型」面板顯示權重檔大小、量化格式、MoE 架構、最長上下文、MTP 推測解碼接受率；統一記憶體已用／總量與 vLLM 上限（<code>gpu_memory_utilization</code>）、KV 快取容量與使用率、GPU 溫度／功耗，每秒更新（面板收起或切到別的面板時停止查詢）。</li>
         <li><b>對話紀錄</b>：存在伺服器、<b>依使用者分開</b>。身分優先取 Tailscale 注入的登入帳號，沒有就用左欄底部自填的名字（<code>x-loop-user</code>）。這是工作區分隔、<b>不是權限控管</b>：知道網址與 token 的人都看得到這台機器上的資料。可搜尋（中文兩字詞也搜得到）、改名、刪除；接續舊對話時只會把最近 <code>chat_context_turns</code>（預設 12）輪帶進模型，較早的內容留在畫面上並標示。</li>
         <li><b>逐則動作</b>：滑過訊息會出現按鈕——<b>重答</b>（丟掉這個回答重問，舊的軟刪除、順序不亂）、<b>編輯重問</b>（把問題放回輸入框，之後的內容一併移除）、<b>複製</b>、<b>存進知識庫</b>、<b>轉成任務</b>、<b>請雲端複核</b>。</li>
+        <li><b>轉成任務會先問你要開哪一種</b>：按下去本地模型先判斷這段對話像哪種工作（<code>POST /api/chat/messages/:id/intent</code>，模型不在就用關鍵字），跳出小視窗讓你確認、改標題與欄位，再依選擇走不同出口：
+          <div class="tbl-wrap"><table>
+            <thead><tr><th>選項</th><th>什麼時候</th><th>去哪裡</th></tr></thead>
+            <tbody>
+              <tr><td><b>軟體修正</b></td><td>機況、誤判／漏檢、crash、參數要調</td><td>開一份 <b>PRD 精靈草稿</b>（類型 演算法／錯誤、repo、症狀、期望、參考來源都先填好），精靈開在第 2 步；精靈送出後這則回答自動變成「已建任務」。</td></tr>
+              <tr><td><b>功能或效能</b></td><td>要多一個功能、要更快</td><td>同上，類型 功能新增／效能。</td></tr>
+              <tr><td><b>驗證新技術／套件</b></td><td>回答介紹了某個 GitHub 專案、套件、論文</td><td>在 <code>spike_root</code>（預設 <code>~/Addis/spikes/&lt;名稱&gt;</code>）<b>開一個新 git repo</b>（含 README／PLAN.md 與自己的 bare origin），建一張任務：裝起來、跑最小 demo、寫 <code>REPORT.md</code>（驗證＝<code>test -s REPORT.md</code> ＋ 人工）。不碰現有專案。</td></tr>
+              <tr><td><b>待辦／純紀錄</b></td><td>新聞彙整、報告、對比表</td><td>現行行為：一張草稿任務，內容就是這則回答。</td></tr>
+            </tbody>
+          </table></div>
+          同一則回答只會有一個去處（再按會回到同一份草稿或任務）；PRD 精靈未啟用時前兩項不能選。</li>
         <li><b>智慧調整參數面板</b>（圖示列第 2 個，或 Alt+2）：填症狀（可加機台／模組，例「IP 瑕疵偵測」）→ 按「產生建議」，問題照樣走一般對話、回答出現在對話區，面板上方顯示<b>最新建議</b>（第一條建議的檔案、參數、目前值 → 建議值、風險）與「轉成任務」「在對話中查看」。下方<b>歷史建議</b>列出你在所有對話裡拿到的建議、對應任務與任務目前狀態，點一下就回到那段對話並捲到那一則（<code>GET /api/chat/tune/history</code>）。</li>
         <li><b>調參建議（輸入框晶片）</b>：打開「調參建議」晶片後描述症狀（例：ROI 邊緣常把正常紋路判成刮傷），模型會先查知識庫定位程式與參數，最後輸出一張建議表：檔案、參數、目前值、建議值、原因、風險、怎麼驗。<b>這只是建議，系統沒有任何寫入機台或設定檔的路徑</b>；按「轉成任務」會開一張 Loop <b>草稿</b>任務帶著整張表（<code>created_by=chat</code>、<code>verify_mode=manual</code>、goal 內明寫「不得自動套用到機台」），要不要排程仍由人決定。同一則回答重複按只會有一張任務（<code>source_ref=chat:&lt;messageId&gt;</code>）。</li>
         <li><b>存進知識庫</b>：把回答寫成 vault 筆記並立刻建索引，之後對話查得到；同一則回答只會存一次。需要先用 <code>loop ingest add --vault &lt;路徑&gt;</code> 登錄一個 vault 來源。</li>

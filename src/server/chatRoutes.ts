@@ -15,6 +15,10 @@ export { QUERY_EXPANSION_PROMPT, parseKeywords };
 import { captureNote } from '../knowledge/ingest/capture.js';
 import { createTask, getTask, getTaskBySourceRef } from '../tasks.js';
 import { parseTuneBlock, plainTaskInput, tuneTaskInput } from '../chat/tune.js';
+import { suggestIntent, type IntentSuggestion, type TaskIntent, type PrdKind } from '../chat/intent.js';
+import { prefillForm } from '../prd/prefill.js';
+import { createDraft, getDraft } from '../prd/drafts.js';
+import { createSpike, SpikeError } from '../spike/create.js';
 import { escalateMessage } from '../chat/escalate.js';
 import { exportFilename, toMarkdown } from '../chat/export.js';
 import { builtinTools, mcpTools, type ToolDef } from '../chat/tools.js';
@@ -652,6 +656,7 @@ export function registerChatRoutes(app: FastifyInstance, db: Database.Database, 
     escalated_from: m.escalated_from,
     captured_path: m.captured_path,
     task_id: m.task_id,
+    draft_id: m.draft_id,
     created_at: m.created_at,
   });
 
@@ -856,6 +861,26 @@ export function registerChatRoutes(app: FastifyInstance, db: Database.Database, 
   // Both actions are idempotent: pressing the button twice returns the first note/task rather
   // than making a second one. Neither touches anything outside this repo's own data.
 
+  /** 轉成任務 step 1: what kind of work is this answer? (local model, keyword fallback) */
+  app.post('/api/chat/messages/:id/intent', async (req, reply) => {
+    const me = gate(req, reply);
+    if (!me) return reply;
+    const { id } = req.params as { id: string };
+    const found = getMessage(db, id, me.user_key);
+    if (!found) return reply.code(404).send({ error: 'message not found' });
+    const questions = messagesFor(db, found.conversation.id)
+      .filter((m) => m.role === 'user' && m.ord < found.message.ord)
+      .map((m) => m.content);
+    const s = await suggestIntent(db, found.message, questions, found.conversation.title, { localChat: localChatImpl });
+    const existing = found.message.task_id ?? getTaskBySourceRef(db, `chat:${id}`)?.id ?? null;
+    return { ...s, existing_task_id: existing, existing_draft_id: found.message.draft_id, prd_gate_enabled: getBool(db, 'prd_gate_enabled', false) };
+  });
+
+  /**
+   * 轉成任務 step 2: the operator picked an intent. fix/feature/perf → a PRD-wizard draft with
+   * the answer pre-filled; spike → a fresh repo + task; todo → the plain draft task. Idempotent:
+   * an answer that already became a task or draft returns it.
+   */
   app.post('/api/chat/messages/:id/task', async (req, reply) => {
     const me = gate(req, reply);
     if (!me) return reply;
@@ -868,28 +893,85 @@ export function registerChatRoutes(app: FastifyInstance, db: Database.Database, 
       const task = getTask(db, existingId);
       if (task) {
         if (!found.message.task_id) markMessage(db, id, me.user_key, { task_id: task.id });
-        return { task, existing: true };
+        return { kind: 'task', task, existing: true };
       }
     }
+    if (found.message.draft_id && getDraft(db, me.user_key, found.message.draft_id)) {
+      return { kind: 'draft', draft: { id: found.message.draft_id }, url: `/prd.html?draft=${found.message.draft_id}`, existing: true };
+    }
 
-    const b = (req.body ?? {}) as { title?: string; goal?: string };
+    const b = (req.body ?? {}) as {
+      intent?: unknown;
+      title?: unknown;
+      kind?: unknown;
+      repo_path?: unknown;
+      symptom?: unknown;
+      expected?: unknown;
+      module?: unknown;
+      sources?: unknown;
+      spike?: { name?: unknown; goal?: unknown; urls?: unknown };
+      model?: unknown;
+      goal?: unknown;
+    };
+    const str = (v: unknown, max = 400) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
+    const intent = (['fix', 'feature', 'perf', 'spike', 'todo'] as TaskIntent[]).includes(b.intent as TaskIntent) ? (b.intent as TaskIntent) : 'todo';
     const card = parseTuneBlock(found.message.content);
-    const input = card
-      ? tuneTaskInput(card, { messageId: id, conversationTitle: found.conversation.title, owner: me.label })
-      : plainTaskInput({
-          title: b.title,
-          goal: b.goal,
-          content: found.message.content,
-          conversationTitle: found.conversation.title,
-          messageId: id,
-          owner: me.label,
-        });
+
     try {
-      // lands as a draft on purpose: a suggestion becomes work only when a human queues it
+      if (intent === 'fix' || intent === 'feature' || intent === 'perf') {
+        if (!getBool(db, 'prd_gate_enabled', false)) {
+          return reply.code(409).send({ error: 'PRD 精靈未啟用（loop config set prd_gate_enabled true）；或改選「待辦」' });
+        }
+        const kinds: PrdKind[] = ['algo', 'bugfix', 'feature', 'perf'];
+        const kind = kinds.includes(b.kind as PrdKind) ? (b.kind as PrdKind) : intent === 'fix' ? 'algo' : intent;
+        const sources = Array.isArray(b.sources)
+          ? (b.sources as Array<{ title?: unknown; url?: unknown }>).map((x) => ({ title: str(x.title, 200), url: str(x.url, 500) })).filter((x) => /^https?:\/\//.test(x.url)).slice(0, 5)
+          : [];
+        const title = str(b.title, 120) || `對話：${found.conversation.title.slice(0, 40)}`;
+        const form = prefillForm({
+          kind,
+          title,
+          symptom: str(b.symptom, 600),
+          expected: str(b.expected, 600),
+          repo_path: str(b.repo_path, 500) || null,
+          module: str(b.module, 40) || null,
+          sources,
+          conversationTitle: found.conversation.title,
+        });
+        const draft = createDraft(db, me.user_key, { title, form, markdown: '', step: 2 });
+        markMessage(db, id, me.user_key, { draft_id: draft.id });
+        return reply.code(201).send({ kind: 'draft', draft: { id: draft.id, title: draft.title }, url: `/prd.html?draft=${draft.id}`, existing: false });
+      }
+      if (intent === 'spike') {
+        const sp = b.spike ?? {};
+        const urls = Array.isArray(sp.urls) ? (sp.urls as unknown[]).map((u) => str(u, 500)).filter(Boolean) : [];
+        const { task, repo_path } = createSpike(db, {
+          name: str(sp.name, 60) || str(b.title, 60) || found.conversation.title.slice(0, 40),
+          goal: str(sp.goal, 1000) || str(b.goal, 1000) || found.message.content.slice(0, 600),
+          urls,
+          owner: me.label,
+          sourceRef: `chat:${id}`,
+          model: str(b.model, 80) || null,
+        });
+        markMessage(db, id, me.user_key, { task_id: task.id });
+        return reply.code(201).send({ kind: 'task', task, repo_path, existing: false });
+      }
+      // todo: the plain draft task (a 調參 answer keeps its structured suggestion table)
+      const input = card
+        ? tuneTaskInput(card, { messageId: id, conversationTitle: found.conversation.title, owner: me.label })
+        : plainTaskInput({
+            title: str(b.title, 120) || undefined,
+            goal: str(b.goal, 20_000) || undefined,
+            content: found.message.content,
+            conversationTitle: found.conversation.title,
+            messageId: id,
+            owner: me.label,
+          });
       const task = createTask(db, input);
       markMessage(db, id, me.user_key, { task_id: task.id });
-      return reply.code(201).send({ task, existing: false, from_tune: Boolean(card) });
+      return reply.code(201).send({ kind: 'task', task, existing: false, from_tune: Boolean(card) });
     } catch (err) {
+      if (err instanceof SpikeError) return reply.code(500).send({ error: err.message });
       return badInput(reply, err);
     }
   });

@@ -234,6 +234,24 @@ dialog.artifact-full {
 dialog.artifact-full .codebar { flex: 0 0 auto; }
 dialog.artifact-full iframe.artifact { flex: 1 1 auto; height: auto; }
 
+/* 轉成任務 chooser */
+dialog.task-chooser { width: min(560px, 94vw); }
+dialog.task-chooser .opts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px; }
+dialog.task-chooser .opt {
+  display: flex; flex-direction: column; gap: 3px; text-align: left; cursor: pointer;
+  padding: 10px 12px; border-radius: var(--r-sm); border: 1px solid var(--border);
+  background: var(--surface-sunk); color: var(--text); font: inherit;
+}
+dialog.task-chooser .opt b { font-size: 13.5px; }
+dialog.task-chooser .opt span { font-size: 12px; opacity: .7; line-height: 1.4; }
+dialog.task-chooser .opt.on { border-color: var(--accent); background: var(--accent-soft); }
+dialog.task-chooser .opt:disabled { opacity: .45; cursor: not-allowed; }
+dialog.task-chooser .intent-fields[hidden] { display: none; }
+dialog.task-chooser .url-list { display: flex; flex-direction: column; gap: 4px; }
+dialog.task-chooser .url-list .url { flex-direction: row; align-items: center; gap: 8px; margin: 0; font-size: 12.5px; overflow-wrap: anywhere; }
+dialog.task-chooser .url-list input { width: auto; }
+@media (max-width: 720px) { dialog.task-chooser .opts { grid-template-columns: 1fr; } }
+
 /* ---- composer ------------------------------------------------------------ */
 .attach { display: flex; flex-wrap: wrap; gap: 10px; margin: 2px 0 8px; }
 .thumb { position: relative; }

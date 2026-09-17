@@ -10,6 +10,7 @@ import type { PrdReviewExec } from '../prd/review.js';
 import { parsePrdToForm } from '../prd/compose.js';
 import { allowedRoots, probeRepo, resolveAllowed, statPath, type GitExec } from '../prd/repo.js';
 import { createDraft, deleteDraft, getDraft, listDrafts, markSubmitted, updateDraft, PrdDraftError } from '../prd/drafts.js';
+import { linkDraftTask } from '../chat/store.js';
 import { draftAcceptance, suggestFiles, type AssistDeps } from '../prd/assist.js';
 import { IdentityError, identityOf, type ChatIdentity } from './identity.js';
 
@@ -96,6 +97,7 @@ export function registerPrdRoutes(app: FastifyInstance, db: Database.Database, o
       if (typeof b.draft_id === 'string' && r.kind === 'task') {
         try {
           markSubmitted(db, identity(req).user_key, b.draft_id, r.task.id);
+          linkDraftTask(db, b.draft_id, r.task.id);
         } catch {
           /* no identity or foreign draft — the task exists either way */
         }

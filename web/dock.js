@@ -625,7 +625,7 @@ $('tune-to-task').onclick = async () => {
   const btn = $('tune-to-task');
   btn.disabled = true;
   try {
-    const r = await api(`/api/chat/messages/${tuneLatest.messageId}/task`, { method: 'POST', body: '{}' });
+    const r = await api(`/api/chat/messages/${tuneLatest.messageId}/task`, { method: 'POST', body: JSON.stringify({ intent: 'todo' }) });
     btn.textContent = `已建任務 ${r.task.id} ↗`;
     toast(r.existing ? `這則建議已經開過任務 ${r.task.id}` : `已建立草稿任務 ${r.task.id}（還沒排程）`, 'ok', {
       text: '在看板打開 ↗',

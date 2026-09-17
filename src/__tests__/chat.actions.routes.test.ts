@@ -7,6 +7,9 @@ import type Database from 'better-sqlite3';
 import { openTestDb, setSetting } from '../db/index.js';
 import { registerChatRoutes } from '../server/chatRoutes.js';
 import { buildApp } from '../server/app.js';
+import { createTask } from '../tasks.js';
+import { linkDraftTask } from '../chat/store.js';
+import { getDraft } from '../prd/drafts.js';
 import { createSource } from '../knowledge/ingest/sources.js';
 import { listTasks } from '../tasks.js';
 
@@ -96,7 +99,7 @@ describe('轉成任務', () => {
     const second = await post(`/api/chat/messages/${a.id}/task`);
 
     expect(second.statusCode).toBe(200);
-    expect(second.json()).toMatchObject({ existing: true, task: { id: first.id } });
+    expect(second.json()).toMatchObject({ kind: 'task', existing: true, task: { id: first.id } });
     expect(listTasks(db)).toHaveLength(1);
     // the message itself remembers, so a reload still shows 已建任務 without asking again
     const stored = db.prepare('SELECT task_id FROM chat_messages WHERE id = ?').get(a.id) as { task_id: string };
@@ -114,7 +117,75 @@ describe('轉成任務', () => {
   it('never reaches another user’s message', async () => {
     const { a } = await answer(TUNE);
     expect((await post(`/api/chat/messages/${a.id}/task`, {}, OTHER)).statusCode).toBe(404);
+    expect((await post(`/api/chat/messages/${a.id}/intent`, {}, OTHER)).statusCode).toBe(404);
     expect(listTasks(db)).toEqual([]);
+  });
+
+  it('intent: proposes what the answer should become (fallback when the model is down)', async () => {
+    const { a } = await answer('ROI 邊緣的判定門檻太低。');
+    const res = await post(`/api/chat/messages/${a.id}/intent`);
+    expect(res.statusCode).toBe(200);
+    // the test app's localChat stub answers 't' → unparsable → keyword fallback on the question
+    expect(res.json()).toMatchObject({ confidence: 'low', existing_task_id: null, existing_draft_id: null, prd_gate_enabled: false });
+    expect(['fix', 'todo']).toContain(res.json().intent);
+  });
+
+  it('fix intent: opens a pre-filled PRD draft instead of a task, and the draft links back on submit', async () => {
+    const { a } = await answer('把 ROI 邊緣的判定門檻調高。 https://docs.example/roi');
+    expect((await post(`/api/chat/messages/${a.id}/task`, { intent: 'fix' })).statusCode).toBe(409); // wizard off
+    setSetting(db, 'prd_gate_enabled', 'true');
+    const res = await post(`/api/chat/messages/${a.id}/task`, {
+      intent: 'fix',
+      kind: 'algo',
+      title: 'ROI 邊緣誤判',
+      repo_path: '/r/cf-aoi',
+      symptom: '邊緣紋路被判成刮傷',
+      expected: '判型正確',
+      sources: [{ title: 'Doc', url: 'https://docs.example/roi' }, { title: 'bad', url: 'ftp://x' }],
+    });
+    expect(res.statusCode).toBe(201);
+    const body = res.json();
+    expect(body.kind).toBe('draft');
+    expect(body.url).toBe(`/prd.html?draft=${body.draft.id}`);
+    const draft = getDraft(db, 'ts:addis@example.com', body.draft.id)!;
+    const form = JSON.parse(draft.form_json);
+    expect(draft.step).toBe(2);
+    expect(form.kind).toBe('algo');
+    expect(form.repo.path).toBe('/r/cf-aoi');
+    expect(form.change).toMatchObject({ title: 'ROI 邊緣誤判', symptom: '邊緣紋路被判成刮傷', expected: '判型正確' });
+    expect(form.change.extra).toEqual(['參考來源：Doc https://docs.example/roi', expect.stringContaining('來自對話：')]);
+    expect(listTasks(db)).toEqual([]); // no task yet — the wizard makes one
+    const stored = db.prepare('SELECT draft_id, task_id FROM chat_messages WHERE id = ?').get(a.id) as { draft_id: string; task_id: string | null };
+    expect(stored).toEqual({ draft_id: body.draft.id, task_id: null });
+    // pressing again returns the same draft
+    expect((await post(`/api/chat/messages/${a.id}/task`, { intent: 'todo' })).json()).toMatchObject({ kind: 'draft', existing: true, draft: { id: body.draft.id } });
+    // when the wizard submits with draft_id the answer flips to 已建任務
+    const t = createTask(db, { title: 'from wizard', goal: 'g' });
+    expect(linkDraftTask(db, body.draft.id, t.id)).toBe(1);
+    expect((db.prepare('SELECT task_id FROM chat_messages WHERE id = ?').get(a.id) as { task_id: string }).task_id).toBe(t.id);
+    expect((await post(`/api/chat/messages/${a.id}/task`, { intent: 'todo' })).json()).toMatchObject({ kind: 'task', existing: true, task: { id: t.id } });
+  });
+
+  it('spike intent: creates a fresh repo under spike_root and a gate-clean task', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'spikes-'));
+    tmp.push(root);
+    setSetting(db, 'spike_root', root);
+    const { a } = await answer('這個專案值得一試。');
+    const res = await post(`/api/chat/messages/${a.id}/task`, { intent: 'spike', spike: { name: 'Glass Via Net', goal: '裝起來跑 demo', urls: ['https://github.com/x/gvn'] } });
+    expect(res.statusCode).toBe(201);
+    const { task, repo_path } = res.json();
+    expect(repo_path).toBe(path.join(root, 'glass-via-net'));
+    expect(task).toMatchObject({ title: '驗證：Glass Via Net', repo_path, base_branch: 'main', status: 'draft' });
+    expect(fs.existsSync(path.join(repo_path, 'PLAN.md'))).toBe(true);
+    expect((await post(`/api/chat/messages/${a.id}/task`, { intent: 'spike' })).json()).toMatchObject({ existing: true, task: { id: task.id } });
+  });
+
+  it('todo intent keeps the plain draft task, with an optional title override', async () => {
+    const { a } = await answer('把 RDMA 收圖改回 SEND/RECV 比較穩。');
+    const { task, kind } = (await post(`/api/chat/messages/${a.id}/task`, { intent: 'todo', title: '收圖策略' })).json();
+    expect(kind).toBe('task');
+    expect(task.title).toBe('收圖策略');
+    expect(task.goal).toContain('SEND/RECV');
   });
 });
 

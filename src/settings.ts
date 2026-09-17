@@ -151,6 +151,8 @@ export function validateSetting(key: string, value: string): string | null {
   } else if (key === 'voice_structure_model' || key === 'report_model' || key === 'report_pptx_model') {
     // these call `claude -p` directly — cloud aliases only
     if (!MODEL_VALUES.has(value)) return `${key} must be one of: ${[...MODEL_VALUES].filter(Boolean).join(', ')} (or empty for CLI default)`;
+  } else if (key === 'spike_root') {
+    if (!value.startsWith('/') && !value.startsWith('~')) return 'spike_root must be an absolute path';
   } else if (key === 'mcp_servers_json') {
     try {
       parseMcpServers(value);
