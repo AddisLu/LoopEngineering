@@ -124,12 +124,21 @@ export async function fetchBounded(rawUrl: string, o: BoundedFetchOptions): Prom
     if (url.username || url.password) throw new BlockedUrlError('網址不可含帳號密碼');
     const key = `${url.hostname.toLowerCase()}:${url.port || (url.protocol === 'https:' ? '443' : '80')}`;
     if (!allow.has(key)) await assertPublicHost(url.hostname, new Set(), o.lookup);
-    const res = await o.fetch(url.toString(), {
+    const init: RequestInit = {
       method: 'GET',
       redirect: 'manual',
       signal,
       headers: { 'user-agent': 'LoopEngineering-chat/1.0 (+local ops assistant)', accept: 'text/html,application/json,text/plain;q=0.9,*/*;q=0.5', ...(o.headers ?? {}) },
-    });
+    };
+    let res: Response;
+    try {
+      res = await o.fetch(url.toString(), init);
+    } catch (err) {
+      // undici's bare "fetch failed" is usually a transient socket error on this Wi-Fi box
+      // (first-try IPv6, a reset mid-handshake); one retry turns most of them into answers
+      if (signal.aborted || !(err instanceof TypeError)) throw err;
+      res = await o.fetch(url.toString(), init);
+    }
     if (res.status >= 300 && res.status < 400) {
       const loc = res.headers.get('location');
       if (!loc) throw new BlockedUrlError(`HTTP ${res.status} 沒有 Location`);

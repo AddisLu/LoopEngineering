@@ -74,6 +74,19 @@ describe('netGuard', () => {
     const ok = await fetchBounded('http://a.example/page', base);
     expect(ok).toMatchObject({ status: 200, truncated: false });
     expect(ok.contentType).toContain('html');
+    // one transient "fetch failed" is retried; a second one (or a non-network error) is not
+    let n = 0;
+    const flaky = (async () => {
+      n += 1;
+      if (n === 1) throw new TypeError('fetch failed');
+      return new Response('ok', { status: 200 });
+    }) as unknown as typeof fetch;
+    expect((await fetchBounded('http://a.example/x', { ...base, fetch: flaky })).status).toBe(200);
+    expect(n).toBe(2);
+    const dead = (async () => {
+      throw new TypeError('fetch failed');
+    }) as unknown as typeof fetch;
+    await expect(fetchBounded('http://a.example/x', { ...base, fetch: dead })).rejects.toThrow('fetch failed');
   });
 });
 

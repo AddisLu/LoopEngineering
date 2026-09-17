@@ -594,10 +594,10 @@ function renderTools(a, rounds) {
   a.toolBox = box;
 }
 
-function onToolFrame(a, t, answer) {
+function onToolFrame(a, t, answer, announce) {
   if (t.status === 'running') {
     if (!answer()) a.body.textContent = `呼叫工具中（${(t.names || []).map(toolLabel).join('、')}）…`;
-    announce('tool', { names: t.names });
+    if (announce) announce('tool', { names: t.names });
     return;
   }
   if (t.unsupported || t.error) {
@@ -736,7 +736,7 @@ async function generate(a, { thinking, cont, mode }) {
             continue;
           }
           if (j.loop_tool) {
-            onToolFrame(a, j.loop_tool, answer);
+            onToolFrame(a, j.loop_tool, answer, announce);
             continue;
           }
           if (j.usage) usage = j.usage;
