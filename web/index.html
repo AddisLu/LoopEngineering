@@ -3,232 +3,301 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Loop Engineering</title>
-    <script>
-      // Set theme before first paint to avoid a flash of the wrong mode.
-      (function () {
-        try {
-          var m = localStorage.getItem('loop_mode');
-          if (m !== 'light' && m !== 'dark') {
-            m = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-          }
-          document.documentElement.setAttribute('data-mode', m);
-        } catch (e) {}
-      })();
-    </script>
+    <title>Loop Engineering · CF-AOI 維運大腦</title>
+    <script src="/theme-boot.js"></script>
     <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/shell.css" />
   </head>
   <body>
-    <header class="topbar">
+    <header class="topbar-mini">
+      <button class="btn sm icon-btn" type="button" id="rail-toggle" aria-controls="rail" aria-expanded="true" title="顯示或收起對話紀錄">☰</button>
       <div class="brand">
         <span class="brand-mark" aria-hidden="true"></span>
         <span class="brand-text">
-          <strong class="brand-name">Loop Engineering</strong>
-          <span class="brand-sub">coding scheduler</span>
+          <span class="brand-name">Loop Engineering</span>
+          <span class="brand-sub">CF-AOI 維運大腦</span>
         </span>
       </div>
-
-      <div class="gauges">
-        <div class="ring" id="ring-session" data-state="ok">
-          <svg viewBox="0 0 44 44" width="42" height="42" aria-hidden="true">
-            <circle class="track" cx="22" cy="22" r="18"></circle>
-            <circle class="fill" cx="22" cy="22" r="18" transform="rotate(-90 22 22)"></circle>
-          </svg>
-          <div class="ring-label"><b id="session-pct">–</b></div>
-          <span class="ring-cap">session</span>
-        </div>
-        <div class="ring" id="ring-weekly" data-state="ok">
-          <svg viewBox="0 0 44 44" width="42" height="42" aria-hidden="true">
-            <circle class="track" cx="22" cy="22" r="18"></circle>
-            <circle class="fill" cx="22" cy="22" r="18" transform="rotate(-90 22 22)"></circle>
-          </svg>
-          <div class="ring-label"><b id="weekly-pct">–</b></div>
-          <span class="ring-cap">weekly</span>
-        </div>
-
-        <div class="ticks">
-          <div class="tick" id="resets">
-            <span class="tick-k">Session 重置</span>
-            <span class="tick-v tnum">–</span>
-          </div>
-          <div class="tick" id="policy">
-            <span class="tick-k">Policy</span>
-            <span class="tick-v">–</span>
-          </div>
-        </div>
-
-        <span class="chip forecast" id="forecast-chip" data-state="ok" title="Backlog 用量預估：待處理任務吃掉的 weekly 額度、剩餘可加碼空間">–</span>
+      <span class="sep" aria-hidden="true"></span>
+      <button class="conv-title" type="button" id="conv-title" title="點一下改名">新對話</button>
+      <div class="menu-wrap">
+        <button class="btn sm icon-btn" type="button" id="conv-menu" aria-haspopup="true" aria-expanded="false" title="這個對話的其他動作">⋯</button>
+        <div class="menu" id="conv-menu-list" hidden role="menu"></div>
       </div>
-
-      <div class="controls">
-        <span id="sched-state" class="state"><span class="s-dot"></span><span class="s-text">–</span></span>
-        <span id="self-update-badge" class="badge self-update" hidden>⟳ 引擎更新排隊中</span>
-        <button id="pause-btn" class="btn" type="button">暫停排程</button>
-        <span id="conn" class="conn connecting" title="SSE 連線狀態" role="status">
-          <span class="conn-dot"></span><span class="conn-text">連線中</span>
-        </span>
-        <button id="settings-btn" class="btn icon-btn" type="button" title="排程設定" aria-label="排程設定">⚙</button>
-        <button id="prune-btn" class="btn icon-btn" type="button" title="清理終態任務" aria-label="清理終態任務">🧹</button>
-        <button id="theme-btn" class="btn icon-btn" type="button" title="切換佈景" aria-label="切換佈景"></button>
-        <a class="btn" href="/brain.html">知識庫</a>
-        <a class="btn" href="/metrics.html">儀表板</a>
-        <a class="btn" href="/pipelines.html">Pipelines</a>
-        <a class="btn" href="/report.html">報告</a>
-        <a class="btn" href="/help.html" title="操作說明">說明</a>
-        <a class="btn primary voice-cta" href="/voice.html">🎤 語音加 task</a>
-        <button id="new-btn" class="btn primary" type="button">+ 新增 task</button>
-      </div>
+      <span class="svc" id="svc-state">連線中…</span>
+      <span class="grow"></span>
+      <span class="usage-chips" id="usage-chips">
+        <span class="chip" id="usage-session" data-state="ok" title="5 小時視窗用量">session –</span>
+        <span class="chip" id="usage-weekly" data-state="ok" title="每週視窗用量">weekly –</span>
+      </span>
+      <a class="btn sm" href="/board.html">任務看板 ↗</a>
+      <button class="btn sm icon-btn" type="button" id="theme-btn" title="切換佈景" aria-label="切換佈景"></button>
+      <button class="btn sm icon-btn" type="button" id="dock-toggle" aria-controls="dock" aria-expanded="true" title="顯示或收起右側面板">▤</button>
     </header>
 
-    <section id="pipeline-strip" class="pipeline-strip" aria-live="polite" hidden></section>
-
-    <main id="board" class="board" aria-live="polite"></main>
-
-    <dialog id="new-dialog">
-      <form method="dialog" id="new-form">
-        <h3>新增 task <button id="voice-btn" class="btn icon-btn" type="button" title="語音輸入" aria-label="語音輸入">🎤</button></h3>
-        <p class="dialog-hint" id="voice-status" hidden></p>
-        <label>Title <span class="req">*</span><input name="title" required autocomplete="off" /></label>
-        <label>Goal <span class="req">*</span><input name="goal" required autocomplete="off" /></label>
-        <label>Plan (.md/.html 或 URL) <input name="plan_ref" placeholder="./plan.md or https://…" autocomplete="off" /></label>
-        <div class="row">
-          <label>Tool
-            <select name="coding_tool"><option>claude-code</option><option>mock</option><option>generic</option><option>plan</option><option>deploy</option></select>
-          </label>
-          <label>Complexity
-            <select name="complexity"><option>S</option><option selected>M</option><option>L</option></select>
-          </label>
-          <label>Priority <input name="priority" type="number" value="2" /></label>
+    <main class="shell" id="shell-main">
+      <aside class="rail" id="rail" aria-label="對話紀錄">
+        <div class="rail-inner" id="rail-inner">
+          <div class="rail-head">
+            <h2>對話紀錄</h2>
+            <button class="btn sm" type="button" id="new-chat-btn">＋ 新對話</button>
+          </div>
+          <input type="search" id="conv-search" placeholder="搜尋對話…" autocomplete="off" />
+          <div class="conv-list" id="conv-list">
+            <p class="conv-empty">載入中…</p>
+          </div>
+          <div class="rail-foot" id="rail-foot">
+            <div class="who"><span>你是</span><b id="who-label">…</b><button class="row-btn" type="button" id="who-change" hidden>換人</button></div>
+            <form id="who-form" hidden>
+              <input id="who-name" placeholder="輸入你的名字" autocomplete="off" maxlength="40" />
+              <button class="btn sm" type="submit">記住</button>
+            </form>
+            <p class="note" id="who-note">對話紀錄依使用者分開存放。這是工作區分隔，不是權限控管：知道網址與 token 的人都看得到這台機器上的資料。</p>
+            <nav class="rail-nav" aria-label="其他頁面">
+              <a href="/board.html">任務看板</a>
+              <a href="/brain.html">知識星圖</a>
+              <a href="/prd.html">PRD</a>
+              <a href="/benchmarks.html">Benchmark</a>
+              <a href="/docs/操作說明.html" target="_blank" rel="noopener">操作說明</a>
+            </nav>
+          </div>
         </div>
-        <label>Model（留空＝用全域預設）
-          <select name="model">
-            <option value="">（全域預設）</option>
-            <option value="sonnet">sonnet</option>
-            <option value="haiku">haiku</option>
-            <option value="opus">opus</option>
-            <option value="fable-5">fable-5</option>
-          </select>
-        </label>
-        <label>Verify steps (逗號分隔) <input name="verification_steps" placeholder="npm run lint, npm test" autocomplete="off" /></label>
-        <div class="settings-group">Verify mode</div>
-        <div class="chk-row">
-          <label class="chk"><input type="checkbox" name="verify_mode" value="command" checked /> command</label>
-          <label class="chk"><input type="checkbox" name="verify_mode" value="llm" /> llm</label>
-          <label class="chk"><input type="checkbox" name="verify_mode" value="manual" /> manual</label>
+      </aside>
+
+      <section class="convo" id="convo">
+        <div class="convo-head">
+          <p class="hint">回答完全在這台 DGX Spark 上產生，不經過雲端、不花 token</p>
+          <span class="grow"></span>
+          <button class="btn sm" type="button" id="samples-toggle" aria-controls="samples" aria-expanded="true">範例問題</button>
+          <button class="btn sm" type="button" id="clear-btn">清除畫面</button>
         </div>
-        <label>驗收標準 Rubric（llm／manual 用，怎樣算「完成」）<textarea name="verify_rubric" rows="3" placeholder="例如：介面能正確顯示…" autocomplete="off"></textarea></label>
-        <label>需要的硬體/環境 Requires（逗號分隔，本機不具備時自動轉手動驗證）<input name="requires" placeholder="gpu, camera, os:windows" autocomplete="off" /></label>
-        <div class="row" id="repo-row">
-          <label>Repo path <input name="repo_path" placeholder="/path/to/repo" autocomplete="off" /></label>
-          <label>Base branch <input name="base_branch" placeholder="main" autocomplete="off" /></label>
+        <p class="err" id="disabled-note" hidden>本地模型未啟用：<code>loop config set local_models_enabled true</code></p>
+        <div class="samples" id="samples"></div>
+        <div class="log" id="log" aria-live="polite">
+          <p class="empty" id="empty">問任何 CF-AOI 的問題，回答會附上知識庫出處；也可以 Ctrl+V 貼上截圖</p>
         </div>
-        <p class="dialog-hint" id="repo-hint" hidden>generic 工具在獨立的產出目錄執行，不需要 repo/base（無 git）。</p>
-        <label>Setup cmd <input name="setup_cmd" placeholder="npm ci" autocomplete="off" /></label>
-        <label>Environment（選填，套用對應 env:&lt;name&gt; 知識；亦為 deploy 任務的目標）
-          <input name="environment" list="env-list" placeholder="company / home" autocomplete="off" />
-          <datalist id="env-list"></datalist>
-        </label>
-        <menu>
-          <button class="btn" type="button" id="new-cancel">取消</button>
-          <button value="create" class="btn primary" id="create-btn" type="submit">建立</button>
-        </menu>
-      </form>
-    </dialog>
+        <form id="composer">
+          <div class="attach" id="attach" hidden></div>
+          <textarea id="prompt" rows="3" placeholder="輸入問題，Shift+Enter 送出、Enter 換行；可 Ctrl+V 貼上截圖"></textarea>
+          <div class="composer-row">
+            <button class="chip toggle" type="button" id="kb-box" aria-pressed="true" title="回答前先檢索 CF-AOI 知識庫，並附上出處">引用知識庫</button>
+            <button class="chip toggle" type="button" id="think-box" aria-pressed="false" title="先推理再回答，較慢但較深入">思考模式</button>
+            <button class="chip toggle" type="button" id="tune-box" aria-pressed="false" title="描述症狀，讓模型查知識庫後給出可調的檔案與參數建議">調參建議</button>
+            <span class="hint" id="tune-note" hidden>只產生建議，不會改機台；建議可一鍵轉成 Loop 任務。</span>
+            <span class="hint" id="attach-hint" aria-live="polite"></span>
+            <span class="grow"></span>
+            <input type="file" id="file-input" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden />
+            <button class="btn sm" type="button" id="file-btn">加入圖片</button>
+            <button class="btn sm" type="button" id="stop-btn" disabled>停止</button>
+            <button class="btn primary" type="submit" id="send-btn">送出</button>
+          </div>
+        </form>
+      </section>
 
-    <dialog id="settings-dialog">
-      <form id="settings-form" method="dialog">
-        <h3>排程設定</h3>
-        <p class="dialog-hint">門檻為用量百分比。儲存後立即生效（下一個 tick，免重啟）。</p>
+      <aside class="dock" id="dock" aria-label="工作面板">
+        <div class="dock-inner">
+          <div class="dock-pane" id="pane-tasks" role="tabpanel" aria-labelledby="act-tasks" hidden>
+            <div class="card">
+              <h2>任務狀態</h2>
+              <div class="counts" id="task-counts"></div>
+              <p class="hint" id="sched-note">連線中…</p>
+            </div>
+            <div class="task-list" id="task-list"></div>
+            <p class="pane-foot"><a href="/board.html">開啟完整看板 ↗</a> · <a href="/board.html#new">＋ 新增 task</a></p>
+          </div>
 
-        <div class="settings-group">日間</div>
-        <label>日間時段 (HH:MM-HH:MM)<input name="day_window" placeholder="08:00-23:00" autocomplete="off" /></label>
-        <div class="row">
-          <label>Session 上限 %<input name="day_session_max" type="number" min="0" max="100" /></label>
-          <label>Weekly 上限 %<input name="day_weekly_max" type="number" min="0" max="100" /></label>
+          <div class="dock-pane" id="pane-tune" role="tabpanel" aria-labelledby="act-tune" hidden>
+            <div class="card">
+              <h2>智慧調整參數</h2>
+              <p class="hint">描述機台症狀，模型會先查 CF-AOI 知識庫，再給出可調的檔案與參數。<b>只產生建議，不會改機台</b>；建議可一鍵轉成 Loop 任務。</p>
+              <form id="tune-form">
+                <textarea id="tune-symptom" rows="4" placeholder="例：ROI 邊緣常把正常紋路判成刮傷"></textarea>
+                <input id="tune-scope" placeholder="機台／模組（可留空，例：IP 瑕疵偵測）" autocomplete="off" />
+                <div class="prd-actions"><button class="btn sm primary" type="submit" id="tune-submit">產生建議</button></div>
+              </form>
+              <p class="hint" id="tune-status">還沒有產生建議</p>
+            </div>
+
+            <div class="card" id="tune-latest" hidden>
+              <h2>最新建議</h2>
+              <div id="tune-latest-body"></div>
+              <div class="prd-actions">
+                <button class="btn sm primary" type="button" id="tune-to-task">轉成任務</button>
+                <button class="btn sm" type="button" id="tune-show">在對話中查看</button>
+              </div>
+            </div>
+
+            <div class="card">
+              <h2>歷史建議 <button class="mini" type="button" id="tune-refresh">重新整理</button></h2>
+              <p class="hint">你在所有對話裡拿到的調參建議，以及對應任務的目前狀態。</p>
+              <div id="tune-history"></div>
+            </div>
+          </div>
+
+          <div class="dock-pane" id="pane-kb" role="tabpanel" aria-labelledby="act-kb" hidden>
+            <div class="card">
+              <h2>CF-AOI 知識庫</h2>
+              <dl>
+                <dt>文件</dt><dd id="kb-docs">–</dd>
+                <dt>可檢索片段</dt><dd id="kb-chunks">–</dd>
+                <dt>來源</dt><dd id="kb-sources">–</dd>
+              </dl>
+            </div>
+            <div class="card">
+              <h2>搜尋知識庫</h2>
+              <form id="rag-form">
+                <input id="rag-q" placeholder="關鍵字…" autocomplete="off" />
+              </form>
+              <div id="rag-results"></div>
+            </div>
+            <div class="card">
+              <h2>快速記一筆</h2>
+              <form id="capture-form">
+                <input id="capture-title" placeholder="標題（可留空）" autocomplete="off" />
+                <textarea id="capture-body" rows="4" placeholder="要記進知識庫的內容…"></textarea>
+                <button class="btn sm primary" type="submit" id="capture-btn">存進知識庫</button>
+              </form>
+              <p class="hint" id="capture-note">寫進 vault 來源並立刻建立索引，之後對話就查得到。</p>
+            </div>
+            <p class="pane-foot"><a href="/brain.html">開啟知識星圖 ↗</a></p>
+          </div>
+
+          <div class="dock-pane" id="pane-prd" role="tabpanel" aria-labelledby="act-prd" hidden>
+            <div class="card">
+              <h2>PRD 精靈</h2>
+              <p class="hint">用五步把「改哪套軟體、改什麼、怎麼驗證」寫清楚，通過閘門才變成 Loop 任務。</p>
+              <div class="prd-actions">
+                <a class="btn sm primary" id="prd-new" href="/prd.html">開新的 PRD</a>
+                <button class="btn sm" type="button" id="prd-refresh">重新整理</button>
+              </div>
+              <h3>最近的草稿</h3>
+              <div id="prd-drafts"></div>
+            </div>
+            <p class="pane-foot"><a href="/prd.html">開啟 PRD 精靈 ↗</a></p>
+          </div>
+
+          <div class="dock-pane" id="pane-model" role="tabpanel" aria-labelledby="act-model">
+            <section class="card" id="model-switch">
+              <h2>可用模型 <span class="hint" id="spark-count"></span></h2>
+              <p class="hint" id="switch-state">讀取中…</p>
+              <div class="model-list" id="model-list"></div>
+              <p class="hint">切換會重新啟動 vLLM，期間無法對話，通常要幾分鐘。</p>
+            </section>
+
+            <section class="card">
+              <h2>這次回答</h2>
+              <div class="tiles">
+                <div><span class="k">首字延遲</span><span class="v" id="r-ttft">–</span></div>
+                <div class="hl"><span class="k">輸出速度</span><span class="v"><span id="r-tps">–</span><small> tok/s</small></span></div>
+                <div><span class="k">輸出 token</span><span class="v" id="r-tokens">–</span></div>
+                <div><span class="k">總耗時</span><span class="v" id="r-total">–</span></div>
+              </div>
+              <p class="live">生成中即時速度 <b id="live-tps">–</b> tok/s · 執行中 <b id="req-running">–</b> · 排隊 <b id="req-waiting">–</b></p>
+            </section>
+
+            <section class="card">
+              <h2>目前模型</h2>
+              <p class="model-name" id="model-name">…</p>
+              <p class="model-id" id="model-id"></p>
+              <p class="params" id="m-params" hidden>
+                <span class="params-total" id="m-params-total"></span>
+                <span class="params-active" id="m-params-active"></span>
+              </p>
+              <dl>
+                <dt>參數組成</dt><dd id="m-params-detail">–</dd>
+                <dt>權重檔大小</dt><dd id="m-disk">–</dd>
+                <dt>量化格式</dt><dd id="m-quant">–</dd>
+                <dt>架構</dt><dd id="m-arch">–</dd>
+                <dt>最長上下文</dt><dd id="m-ctx">–</dd>
+                <dt>推測解碼</dt><dd id="m-spec">–</dd>
+              </dl>
+            </section>
+
+            <section class="card">
+              <h2>記憶體（統一記憶體，CPU 與 GPU 共用）</h2>
+              <div class="bar" id="mem-bar-wrap"><span class="fill" id="mem-bar"></span><span class="mark" id="mem-mark" hidden></span></div>
+              <dl>
+                <dt>已用 / 總量</dt><dd id="mem-used">–</dd>
+                <dt>剩餘可用</dt><dd id="mem-free">–</dd>
+                <dt>vLLM 上限</dt><dd id="mem-vllm">–</dd>
+              </dl>
+              <h3>KV 快取（模型處理對話內容的工作區）</h3>
+              <div class="bar"><span class="fill kv" id="kv-bar"></span></div>
+              <dl>
+                <dt>容量</dt><dd id="kv-size">–</dd>
+                <dt>目前使用</dt><dd id="kv-usage">–</dd>
+                <dt>同時服務</dt><dd id="kv-conc">–</dd>
+              </dl>
+            </section>
+
+            <section class="card">
+              <h2>GPU 與累計</h2>
+              <dl>
+                <dt>GPU</dt><dd id="gpu-name">–</dd>
+                <dt>溫度 / 功耗</dt><dd id="gpu-tp">–</dd>
+                <dt>GPU 使用率</dt><dd id="gpu-util">–</dd>
+                <dt>累計生成</dt><dd id="tot-gen">–</dd>
+                <dt>累計讀入</dt><dd id="tot-prompt">–</dd>
+              </dl>
+            </section>
+          </div>
+
+          <div class="dock-pane" id="pane-bench" role="tabpanel" aria-labelledby="act-bench" hidden>
+            <div class="card">
+              <h2>Benchmark</h2>
+              <p class="hint">同一份題目跑本地與雲端模型，比對誰答得準、花多久。</p>
+              <div id="bench-list"></div>
+            </div>
+            <p class="pane-foot"><a href="/benchmarks.html">開啟完整 Benchmark 頁 ↗</a></p>
+          </div>
         </div>
+      </aside>
 
-        <div class="settings-group">夜間</div>
-        <div class="row">
-          <label>Session 上限 %<input name="night_session_max" type="number" min="0" max="100" /></label>
-          <label>Weekly 上限 %<input name="night_weekly_max" type="number" min="0" max="100" /></label>
-        </div>
+      <nav class="activity" id="activity-bar" role="tablist" aria-orientation="vertical" aria-label="工作面板" data-open="true">
+        <button class="act" type="button" id="act-tasks" role="tab" aria-controls="pane-tasks" aria-selected="false" title="任務（Alt+1）">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6.5h3.2M4 12h3.2M4 17.5h3.2"/><path d="M10.5 6.5H20M10.5 12H20M10.5 17.5H20"/></svg>
+          <span class="lbl">任務</span>
+          <span class="badge" id="act-tasks-badge" hidden></span>
+        </button>
+        <button class="act" type="button" id="act-tune" role="tab" aria-controls="pane-tune" aria-selected="false" title="調參（Alt+2）">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 5v5M5 14v5M12 5v3M12 12v7M19 5v9M19 18v1"/><path d="M3 12h4M10 10h4M17 16h4"/></svg>
+          <span class="lbl">調參</span>
+          <span class="badge" id="act-tune-badge" hidden></span>
+        </button>
+        <button class="act" type="button" id="act-kb" role="tab" aria-controls="pane-kb" aria-selected="false" title="知識庫（Alt+3）">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4H19v16H5.5A1.5 1.5 0 0 1 4 18.5z"/><path d="M8 4v16M11 8.5h5M11 12h5"/></svg>
+          <span class="lbl">知識庫</span>
+          <span class="badge" id="act-kb-badge" hidden></span>
+        </button>
+        <button class="act" type="button" id="act-prd" role="tab" aria-controls="pane-prd" aria-selected="false" title="PRD（Alt+4）">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3.5h7.5L18 8v12.5H6z"/><path d="M13.5 3.5V8H18"/><path d="M9 12h6M9 15.5h6"/></svg>
+          <span class="lbl">PRD</span>
+          <span class="badge" id="act-prd-badge" hidden></span>
+        </button>
+        <span class="sep" aria-hidden="true"></span>
+        <button class="act" type="button" id="act-model" role="tab" aria-controls="pane-model" aria-selected="false" title="模型（Alt+5）">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="7.5" y="7.5" width="9" height="9" rx="1.5"/><path d="M10 4v3.5M14 4v3.5M10 16.5V20M14 16.5V20M4 10h3.5M4 14h3.5M16.5 10H20M16.5 14H20"/></svg>
+          <span class="lbl">模型</span>
+          <span class="badge" id="act-model-badge" hidden></span>
+        </button>
+        <button class="act" type="button" id="act-bench" role="tab" aria-controls="pane-bench" aria-selected="false" title="Benchmark（Alt+6）">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h16"/><path d="M7 20v-6M12 20V6M17 20v-9"/></svg>
+          <span class="lbl">評比</span>
+          <span class="badge" id="act-bench-badge" hidden></span>
+        </button>
+      </nav>
+    </main>
 
-        <div class="settings-group">保護與排程</div>
-        <div class="row">
-          <label>硬上限 %（斷路器）<input name="hard_limit_pct" type="number" min="0" max="100" /></label>
-          <label>最少 runway（分）<input name="min_runway_min" type="number" min="0" /></label>
-          <label>並發數<input name="max_concurrency" type="number" min="0" /></label>
-        </div>
+    <div class="drawer-scrim" id="drawer-scrim" hidden></div>
+    <aside class="manage-drawer" id="chat-drawer" hidden aria-label="面板">
+      <div class="drawer-head">
+        <strong id="drawer-title">對話紀錄</strong>
+        <button class="btn sm" type="button" id="drawer-close" title="關閉">✕</button>
+      </div>
+      <div class="drawer-body" id="drawer-body"></div>
+    </aside>
 
-        <div class="settings-group">Git 收尾</div>
-        <div class="row">
-          <label>fetch 最新 base
-            <select name="git_fetch_base"><option value="true">開</option><option value="false">關</option></select>
-          </label>
-          <label>推送分支備份
-            <select name="auto_push_branch"><option value="true">開</option><option value="false">關</option></select>
-          </label>
-        </div>
-        <div class="row">
-          <label>自動併入 base
-            <select name="auto_merge"><option value="true">開</option><option value="false">關</option></select>
-          </label>
-          <label>衝突自動建任務
-            <select name="merge_conflict_task"><option value="true">開</option><option value="false">關</option></select>
-          </label>
-        </div>
-
-        <div class="settings-group">執行模型</div>
-        <label>Coding 預設模型（未指定的任務都用它，越貴越燒 token）
-          <select name="default_model">
-            <option value="sonnet">sonnet（推薦，省 token）</option>
-            <option value="haiku">haiku（最省）</option>
-            <option value="opus">opus（更強）</option>
-            <option value="fable-5">fable-5（最強，最貴）</option>
-            <option value="default">CLI 預設</option>
-          </select>
-        </label>
-
-        <div class="settings-group">執行紀律（實驗性）</div>
-        <label>派工時附加「執行紀律」提示區塊（TDD／系統化除錯／完成前驗證；預設關，效果見儀表板 A/B 表）
-          <select name="prompt_discipline"><option value="false">關</option><option value="true">開</option></select>
-        </label>
-
-        <p class="settings-err" id="settings-err" hidden></p>
-        <menu>
-          <button class="btn" type="button" id="settings-cancel">取消</button>
-          <button value="save" class="btn primary" id="settings-save" type="submit">儲存</button>
-        </menu>
-      </form>
-    </dialog>
-
-    <dialog id="prune-dialog">
-      <form id="prune-form" method="dialog">
-        <h3>清理任務</h3>
-        <p class="dialog-hint">永久刪除終態任務與其磁碟產物（worktree／plan／logs）。不會動到執行中、blocked 或待結案（review）的任務。</p>
-
-        <div class="settings-group">狀態</div>
-        <div class="chk-row">
-          <label class="chk"><input type="checkbox" name="status" value="closed" checked /> closed</label>
-          <label class="chk"><input type="checkbox" name="status" value="failed" checked /> failed</label>
-        </div>
-
-        <label>只清理 N 天前更新的（留空 = 不限）<input name="older_than" type="number" min="0" placeholder="例如 7" autocomplete="off" /></label>
-
-        <p class="prune-result" id="prune-result" hidden></p>
-        <p class="settings-err" id="prune-err" hidden></p>
-        <menu>
-          <button class="btn" type="button" id="prune-cancel">取消</button>
-          <button class="btn" type="button" id="prune-preview">預覽</button>
-          <button class="btn danger" type="button" id="prune-run">清理</button>
-        </menu>
-      </form>
-    </dialog>
-
-    <dialog id="detail-dialog">
-      <div id="detail-body"></div>
-    </dialog>
-
-    <script src="/app.js"></script>
+    <script type="module" src="/chat.js"></script>
+    <script type="module" src="/dock.js"></script>
   </body>
 </html>

@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="zh-Hant" data-mode="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>任務看板 · Loop Engineering</title>
+    <script>
+      // Set theme before first paint to avoid a flash of the wrong mode.
+      (function () {
+        try {
+          var m = localStorage.getItem('loop_mode');
+          if (m !== 'light' && m !== 'dark') {
+            m = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+          }
+          document.documentElement.setAttribute('data-mode', m);
+        } catch (e) {}
+      })();
+    </script>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span class="brand-text">
+          <strong class="brand-name">Loop Engineering</strong>
+          <span class="brand-sub">coding scheduler</span>
+        </span>
+      </div>
+
+      <div class="gauges">
+        <div class="ring" id="ring-session" data-state="ok">
+          <svg viewBox="0 0 44 44" width="42" height="42" aria-hidden="true">
+            <circle class="track" cx="22" cy="22" r="18"></circle>
+            <circle class="fill" cx="22" cy="22" r="18" transform="rotate(-90 22 22)"></circle>
+          </svg>
+          <div class="ring-label"><b id="session-pct">–</b></div>
+          <span class="ring-cap">session</span>
+        </div>
+        <div class="ring" id="ring-weekly" data-state="ok">
+          <svg viewBox="0 0 44 44" width="42" height="42" aria-hidden="true">
+            <circle class="track" cx="22" cy="22" r="18"></circle>
+            <circle class="fill" cx="22" cy="22" r="18" transform="rotate(-90 22 22)"></circle>
+          </svg>
+          <div class="ring-label"><b id="weekly-pct">–</b></div>
+          <span class="ring-cap">weekly</span>
+        </div>
+
+        <div class="ticks">
+          <div class="tick" id="resets">
+            <span class="tick-k">Session 重置</span>
+            <span class="tick-v tnum">–</span>
+          </div>
+          <div class="tick" id="policy">
+            <span class="tick-k">Policy</span>
+            <span class="tick-v">–</span>
+          </div>
+        </div>
+
+        <span class="chip forecast" id="forecast-chip" data-state="ok" title="Backlog 用量預估：待處理任務吃掉的 weekly 額度、剩餘可加碼空間">–</span>
+        <span class="chip forecast" id="local-chip" data-state="ok" hidden title="本地模型（vLLM）狀態">–</span>
+      </div>
+
+      <div class="controls">
+        <span id="sched-state" class="state"><span class="s-dot"></span><span class="s-text">–</span></span>
+        <span id="self-update-badge" class="badge self-update" hidden>⟳ 引擎更新排隊中</span>
+        <button id="pause-btn" class="btn" type="button">暫停排程</button>
+        <span id="conn" class="conn connecting" title="SSE 連線狀態" role="status">
+          <span class="conn-dot"></span><span class="conn-text">連線中</span>
+        </span>
+        <button id="settings-btn" class="btn icon-btn" type="button" title="排程設定" aria-label="排程設定">⚙</button>
+        <button id="prune-btn" class="btn icon-btn" type="button" title="清理終態任務" aria-label="清理終態任務">🧹</button>
+        <button id="theme-btn" class="btn icon-btn" type="button" title="切換佈景" aria-label="切換佈景"></button>
+        <a class="btn" href="/">← 回到對話</a>
+        <a class="btn" href="/brain.html">知識星圖</a>
+        <button id="new-btn" class="btn primary" type="button">+ 新增 task</button>
+      </div>
+    </header>
+
+    <section id="pipeline-strip" class="pipeline-strip" aria-live="polite" hidden></section>
+
+    <main id="board" class="board" aria-live="polite"></main>
+
+    <dialog id="new-dialog">
+      <form method="dialog" id="new-form">
+        <h3>新增 task <button id="voice-btn" class="btn icon-btn" type="button" title="語音輸入" aria-label="語音輸入">🎤</button></h3>
+        <p class="dialog-hint" id="voice-status" hidden></p>
+        <label>Title <span class="req">*</span><input name="title" required autocomplete="off" /></label>
+        <label>Goal <span class="req">*</span><input name="goal" required autocomplete="off" /></label>
+        <label>Plan (.md/.html 或 URL) <input name="plan_ref" placeholder="./plan.md or https://…" autocomplete="off" /></label>
+        <div class="row">
+          <label>Tool
+            <select name="coding_tool"><option>claude-code</option><option>mock</option><option>generic</option><option>plan</option><option>deploy</option></select>
+          </label>
+          <label>Complexity
+            <select name="complexity"><option>S</option><option selected>M</option><option>L</option></select>
+          </label>
+          <label>Priority <input name="priority" type="number" value="2" /></label>
+        </div>
+        <label>Model（留空＝用全域預設）
+          <select name="model">
+            <option value="">（全域預設）</option>
+            <option value="sonnet">sonnet</option>
+            <option value="haiku">haiku</option>
+            <option value="opus">opus</option>
+            <option value="fable-5">fable-5</option>
+            <optgroup label="本地模型（vLLM，不耗 token）" id="model-local-group" hidden></optgroup>
+          </select>
+        </label>
+        <label>Verify steps (逗號分隔) <input name="verification_steps" placeholder="npm run lint, npm test" autocomplete="off" /></label>
+        <div class="settings-group">Verify mode</div>
+        <div class="chk-row">
+          <label class="chk"><input type="checkbox" name="verify_mode" value="command" checked /> command</label>
+          <label class="chk"><input type="checkbox" name="verify_mode" value="llm" /> llm</label>
+          <label class="chk"><input type="checkbox" name="verify_mode" value="manual" /> manual</label>
+        </div>
+        <label>驗收標準 Rubric（llm／manual 用，怎樣算「完成」）<textarea name="verify_rubric" rows="3" placeholder="例如：介面能正確顯示…" autocomplete="off"></textarea></label>
+        <label>需要的硬體/環境 Requires（逗號分隔，本機不具備時自動轉手動驗證）<input name="requires" placeholder="gpu, camera, os:windows" autocomplete="off" /></label>
+        <div class="row" id="repo-row">
+          <label>Repo path <input name="repo_path" placeholder="/path/to/repo" autocomplete="off" /></label>
+          <label>Base branch <input name="base_branch" placeholder="main" autocomplete="off" /></label>
+        </div>
+        <p class="dialog-hint" id="repo-hint" hidden>generic 工具在獨立的產出目錄執行，不需要 repo/base（無 git）。</p>
+        <label>Setup cmd <input name="setup_cmd" placeholder="npm ci" autocomplete="off" /></label>
+        <label>Environment（選填，套用對應 env:&lt;name&gt; 知識；亦為 deploy 任務的目標）
+          <input name="environment" list="env-list" placeholder="company / home" autocomplete="off" />
+          <datalist id="env-list"></datalist>
+        </label>
+        <menu>
+          <button class="btn" type="button" id="new-cancel">取消</button>
+          <button value="create" class="btn primary" id="create-btn" type="submit">建立</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <dialog id="settings-dialog">
+      <form id="settings-form" method="dialog">
+        <h3>排程設定</h3>
+        <p class="dialog-hint">門檻為用量百分比。儲存後立即生效（下一個 tick，免重啟）。</p>
+
+        <div class="settings-group">日間</div>
+        <label>日間時段 (HH:MM-HH:MM)<input name="day_window" placeholder="08:00-23:00" autocomplete="off" /></label>
+        <div class="row">
+          <label>Session 上限 %<input name="day_session_max" type="number" min="0" max="100" /></label>
+          <label>Weekly 上限 %<input name="day_weekly_max" type="number" min="0" max="100" /></label>
+        </div>
+
+        <div class="settings-group">夜間</div>
+        <div class="row">
+          <label>Session 上限 %<input name="night_session_max" type="number" min="0" max="100" /></label>
+          <label>Weekly 上限 %<input name="night_weekly_max" type="number" min="0" max="100" /></label>
+        </div>
+
+        <div class="settings-group">保護與排程</div>
+        <div class="row">
+          <label>硬上限 %（斷路器）<input name="hard_limit_pct" type="number" min="0" max="100" /></label>
+          <label>最少 runway（分）<input name="min_runway_min" type="number" min="0" /></label>
+          <label>並發數<input name="max_concurrency" type="number" min="0" /></label>
+        </div>
+
+        <div class="settings-group">Git 收尾</div>
+        <div class="row">
+          <label>fetch 最新 base
+            <select name="git_fetch_base"><option value="true">開</option><option value="false">關</option></select>
+          </label>
+          <label>推送分支備份
+            <select name="auto_push_branch"><option value="true">開</option><option value="false">關</option></select>
+          </label>
+        </div>
+        <div class="row">
+          <label>自動併入 base
+            <select name="auto_merge"><option value="true">開</option><option value="false">關</option></select>
+          </label>
+          <label>衝突自動建任務
+            <select name="merge_conflict_task"><option value="true">開</option><option value="false">關</option></select>
+          </label>
+        </div>
+
+        <div class="settings-group">執行模型</div>
+        <label>Coding 預設模型（未指定的任務都用它，越貴越燒 token）
+          <select name="default_model">
+            <option value="sonnet">sonnet（推薦，省 token）</option>
+            <option value="haiku">haiku（最省）</option>
+            <option value="opus">opus（更強）</option>
+            <option value="fable-5">fable-5（最強，最貴）</option>
+            <option value="default">CLI 預設</option>
+            <optgroup label="本地模型（vLLM，不耗 token）" id="default-model-local-group" hidden></optgroup>
+          </select>
+        </label>
+
+        <div class="settings-group">本地模型（vLLM）</div>
+        <label>啟用本地模型（Model 選 local:… 的任務交給 Spark 上的 vLLM + opencode 執行，不耗 Anthropic token；關閉時這類任務停在佇列）
+          <select name="local_models_enabled"><option value="false">關</option><option value="true">開</option></select>
+        </label>
+        <label>本地模型同時執行數（同一時間 GPU 只載一個模型） <input name="local_max_concurrency" type="number" min="1" max="8" /></label>
+
+        <div class="settings-group">執行紀律（實驗性）</div>
+        <label>派工時附加「執行紀律」提示區塊（TDD／系統化除錯／完成前驗證；預設關，效果見儀表板 A/B 表）
+          <select name="prompt_discipline"><option value="false">關</option><option value="true">開</option></select>
+        </label>
+
+        <p class="settings-err" id="settings-err" hidden></p>
+        <menu>
+          <button class="btn" type="button" id="settings-cancel">取消</button>
+          <button value="save" class="btn primary" id="settings-save" type="submit">儲存</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <dialog id="prune-dialog">
+      <form id="prune-form" method="dialog">
+        <h3>清理任務</h3>
+        <p class="dialog-hint">永久刪除終態任務與其磁碟產物（worktree／plan／logs）。不會動到執行中、blocked 或待結案（review）的任務。</p>
+
+        <div class="settings-group">狀態</div>
+        <div class="chk-row">
+          <label class="chk"><input type="checkbox" name="status" value="closed" checked /> closed</label>
+          <label class="chk"><input type="checkbox" name="status" value="failed" checked /> failed</label>
+        </div>
+
+        <label>只清理 N 天前更新的（留空 = 不限）<input name="older_than" type="number" min="0" placeholder="例如 7" autocomplete="off" /></label>
+
+        <p class="prune-result" id="prune-result" hidden></p>
+        <p class="settings-err" id="prune-err" hidden></p>
+        <menu>
+          <button class="btn" type="button" id="prune-cancel">取消</button>
+          <button class="btn" type="button" id="prune-preview">預覽</button>
+          <button class="btn danger" type="button" id="prune-run">清理</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <dialog id="detail-dialog">
+      <div id="detail-body"></div>
+    </dialog>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
