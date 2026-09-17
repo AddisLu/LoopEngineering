@@ -42,9 +42,16 @@ import type { PersistWriteFns } from '../report/persist.js';
 import type { PptxRenderExec } from '../report/pptx/render.js';
 import type { ContentExec } from '../report/pptx/status.js';
 import type { AssembleFs } from '../report/pptx/assemble.js';
+import { registerLocalRoutes, type LocalRouteOptions } from './localRoutes.js';
+import { registerBenchmarkRoutes } from './benchmarkRoutes.js';
+import type { BenchJudgeExec } from '../benchmark/judge.js';
+import { registerPrdRoutes, type PrdRouteOptions } from './prdRoutes.js';
+import { registerChatRoutes, type ChatRouteOptions } from './chatRoutes.js';
+import type { PrdReviewExec } from '../prd/review.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WEB_DIR = path.resolve(__dirname, '..', '..', 'web');
+const DOCS_DIR = path.resolve(__dirname, '..', '..', 'docs');
 
 const READONLY_PREFIXES = ['/api/rag/', '/api/knowledge', '/api/sources', '/api/status'];
 function isReadonlyAllowed(url: string): boolean {
@@ -79,6 +86,23 @@ export interface AppOptions {
   reportPptxContentExec?: ContentExec;
   reportPptxFs?: AssembleFs;
   reportPptxNow?: () => Date;
+  /** Test-only injection point for /api/local/* (zero docker/vLLM). */
+  modelManager?: LocalRouteOptions['modelManager'];
+  /** Test-only: HF cache dir the model switcher measures downloaded weights against. */
+  localHubDir?: LocalRouteOptions['hubDir'];
+  /** Test-only: stands in for `docker images -q` when checking a recipe's image. */
+  dockerProbe?: LocalRouteOptions['dockerProbe'];
+  /** Test-only injection point for POST /api/benchmarks/:id/judge (zero tokens). */
+  benchJudgeExec?: BenchJudgeExec;
+  /** Test-only injection point for the PRD gate's local-model review (zero GPU). */
+  prdReviewExec?: PrdReviewExec;
+  /** Test-only seams for the PRD wizard endpoints (knowledge search, local model, identity, git). */
+  prdSearch?: PrdRouteOptions['search'];
+  prdLocalChat?: PrdRouteOptions['localChat'];
+  prdIdentity?: PrdRouteOptions['identity'];
+  prdGit?: PrdRouteOptions['git'];
+  /** Test-only injection point for 模型對話 的使用者辨識 (see src/server/identity.ts). */
+  chatIdentity?: ChatRouteOptions['identity'];
 }
 
 interface CreateTaskBody {
@@ -122,7 +146,7 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
     app.register(fastifyCors, {
       origin: corsOrigins,
       methods: ['GET', 'OPTIONS'],
-      allowedHeaders: ['authorization', 'content-type'],
+      allowedHeaders: ['authorization', 'content-type', 'x-loop-user'],
       credentials: false,
     });
   }
@@ -134,6 +158,10 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
   app.addHook('onRequest', async (req, reply) => {
     if (!apiToken && !readonlyToken) return; // dev / no token configured
     if (!req.url.startsWith('/api/')) return;
+    // 分享連結 (web/share.html): the token in the path is the whole credential and the page has no
+    // way to hold a bearer. Exactly one method on one prefix — read-only, one conversation,
+    // revocable from the chat page (src/server/chatRoutes.ts).
+    if (req.method === 'GET' && (req.url.split('?')[0] ?? '').startsWith('/api/chat/shared/')) return;
     const auth = req.headers.authorization;
     const q = (req.query as any)?.token;
     if (apiToken && (auth === `Bearer ${apiToken}` || q === apiToken)) return;
@@ -465,6 +493,16 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
   registerDeployRoutes(app, db);
   registerPipelineRoutes(app, db);
   registerIntegrationRoutes(app, db);
+  registerLocalRoutes(app, db, { modelManager: opts.modelManager, hubDir: opts.localHubDir, dockerProbe: opts.dockerProbe });
+  registerBenchmarkRoutes(app, db, { judgeExec: opts.benchJudgeExec });
+  registerPrdRoutes(app, db, {
+    reviewExec: opts.prdReviewExec,
+    search: opts.prdSearch,
+    localChat: opts.prdLocalChat,
+    identity: opts.prdIdentity,
+    git: opts.prdGit,
+  });
+  registerChatRoutes(app, db, { identity: opts.chatIdentity });
   registerVoiceRoutes(app, db, {
     transcribeExec: opts.voiceTranscribeExec,
     structureExec: opts.voiceStructureExec,
@@ -485,6 +523,9 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
   });
 
   app.register(fastifyStatic, { root: WEB_DIR, prefix: '/' });
+  // 操作說明 is the single source of truth for user docs; the chat shell links to it here instead
+  // of shipping a second copy under web/ that drifts.
+  app.register(fastifyStatic, { root: DOCS_DIR, prefix: '/docs/', decorateReply: false });
 
   return app;
 }
