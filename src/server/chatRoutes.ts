@@ -19,6 +19,7 @@ import { suggestIntent, type IntentSuggestion, type TaskIntent, type PrdKind } f
 import { prefillForm } from '../prd/prefill.js';
 import { createDraft, getDraft } from '../prd/drafts.js';
 import { createSpike, SpikeError } from '../spike/create.js';
+import { GenerationBusyError, getGenerationRegistry, type GenerationRegistry } from '../chat/generation.js';
 import { escalateMessage } from '../chat/escalate.js';
 import { exportFilename, toMarkdown } from '../chat/export.js';
 import { builtinTools, mcpTools, type ToolDef } from '../chat/tools.js';
@@ -125,6 +126,8 @@ export interface ChatRouteOptions {
   tools?: (db: Database.Database) => ToolDef[];
   /** MCP servers bridged into the tool set (src/mcp/client.ts); absent = no MCP tools. */
   mcpPool?: McpPool | null;
+  /** Test injection: the in-flight answer registry (defaults to the process singleton). */
+  generations?: GenerationRegistry;
 }
 
 interface ModelFiles {
@@ -608,6 +611,7 @@ export function registerChatRoutes(app: FastifyInstance, db: Database.Database, 
   // tee-ing the stream here would duplicate that and break the raw passthrough. Each call is
   // therefore small and independent, and the client treats a failure as "no history this turn".
   const localChatImpl = opts.localChat ?? chatLocal;
+  const gens = opts.generations ?? getGenerationRegistry(db);
   const historyOn = () => getBool(db, 'chat_history_enabled', true);
 
   /** enabled → history enabled → identity. Returns null once it has already sent the error. */
@@ -657,6 +661,7 @@ export function registerChatRoutes(app: FastifyInstance, db: Database.Database, 
     captured_path: m.captured_path,
     task_id: m.task_id,
     draft_id: m.draft_id,
+    generating: gens.isRunning(m.id),
     created_at: m.created_at,
   });
 
@@ -1080,6 +1085,7 @@ export function registerChatRoutes(app: FastifyInstance, db: Database.Database, 
       knowledge?: unknown;
       mode?: unknown;
       tools?: unknown;
+      message_id?: unknown;
     };
     const messages = validMessages(body.messages);
     if (!messages) {
@@ -1095,6 +1101,17 @@ export function registerChatRoutes(app: FastifyInstance, db: Database.Database, 
     }
     const { status, model } = serving();
     if (!model) return reply.code(409).send({ error: `no local model ready (status: ${status})` });
+    // 離開頁面也繼續: the page hands over the empty assistant row it created; the answer is then
+    // kept and persisted server-side (src/chat/generation.ts) and can be re-attached to.
+    let genMeta: { messageId: string; conversationId: string; userKey: string } | null = null;
+    if (typeof body.message_id === 'string' && body.message_id) {
+      const me = gate(req, reply);
+      if (!me) return reply;
+      const row = getMessage(db, body.message_id, me.user_key);
+      if (!row || row.message.role !== 'assistant') return reply.code(404).send({ error: 'message_id: 找不到這則回答' });
+      if (gens.isRunning(body.message_id)) return reply.code(409).send({ error: '這則回答還在產生中' });
+      genMeta = { messageId: body.message_id, conversationId: row.conversation.id, userKey: me.user_key };
+    }
     const thinking = body.thinking === true && !cont;
     const requested = Number(body.max_tokens);
     // a full SVG diagram or HTML page often needs 5–10K tokens (~52 tok/s here, so a few minutes)
@@ -1179,14 +1196,28 @@ export function registerChatRoutes(app: FastifyInstance, db: Database.Database, 
       : '';
     const sseHead = { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache', connection: 'keep-alive', 'x-accel-buffering': 'no' };
 
+    // one writer for both branches: the socket while it is open, the registry always
+    const gen = genMeta ? gens.start(genMeta, ac) : null;
+    let socketOpen = true;
+    const emit = (res: import('node:http').ServerResponse, line: string) => {
+      if (gen) gens.push(gen.messageId, line);
+      if (socketOpen) res.write(line);
+    };
+    const onClose = () => {
+      socketOpen = false;
+      if (gen) gen.detached = true; // the page left — keep generating, the registry has it
+      else ac.abort(); // nobody registered the answer: stop as before
+    };
+
     if (tools.length) {
       // the tool loop owns the upstream stream: it must see every chunk to catch tool calls
       reply.hijack();
       const res = reply.raw;
       res.writeHead(200, sseHead);
-      res.on('close', () => ac.abort());
-      if (knowledgeFrame) res.write(knowledgeFrame);
-      if (mcpSkipped.length) res.write(`data: ${JSON.stringify({ loop_tool: { skipped: mcpSkipped } })}\n\n`);
+      res.on('close', onClose);
+      if (knowledgeFrame) emit(res, knowledgeFrame);
+      if (mcpSkipped.length) emit(res, `data: ${JSON.stringify({ loop_tool: { skipped: mcpSkipped } })}\n\n`);
+      let loopError: string | null = null;
       try {
         const out = await runToolLoop({
           fetch: (url, init) => fetchImpl(String(url), init),
@@ -1197,16 +1228,21 @@ export function registerChatRoutes(app: FastifyInstance, db: Database.Database, 
           ctx: { db, fetch: opts.toolFetch ?? fetch, lookup: opts.toolLookup, signal: ac.signal },
           maxRounds: Math.min(10, Math.max(1, getNum(db, 'chat_tool_max_rounds', 5))),
           wallMs: getNum(db, 'chat_tool_wall_ms', 120_000),
-          write: (line) => res.write(line),
+          write: (line) => emit(res, line),
           signal: ac.signal,
           log: (m) => app.log.info({ chat_tools: m }),
         });
-        if (out.error) res.write(`data: ${JSON.stringify({ loop_tool: { error: out.error } })}\n\n`);
+        if (out.error) {
+          loopError = out.error;
+          emit(res, `data: ${JSON.stringify({ loop_tool: { error: out.error } })}\n\n`);
+        }
       } catch (err) {
-        if (!ac.signal.aborted) res.write(`data: ${JSON.stringify({ loop_tool: { error: `工具迴圈失敗：${(err as Error).message.slice(0, 200)}` } })}\n\n`);
+        loopError = ac.signal.aborted ? null : `工具迴圈失敗：${(err as Error).message.slice(0, 200)}`;
+        if (loopError) emit(res, `data: ${JSON.stringify({ loop_tool: { error: loopError } })}\n\n`);
       } finally {
         clearTimeout(timer);
-        res.end();
+        if (gen) gens.finish(gen.messageId, ac.signal.aborted ? 'abort' : null, loopError);
+        if (socketOpen) res.end();
       }
       return;
     }
@@ -1233,16 +1269,73 @@ export function registerChatRoutes(app: FastifyInstance, db: Database.Database, 
     reply.hijack();
     const res = reply.raw;
     res.writeHead(200, sseHead);
-    res.on('close', () => ac.abort()); // viewer pressed 停止 or closed the tab → stop generating
-    if (knowledgeFrame) res.write(knowledgeFrame);
-    if (toolsNote) res.write(`data: ${JSON.stringify({ loop_tool: { unsupported: toolsNote } })}\n\n`);
+    res.on('close', onClose); // 停止 / tab closed: abort unless the answer is registered
+    if (knowledgeFrame) emit(res, knowledgeFrame);
+    if (toolsNote) emit(res, `data: ${JSON.stringify({ loop_tool: { unsupported: toolsNote } })}\n\n`);
+    let streamError: string | null = null;
     try {
-      for await (const chunk of upstream.body as unknown as AsyncIterable<Uint8Array>) res.write(chunk);
-    } catch {
-      /* aborted by the viewer or the 10-minute cap */
+      // the registry needs whole SSE lines, so the passthrough re-chunks on the blank-line boundary
+      const dec = new TextDecoder();
+      let carry = '';
+      for await (const chunk of upstream.body as unknown as AsyncIterable<Uint8Array>) {
+        if (!gen) {
+          res.write(chunk);
+          continue;
+        }
+        carry += dec.decode(chunk, { stream: true });
+        let cut;
+        while ((cut = carry.indexOf('\n\n')) >= 0) {
+          emit(res, carry.slice(0, cut + 2));
+          carry = carry.slice(cut + 2);
+        }
+      }
+      if (gen && carry.trim()) emit(res, `${carry}\n\n`);
+    } catch (err) {
+      if (!ac.signal.aborted) streamError = `vLLM 串流中斷：${(err as Error).message.slice(0, 120)}`;
     } finally {
       clearTimeout(timer);
-      res.end();
+      if (gen) gens.finish(gen.messageId, ac.signal.aborted ? 'abort' : null, streamError);
+      if (socketOpen) res.end();
     }
+  });
+
+  // ---- 離開頁面也繼續: re-attach / stop an in-flight answer ------------------------------------
+
+  app.get('/api/chat/messages/:id/stream', async (req, reply) => {
+    const me = gate(req, reply);
+    if (!me) return reply;
+    const { id } = req.params as { id: string };
+    const g = gens.get(id);
+    if (!g || g.userKey !== me.user_key) return reply.code(404).send({ error: '這則回答沒有在產生中' });
+    reply.hijack();
+    const res = reply.raw;
+    res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache', connection: 'keep-alive', 'x-accel-buffering': 'no' });
+    res.write(`data: ${JSON.stringify({ loop_resume: { started_at: g.startedAt, first_token_ms: g.firstTokenAt != null ? g.firstTokenAt - g.startedAt : null, done: g.done, finish: g.finish } })}\n\n`);
+    let ended = false;
+    const end = () => {
+      if (ended) return;
+      ended = true;
+      res.end();
+    };
+    const detach = gens.attach(id, (line) => {
+      if (ended) return;
+      res.write(line);
+      if (line.includes('data: [DONE]')) end();
+    });
+    if (g.done && !ended) {
+      res.write('data: [DONE]\n\n');
+      end();
+    }
+    res.on('close', () => detach?.());
+  });
+
+  app.post('/api/chat/messages/:id/abort', async (req, reply) => {
+    const me = gate(req, reply);
+    if (!me) return reply;
+    const { id } = req.params as { id: string };
+    const g = gens.get(id);
+    if (!g || g.userKey !== me.user_key || g.done) return reply.code(404).send({ error: '這則回答沒有在產生中' });
+    gens.abort(id);
+    return { ok: true };
   });
 }

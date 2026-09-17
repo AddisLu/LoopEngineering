@@ -1,21 +1,4 @@
-import {
-  $,
-  api,
-  authHeaders,
-  drawer,
-  el,
-  fmtInt,
-  fmtSec,
-  nameHeader,
-  phone,
-  rail,
-  setText,
-  store,
-  stored,
-  toast,
-  when,
-  wireTheme,
-} from './shell.js';
+import { $, api, authHeaders, drawer, el, fmtInt, fmtSec, nameHeader, phone, rail, setText, store, stored, toast, when, wireTheme } from './shell.js';
 import { renderMarkdown } from './chat-md.js';
 import { mountActions, mountConvMenu } from './chat-actions.js';
 
@@ -378,6 +361,11 @@ for (const q of SAMPLES) {
 const log = $('log');
 const history = [];
 let controller = null;
+let current = null; // the answer view being streamed (for 停止 → server-side abort)
+let leaving = false; // pagehide: the server keeps generating, so the abort path must not mark the row
+window.addEventListener('pagehide', () => {
+  leaving = true;
+});
 
 function setBusy(on) {
   busyNow = on;
@@ -401,7 +389,9 @@ function addMsg(role) {
   wrap.append(think, body);
   log.append(wrap);
   log.scrollTop = log.scrollHeight;
-  return { wrap, think, thinkText, body };
+  const view = { wrap, think, thinkText, body };
+  wrap._view = view; // openConv finds answers still being generated through this
+  return view;
 }
 
 function resetRunTiles() {
@@ -637,8 +627,9 @@ function addContinue(a) {
 
 // One streamed generation into assistant message `a`. With cont, vLLM extends the truncated
 // answer from the exact character it stopped at and the new text is appended to the same message.
-async function generate(a, { thinking, cont, mode }) {
+async function generate(a, { thinking, cont, mode, resume = false }) {
   controller = new AbortController();
+  current = a;
   setBusy(true);
   resetRunTiles();
   const prefix = cont ? a.entry.content : '';
@@ -653,7 +644,7 @@ async function generate(a, { thinking, cont, mode }) {
     );
   announce('start');
 
-  const t0 = performance.now();
+  let t0 = performance.now();
   let tFirst = null;
   let usage = null;
   let finish = null;
@@ -690,19 +681,24 @@ async function generate(a, { thinking, cont, mode }) {
   if (cont) paint(false);
 
   try {
-    const r = await fetch('/api/chat', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', ...authHeaders },
-      body: JSON.stringify({
-        messages: modelHistory(),
-        thinking,
-        continue: cont,
-        knowledge: Boolean(a.knowledge),
-        ...(a.tools && !cont ? { tools: true } : {}),
-        ...(mode === 'tune' ? { mode } : {}),
-      }),
-      signal: controller.signal,
-    });
+    // 離開頁面也繼續: the server keeps this answer under message_id, so a page that comes back
+    // re-attaches to GET …/stream instead of asking again
+    const r = resume
+      ? await fetch(`/api/chat/messages/${a.messageId}/stream`, { headers: { ...authHeaders, ...nameHeader() }, signal: controller.signal })
+      : await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', ...authHeaders, ...nameHeader() },
+          body: JSON.stringify({
+            messages: modelHistory(),
+            thinking,
+            continue: cont,
+            knowledge: Boolean(a.knowledge),
+            ...(a.tools && !cont ? { tools: true } : {}),
+            ...(mode === 'tune' ? { mode } : {}),
+            ...(a.messageId && !cont ? { message_id: a.messageId } : {}),
+          }),
+          signal: controller.signal,
+        });
     if (!r.ok) {
       const d = await r.json().catch(() => ({}));
       throw new Error(d.error || `HTTP ${r.status}`);
@@ -726,6 +722,20 @@ async function generate(a, { thinking, cont, mode }) {
           try {
             j = JSON.parse(data);
           } catch (e) {
+            continue;
+          }
+          if (j.loop_resume) {
+            // the clock restarts from when the server started, not from when we came back
+            t0 = performance.now() - Math.max(0, Date.now() - j.loop_resume.started_at);
+            if (j.loop_resume.first_token_ms != null) {
+              tFirst = t0 + j.loop_resume.first_token_ms;
+              setText('r-ttft', fmtSec(j.loop_resume.first_token_ms));
+              a.wrap.classList.remove('pending');
+            }
+            continue;
+          }
+          if (j.loop_gen && j.loop_gen.error) {
+            a.wrap.append(el('div', 'note', `產生中斷：${j.loop_gen.error}`));
             continue;
           }
           if (j.loop_knowledge) {
@@ -805,6 +815,9 @@ async function generate(a, { thinking, cont, mode }) {
     if (raf) cancelAnimationFrame(raf);
     raf = 0;
     a.wrap.classList.remove('pending');
+    if (e.name === 'AbortError' && leaving) {
+      return; // navigating away: the server finishes and stores the answer, nothing to mark here
+    }
     if (e.name === 'AbortError') {
       commit();
       if (answer()) paint(true);
@@ -828,6 +841,7 @@ async function generate(a, { thinking, cont, mode }) {
     clearInterval(timer);
     clearInterval(draft);
     controller = null;
+    current = null;
     setBusy(false);
     refreshStats();
   }
@@ -860,7 +874,11 @@ $('prompt').addEventListener('keydown', (e) => {
     send($('prompt').value);
   }
 });
-$('stop-btn').onclick = () => controller && controller.abort();
+$('stop-btn').onclick = () => {
+  // tell the server first — closing the socket alone no longer stops a registered answer
+  if (current && current.messageId) api(`/api/chat/messages/${current.messageId}/abort`, { method: 'POST', body: '{}' }).catch(() => {});
+  if (controller) controller.abort();
+};
 function resetChat() {
   if (controller) controller.abort();
   history.length = 0;
@@ -1047,6 +1065,7 @@ $('conv-title').onclick = () => {
 
 function newChat() {
   convId = null;
+  store('loop_last_conv', '');
   paintTitle('新對話');
   resetChat();
   loadConvs();
@@ -1068,6 +1087,7 @@ async function saveUserTurn(u, text, images, thinking) {
         body: JSON.stringify({ knowledge: chipOn('kb-box'), thinking }),
       });
       convId = conv.id;
+      store('loop_last_conv', conv.id);
     }
     const saved = await chatApi(`/api/chat/conversations/${convId}/messages`, {
       method: 'POST',
@@ -1167,6 +1187,7 @@ function replayMsg(m) {
   v.capturedPath = m.captured_path || null;
   v.taskId = m.task_id || null;
   v.draftId = m.draft_id || null;
+  v.generating = Boolean(m.generating);
   const cloud = String(m.model_id || '').startsWith('cloud:');
   if (cloud) {
     v.wrap.classList.add('cloud');
@@ -1174,8 +1195,9 @@ function replayMsg(m) {
   }
   const entry = { role: m.role, content: m.content };
   v.entry = entry;
-  // cloud reviews stay out of what the local model sees, on replay too
-  if (!cloud) history.push(entry);
+  // cloud reviews stay out of what the local model sees, on replay too; an answer still being
+  // generated joins history when its stream commits (generate → commit)
+  if (!cloud && !v.generating) history.push(entry);
   // 重答 needs the ord of the *answer*; 編輯重問 the ord of the question — both come from the row
   mountActions(v, actionCtx);
 }
@@ -1204,8 +1226,16 @@ async function openConv(id) {
   });
   if (!data.messages.length) log.append(el('p', 'empty', '這個對話還沒有訊息'));
   log.scrollTop = log.scrollHeight;
+  store('loop_last_conv', id);
   loadConvs();
   $('prompt').focus();
+  // an answer the server is still producing: re-attach and keep streaming
+  const live = [...log.querySelectorAll('.msg.assistant')].map((w) => w._view).filter((v) => v && v.generating);
+  for (const v of live) {
+    v.wrap.classList.add('pending');
+    v.knowledge = data.conversation.knowledge === 1;
+    generate(v, { thinking: false, cont: false, mode: 'chat', resume: true }).then(() => mountActions(v, actionCtx));
+  }
 }
 
 mountConvMenu({
@@ -1216,4 +1246,12 @@ mountConvMenu({
   },
 });
 paintTitle('新對話');
-loadMe().then(loadConvs);
+loadMe()
+  .then(loadConvs)
+  .then(() => {
+    // come back to where you were — including an answer that is still being generated
+    const last = stored('loop_last_conv');
+    if (last) openConv(last).then(() => {
+      if (convId !== last) store('loop_last_conv', '');
+    });
+  });
