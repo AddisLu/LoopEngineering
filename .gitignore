@@ -17,3 +17,6 @@ worktrees/
 LOOP_TASK.md
 HANDOFF.md
 LOOP_RESUME_CONTEXT.md
+
+# python bytecode from the helper scripts
+__pycache__/

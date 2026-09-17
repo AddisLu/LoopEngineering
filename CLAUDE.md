@@ -49,4 +49,4 @@ DB schema: `src/db/schema.sql` (`CREATE TABLE IF NOT EXISTS`, exec'd every start
 - Substantive features are executed as **serial Loop task chains** on this very repo (create tasks via `loop add --depends-on <prev>`; the engine implements, auto-merges, and self-updates; a human closes each review to release the next link). Never queue two tasks that touch the same files concurrently.
 - Keep the working tree clean: uncommitted changes downgrade every running task's auto-merge to `pending`.
 - Commit messages are conventional (`feat(scope):`, `fix(...)`) and small.
-- User docs live in `docs/操作說明.html` (Traditional Chinese, served nowhere — file-only); update it when user-facing behavior changes.
+- User docs live in `docs/操作說明.html` (Traditional Chinese, served read-only at `/docs/` and linked from the chat shell's rail); update it when user-facing behavior changes.
