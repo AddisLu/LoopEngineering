@@ -59,10 +59,21 @@ export interface ModelManagerDeps {
 
 const REFRESH_MS = 5 * 60_000;
 
+/**
+ * How a recipe is started. `HF_HUB_OFFLINE=1` is deliberate: the switcher only offers models
+ * whose weights are already complete on disk (src/local/weights.ts), so vLLM has no business
+ * talking to the hub at load time. Without it, an upstream repo that published a *new revision*
+ * makes vLLM resolve that revision instead and quietly start re-downloading ~100 GB mid-switch —
+ * which is how this machine ended up with no model at all during a demo.
+ */
+export function launchArgs(repo: string, recipe: string): string[] {
+  return [path.join(repo, 'run-recipe.sh'), recipe, '--solo', '--earlyoom', '-e', 'HF_HUB_OFFLINE=1'];
+}
+
 function defaultLaunch(repo: string, recipe: string, logPath: string): LauncherHandle {
   const fd = fs.openSync(logPath, 'a');
   // detached + unref: vLLM outlives an engine restart (reconcile() re-adopts it).
-  const child = nodeSpawn('bash', [path.join(repo, 'run-recipe.sh'), recipe, '--solo', '--earlyoom'], {
+  const child = nodeSpawn('bash', launchArgs(repo, recipe), {
     cwd: repo,
     detached: true,
     stdio: ['ignore', fd, fd],

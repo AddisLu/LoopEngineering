@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type Database from 'better-sqlite3';
 import { openTestDb, getSetting, setSetting } from '../db/index.js';
-import { ModelManager, type ModelManagerDeps } from '../local/modelManager.js';
+import { ModelManager, type ModelManagerDeps, launchArgs } from '../local/modelManager.js';
 
 const QWEN = 'local-inference-lab/Qwen3.8-Flash-Next-NVFP4';
 
@@ -60,6 +60,20 @@ const events = () =>
   (db.prepare("SELECT detail FROM task_events WHERE kind = 'note' ORDER BY id").all() as { detail: string }[]).map(
     (e) => e.detail,
   );
+
+describe('launchArgs', () => {
+  it('runs the recipe solo with the hub switched off', () => {
+    // a new upstream revision must never turn a switch into a 100 GB download
+    expect(launchArgs('/r/spark', 'qwen3.8-flash-next-nvfp4-solo')).toEqual([
+      '/r/spark/run-recipe.sh',
+      'qwen3.8-flash-next-nvfp4-solo',
+      '--solo',
+      '--earlyoom',
+      '-e',
+      'HF_HUB_OFFLINE=1',
+    ]);
+  });
+});
 
 describe('ModelManager switch', () => {
   it('waits for the old container to disappear before launching, and fails instead of colliding', async () => {
