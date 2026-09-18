@@ -41,8 +41,15 @@ function downloaded(hub: string, servedId: string, bytes = 1024, partial = false
   fs.mkdirSync(path.join(repo, 'blobs'), { recursive: true });
   fs.mkdirSync(path.join(repo, 'snapshots', 'main'), { recursive: true });
   fs.writeFileSync(path.join(repo, 'blobs', 'w1'), Buffer.alloc(bytes));
-  fs.writeFileSync(path.join(repo, 'snapshots', 'main', 'w1'), Buffer.alloc(bytes));
-  if (partial) fs.writeFileSync(path.join(repo, 'blobs', 'w2.incomplete'), Buffer.alloc(bytes));
+  fs.writeFileSync(path.join(repo, 'snapshots', 'main', 'model.safetensors'), Buffer.alloc(bytes));
+  // an interrupted pull: the index names a shard that never finished linking into the snapshot
+  if (partial) {
+    fs.writeFileSync(path.join(repo, 'blobs', 'w2.incomplete'), Buffer.alloc(bytes));
+    fs.writeFileSync(
+      path.join(repo, 'snapshots', 'main', 'model.safetensors.index.json'),
+      JSON.stringify({ weight_map: { 'a.weight': 'model.safetensors', 'b.weight': 'model-2.safetensors' } }),
+    );
+  }
 }
 
 beforeEach(async () => {

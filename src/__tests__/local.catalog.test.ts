@@ -47,8 +47,15 @@ function cached(hub: string, model: string, opts: { partial?: boolean; bytes?: n
   fs.mkdirSync(path.join(repo, 'blobs'), { recursive: true });
   fs.mkdirSync(path.join(repo, 'snapshots', 'main'), { recursive: true });
   fs.writeFileSync(path.join(repo, 'blobs', 'a'), Buffer.alloc(opts.bytes ?? 2048));
-  fs.writeFileSync(path.join(repo, 'snapshots', 'main', 'a'), '');
-  if (opts.partial) fs.writeFileSync(path.join(repo, 'blobs', 'b.incomplete'), Buffer.alloc(512));
+  fs.writeFileSync(path.join(repo, 'snapshots', 'main', 'model.safetensors'), '');
+  // partial = the shard index names a file that is not in the snapshot yet
+  if (opts.partial) {
+    fs.writeFileSync(path.join(repo, 'blobs', 'b.incomplete'), Buffer.alloc(512));
+    fs.writeFileSync(
+      path.join(repo, 'snapshots', 'main', 'model.safetensors.index.json'),
+      JSON.stringify({ weight_map: { a: 'model.safetensors', b: 'model-2.safetensors' } }),
+    );
+  }
 }
 
 const sizes: Record<string, { size: number; gated?: unknown }> = {
