@@ -72,4 +72,15 @@ describe('模型對話 scripts', () => {
     const missing = [...ids].filter((id) => !page.includes(`id="${id}"`));
     expect(missing, `ids used by chat scripts but absent from index.html: ${missing.join(', ')}`).toEqual([]);
   });
+
+  it('the topbar model chip is painted from the board stream, not only by the stats poll', () => {
+    const js = fs.readFileSync(path.join(WEB_DIR, 'chat.js'), 'utf8');
+    // refreshStats() is gated on a panel being open, so with the dock collapsed the chip used to
+    // keep the placeholder text from index.html forever
+    expect(js).toContain('onBoard');
+    expect(js).toContain('LOCAL_STATE');
+    expect(js).toContain('模型就緒');
+    const html = fs.readFileSync(path.join(WEB_DIR, 'index.html'), 'utf8');
+    expect(html).toContain('id="svc-state"');
+  });
 });

@@ -1,4 +1,4 @@
-import { $, api, authHeaders, drawer, el, fmtInt, fmtSec, nameHeader, phone, rail, setText, store, stored, toast, when, wireTheme } from './shell.js';
+import { $, api, authHeaders, drawer, el, fmtInt, fmtSec, nameHeader, onBoard, phone, rail, setText, store, stored, toast, when, wireTheme } from './shell.js';
 import { renderMarkdown } from './chat-md.js';
 import { mountActions, mountConvMenu } from './chat-actions.js';
 
@@ -226,6 +226,23 @@ async function refreshStats() {
 }
 refreshStats();
 setInterval(refreshStats, 1000);
+
+/**
+ * The topbar chip is always on screen, but refreshStats() only runs while 機台／知識庫 is open or
+ * an answer is streaming (GET /api/chat/stats costs two vLLM calls plus nvidia-smi). With every
+ * panel closed the chip used to sit on its placeholder text 「連線中…」 forever. The board SSE
+ * already carries the model state, so paint from that and let the poll overwrite it when it runs.
+ */
+const LOCAL_STATE = { ready: '模型就緒', starting: '模型啟動中…', idle: '模型未載入', error: '模型錯誤' };
+onBoard((s) => {
+  if (busyNow || paneOpen('pane-status')) return; // the authoritative poll is already painting
+  const l = s && s.local;
+  if (!l) return;
+  const svc = $('svc-state');
+  const ready = Boolean(l.enabled) && l.status === 'ready';
+  svc.textContent = !l.enabled ? '本地模型未啟用' : LOCAL_STATE[l.status] || `模型狀態：${l.status}`;
+  svc.dataset.state = ready ? 'ok' : 'bad';
+});
 
 
 // ---- image attachments (Ctrl+V / drag & drop / file picker) ------------------------
