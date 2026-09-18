@@ -28,9 +28,11 @@ const histRail = rail({
   defaultOpen: window.innerWidth >= 1000,
 });
 // The dock (which panel, open or closed) belongs to dock.js — this file only needs to know
-// whether the 模型 panel is on screen, so the 1 s stats poll can stop when it is not.
-const statsVisible = () =>
-  !$('pane-status').hidden && (phone() ? drawer.isOpen() : !shellMain.classList.contains('dock-collapsed'));
+// whether a panel that shows /api/chat/stats is on screen, so the 1 s poll can stop otherwise.
+// Two panels read that payload: 機台 (speed, memory, GPU) and 知識庫 (documents / chunks /
+// sources) — leaving 知識庫 out left its counters stuck on “–” for anyone who never opened 機台.
+const paneOpen = (id) => !$(id).hidden && (phone() ? drawer.isOpen() : !shellMain.classList.contains('dock-collapsed'));
+const statsVisible = () => paneOpen('pane-status') || paneOpen('pane-kb');
 
 // On a phone there is no width to hand back, so the same markup moves into the shared drawer
 // (shell.js `drawer`); the dock does the same in dock.js. Closing returns both.
@@ -47,7 +49,7 @@ $('rail-toggle').onclick = () => {
 // dock.js tells us when 模型 becomes the visible panel, so it is never stale on arrival
 document.addEventListener('loop-tab', (e) => {
   const d = e.detail || {};
-  if (d.open && d.tab === 'status') refreshStats();
+  if (d.open && (d.tab === 'status' || d.tab === 'kb')) refreshStats();
 });
 $('drawer-close').onclick = closeDrawer;
 $('drawer-scrim').onclick = closeDrawer;
@@ -200,10 +202,14 @@ function paintStats(s) {
 }
 
 let statsInFlight = false;
+let statsAt = 0;
 async function refreshStats() {
   if (statsInFlight) return;
   if (!statsVisible() && !busyNow) return; // panel hidden and idle — nothing to paint
+  // only the 機台 tiles need a per-second refresh; the knowledge counters barely move
+  if (!busyNow && !paneOpen('pane-status') && Date.now() - statsAt < 5000) return;
   statsInFlight = true;
+  statsAt = Date.now();
   try {
     const r = await fetch('/api/chat/stats', { headers: authHeaders });
     if (r.status === 404) {

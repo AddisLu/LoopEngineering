@@ -221,10 +221,12 @@ describe('chat-first shell', () => {
     expect(slice('pane-model')).not.toContain('id="r-ttft"');
     expect(page).toContain('title="機台狀況（Alt+6）"');
     expect(page).toContain('title="Benchmark（Alt+7）"');
-    // chat.js polls stats only while 機台 is showing
+    // chat.js polls /api/chat/stats only while a panel that shows it is open — 機台 (tiles) or
+    // 知識庫 (documents/chunks/sources); leaving 知識庫 out stuck its counters on “–”
     const chat = read('chat.js');
-    expect(chat).toContain("$('pane-status')");
-    expect(chat).not.toContain("$('pane-model')");
+    expect(chat).toContain("paneOpen('pane-status')");
+    expect(chat).toContain("paneOpen('pane-kb')");
+    expect(chat).not.toContain("'pane-model'");
     // the switcher is built on the catalog (every recipe on disk), with background jobs
     const dock = read('dock.js');
     expect(dock).toContain('/api/local/catalog');
