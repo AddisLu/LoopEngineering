@@ -30,18 +30,30 @@
   const pct = (n) => (n == null || isNaN(n) ? '–' : `${Math.round(n * 100)}%`);
   const dur = (s) => (s == null ? '–' : s < 90 ? `${s}s` : `${Math.round(s / 60)}m`);
   const gb = (b) => (b == null ? '' : `${(b / 1024 ** 3).toFixed(b >= 100 * 1024 ** 3 ? 0 : 1)} GB`);
-  const STATUS = { running: '進行中', judging: '評分中', judged: '已評分', judge_failed: '評分失敗' };
+  const STATUS = { running: '進行中', judging: '評分中', judged: '已評分', judge_failed: '評分失敗', cancelled: '已取消' };
+  const DOMAIN = { cuda: 'CUDA／GPU', cv: '影像處理', cpp: 'C++', csharp: 'C#', typescript: 'TypeScript', python: 'Python', other: '其他' };
+  const domainLabel = (d) => DOMAIN[d] || d || '其他';
+  // SQLite writes UTC; show it in the operator's own clock
+  const localTime = (s) => {
+    if (!s) return '–';
+    const d = new Date(/[TZ]/.test(s) ? s : `${s.replace(' ', 'T')}Z`);
+    return isNaN(d) ? s : d.toLocaleString('zh-TW', { hour12: false }).replace(/:\d\d$/, '');
+  };
   const VERIFY = { pass: '通過', manual: '待人工', fail: '失敗' };
   const CONSENSUS = { unanimous: '評審一致', split: '評審分歧', single: '單一評審' };
   // the same wording the dock uses for a task's state
   const TASK_LABEL = { draft: '草稿', ready: '就緒', queued: '排隊中', blocked: '卡住', running: '執行中', verifying: '驗證中', review: '待結案', attention: '要你處理', failed: '失敗', closed: '已結案' };
   const taskLabel = (s) => TASK_LABEL[s] || s || '未知';
   const SOURCE = { builtin: '內建題庫', task: '看板任務', draft: 'PRD 草稿', manual: '自己出題' };
+  // id -> human name, filled from the local catalog; the page never shows a raw id if it can help it
+  const MODEL_NAMES = new Map();
+  const modelName = (id) => MODEL_NAMES.get(id) || String(id || '').replace(/^local:/, '');
   const CLOUD = [
     ['sonnet', 'Sonnet', '雲端 · 快、便宜'],
     ['opus', 'Opus', '雲端 · 最強，最貴'],
     ['haiku', 'Haiku', '雲端 · 最便宜'],
   ];
+  for (const [id, name] of [['sonnet', 'Sonnet'], ['opus', 'Opus'], ['haiku', 'Haiku']]) MODEL_NAMES.set(id, name);
   const JUDGES = [
     ['opus', 'Opus', '預設評審，判斷最穩'],
     ['sonnet', 'Sonnet', '較快、較省'],
@@ -86,6 +98,12 @@
     return tr;
   }
   const chip = (text, cls) => el('span', `chip ${cls || ''}`.trim(), text);
+  // the list and detail views have no error slot of their own; #form-err lives inside 新評比
+  function pageError(msg) {
+    const box = $('page-err');
+    box.hidden = !msg;
+    box.textContent = msg || '';
+  }
 
   // ================= list view =================
   let summary = { running: null, recent: [], models: [] };
@@ -101,7 +119,7 @@
     if (run) {
       $('running-line').replaceChildren(
         el('b', null, run.title),
-        el('span', null, `　${STATUS[run.status] || run.status} · ${run.arms_done}/${run.arm_count} 組完成 · ${run.models.join('、')}`),
+        el('span', null, `　${STATUS[run.status] || run.status} · ${run.arms_done}/${run.arm_count} 組完成 · ${run.models.map(modelName).join('、')}`),
       );
       $('running-line').onclick = () => go(`#b=${run.id}`);
       $('running-line').style.cursor = 'pointer';
@@ -116,7 +134,7 @@
     fillTable(
       $('matrix'),
       ['領域', '模型', '次數', '平均分數', '勝率', '驗證通過率', '平均輸出 token', '平均耗時'],
-      matrix.map((m) => row([m.domain, m.model, m.n, el('span', 'heat', fmt(m.avg_score)), pct(m.win_rate), pct(m.verify_pass_rate), m.avg_tokens_out, dur(m.avg_duration_s)])),
+      matrix.map((m) => row([domainLabel(m.domain), m.model_label || modelName(m.model), m.n, el('span', 'heat', fmt(m.avg_score)), pct(m.win_rate), pct(m.verify_pass_rate), m.avg_tokens_out, dur(m.avg_duration_s)])),
     );
     paintBenchList();
   }
@@ -138,7 +156,7 @@
             `${b.arms_done}/${b.arm_count}`,
             b.winner_label || '–',
             b.judges.join('、') + (b.consensus && b.status === 'judged' ? `（${CONSENSUS[b.consensus] || b.consensus}）` : ''),
-            b.created_at,
+            localTime(b.created_at),
           ],
           () => go(`#b=${b.id}`),
         ),
@@ -156,14 +174,21 @@
     $('detail-title').textContent = b.title;
     const chips = [chip(STATUS[b.status] || b.status, b.status === 'judged' ? 'ok' : b.status === 'judge_failed' ? 'bad' : '')];
     if (b.consensus && b.status === 'judged') chips.push(chip(CONSENSUS[b.consensus] || b.consensus));
-    chips.push(chip(b.domain), chip(`${arms.length} 組`), chip(`評審：${(b.judge_models || b.judge_model || '').split(',').join('、')}`));
+    chips.push(chip(domainLabel(b.domain)), chip(`${arms.length} 組`), chip(`評審：${(b.judge_models || b.judge_model || '').split(',').join('、')}`), chip(localTime(b.created_at)));
     $('detail-chips').replaceChildren(...chips);
     const src = [SOURCE[b.source_kind] || '–', b.source_ref, b.repo_path].filter(Boolean).join(' · ');
+    const live = b.status === 'running' || b.status === 'judging';
     $('detail-source').textContent = `題目來源：${src}`;
     $('detail-summary').textContent = b.summary || (b.status === 'judged' ? '' : '還沒有評分結果。');
     $('detail-error').hidden = !b.error;
     $('detail-error').textContent = b.error || '';
-    $('rejudge-btn').hidden = b.status === 'running';
+    // re-judging a finished benchmark is exactly what the button is for; only a live run blocks it
+    $('rejudge-btn').hidden = live || b.status === 'cancelled';
+    $('cancel-bench-btn').hidden = !live;
+    $('delete-bench-btn').hidden = live;
+    $('detail-actions-hint').textContent = live
+      ? '取消會把還沒跑完的組別標成失敗，並把機器讓出來。'
+      : '重新評分會再花一次雲端額度（每位評審一次）；刪除只移除這次比較，任務會留在看板。';
 
     const judges = (b.judge_models || b.judge_model || '').split(',').filter(Boolean);
     const sorted = [...arms].sort((x, y) => (x.judge_rank ?? 99) - (y.judge_rank ?? 99));
@@ -182,7 +207,7 @@
         notes.append(el('summary', null, '看評語'), el('p', 'summary', a.notes || '（無）'));
         return row([
           a.judge_rank ?? '–',
-          a.model,
+          a.model_label || modelName(a.model),
           VERIFY[a.verify_outcome] || '–',
           fmt(a.judge_score),
           ...perJudge,
@@ -225,8 +250,39 @@
     }
   };
 
+  $('cancel-bench-btn').onclick = async () => {
+    if (!detailId) return;
+    if (!window.confirm('取消這次評比？還沒跑完的組別會標成失敗，機器讓出來給下一個評比。')) return;
+    const btn = $('cancel-bench-btn');
+    btn.disabled = true;
+    try {
+      await api(`/api/benchmarks/${encodeURIComponent(detailId)}/cancel`, 'POST', {});
+      await loadDetail(detailId);
+    } catch (e) {
+      pageError(`取消失敗：${e.message}`);
+    } finally {
+      btn.disabled = false;
+    }
+  };
+
+  $('delete-bench-btn').onclick = async () => {
+    if (!detailId) return;
+    if (!window.confirm('刪除這次評比的比較結果？每個模型跑出來的任務會留在看板上。')) return;
+    const btn = $('delete-bench-btn');
+    btn.disabled = true;
+    try {
+      await api(`/api/benchmarks/${encodeURIComponent(detailId)}`, 'DELETE');
+      go('#list');
+    } catch (e) {
+      pageError(`刪不掉：${e.message}`);
+      btn.disabled = false;
+    }
+  };
+
   // ================= new view =================
   const draftState = { source: 'task', ref: null, models: new Set(), judges: new Set(['opus']), switchMin: 6 };
+  let usage = null; // { session, weekly } percent of the subscription window, from /api/board
+  let runningNow = null; // a benchmark already owns the machine: only one at a time
 
   function setSource(kind) {
     draftState.source = kind;
@@ -292,7 +348,10 @@
     try {
       // the board snapshot is the task list this deployment already serves — show all of it, so
       // "what is on my board" and "what can I benchmark" are the same list
-      const { cards } = await api('/api/board');
+      const board = await api('/api/board');
+      const { cards } = board;
+      usage = board.usage || null;
+      runningNow = board.benchmark || null;
       taskGate.clear();
       for (const t of cards.slice(0, 200)) {
         const arm = t.title.startsWith('[bench]');
@@ -319,10 +378,14 @@
     try {
       const { drafts } = await api('/api/prd/drafts?limit=50');
       for (const d of drafts) {
-        const o = el('option', null, `${d.title}（第 ${d.step} 步 · ${d.updated_at}）`);
+        // a draft the wizard never composed has no markdown, so the gate has nothing to read
+        const ready = d.has_markdown !== 0;
+        const o = el('option', null, `${d.title}（第 ${d.step} 步 · ${localTime(d.updated_at)}${ready ? '' : ' · 還沒按過「檢查」，不能當題目'}）`);
         o.value = d.id;
+        o.disabled = !ready;
         sel.appendChild(o);
       }
+      if (!drafts.length) sel.appendChild(el('option', null, '還沒有草稿'));
     } catch (e) {
       sel.replaceChildren(el('option', null, 'PRD 精靈未啟用'));
     }
@@ -339,6 +402,7 @@
     try {
       const cat = await api('/api/local/catalog');
       entries = cat.entries.filter((e) => e.registered_id || e.action === 'switch');
+      for (const e of cat.entries) if (e.registered_id) MODEL_NAMES.set(`local:${e.registered_id}`, e.name);
       draftState.switchMin = 6;
     } catch (e) { /* local models disabled — fall back to the registered list */ }
     if (entries) {
@@ -421,14 +485,24 @@
     if (models.length < 2) problems.push('至少選 2 個參賽模型');
     if (!draftState.judges.size) problems.push('至少選 1 位評審');
 
+    const cloud = models.filter((m) => !m.startsWith('local:'));
+    if (runningNow) problems.push(`已經有一個評比在跑：「${runningNow.title}」，先讓它跑完或取消`);
+
     const switches = Math.max(0, locals.length);
     const minutes = switches * draftState.switchMin + models.length * 12 + draftState.judges.size * 3;
     box.replaceChildren();
     box.append(el('div', null, `題目：${label || '—'}`));
-    box.append(el('div', null, `參賽：${models.length ? models.join('、') : '—'}`));
-    box.append(el('div', null, `評審：${[...draftState.judges].join('、') || '—'}`));
+    box.append(el('div', null, `參賽：${models.length ? models.map(modelName).join('、') : '—'}`));
+    box.append(el('div', null, `評審：${[...draftState.judges].map(modelName).join('、') || '—'}`));
     if (!problems.length) {
       box.append(el('div', null, `預計 ${minutes} 分鐘上下：切換本地模型 ${switches} 次（每次約 ${draftState.switchMin} 分鐘）＋ 每組實作時間 ＋ 評分。`));
+      // the only thing that spends the subscription is cloud arms and the judges
+      const spend = cloud.length + draftState.judges.size;
+      const now = usage ? `目前用量 session ${usage.session}%、weekly ${usage.weekly}%` : '用量讀不到';
+      box.append(el('div', 'hint', `會花訂閱額度的有 ${spend} 次雲端呼叫：參賽 ${cloud.length} 組＋評審 ${draftState.judges.size} 位。${now}。`));
+      if (usage && (usage.session >= 70 || usage.weekly >= 80) && spend > 0) {
+        box.append(el('div', 'err', `用量偏高（session ${usage.session}%、weekly ${usage.weekly}%），雲端組別可能會被排到額度回補之後才跑。`));
+      }
       if (locals.length) box.append(el('div', 'hint', '評比期間對話頁會顯示「評比使用中」，模型切換鈕會鎖住；結束後自動切回原本的模型。'));
     } else {
       box.append(el('div', 'err', problems.join('；')));
@@ -489,24 +563,27 @@
     if (timer) clearInterval(timer);
     timer = null;
     try {
+      pageError('');
       if (detail) {
         await loadDetail(decodeURIComponent(detail[1]));
-        timer = setInterval(() => loadDetail(detailId).catch(() => {}), 10000);
+        timer = setInterval(() => loadDetail(detailId).catch((e) => pageError(`更新不了這頁：${e.message}`)), 10000);
       } else if (hash === '#new') {
         await Promise.all([loadBuiltin(), loadTasks(), loadDrafts(), loadModelPicks()]);
         setSource(draftState.source);
       } else {
         await loadList();
-        timer = setInterval(() => loadList().catch(() => {}), 15000);
+        timer = setInterval(() => loadList().catch((e) => pageError(`更新不了列表：${e.message}`)), 15000);
       }
       $('disabled-note').hidden = true;
     } catch (e) {
       if (e.status === 404) {
         $('disabled-note').hidden = false;
         for (const v of ['view-list', 'view-detail', 'view-new']) $(v).hidden = true;
-      } else {
+      } else if (hash === '#new') {
         $('form-err').hidden = false;
         $('form-err').textContent = e.message;
+      } else {
+        pageError(e.message);
       }
     }
   }

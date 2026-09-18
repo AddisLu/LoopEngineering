@@ -104,8 +104,8 @@ function runningBenchmark(db: Database.Database): BoardState['benchmark'] {
     .prepare(
       `SELECT b.id, b.title, b.status,
               (SELECT COUNT(*) FROM benchmark_arms a WHERE a.benchmark_id = b.id) AS arm_count,
-              (SELECT COUNT(*) FROM benchmark_arms a JOIN tasks t ON t.id = a.task_id
-                WHERE a.benchmark_id = b.id AND t.status IN ('review','attention','failed','closed')) AS arms_done
+              (SELECT COUNT(*) FROM benchmark_arms a LEFT JOIN tasks t ON t.id = a.task_id
+                WHERE a.benchmark_id = b.id AND (t.id IS NULL OR t.status IN ('review','attention','failed','closed'))) AS arms_done
          FROM benchmarks b WHERE b.status IN ('running','judging') ORDER BY b.created_at DESC LIMIT 1`,
     )
     .get() as BoardState['benchmark'];

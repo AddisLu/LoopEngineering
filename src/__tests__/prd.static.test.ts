@@ -53,4 +53,11 @@ describe('PRD 精靈 page', () => {
     expect(dock).not.toContain("$('prd-check')");
     expect(dock).toContain("api('/api/prd/drafts");
   });
+
+  it('an untitled draft is named after what it is about', () => {
+    const js = fs.readFileSync(path.join(WEB_DIR, 'prd.js'), 'utf8');
+    // every draft used to be saved as "未命名 PRD", so three of them looked identical in the dock
+    expect(js).toContain('function draftTitle()');
+    expect(js).toContain('title: draftTitle()');
+  });
 });

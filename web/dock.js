@@ -542,7 +542,7 @@ $('prd-refresh').onclick = loadPrdDrafts;
 // The dashboard view: which model actually wins, what is running right now, and the last few
 // runs. Everything deeper (picking a question, models and judges) lives on /benchmarks.html.
 let benchTimer = null;
-const BENCH_STATUS = { running: '進行中', judging: '評分中', judged: '已評分', judge_failed: '評分失敗' };
+const BENCH_STATUS = { running: '進行中', judging: '評分中', judged: '已評分', judge_failed: '評分失敗', cancelled: '已取消' };
 const CONSENSUS = { unanimous: '評審一致', split: '評審分歧', single: '單一評審' };
 
 function benchRow(b) {

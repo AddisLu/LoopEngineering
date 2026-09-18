@@ -9,6 +9,7 @@ import { setCachedUsage } from '../token/usage.js';
 import { createTask } from '../tasks.js';
 import { createDraft } from '../prd/drafts.js';
 import fs from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -81,7 +82,7 @@ describe('/api/benchmarks', () => {
     it('validates input (400) and creates arms from CSV fields (201)', async () => {
       const bad = await app.inject({ method: 'POST', url: '/api/benchmarks', payload: { ...BODY, models: 'local:qwen38-flash' } });
       expect(bad.statusCode).toBe(400);
-      expect(bad.json().error).toMatch(/at least 2/);
+      expect(bad.json().error).toMatch(/2 個/);
 
       const res = await app.inject({ method: 'POST', url: '/api/benchmarks', payload: BODY });
       expect(res.statusCode).toBe(201);
@@ -95,7 +96,7 @@ describe('/api/benchmarks', () => {
       expect((await app.inject({ method: 'GET', url: '/api/benchmarks/b_missing' })).statusCode).toBe(404);
     });
 
-    it('manual judge: 409 while arms run, judges once they are done, 409 afterwards; matrix fills', async () => {
+    it('manual judge: 409 while arms run, judges once they are done, re-judges afterwards; matrix fills', async () => {
       const { benchmark, arms } = (await app.inject({ method: 'POST', url: '/api/benchmarks', payload: BODY })).json();
       expect((await app.inject({ method: 'POST', url: `/api/benchmarks/${benchmark.id}/judge` })).statusCode).toBe(409);
 
@@ -105,7 +106,10 @@ describe('/api/benchmarks', () => {
       expect(judged.json().benchmark).toMatchObject({ status: 'judged', winner: 'local:qwen38-flash' });
       expect(judgeCalls).toEqual(['opus']);
 
-      expect((await app.inject({ method: 'POST', url: `/api/benchmarks/${benchmark.id}/judge` })).statusCode).toBe(409);
+      // re-judging a judged benchmark is allowed: it is the "the judge got it wrong" button
+      const again = await app.inject({ method: 'POST', url: `/api/benchmarks/${benchmark.id}/judge` });
+      expect(again.statusCode).toBe(200);
+      expect(judgeCalls).toEqual(['opus', 'opus']);
       const matrix = (await app.inject({ method: 'GET', url: '/api/benchmarks/matrix' })).json().matrix;
       expect(matrix.map((r: { model: string }) => r.model)).toEqual(['local:qwen38-flash', 'local:qwen3-coder-next']);
       expect(matrix[0]).toMatchObject({ domain: 'typescript', win_rate: 1, avg_score: 8.8 });
@@ -159,6 +163,58 @@ describe('/api/benchmarks', () => {
       expect(bad.statusCode).toBe(400);
       expect(bad.json().error).toContain('檢查');
       expect((await app.inject({ method: 'POST', url: '/api/benchmarks', payload: { source: { kind: 'draft', ref: 'd_nope' }, models: ['local:qwen38-flash', 'sonnet'] } })).statusCode).toBe(404);
+    });
+
+    it('refuses a second benchmark, cancels the first, then allows it', async () => {
+      const first = (await app.inject({ method: 'POST', url: '/api/benchmarks', payload: BODY })).json().benchmark;
+      const second = await app.inject({ method: 'POST', url: '/api/benchmarks', payload: BODY });
+      expect(second.statusCode).toBe(400);
+      expect(second.json().error).toMatch(/已經有一個評比在跑/);
+
+      const cancelled = await app.inject({ method: 'POST', url: `/api/benchmarks/${first.id}/cancel` });
+      expect(cancelled.statusCode).toBe(200);
+      expect(cancelled.json().benchmark.status).toBe('cancelled');
+      for (const a of (await app.inject({ method: 'GET', url: `/api/benchmarks/${first.id}` })).json().arms) {
+        expect(getTask(db, a.task_id)!.status).toBe('failed');
+      }
+      expect((await app.inject({ method: 'POST', url: '/api/benchmarks', payload: BODY })).statusCode).toBe(201);
+      // and a cancelled benchmark can be dropped from the list
+      expect((await app.inject({ method: 'DELETE', url: `/api/benchmarks/${first.id}` })).statusCode).toBe(200);
+      expect((await app.inject({ method: 'GET', url: `/api/benchmarks/${first.id}` })).statusCode).toBe(404);
+    });
+
+    it('a running benchmark cannot be deleted, only cancelled', async () => {
+      const b = (await app.inject({ method: 'POST', url: '/api/benchmarks', payload: BODY })).json().benchmark;
+      const del = await app.inject({ method: 'DELETE', url: `/api/benchmarks/${b.id}` });
+      expect(del.statusCode).toBe(409);
+      expect(del.json().error).toMatch(/取消評比/);
+      expect((await app.inject({ method: 'DELETE', url: '/api/benchmarks/b_nope' })).statusCode).toBe(404);
+    });
+
+    it('a typed-in question is accepted without a plan field and carries display names', async () => {
+      const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'bench-manual-'));
+      tmp.push(repo);
+      execFileSync('git', ['init', '-b', 'main', repo]);
+      fs.writeFileSync(path.join(repo, 'README.md'), '# x');
+      execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@e', 'commit', '-q', '--allow-empty', '-m', 'init'], { cwd: repo });
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/benchmarks',
+        payload: {
+          source: { kind: 'manual' },
+          models: ['local:qwen38-flash', 'sonnet'],
+          overrides: { title: '臨時題目', goal: '做一個小工具', repo_path: repo, base_branch: 'main', verification_steps: ['true'], domain: 'typescript' },
+        },
+      });
+      expect(res.statusCode).toBe(201);
+      // the page has no plan field: the question itself is written out as the plan
+      expect(res.json().benchmark.plan_ref).toMatch(/\.md$/);
+      expect(res.json().arms[0].model_label).toBe('Qwen3.8 Flash Next (NVFP4)');
+      await app.inject({ method: 'POST', url: `/api/benchmarks/${res.json().benchmark.id}/cancel` });
+      const missing = await app.inject({ method: 'POST', url: '/api/benchmarks', payload: { source: { kind: 'manual' }, models: ['local:qwen38-flash', 'sonnet'], overrides: { title: 'x', goal: 'y', verification_steps: ['true'] } } });
+      expect(missing.statusCode).toBe(400);
+      expect(missing.json().error).toContain('題目還缺');
+      expect(missing.json().error).toContain('repo 路徑');
     });
 
     it('the board snapshot says a benchmark owns the machine', async () => {

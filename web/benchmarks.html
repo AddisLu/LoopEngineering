@@ -83,6 +83,7 @@
 
     <main class="bench">
       <p class="off" id="disabled-note" hidden>Benchmark 模式未啟用：<code>loop config set benchmark_enabled true</code></p>
+      <p class="err" id="page-err" hidden></p>
 
       <!-- ============ list ============ -->
       <div id="view-list">
@@ -111,6 +112,7 @@
                 <option value="judging">評分中</option>
                 <option value="judged">已評分</option>
                 <option value="judge_failed">評分失敗</option>
+                <option value="cancelled">已取消</option>
               </select>
             </label>
             <span class="grow"></span>
@@ -142,7 +144,9 @@
 
           <div class="row" style="margin-top: 14px">
             <button class="btn sm" id="rejudge-btn" type="button">重新評分</button>
-            <span class="hint">重新評分會再花一次雲端額度（每位評審一次）。</span>
+            <button class="btn sm" id="cancel-bench-btn" type="button" hidden>取消評比</button>
+            <button class="btn sm" id="delete-bench-btn" type="button" hidden>刪除這次評比</button>
+            <span class="hint" id="detail-actions-hint">重新評分會再花一次雲端額度（每位評審一次）。</span>
           </div>
         </section>
       </div>

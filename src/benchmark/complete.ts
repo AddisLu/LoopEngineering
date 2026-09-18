@@ -22,11 +22,18 @@ import { isLocalModel, localId } from '../local/models.js';
 const TERMINAL = new Set(['review', 'attention', 'failed', 'closed']);
 const judging = new Set<string>();
 
+/** Is this benchmark being judged by THIS process right now? (a DB row can outlive the process) */
+export function isJudging(id: string): boolean {
+  return judging.has(id);
+}
+
 /** Judge every running benchmark whose arms have all finished. Returns the ids judged this call. */
 export async function checkBenchmarks(db: Database.Database, exec?: BenchJudgeExec): Promise<string[]> {
   if (!getBool(db, 'benchmark_enabled', false)) return [];
   const done: string[] = [];
-  const running = db.prepare("SELECT id FROM benchmarks WHERE status = 'running'").all() as { id: string }[];
+  // 'judging' is also picked up: the in-flight guard lives in memory, so a restart during
+  // judging used to leave the row stuck at 'judging' with nothing left to finish it.
+  const running = db.prepare("SELECT id FROM benchmarks WHERE status IN ('running','judging')").all() as { id: string }[];
   for (const { id } of running) {
     const detail = getBenchmark(db, id);
     if (!detail || judging.has(id)) continue;
@@ -51,7 +58,16 @@ export async function judgeBenchmark(
   try {
     const bench = detail.benchmark;
     db.prepare("UPDATE benchmarks SET status = 'judging', error = NULL WHERE id = ?").run(id);
-    const evidence = detail.arms.map((arm) => collectArmEvidence(db, bench, arm));
+    // an arm whose task was deleted has no work to compare; judging it as a loser would poison
+    // the model's record, so it drops out of the comparison entirely
+    const live = detail.arms.filter((a) => a.task_status != null);
+    if (live.length < 2) {
+      const why = `參賽組不足（${live.length}/${detail.arms.length}，其餘任務已被刪除）`;
+      db.prepare("UPDATE benchmarks SET status = 'cancelled', error = ? WHERE id = ?").run(why, id);
+      logEvent(db, { kind: 'note', detail: `benchmark ${id} cancelled: ${why}` });
+      return getBenchmark(db, id)!.benchmark;
+    }
+    const evidence = live.map((arm) => collectArmEvidence(db, bench, arm));
     const judges = opts.judges?.length ? opts.judges : judgeList(bench);
     // every judge scores on its own; one failing does not sink the others
     const per = new Map<string, BenchJudgeResult>();
@@ -167,7 +183,9 @@ function collectArmEvidence(db: Database.Database, bench: Benchmark, arm: Benchm
 
   const run = task ? latestRun(db, task.id) : undefined;
   const wt = run?.worktree_path && fs.existsSync(run.worktree_path) ? run.worktree_path : null;
-  let diff = '(no worktree — the arm never produced a change)';
+  let diff = wt
+    ? '(no base branch recorded for this benchmark — cannot diff)'
+    : '(no worktree — the arm never produced a change)';
   let stat = '';
   if (wt && bench.base_branch) {
     diff = armDiff(wt, bench.base_branch, getNum(db, 'bench_diff_cap_chars', 8000));

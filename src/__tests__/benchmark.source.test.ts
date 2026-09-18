@@ -7,7 +7,7 @@ import type Database from 'better-sqlite3';
 import { openTestDb, setSetting } from '../db/index.js';
 import { createTask, getTask } from '../tasks.js';
 import { validateTask } from '../gate/validateTask.js';
-import { BENCH_SEED_DIR, listBuiltin, loadBuiltin, resolveSource } from '../benchmark/source.js';
+import { BENCH_SEED_DIR, listBuiltin, loadBuiltin, resolveSource, taskDomain } from '../benchmark/source.js';
 import { aggregateJudgements, type ArmEvidence, type BenchJudgeResult } from '../benchmark/judge.js';
 import { BenchmarkInputError, benchmarkSummary, createBenchmark, getBenchmark, judgeList, listBenchmarks, modelLabel } from '../benchmark/store.js';
 import { judgeBenchmark } from '../benchmark/complete.js';
@@ -92,8 +92,40 @@ describe('resolveSource', () => {
     // the page may override anything it shows
     expect(resolveSource(db, 'task', t.id, { title: '改一下', domain: 'cpp' }).title).toBe('改一下');
     expect(() => resolveSource(db, 'task', 't_nope')).toThrow(/找不到任務/);
-    expect(() => resolveSource(db, 'manual', null, { title: 'x' })).toThrow(/goal/);
+    expect(() => resolveSource(db, 'manual', null, { title: 'x' })).toThrow(/目標/);
     expect(() => resolveSource(db, 'zzz' as never, null)).toThrow(/task, draft, builtin or manual/);
+  });
+
+  it('a task-sourced question inherits a real domain instead of always being "other"', () => {
+    const t = createTask(db, { title: 'ROI 邊緣誤判', goal: '調整瑕疵偵測', plan_ref: 'https://e/p', verification_steps: ['true'] });
+    expect(resolveSource(db, 'task', t.id).domain).toBe('cv');
+    expect(taskDomain({ requires: 'gpu,cuda' })).toBe('cuda');
+    expect(taskDomain({ title: 'fastify route', goal: 'typescript' })).toBe('typescript');
+    expect(taskDomain({ title: '整理報告' })).toBe('other');
+  });
+
+  it('a typed-in question gets a plan file written for it, and takes it back if unused', () => {
+    const plans = tmpdir('bench-plans-');
+    const q = resolveSource(db, 'manual', null, { title: '臨時題目', goal: '做一個小工具', verification_steps: ['npm test'], repo_path: '/somewhere' }, { plansDir: plans });
+    // the form has no plan field, and the gate refuses a task without one
+    expect(q.plan_ref!.startsWith(plans)).toBe(true);
+    const md = fs.readFileSync(q.plan_ref!, 'utf8');
+    expect(md).toContain('臨時題目');
+    expect(md).toContain('npm test');
+    expect(md).toContain('不會合併回 base branch');
+    expect(q.base_branch).toBe('main');
+    q.cleanup!();
+    expect(fs.existsSync(q.plan_ref!)).toBe(false);
+  });
+
+  it('a built-in question cleans up its throwaway repo when the benchmark is rejected', () => {
+    const root = tmpdir('bench-repos-');
+    const q = resolveSource(db, 'builtin', 'slugify', {}, { repoRoot: root });
+    expect(fs.existsSync(q.repo_path!)).toBe(true);
+    // createBenchmark can still refuse (bad models, bad judge) after the repo exists
+    q.cleanup!();
+    expect(fs.existsSync(q.repo_path!)).toBe(false);
+    expect(fs.readdirSync(path.join(root, '.bench', '.origins'))).toEqual([]);
   });
 });
 

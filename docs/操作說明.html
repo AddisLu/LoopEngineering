@@ -1177,19 +1177,21 @@ loop prd submit my-feature.md --bench-models local:qwen38-flash,local:qwen3-code
           <ul>
             <li><b>看板任務</b>（預設）：沿用那張任務的 repo、計畫與驗證指令；缺 repo 或計畫的任務會標「缺 …」，選了也不能送出。</li>
             <li><b>PRD 草稿</b>：精靈寫好的草稿，送出前照樣過 PRD 閘門。</li>
-            <li><b>自己出題</b>：看板上沒有這張任務、但臨時想比一題時用——填標題、目標、<b>現有 repo 的路徑</b>與驗證指令，系統照這份描述幫每個模型各開一張任務。</li>
+            <li><b>自己出題</b>：看板上沒有這張任務、但臨時想比一題時用——填標題、目標、<b>現有 repo 的路徑</b>與驗證指令，系統照這份描述幫每個模型各開一張任務。表單沒有「計畫」欄位：系統會把這份題目本身寫成一份計畫檔（<code>plans/bench-*.md</code>）給每一組看，評比若被擋下來那份檔案也會一併刪掉。</li>
             <li><b>內建題庫</b>（<code>seed/bench/*.json</code>，放在最後）：slugify、LRU cache、CSV 解析、token bucket、二值化＋連通元件、log 分析——練習用的中性小題，各自附 <code>tests/</code> 當驗收（<code>python3 -m unittest discover</code>）。每次評比會在 <code>spike_root/.bench/</code> 開一個<b>全新的 repo</b>（含自己的 bare origin），不碰任何現有專案。第一次試用評比、或只想比「純寫程式能力」時才用。</li>
           </ul>
         </li>
         <li><b>② 參賽模型</b>（至少 2 個）：本地模型直接從模型目錄來，跑不動的會灰掉並寫原因（權重沒下載、映像沒建、需要 2 台 Spark）；雲端模型（Sonnet／Opus／Haiku）會標「花訂閱額度」。</li>
         <li><b>③ 評審</b>（可多選）：每位雲端評審<b>各評一次</b>，看每組的驗證結果與 diff（每組最多 <code>bench_diff_cap_chars</code> 字），依<b>正確性／完整性／程式品質／遵循度</b>各給 0–10 分。組別以 Arm A/B… 匿名。多位評審時，每項分數取平均後重新排名，並標出<b>評審一致</b>或<b>評審分歧</b>；某位評審失敗不影響其他人（全部失敗才算「評分失敗」）。</li>
-        <li><b>④ 送出</b>前會估時間：切換本地模型的次數 × 每次幾分鐘 ＋ 各組實作 ＋ 評分。</li>
+        <li><b>④ 送出</b>前會估時間（切換本地模型的次數 × 每次幾分鐘 ＋ 各組實作 ＋ 評分），並列出<b>會花訂閱額度的次數</b>（雲端參賽組＋評審人數）與目前的 session／weekly 用量；用量偏高時會直接警告。</li>
+        <li><b>一次只能有一個評比</b>：一台 Spark 只有一顆 GPU，兩個評比同時跑會互相搶模型，而且只有一個看得到。已經有評比在跑時，建立頁會直接說「已經有一個評比在跑：…」。</li>
+        <li><b>取消與刪除</b>：詳細頁的「取消評比」會把還沒跑完的組別停掉並標成失敗，把機器讓出來；跑完之後可以「刪除這次評比」，只移除這次比較，<b>每個模型跑出來的任務會留在看板上</b>。若某一組的任務被刪掉，那一組就不列入評分（剩不到兩組時整個評比會標成已取消）。</li>
         <li><b>執行</b>：每個模型是一張普通任務（標題 <code>[bench] …</code>），各自的 worktree、驗證與續跑，但<b>永遠不會合併</b>回 base branch。一台 Spark 一次只載入一個模型，所以本地組會輪流切換；評比進行中，對話頁的模型面板會顯示<b>「評比使用中」</b>並鎖住切換鈕，評分完成後自動<b>切回原本的模型</b>。</li>
         <li><b>結果</b>：推播一次；評比頁的<b>模型 × 領域矩陣</b>累積平均分數、勝率、驗證通過率、平均輸出 token 與耗時。評比後 arm 的 worktree 會清掉，<code>loop/&lt;任務 id&gt;</code> 分支保留供檢視。</li>
-        <li><b>花費</b>：評審是一個 benchmark <b>唯一的 Anthropic 花費</b>（每位評審一次 <code>claude -p</code>）。用量達硬上限時會延後並標為「評分失敗」，可在詳細頁按「重新評分」或執行 <code>loop bench judge &lt;id&gt;</code>。</li>
+        <li><b>花費</b>：評審是一個 benchmark <b>唯一的 Anthropic 花費</b>（每位評審一次 <code>claude -p</code>），除非你讓雲端模型也參賽。用量達硬上限時會延後並標為「評分失敗」，可在詳細頁按「重新評分」或執行 <code>loop bench judge &lt;id&gt;</code>；<b>已評分的評比也可以重新評分</b>（會再花一次額度）。服務若在評分中途重啟，下一輪 tick 會自己把它接回去評完。</li>
         <li><b>PRD 精靈</b>第⑤步的「實作模型」選「評比：多個模型各做一次」就能直接把同一份 PRD 送成評比。</li>
       </ul>
-      <p>API：<code>GET /api/benchmarks/summary</code>（儀表板）、<code>GET /api/benchmarks/builtin</code>（題庫）、<code>POST /api/benchmarks {source:{kind,ref}, models[], judge_models[], overrides?}</code>、<code>GET /api/benchmarks/:id</code>（含每位評審的 <code>judgements</code>）、<code>POST /api/benchmarks/:id/judge {judge_models?}</code>。</p>
+      <p>API：<code>GET /api/benchmarks/summary</code>（儀表板）、<code>GET /api/benchmarks/builtin</code>（題庫）、<code>POST /api/benchmarks {source:{kind,ref}, models[], judge_models[], overrides?}</code>、<code>GET /api/benchmarks/:id</code>（含每位評審的 <code>judgements</code>）、<code>POST /api/benchmarks/:id/judge {judge_models?}</code>、<code>POST /api/benchmarks/:id/cancel</code>、<code>DELETE /api/benchmarks/:id</code>。</p>
       <pre><code>loop config set benchmark_enabled true
 loop bench add --title "matmul kernel" --goal "實作 tiled matmul" --repo ~/bench/cuda-toy \
   --verify "make test" --plan ~/bench/matmul-prd.md --domain cuda \

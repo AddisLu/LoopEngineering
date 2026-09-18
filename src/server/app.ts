@@ -520,7 +520,15 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
     jobRunner: opts.localJobRunner,
     catalog: opts.localCatalog,
   });
-  registerBenchmarkRoutes(app, db, { judgeExec: opts.benchJudgeExec, source: opts.benchSource, prdReviewExec: opts.prdReviewExec });
+  registerBenchmarkRoutes(app, db, {
+    judgeExec: opts.benchJudgeExec,
+    source: opts.benchSource,
+    prdReviewExec: opts.prdReviewExec,
+    // cancelling a benchmark has to stop the arm that is running right now, not just mark it
+    onArmCancel: (t) => {
+      for (const r of activeRuns(db).filter((r) => r.task_id === t.id)) killRun(db, { id: r.id, pid: r.pid }, 'user');
+    },
+  });
   registerPrdRoutes(app, db, {
     reviewExec: opts.prdReviewExec,
     search: opts.prdSearch,

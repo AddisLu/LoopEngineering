@@ -90,6 +90,33 @@ describe('benchmarks page + local model board wiring: static assets', () => {
     expect(js).toContain('已經建立的任務不會被刪除');
   });
 
+  it('a benchmark can be cancelled or deleted from its detail page', () => {
+    const html = fs.readFileSync(path.join(WEB_DIR, 'benchmarks.html'), 'utf8');
+    for (const id of ['cancel-bench-btn', 'delete-bench-btn', 'page-err']) expect(html).toContain(`id="${id}"`);
+    // the only error slot used to live inside the create view, which is hidden while browsing
+    expect(html.indexOf('id="page-err"')).toBeLessThan(html.indexOf('id="view-list"'));
+    const js = fs.readFileSync(path.join(WEB_DIR, 'benchmarks.js'), 'utf8');
+    expect(js).toContain('/cancel');
+    expect(js).toContain("'DELETE'");
+    expect(js).toContain('pageError');
+    // 重新評分 used to be offered on a judged benchmark and always 409'd
+    expect(js).not.toContain("$('rejudge-btn').hidden = b.status === 'running'");
+  });
+
+  it('the page shows names and local time, never raw ids or UTC strings', () => {
+    const js = fs.readFileSync(path.join(WEB_DIR, 'benchmarks.js'), 'utf8');
+    expect(js).toContain('modelName');
+    expect(js).toContain('domainLabel');
+    expect(js).toContain('localTime');
+    expect(js).not.toMatch(/row\(\[m\.domain, m\.model/);
+    expect(js).not.toMatch(/\bb\.created_at\b(?!\))/);
+    // cloud arms and judges are the only spend; say so before the button is pressed
+    expect(js).toContain('訂閱額度');
+    expect(js).toContain('usage');
+    // a draft with no composed PRD cannot be a question
+    expect(js).toContain('has_markdown');
+  });
+
   it('the dock shows the dashboard in Chinese, not raw enum values', () => {
     const dock = fs.readFileSync(path.join(WEB_DIR, 'dock.js'), 'utf8');
     expect(dock).toContain('/api/benchmarks/summary');

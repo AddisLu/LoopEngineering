@@ -1,7 +1,7 @@
 import type Database from 'better-sqlite3';
 import { nanoid } from 'nanoid';
 import { getSetting, logEvent } from '../db/index.js';
-import { createTask, setStatus } from '../tasks.js';
+import { createTask, getTask, setStatus } from '../tasks.js';
 import { validateTask } from '../gate/validateTask.js';
 import { isModelValue, BENCH_JUDGE_MODELS } from '../settings.js';
 import { getLocalModel, isLocalModel, localId } from '../local/models.js';
@@ -30,7 +30,7 @@ export interface Benchmark {
   domain: string;
   complexity: Complexity;
   judge_model: string;
-  status: 'running' | 'judging' | 'judged' | 'judge_failed';
+  status: 'running' | 'judging' | 'judged' | 'judge_failed' | 'cancelled';
   winner: string | null;
   summary: string | null;
   result_json: string | null;
@@ -73,7 +73,7 @@ export interface BenchmarkArm {
   diff_stat: string | null;
 }
 
-export type BenchmarkArmView = BenchmarkArm & { task_status: string | null; task_title: string | null };
+export type BenchmarkArmView = BenchmarkArm & { task_status: string | null; task_title: string | null; model_label?: string | null };
 
 export interface NewBenchmarkInput {
   title: string;
@@ -111,6 +111,30 @@ export function judgeList(b: Pick<Benchmark, 'judge_model' | 'judge_models'>): s
 
 export class BenchmarkInputError extends Error {}
 
+/** A benchmark that still owns the GPU / the queue: at most one may exist at a time. */
+export function activeBenchmark(db: Database.Database): Benchmark | null {
+  return (db.prepare("SELECT * FROM benchmarks WHERE status IN ('running','judging') ORDER BY created_at DESC LIMIT 1").get() as Benchmark | undefined) ?? null;
+}
+
+/** The gate speaks in column names; the benchmark page is Chinese, so translate on the way out. */
+const GATE_FIELD: Record<string, string> = {
+  plan_ref: '計畫檔（.md/.html 或網址）',
+  repo_path: 'repo 路徑（要是已存在的 git repo）',
+  base_branch: 'base 分支',
+  verification_steps: '驗證指令（至少一行）',
+  verify_rubric: '驗收標準',
+  goal: '目標',
+  environment: '部署環境',
+};
+export function gateReason(missing: string[]): string {
+  const seen = new Set<string>();
+  for (const m of missing) {
+    const field = String(m).split(/[ (]/)[0]!;
+    seen.add(GATE_FIELD[field] ?? field);
+  }
+  return `題目還缺：${[...seen].join('、')}`;
+}
+
 function planKind(ref: string | null): 'md' | 'html' | 'url' | null {
   if (!ref) return null;
   if (/^https?:\/\//i.test(ref)) return 'url';
@@ -123,30 +147,36 @@ export function createBenchmark(
 ): { benchmark: Benchmark; arms: BenchmarkArmView[] } {
   const title = input.title?.trim();
   const goal = input.goal?.trim();
-  if (!title || !goal) throw new BenchmarkInputError('title and goal are required');
+  if (!title || !goal) throw new BenchmarkInputError('題目要有標題和目標');
+
+  // Two benchmarks at once means two sets of arms fighting over one GPU, only one of them
+  // visible in the dock, and the second one recording the first one's arm as "the operator's
+  // model" to switch back to. Refuse instead.
+  const busy = activeBenchmark(db);
+  if (busy) throw new BenchmarkInputError(`已經有一個評比在跑：「${busy.title}」。等它跑完，或先在評比頁按「取消評比」。`);
 
   const models = [...new Set((input.models ?? []).map((m) => String(m).trim()).filter(Boolean))];
-  if (models.length < 2) throw new BenchmarkInputError('a benchmark needs at least 2 distinct models');
+  if (models.length < 2) throw new BenchmarkInputError('評比至少要 2 個不同的參賽模型');
   for (const m of models) {
-    if (!isModelValue(m) || m === 'default') throw new BenchmarkInputError(`invalid model: ${m}`);
+    if (!isModelValue(m) || m === 'default') throw new BenchmarkInputError(`不能用這個模型：${m}`);
     if (isLocalModel(m)) {
       const lm = getLocalModel(db, localId(m));
-      if (!lm) throw new BenchmarkInputError(`unknown local model: ${m}`);
-      if (!lm.enabled) throw new BenchmarkInputError(`local model ${m} is disabled`);
+      if (!lm) throw new BenchmarkInputError(`找不到這個本地模型：${m}`);
+      if (!lm.enabled) throw new BenchmarkInputError(`本地模型 ${m} 已停用，不能參賽`);
     }
   }
 
   const domain = (input.domain ?? 'other').trim().toLowerCase();
   if (!(BENCH_DOMAINS as readonly string[]).includes(domain)) {
-    throw new BenchmarkInputError(`domain must be one of: ${BENCH_DOMAINS.join(', ')}`);
+    throw new BenchmarkInputError(`領域只能是：${BENCH_DOMAINS.join('、')}`);
   }
   const steps = (input.verification_steps ?? []).map((s) => String(s).trim()).filter(Boolean);
   if (steps.length === 0) {
-    throw new BenchmarkInputError('at least one verification step is required — arms are compared against a real check');
+    throw new BenchmarkInputError('題目還缺：驗證指令（至少一行）——每一組都要用同一個真的檢查來比');
   }
   const judges = [...new Set((input.judge_models?.length ? input.judge_models : [input.judge_model || getSetting(db, 'bench_judge_model') || 'opus']).map((j) => String(j).trim()).filter(Boolean))];
   for (const j of judges) {
-    if (!BENCH_JUDGE_MODELS.has(j)) throw new BenchmarkInputError(`judge_model must be one of: ${[...BENCH_JUDGE_MODELS].join(', ')} (got ${j})`);
+    if (!BENCH_JUDGE_MODELS.has(j)) throw new BenchmarkInputError(`評審只能選：${[...BENCH_JUDGE_MODELS].join('、')}（收到 ${j}）`);
   }
   const judgeModel = judges[0]!;
 
@@ -172,7 +202,11 @@ export function createBenchmark(
     requires: null,
   } as unknown as Task;
   const gate = validateTask(probe, getSetting(db, 'host_capabilities') ?? '');
-  if (!gate.ok) throw new BenchmarkInputError(`gate not satisfied: ${gate.missing.join('; ')}`);
+  if (!gate.ok) {
+    // the raw field names go to the log, not to the operator's screen
+    logEvent(db, { kind: 'note', detail: `benchmark rejected: ${gate.missing.join('; ')}` });
+    throw new BenchmarkInputError(gateReason(gate.missing));
+  }
 
   const id = `b_${nanoid(10)}`;
   db.prepare(
@@ -228,6 +262,48 @@ export function createBenchmark(
   return { benchmark: created.benchmark, arms: created.arms };
 }
 
+/**
+ * Stop a benchmark the operator no longer wants: every arm that has not finished is failed
+ * (the caller kills the live process first), the row goes to 'cancelled' and the GPU is free
+ * for the next one. Judged/failed benchmarks are left alone — there is nothing to stop.
+ */
+export function cancelBenchmark(
+  db: Database.Database,
+  id: string,
+  reason = '使用者取消',
+  deps: { onArmTask?: (task: Task) => void } = {},
+): Benchmark | null {
+  const detail = getBenchmark(db, id);
+  if (!detail) return null;
+  const { benchmark } = detail;
+  if (benchmark.status === 'judged' || benchmark.status === 'cancelled') return benchmark;
+  const TERMINAL = new Set(['review', 'attention', 'failed', 'closed']);
+  for (const arm of detail.arms) {
+    const t = getTask(db, arm.task_id);
+    if (!t || TERMINAL.has(t.status)) continue;
+    deps.onArmTask?.(t);
+    setStatus(db, t.id, 'failed', { detail: `benchmark ${id} cancelled: ${reason}` });
+  }
+  db.prepare("UPDATE benchmarks SET status = 'cancelled', error = ? WHERE id = ?").run(reason, id);
+  logEvent(db, { kind: 'note', detail: `benchmark ${id} cancelled: ${reason}` });
+  return getBenchmark(db, id)!.benchmark;
+}
+
+/** Drop a finished benchmark's rows. The arm tasks stay on the board; only the comparison goes. */
+export function deleteBenchmark(db: Database.Database, id: string): boolean {
+  const row = db.prepare('SELECT status FROM benchmarks WHERE id = ?').get(id) as { status: string } | undefined;
+  if (!row) return false;
+  if (row.status === 'running' || row.status === 'judging') throw new BenchmarkInputError('評比還在進行，請先按「取消評比」。');
+  const tx = db.transaction(() => {
+    db.prepare('DELETE FROM benchmark_judgements WHERE benchmark_id = ?').run(id);
+    db.prepare('DELETE FROM benchmark_arms WHERE benchmark_id = ?').run(id);
+    db.prepare('DELETE FROM benchmarks WHERE id = ?').run(id);
+  });
+  tx();
+  logEvent(db, { kind: 'note', detail: `benchmark ${id} deleted` });
+  return true;
+}
+
 export function getBenchmark(
   db: Database.Database,
   id: string,
@@ -241,6 +317,7 @@ export function getBenchmark(
         WHERE a.benchmark_id = ? ORDER BY a.rowid`,
     )
     .all(id) as BenchmarkArmView[];
+  for (const a of arms) a.model_label = modelLabel(db, a.model);
   const judgements = db.prepare('SELECT * FROM benchmark_judgements WHERE benchmark_id = ? ORDER BY rowid').all(id) as BenchmarkJudgement[];
   return { benchmark, arms, judgements };
 }
@@ -258,8 +335,8 @@ export function listBenchmarks(db: Database.Database, limit = 50): BenchmarkList
     .prepare(
       `SELECT b.*,
               (SELECT COUNT(*) FROM benchmark_arms a WHERE a.benchmark_id = b.id) AS arm_count,
-              (SELECT COUNT(*) FROM benchmark_arms a JOIN tasks t ON t.id = a.task_id
-                WHERE a.benchmark_id = b.id AND t.status IN ('review','attention','failed','closed')) AS arms_done,
+              (SELECT COUNT(*) FROM benchmark_arms a LEFT JOIN tasks t ON t.id = a.task_id
+                WHERE a.benchmark_id = b.id AND (t.id IS NULL OR t.status IN ('review','attention','failed','closed'))) AS arms_done,
               (SELECT GROUP_CONCAT(a.model, ',') FROM benchmark_arms a WHERE a.benchmark_id = b.id) AS models_csv
          FROM benchmarks b ORDER BY b.created_at DESC, b.rowid DESC LIMIT ?`,
     )
@@ -311,6 +388,7 @@ export function benchmarkSummary(db: Database.Database): { running: BenchmarkLis
 
 export interface MatrixRow {
   model: string;
+  model_label?: string | null;
   domain: string;
   n: number;
   avg_score: number | null;
@@ -340,6 +418,7 @@ export function benchmarkMatrix(db: Database.Database): MatrixRow[] {
   const r2 = (v: number) => Math.round(v * 100) / 100;
   return rows.map((r) => ({
     ...r,
+    model_label: modelLabel(db, r.model),
     avg_score: r1(r.avg_score),
     win_rate: r2(r.win_rate),
     verify_pass_rate: r2(r.verify_pass_rate),

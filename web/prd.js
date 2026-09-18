@@ -89,9 +89,22 @@ const paintPreview = () => {
 };
 
 let saving = false;
+
+// Three drafts all called "未命名 PRD" are three drafts nobody can tell apart. Until the engineer
+// types a title, name the draft after what it is about: repo · 類型 · 症狀.
+function draftTitle() {
+  const typed = clean(form.change.title);
+  if (typed) return typed;
+  const repo = clean(form.repo.path).split('/').filter(Boolean).pop() || '';
+  const kind = KINDS[form.kind]?.label || '';
+  const what = clean(form.change.symptom).replace(/\s+/g, ' ').slice(0, 30);
+  const parts = [repo, kind, what].filter(Boolean);
+  return parts.length ? parts.join(' · ') : undefined;
+}
+
 const saveDraft = debounce(async () => {
   if (gateOff) return;
-  const body = { title: clean(form.change.title) || undefined, form, markdown: composePrd(form), step };
+  const body = { title: draftTitle(), form, markdown: composePrd(form), step };
   saving = true;
   setText('draft-state', '儲存中…');
   try {

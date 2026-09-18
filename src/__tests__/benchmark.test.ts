@@ -4,8 +4,9 @@ import { openTestDb, setSetting } from '../db/index.js';
 import { getTask } from '../tasks.js';
 import { runTask } from '../orchestrator/run.js';
 import { setCachedUsage } from '../token/usage.js';
-import { createBenchmark, getBenchmark, benchmarkMatrix, listBenchmarks, type NewBenchmarkInput } from '../benchmark/store.js';
+import { activeBenchmark, cancelBenchmark, createBenchmark, deleteBenchmark, getBenchmark, benchmarkMatrix, listBenchmarks, type NewBenchmarkInput } from '../benchmark/store.js';
 import { checkBenchmarks, judgeBenchmark } from '../benchmark/complete.js';
+import { deleteTask } from '../tasks.js';
 import { parseBenchJudgement, type ArmEvidence } from '../benchmark/judge.js';
 
 let db: Database.Database;
@@ -60,19 +61,59 @@ describe('createBenchmark', () => {
   });
 
   it('rejects inputs that cannot produce a fair comparison', () => {
-    expect(() => createBenchmark(db, { ...INPUT, models: ['local:qwen38-flash', 'local:qwen38-flash'] })).toThrow(/at least 2 distinct/);
-    expect(() => createBenchmark(db, { ...INPUT, models: ['local:qwen38-flash', 'local:nope'] })).toThrow(/unknown local model/);
-    expect(() => createBenchmark(db, { ...INPUT, models: ['local:qwen38-flash', 'local:qwen36-35b'] })).toThrow(/disabled/);
-    expect(() => createBenchmark(db, { ...INPUT, domain: 'cobol' })).toThrow(/domain must be one of/);
-    expect(() => createBenchmark(db, { ...INPUT, verification_steps: [] })).toThrow(/verification step/);
-    expect(() => createBenchmark(db, { ...INPUT, judge_model: 'haiku' })).toThrow(/judge_model/);
-    expect(() => createBenchmark(db, { ...INPUT, coding_tool: 'claude-code', repo_path: '/nope' })).toThrow(/gate not satisfied/);
+    expect(() => createBenchmark(db, { ...INPUT, models: ['local:qwen38-flash', 'local:qwen38-flash'] })).toThrow(/2 個不同的參賽模型/);
+    expect(() => createBenchmark(db, { ...INPUT, models: ['local:qwen38-flash', 'local:nope'] })).toThrow(/找不到這個本地模型/);
+    expect(() => createBenchmark(db, { ...INPUT, models: ['local:qwen38-flash', 'local:qwen36-35b'] })).toThrow(/已停用/);
+    expect(() => createBenchmark(db, { ...INPUT, domain: 'cobol' })).toThrow(/領域只能是/);
+    expect(() => createBenchmark(db, { ...INPUT, verification_steps: [] })).toThrow(/驗證指令/);
+    expect(() => createBenchmark(db, { ...INPUT, judge_model: 'haiku' })).toThrow(/評審只能選/);
+    expect(() => createBenchmark(db, { ...INPUT, coding_tool: 'claude-code', repo_path: '/nope' })).toThrow(/題目還缺：repo 路徑/);
     expect(listBenchmarks(db)).toEqual([]); // nothing half-created
   });
 
   it('a cloud baseline arm is allowed next to local arms', () => {
     const { arms } = createBenchmark(db, { ...INPUT, models: ['local:qwen38-flash', 'sonnet'] });
     expect(arms.map((a) => a.model)).toEqual(['local:qwen38-flash', 'sonnet']);
+  });
+
+  it('only one benchmark may own the machine at a time', () => {
+    const first = createBenchmark(db, INPUT).benchmark;
+    expect(activeBenchmark(db)?.id).toBe(first.id);
+    // two at once means two sets of arms on one GPU and only one of them visible
+    expect(() => createBenchmark(db, INPUT)).toThrow(/已經有一個評比在跑/);
+    cancelBenchmark(db, first.id);
+    expect(activeBenchmark(db)).toBeNull();
+    const second = createBenchmark(db, INPUT).benchmark;
+    expect(second.id).not.toBe(first.id);
+  });
+});
+
+describe('cancel and delete', () => {
+  it('cancelling fails the unfinished arms, frees the machine, and can be deleted afterwards', () => {
+    const { benchmark, arms } = createBenchmark(db, INPUT);
+    const seen: string[] = [];
+    expect(() => deleteBenchmark(db, benchmark.id)).toThrow(/還在進行/);
+    const after = cancelBenchmark(db, benchmark.id, '使用者取消', { onArmTask: (t) => seen.push(t.id) })!;
+    expect(after.status).toBe('cancelled');
+    expect(after.error).toBe('使用者取消');
+    expect(seen).toEqual(arms.map((a) => a.task_id)); // the live run is killed before the row changes
+    for (const a of arms) expect(getTask(db, a.task_id)!.status).toBe('failed');
+    expect(deleteBenchmark(db, benchmark.id)).toBe(true);
+    expect(getBenchmark(db, benchmark.id)).toBeNull();
+    // the arm tasks stay on the board; only the comparison is gone
+    for (const a of arms) expect(getTask(db, a.task_id)).toBeTruthy();
+    expect(deleteBenchmark(db, benchmark.id)).toBe(false);
+  });
+
+  it('an arm whose task was deleted counts as done and never gets judged as a loser', async () => {
+    const { benchmark, arms } = createBenchmark(db, INPUT);
+    await runTask(db, getTask(db, arms[0]!.task_id)!);
+    deleteTask(db, arms[1]!.task_id);
+    // the deleted arm used to hold arms_done below arm_count forever
+    expect(listBenchmarks(db)[0]).toMatchObject({ arm_count: 2, arms_done: 2 });
+    const judged = await judgeBenchmark(db, benchmark.id, async () => '{}');
+    expect(judged).toMatchObject({ status: 'cancelled' });
+    expect(judged!.error).toMatch(/參賽組不足/);
   });
 });
 
@@ -94,6 +135,16 @@ describe('judging', () => {
     expect(await checkBenchmarks(db, exec)).toEqual([]);
     expect(calls).toBe(0);
     expect(getBenchmark(db, benchmark.id)!.benchmark.status).toBe('running');
+  });
+
+  it('a benchmark left at judging by a restart is picked up again', async () => {
+    const { benchmark } = createBenchmark(db, INPUT);
+    await runArms(benchmark.id);
+    // the in-flight guard lives in memory: a crash mid-judge leaves only the row behind
+    db.prepare("UPDATE benchmarks SET status = 'judging' WHERE id = ?").run(benchmark.id);
+    const done = await checkBenchmarks(db, async () => judgeJson(S(6, 6, 6, 6), S(8, 8, 8, 8)));
+    expect(done).toEqual([benchmark.id]);
+    expect(getBenchmark(db, benchmark.id)!.benchmark.status).toBe('judged');
   });
 
   it('anonymises arms, ranks from the scores, stores results, closes arms and feeds the matrix', async () => {
