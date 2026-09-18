@@ -91,9 +91,18 @@ export function registerPrdRoutes(app: FastifyInstance, db: Database.Database, o
         queue: b.queue !== false,
         verify_llm: b.verify_llm === true,
         benchmark_models: benchModels.length ? benchModels : undefined,
+        judge_models: Array.isArray(b.judge_models) ? b.judge_models.map(String).filter(Boolean) : undefined,
       });
       if (!r.ok) return reply.code(422).send({ error: 'PRD blocked by the gate', check: r.check });
       // a wizard draft that became a task remembers it, so the dock can show 已建任務
+      if (typeof b.draft_id === 'string' && r.kind === 'benchmark') {
+        try {
+          db.prepare('UPDATE benchmarks SET source_ref = ? WHERE id = ?').run(b.draft_id, r.benchmark.id);
+          markSubmitted(db, identity(req).user_key, b.draft_id, r.benchmark.id);
+        } catch {
+          /* no identity or foreign draft — the benchmark exists either way */
+        }
+      }
       if (typeof b.draft_id === 'string' && r.kind === 'task') {
         try {
           markSubmitted(db, identity(req).user_key, b.draft_id, r.task.id);

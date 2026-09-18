@@ -37,6 +37,25 @@ export interface Benchmark {
   error: string | null;
   created_at: string;
   judged_at: string | null;
+  /** where the question came from (task | draft | manual | builtin) and its id/key */
+  source_kind: string | null;
+  source_ref: string | null;
+  /** CSV of judge models; judge_model stays the first one for older readers */
+  judge_models: string | null;
+  /** local model that was serving when the benchmark started — switched back to once judged */
+  restore_model: string | null;
+  /** unanimous | split | single, once judged */
+  consensus: string | null;
+}
+
+export interface BenchmarkJudgement {
+  benchmark_id: string;
+  judge_model: string;
+  result_json: string | null;
+  summary: string | null;
+  winner: string | null;
+  error: string | null;
+  created_at: string;
 }
 
 export interface BenchmarkArm {
@@ -69,9 +88,25 @@ export interface NewBenchmarkInput {
   complexity?: Complexity;
   models: string[];
   judge_model?: string;
+  /** several judges: each scores independently, arms carry the mean (multi-judge) */
+  judge_models?: string[];
   priority?: number;
+  source_kind?: 'task' | 'draft' | 'manual' | 'builtin';
+  source_ref?: string | null;
   /** dev/test only: 'mock' runs every arm on the zero-token mock adapter. */
   coding_tool?: 'claude-code' | 'mock';
+}
+
+/** Human name for a model id: local display name, else the alias itself. */
+export function modelLabel(db: Database.Database, model: string | null): string | null {
+  if (!model) return null;
+  if (isLocalModel(model)) return getLocalModel(db, localId(model))?.display_name ?? model;
+  return model;
+}
+
+export function judgeList(b: Pick<Benchmark, 'judge_model' | 'judge_models'>): string[] {
+  const list = (b.judge_models ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+  return list.length ? list : [b.judge_model];
 }
 
 export class BenchmarkInputError extends Error {}
@@ -109,10 +144,11 @@ export function createBenchmark(
   if (steps.length === 0) {
     throw new BenchmarkInputError('at least one verification step is required — arms are compared against a real check');
   }
-  const judgeModel = (input.judge_model || getSetting(db, 'bench_judge_model') || 'opus').trim();
-  if (!BENCH_JUDGE_MODELS.has(judgeModel)) {
-    throw new BenchmarkInputError(`judge_model must be one of: ${[...BENCH_JUDGE_MODELS].join(', ')}`);
+  const judges = [...new Set((input.judge_models?.length ? input.judge_models : [input.judge_model || getSetting(db, 'bench_judge_model') || 'opus']).map((j) => String(j).trim()).filter(Boolean))];
+  for (const j of judges) {
+    if (!BENCH_JUDGE_MODELS.has(j)) throw new BenchmarkInputError(`judge_model must be one of: ${[...BENCH_JUDGE_MODELS].join(', ')} (got ${j})`);
   }
+  const judgeModel = judges[0]!;
 
   const codingTool = input.coding_tool ?? 'claude-code';
   const planRef = input.plan_ref?.trim() || null;
@@ -141,9 +177,9 @@ export function createBenchmark(
   const id = `b_${nanoid(10)}`;
   db.prepare(
     `INSERT INTO benchmarks (id, title, goal, plan_ref, repo_path, base_branch, verification_steps, setup_cmd,
-       verify_rubric, domain, complexity, judge_model)
+       verify_rubric, domain, complexity, judge_model, judge_models, source_kind, source_ref, restore_model)
      VALUES (@id, @title, @goal, @plan_ref, @repo_path, @base_branch, @verification_steps, @setup_cmd,
-       @verify_rubric, @domain, @complexity, @judge_model)`,
+       @verify_rubric, @domain, @complexity, @judge_model, @judge_models, @source_kind, @source_ref, @restore_model)`,
   ).run({
     id,
     title,
@@ -157,6 +193,11 @@ export function createBenchmark(
     domain,
     complexity,
     judge_model: judgeModel,
+    judge_models: judges.join(','),
+    source_kind: input.source_kind ?? 'manual',
+    source_ref: input.source_ref ?? null,
+    // the model serving right now — the judge step switches back to it when the arms are done
+    restore_model: models.some(isLocalModel) && getSetting(db, 'local_model_status') === 'ready' ? (getSetting(db, 'local_model_loaded') || null) : null,
   });
 
   const insertArm = db.prepare('INSERT INTO benchmark_arms (benchmark_id, model, task_id) VALUES (?, ?, ?)');
@@ -190,7 +231,7 @@ export function createBenchmark(
 export function getBenchmark(
   db: Database.Database,
   id: string,
-): { benchmark: Benchmark; arms: BenchmarkArmView[] } | null {
+): { benchmark: Benchmark; arms: BenchmarkArmView[]; judgements: BenchmarkJudgement[] } | null {
   const benchmark = db.prepare('SELECT * FROM benchmarks WHERE id = ?').get(id) as Benchmark | undefined;
   if (!benchmark) return null;
   const arms = db
@@ -200,22 +241,72 @@ export function getBenchmark(
         WHERE a.benchmark_id = ? ORDER BY a.rowid`,
     )
     .all(id) as BenchmarkArmView[];
-  return { benchmark, arms };
+  const judgements = db.prepare('SELECT * FROM benchmark_judgements WHERE benchmark_id = ? ORDER BY rowid').all(id) as BenchmarkJudgement[];
+  return { benchmark, arms, judgements };
 }
 
-export function listBenchmarks(
-  db: Database.Database,
-  limit = 50,
-): (Benchmark & { arm_count: number; arms_done: number })[] {
-  return db
+export interface BenchmarkListRow extends Benchmark {
+  arm_count: number;
+  arms_done: number;
+  winner_label: string | null;
+  judges: string[];
+  models: string[];
+}
+
+export function listBenchmarks(db: Database.Database, limit = 50): BenchmarkListRow[] {
+  const rows = db
     .prepare(
       `SELECT b.*,
               (SELECT COUNT(*) FROM benchmark_arms a WHERE a.benchmark_id = b.id) AS arm_count,
               (SELECT COUNT(*) FROM benchmark_arms a JOIN tasks t ON t.id = a.task_id
-                WHERE a.benchmark_id = b.id AND t.status IN ('review','attention','failed','closed')) AS arms_done
+                WHERE a.benchmark_id = b.id AND t.status IN ('review','attention','failed','closed')) AS arms_done,
+              (SELECT GROUP_CONCAT(a.model, ',') FROM benchmark_arms a WHERE a.benchmark_id = b.id) AS models_csv
          FROM benchmarks b ORDER BY b.created_at DESC, b.rowid DESC LIMIT ?`,
     )
-    .all(limit) as (Benchmark & { arm_count: number; arms_done: number })[];
+    .all(limit) as (Benchmark & { arm_count: number; arms_done: number; models_csv: string | null })[];
+  return rows.map(({ models_csv, ...b }) => ({
+    ...b,
+    winner_label: modelLabel(db, b.winner),
+    judges: judgeList(b),
+    models: (models_csv ?? '').split(',').filter(Boolean),
+  }));
+}
+
+export interface ModelRecord {
+  model: string;
+  label: string;
+  n: number;
+  wins: number;
+  avg_score: number | null;
+  verify_pass_rate: number;
+}
+
+/** What the dock shows: the running one, the last few, and each model's record across judged benchmarks. */
+export function benchmarkSummary(db: Database.Database): { running: BenchmarkListRow | null; recent: BenchmarkListRow[]; models: ModelRecord[] } {
+  const all = listBenchmarks(db, 200);
+  const running = all.find((b) => b.status === 'running' || b.status === 'judging') ?? null;
+  const rows = db
+    .prepare(
+      `SELECT a.model AS model, COUNT(*) AS n,
+              SUM(CASE WHEN a.judge_rank = 1 THEN 1 ELSE 0 END) AS wins,
+              AVG(a.judge_score) AS avg_score,
+              AVG(CASE WHEN a.verify_outcome = 'pass' THEN 1.0 ELSE 0.0 END) AS verify_pass_rate
+         FROM benchmark_arms a JOIN benchmarks b ON b.id = a.benchmark_id
+        WHERE b.status = 'judged' GROUP BY a.model ORDER BY wins DESC, avg_score DESC`,
+    )
+    .all() as Array<{ model: string; n: number; wins: number; avg_score: number | null; verify_pass_rate: number }>;
+  return {
+    running,
+    recent: all.slice(0, 8),
+    models: rows.map((r) => ({
+      model: r.model,
+      label: modelLabel(db, r.model) ?? r.model,
+      n: r.n,
+      wins: r.wins,
+      avg_score: r.avg_score == null ? null : Math.round(r.avg_score * 10) / 10,
+      verify_pass_rate: Math.round(r.verify_pass_rate * 100) / 100,
+    })),
+  };
 }
 
 export interface MatrixRow {

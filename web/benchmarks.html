@@ -18,8 +18,9 @@
     </script>
     <link rel="stylesheet" href="/styles.css" />
     <style>
-      main.bench { max-width: 1180px; margin: 0 auto; padding: 18px 20px 60px; display: grid; gap: 22px; }
+      main.bench { width: 100%; max-width: 1180px; margin: 0 auto; padding: 18px 20px 60px; display: grid; gap: 22px; align-content: start; overflow-y: auto; }
       .bench h2 { font-size: 16px; margin: 0 0 10px; }
+      .bench h3 { font-size: 13.5px; margin: 18px 0 8px; }
       .bench section { background: var(--surface); border: 1px solid var(--line, var(--border, #ddd)); border-radius: 12px; padding: 16px 18px; }
       .bench .off { color: var(--warn); }
       .bench table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
@@ -27,16 +28,40 @@
       .bench th { font-weight: 600; color: var(--text-2, inherit); }
       .bench tr.clickable { cursor: pointer; }
       .bench tr.clickable:hover, .bench tr.selected { background: var(--accent-soft, rgba(0, 0, 0, 0.04)); }
-      .bench form { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px 16px; }
-      .bench form label { display: grid; gap: 4px; font-size: 13px; }
-      .bench form .wide { grid-column: 1 / -1; }
-      .bench form input, .bench form select, .bench form textarea { font: inherit; padding: 6px 8px; }
-      .bench .models { display: flex; flex-wrap: wrap; gap: 6px 16px; }
-      .bench .models label { display: flex; gap: 6px; align-items: center; }
       .bench .err { color: var(--danger); white-space: pre-wrap; }
       .bench .summary { white-space: pre-wrap; margin: 8px 0 12px; }
       .bench .heat { font-weight: 600; }
       .bench .scroll { overflow-x: auto; }
+      .bench .hint { font-size: 12.5px; color: var(--text-3, var(--text-2)); margin: 2px 0 10px; }
+      .bench .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+      .bench .grow { flex: 1 1 auto; }
+
+      /* step sections of the create view */
+      .step-head { display: flex; align-items: baseline; gap: 8px; }
+      .step-head .n { width: 22px; height: 22px; border-radius: 50%; background: var(--accent); color: var(--on-accent, #fff); display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex: 0 0 auto; }
+      .tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+      .tabs .tab { font: inherit; font-size: 13px; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line, var(--border)); background: var(--surface-2, transparent); color: inherit; cursor: pointer; }
+      .tabs .tab.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 600; }
+      .src-pane[hidden] { display: none; }
+      .src-pane { display: grid; gap: 8px; }
+      .src-pane > label { display: grid; gap: 4px; font-size: 13px; }
+      .src-pane > label input, .src-pane > label select, .src-pane > label textarea { font: inherit; padding: 6px 8px; }
+      .picks { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 8px; }
+      .pick { display: flex; gap: 8px; align-items: flex-start; padding: 9px 11px; border: 1px solid var(--line, var(--border)); border-radius: 10px; cursor: pointer; }
+      .pick.on { border-color: var(--accent); background: var(--accent-soft); }
+      .pick.off { opacity: .55; cursor: not-allowed; }
+      .pick input { margin-top: 3px; }
+      .pick .b { font-size: 13px; font-weight: 600; }
+      .pick .s { font-size: 11.5px; opacity: .72; display: block; }
+      .qcards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; }
+      .estimate { background: var(--surface-2, var(--sunk, rgba(0,0,0,.03))); border-radius: 10px; padding: 10px 12px; font-size: 13px; }
+      .chipline { display: flex; flex-wrap: wrap; gap: 6px; }
+      .chipline .chip { font-size: 11.5px; padding: 3px 9px; border-radius: 999px; background: var(--surface-2, rgba(0,0,0,.05)); }
+      .chip.ok { color: var(--ok); }
+      .chip.bad { color: var(--danger); }
+      .judge-card { border: 1px solid var(--line, var(--border)); border-radius: 10px; padding: 10px 12px; margin-top: 8px; }
+      .judge-card .who { font-weight: 600; font-size: 13px; margin-bottom: 4px; }
+      .judge-card .txt { white-space: pre-wrap; font-size: 13px; }
     </style>
   </head>
   <body>
@@ -45,12 +70,13 @@
         <span class="brand-mark" aria-hidden="true"></span>
         <span class="brand-text">
           <strong class="brand-name">Loop Engineering</strong>
-          <span class="brand-sub">Benchmark · 本地模型評比</span>
+          <span class="brand-sub">Benchmark · 模型評比</span>
         </span>
       </div>
       <div class="controls">
         <a class="btn" href="/">← 回到對話</a>
         <a class="btn" href="/board.html">任務看板</a>
+        <button class="btn" id="nav-new" type="button">＋ 新評比</button>
         <button class="btn" id="theme-btn" type="button" title="切換深淺色">☾</button>
       </div>
     </header>
@@ -58,69 +84,137 @@
     <main class="bench">
       <p class="off" id="disabled-note" hidden>Benchmark 模式未啟用：<code>loop config set benchmark_enabled true</code></p>
 
-      <section>
-        <h2>模型 × 領域 矩陣</h2>
-        <div class="scroll"><table id="matrix"></table></div>
-        <p class="empty" id="matrix-empty">還沒有評比完成的 benchmark</p>
-      </section>
+      <!-- ============ list ============ -->
+      <div id="view-list">
+        <section id="running-box" hidden>
+          <h2>進行中</h2>
+          <p id="running-line"></p>
+          <p class="hint">評比會自己輪流把每個本地模型載入 vLLM（每次幾分鐘），全部跑完後自動評分，再切回原本的模型。</p>
+        </section>
 
-      <section>
-        <h2>Benchmarks</h2>
-        <div class="scroll"><table id="bench-list"></table></div>
-        <p class="empty" id="list-empty">尚無 benchmark</p>
-      </section>
+        <section>
+          <h2>模型戰績</h2>
+          <p class="hint">只統計已評分的評比：勝場＝該模型拿第一的次數；平均＝評審給的平均分（0–10）。</p>
+          <div class="scroll"><table id="records"></table></div>
+          <h3>模型 × 領域</h3>
+          <div class="scroll"><table id="matrix"></table></div>
+          <p class="hint" id="matrix-empty" hidden>還沒有評分完成的評比。</p>
+        </section>
 
-      <section id="detail" hidden>
-        <h2 id="detail-title">–</h2>
-        <p class="summary" id="detail-summary"></p>
-        <p class="err" id="detail-error" hidden></p>
-        <div class="scroll"><table id="detail-arms"></table></div>
-        <p><button class="btn sm" id="rejudge-btn" type="button" hidden>重新評比</button></p>
-      </section>
-
-      <section>
-        <h2>新增 Benchmark（同一題交給多個模型各做一次）</h2>
-        <form id="bench-form">
-          <label>標題 <input name="title" required /></label>
-          <label>領域
-            <select name="domain">
-              <option value="cuda">cuda</option>
-              <option value="cv">cv</option>
-              <option value="cpp">cpp</option>
-              <option value="csharp">csharp</option>
-              <option value="typescript">typescript</option>
-              <option value="python">python</option>
-              <option value="other" selected>other</option>
-            </select>
-          </label>
-          <label class="wide">目標 <textarea name="goal" rows="2" required></textarea></label>
-          <label>Plan / PRD（檔案路徑或 URL） <input name="plan_ref" /></label>
-          <label>Repo 路徑 <input name="repo_path" required /></label>
-          <label>Base branch <input name="base_branch" value="main" /></label>
-          <label>驗證指令（逗號分隔） <input name="verification_steps" placeholder="npm test" required /></label>
-          <label>Setup 指令 <input name="setup_cmd" placeholder="npm ci" /></label>
-          <label>複雜度
-            <select name="complexity"><option>S</option><option selected>M</option><option>L</option></select>
-          </label>
-          <label>評審模型
-            <select name="judge_model">
-              <option value="opus" selected>opus</option>
-              <option value="fable">fable</option>
-              <option value="fable-5">fable-5</option>
-              <option value="sonnet">sonnet</option>
-            </select>
-          </label>
-          <label class="wide">驗收標準（給評審看） <textarea name="verify_rubric" rows="2"></textarea></label>
-          <div class="wide">
-            <div>參賽模型（至少 2 個）</div>
-            <div class="models" id="model-choices"></div>
+        <section>
+          <h2>歷次評比</h2>
+          <div class="row">
+            <label class="hint">狀態
+              <select id="filter-status">
+                <option value="">全部</option>
+                <option value="running">進行中</option>
+                <option value="judging">評分中</option>
+                <option value="judged">已評分</option>
+                <option value="judge_failed">評分失敗</option>
+              </select>
+            </label>
+            <span class="grow"></span>
+            <span class="hint" id="list-count"></span>
           </div>
-          <div class="wide">
-            <button class="btn primary" type="submit" id="bench-submit">建立並排入佇列</button>
-            <span class="err" id="form-err" hidden></span>
+          <div class="scroll"><table id="bench-list"></table></div>
+          <p class="hint" id="list-empty" hidden>還沒有評比。按右上角「＋ 新評比」開始。</p>
+        </section>
+      </div>
+
+      <!-- ============ detail ============ -->
+      <div id="view-detail" hidden>
+        <section>
+          <div class="row">
+            <button class="btn sm" id="back-btn" type="button">← 回列表</button>
+            <span class="grow"></span>
+            <span class="chipline" id="detail-chips"></span>
           </div>
-        </form>
-      </section>
+          <h2 id="detail-title">–</h2>
+          <p class="hint" id="detail-source"></p>
+          <p class="summary" id="detail-summary"></p>
+          <p class="err" id="detail-error" hidden></p>
+
+          <h3>各組結果</h3>
+          <div class="scroll"><table id="detail-arms"></table></div>
+
+          <h3>評審意見</h3>
+          <div id="detail-judges"></div>
+
+          <div class="row" style="margin-top: 14px">
+            <button class="btn sm" id="rejudge-btn" type="button">重新評分</button>
+            <span class="hint">重新評分會再花一次雲端額度（每位評審一次）。</span>
+          </div>
+        </section>
+      </div>
+
+      <!-- ============ new ============ -->
+      <div id="view-new" hidden>
+        <section>
+          <div class="step-head"><span class="n">1</span><h2>要比什麼題目？</h2></div>
+          <div class="tabs" id="source-tabs">
+            <button class="tab" type="button" data-src="builtin">內建題庫</button>
+            <button class="tab" type="button" data-src="task">看板任務</button>
+            <button class="tab" type="button" data-src="draft">PRD 草稿</button>
+            <button class="tab" type="button" data-src="manual">現場輸入</button>
+          </div>
+
+          <div class="src-pane" id="src-builtin">
+            <p class="hint">中性的小題目，各自附單元測試當驗收；每次評比會開一個全新的 repo，不碰現有專案。</p>
+            <div class="qcards" id="builtin-list"></div>
+          </div>
+
+          <div class="src-pane" id="src-task" hidden>
+            <p class="hint">拿看板上的一張任務當題目（沿用它的 repo、計畫與驗證指令），每個模型各做一次。</p>
+            <label>任務 <select id="task-select"></select></label>
+          </div>
+
+          <div class="src-pane" id="src-draft" hidden>
+            <p class="hint">用 PRD 精靈寫好的草稿；送出前會先過 PRD 閘門（和一般建任務一樣）。</p>
+            <label>草稿 <select id="draft-select"></select></label>
+          </div>
+
+          <div class="src-pane" id="src-manual" hidden>
+            <label>標題 <input id="m-title" type="text" placeholder="例：CSV 解析器" /></label>
+            <label>目標 <textarea id="m-goal" rows="3" placeholder="要做出什麼、怎樣算完成"></textarea></label>
+            <label>Repo 路徑 <input id="m-repo" type="text" placeholder="/home/you/project" /></label>
+            <label>Base branch <input id="m-branch" type="text" value="main" /></label>
+            <label>驗證指令（一行一個） <textarea id="m-verify" rows="2" placeholder="npm test"></textarea></label>
+            <label>領域
+              <select id="m-domain">
+                <option value="other" selected>other</option>
+                <option value="cuda">cuda</option>
+                <option value="cv">cv</option>
+                <option value="cpp">cpp</option>
+                <option value="csharp">csharp</option>
+                <option value="typescript">typescript</option>
+                <option value="python">python</option>
+              </select>
+            </label>
+          </div>
+        </section>
+
+        <section>
+          <div class="step-head"><span class="n">2</span><h2>誰來比？（至少 2 個）</h2></div>
+          <p class="hint">本地模型免費但一次只能載入一個——評比會自動輪流切換。雲端模型會花訂閱額度。</p>
+          <div class="picks" id="model-picks"></div>
+        </section>
+
+        <section>
+          <div class="step-head"><span class="n">3</span><h2>誰來評分？</h2></div>
+          <p class="hint">雲端模型看每組的 diff 與驗證結果打分（匿名比較）。選多位就各評一次，顯示是否一致。</p>
+          <div class="picks" id="judge-picks"></div>
+        </section>
+
+        <section>
+          <div class="step-head"><span class="n">4</span><h2>確認送出</h2></div>
+          <div class="estimate" id="estimate">先選題目與模型。</div>
+          <p class="err" id="form-err" hidden></p>
+          <div class="row" style="margin-top: 12px">
+            <button class="btn primary" id="bench-submit" type="button">建立評比並排入佇列</button>
+            <button class="btn sm" id="cancel-new" type="button">取消</button>
+          </div>
+        </section>
+      </div>
     </main>
 
     <script src="/benchmarks.js"></script>

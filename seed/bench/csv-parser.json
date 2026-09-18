@@ -1,0 +1,18 @@
+{
+  "key": "csv-parser",
+  "title": "RFC 4180 CSV 解析器",
+  "goal": "在 src/csvparse.py 實作 parse(text) -> list[list[str]]：支援雙引號欄位、欄位內的換行與逗號、雙引號跳脫（\"\"）、CRLF 與 LF、結尾空行；不可用 csv 模組。",
+  "domain": "python",
+  "complexity": "M",
+  "verification_steps": [
+    "python3 -m unittest discover -s tests -v"
+  ],
+  "verify_rubric": "狀態機正確、邊界情況（空欄、只有換行、未閉合引號要丟 ValueError）、不用 csv 模組。",
+  "files": {
+    "README.md": "# CSV parser\n\n見 PLAN.md\n\n驗證：`python3 -m unittest discover -s tests -v`（tests/ 內的測試就是驗收標準，不要改測試）。\n",
+    "PLAN.md": "# RFC 4180 CSV 解析器\n\n## 目標\n實作 src/csvparse.py 的 parse(text)。\n\n## 規則\n- 只改 `src/`，不要動 `tests/`。\n- 純標準函式庫（Python 3.10+），不安裝套件。\n- 通過 `python3 -m unittest discover -s tests -v` 後結束。\n- 禁止 import csv。\n- 未閉合的引號要 raise ValueError。\n",
+    "src/__init__.py": "",
+    "src/csvparse.py": "def parse(text: str) -> list[list[str]]:\n    raise NotImplementedError\n",
+    "tests/test_csv.py": "import unittest\nfrom src.csvparse import parse\nimport src.csvparse as mod\n\n\nclass T(unittest.TestCase):\n    def test_simple(self):\n        self.assertEqual(parse('a,b,c\\n1,2,3\\n'), [['a', 'b', 'c'], ['1', '2', '3']])\n\n    def test_quotes(self):\n        self.assertEqual(parse('\"a,1\",\"say \"\"hi\"\"\",\"line\\nbreak\"\\n'), [['a,1', 'say \"hi\"', 'line\\nbreak']])\n\n    def test_crlf_and_empty(self):\n        self.assertEqual(parse('x,,z\\r\\n,,\\r\\n'), [['x', '', 'z'], ['', '', '']])\n\n    def test_unclosed(self):\n        with self.assertRaises(ValueError):\n            parse('\"oops,1\\n')\n\n    def test_no_csv_module(self):\n        self.assertNotIn('csv', [m.split('.')[0] for m in dir(mod) if not m.startswith('_')])\n\n\nif __name__ == '__main__':\n    unittest.main()\n"
+  }
+}

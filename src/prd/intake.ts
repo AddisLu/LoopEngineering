@@ -78,6 +78,8 @@ export interface SubmitOptions extends PrdOptions {
   queue?: boolean;
   /** 2+ models: create a benchmark from the PRD instead of a single task. */
   benchmark_models?: string[];
+  /** several cloud judges for the benchmark branch (defaults to bench_judge_model) */
+  judge_models?: string[];
 }
 
 export type SubmitResult =
@@ -134,7 +136,14 @@ export async function submitPrd(db: Database.Database, markdown: string, opts: S
   };
 
   if (opts.benchmark_models?.length) {
-    const { benchmark, arms } = createBenchmark(db, { ...common, domain: f.domain ?? 'other', models: opts.benchmark_models });
+    const { benchmark, arms } = createBenchmark(db, {
+      ...common,
+      domain: f.domain ?? 'other',
+      models: opts.benchmark_models,
+      judge_models: opts.judge_models,
+      setup_cmd: f.setup_steps?.length ? f.setup_steps.join(' && ') : null,
+      source_kind: 'draft',
+    });
     logEvent(db, { kind: 'note', detail: `PRD intake: benchmark ${benchmark.id} from ${path.basename(planRef)}` });
     return { ok: true, kind: 'benchmark', check, plan_ref: planRef, benchmark, arms };
   }

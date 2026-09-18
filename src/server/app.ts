@@ -43,7 +43,7 @@ import type { PptxRenderExec } from '../report/pptx/render.js';
 import type { ContentExec } from '../report/pptx/status.js';
 import type { AssembleFs } from '../report/pptx/assemble.js';
 import { registerLocalRoutes, type LocalRouteOptions } from './localRoutes.js';
-import { registerBenchmarkRoutes } from './benchmarkRoutes.js';
+import { registerBenchmarkRoutes, type BenchmarkRouteOptions } from './benchmarkRoutes.js';
 import type { BenchJudgeExec } from '../benchmark/judge.js';
 import { registerPrdRoutes, type PrdRouteOptions } from './prdRoutes.js';
 import { registerChatRoutes, type ChatRouteOptions } from './chatRoutes.js';
@@ -110,6 +110,8 @@ export interface AppOptions {
   terminalIdentity?: TerminalRouteOptions['identity'];
   /** Test-only injection point for POST /api/benchmarks/:id/judge (zero tokens). */
   benchJudgeExec?: BenchJudgeExec;
+  /** Test-only: built-in question dir / repo root for benchmark sources. */
+  benchSource?: BenchmarkRouteOptions['source'];
   /** Test-only injection point for the PRD gate's local-model review (zero GPU). */
   prdReviewExec?: PrdReviewExec;
   /** Test-only seams for the PRD wizard endpoints (knowledge search, local model, identity, git). */
@@ -518,7 +520,7 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
     jobRunner: opts.localJobRunner,
     catalog: opts.localCatalog,
   });
-  registerBenchmarkRoutes(app, db, { judgeExec: opts.benchJudgeExec });
+  registerBenchmarkRoutes(app, db, { judgeExec: opts.benchJudgeExec, source: opts.benchSource, prdReviewExec: opts.prdReviewExec });
   registerPrdRoutes(app, db, {
     reviewExec: opts.prdReviewExec,
     search: opts.prdSearch,

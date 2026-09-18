@@ -1,0 +1,18 @@
+{
+  "key": "slugify",
+  "title": "slugify：URL 友善的字串正規化",
+  "goal": "在 src/slugify.py 實作 slugify(text, max_len=60)：小寫、去重音（NFKD）、非英數變成單一連字號、去頭尾連字號、超過 max_len 在連字號處截斷；中文等非拉丁字元以 Unicode 保留（不轉拼音）。",
+  "domain": "python",
+  "complexity": "S",
+  "verification_steps": [
+    "python3 -m unittest discover -s tests -v"
+  ],
+  "verify_rubric": "正確處理重音、連續符號、長度截斷、空字串；程式碼可讀、有型別註記。",
+  "files": {
+    "README.md": "# slugify\n\n見 PLAN.md\n\n驗證：`python3 -m unittest discover -s tests -v`（tests/ 內的測試就是驗收標準，不要改測試）。\n",
+    "PLAN.md": "# slugify\n\n## 目標\n實作 src/slugify.py 的 slugify(text, max_len=60)。\n\n## 規則\n- 只改 `src/`，不要動 `tests/`。\n- 純標準函式庫（Python 3.10+），不安裝套件。\n- 通過 `python3 -m unittest discover -s tests -v` 後結束。\n- 重音字元用 unicodedata.normalize('NFKD') 去掉組合記號。\n- 截斷時不要留下半個單字：在最後一個連字號處切。\n",
+    "src/__init__.py": "",
+    "src/slugify.py": "def slugify(text: str, max_len: int = 60) -> str:\n    raise NotImplementedError\n",
+    "tests/test_slugify.py": "import unittest\nfrom src.slugify import slugify\n\n\nclass T(unittest.TestCase):\n    def test_basic(self):\n        self.assertEqual(slugify('Hello, World!'), 'hello-world')\n\n    def test_accents(self):\n        self.assertEqual(slugify('Crème Brûlée'), 'creme-brulee')\n\n    def test_collapse(self):\n        self.assertEqual(slugify('  a---b  __ c  '), 'a-b-c')\n\n    def test_truncate_on_hyphen(self):\n        self.assertEqual(slugify('one two three four', max_len=9), 'one-two')\n\n    def test_empty(self):\n        self.assertEqual(slugify('!!!'), '')\n\n    def test_unicode_kept(self):\n        self.assertEqual(slugify('玻璃 基板 TGV'), '玻璃-基板-tgv')\n\n\nif __name__ == '__main__':\n    unittest.main()\n"
+  }
+}

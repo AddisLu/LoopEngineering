@@ -388,6 +388,17 @@ CREATE TABLE IF NOT EXISTS benchmark_arms (
   PRIMARY KEY (benchmark_id, model)
 );
 CREATE INDEX IF NOT EXISTS idx_benchmark_arms_task ON benchmark_arms(task_id);
+-- One row per judge model per benchmark (multi-judge): the raw verdict; arms carry the mean.
+CREATE TABLE IF NOT EXISTS benchmark_judgements (
+  benchmark_id TEXT NOT NULL REFERENCES benchmarks(id) ON DELETE CASCADE,
+  judge_model  TEXT NOT NULL,
+  result_json  TEXT,
+  summary      TEXT,
+  winner       TEXT,
+  error        TEXT,
+  created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (benchmark_id, judge_model)
+);
 
 
 -- 模型對話 history (src/chat/store.ts, web/chat.html): server-side transcripts for the local-LLM

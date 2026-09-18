@@ -170,6 +170,15 @@ function migrate(db: Database.Database): void {
   add('chat_messages', [['tools_json', 'TEXT']]);
   // 轉成任務 → PRD 精靈: the wizard draft an answer became (task_id follows once it is submitted)
   add('chat_messages', [['draft_id', 'TEXT']]);
+  // benchmark redesign: where the question came from, several judges, and the model to switch
+  // back to once the arms are done
+  add('benchmarks', [
+    ['source_kind', 'TEXT'],
+    ['source_ref', 'TEXT'],
+    ['judge_models', 'TEXT'],
+    ['restore_model', 'TEXT'],
+    ['consensus', 'TEXT'],
+  ]);
   // 分享連結: an unguessable token makes one conversation readable without a login. Partial index
   // so the many NULLs (every unshared conversation) do not collide.
   add('chat_conversations', [

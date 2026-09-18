@@ -218,6 +218,7 @@ export async function runBenchJudge(
   bench: Benchmark,
   arms: ArmEvidence[],
   exec?: BenchJudgeExec,
+  judgeModel: string = bench.judge_model,
 ): Promise<BenchJudgeResult> {
   const hardLimit = getNum(db, 'hard_limit_pct', 95);
   const usage = readUsage().session.percent;
@@ -225,8 +226,64 @@ export async function runBenchJudge(
   if (!exec && !hasClaudeCli()) return { ok: false, error: 'claude CLI not found on PATH' };
   const run = exec ?? claudePromptExec(getNum(db, 'bench_judge_timeout_ms', 600_000));
   try {
-    return parseBenchJudgement(await run(buildBenchPrompt(bench, arms), bench.judge_model), arms);
+    return parseBenchJudgement(await run(buildBenchPrompt(bench, arms), judgeModel), arms);
   } catch (err) {
     return { ok: false, error: `judge call failed: ${String(err).slice(-300)}` };
   }
+}
+
+export interface AggregatedArm {
+  model: string;
+  /** per-judge totals plus the mean the arms table shows */
+  per_judge: Record<string, { scores: Record<Criterion, number>; total: number; rank: number; notes: string }>;
+  mean: Record<Criterion, number> & { total: number };
+  rank: number;
+}
+
+export interface Aggregated {
+  arms: AggregatedArm[];
+  winner: string | null;
+  consensus: 'unanimous' | 'split' | 'single';
+  summary: string;
+}
+
+/**
+ * Several judges, one verdict: each arm's criterion scores are averaged across the judges that
+ * answered, ranks are recomputed from the mean (same tie-breaks as a single judge), and the
+ * consensus says whether every judge put the same arm first.
+ */
+export function aggregateJudgements(per: Map<string, BenchJudgeResult>, arms: ArmEvidence[]): Aggregated {
+  const ok = [...per.entries()].filter((e): e is [string, Extract<BenchJudgeResult, { ok: true }>] => e[1].ok);
+  const byModel = new Map<string, AggregatedArm>();
+  for (const e of arms) {
+    byModel.set(e.model, { model: e.model, per_judge: {}, mean: { correctness: 0, completeness: 0, code_quality: 0, adherence: 0, total: 0 }, rank: 0 });
+  }
+  for (const [judge, r] of ok) {
+    for (const a of r.arms) {
+      const agg = byModel.get(a.model);
+      if (agg) agg.per_judge[judge] = { scores: a.scores, total: a.total, rank: a.rank, notes: a.notes };
+    }
+  }
+  const round1 = (v: number) => Math.round(v * 10) / 10;
+  for (const agg of byModel.values()) {
+    const votes = Object.values(agg.per_judge);
+    if (!votes.length) continue;
+    for (const c of CRITERIA) agg.mean[c] = round1(votes.reduce((s, v) => s + v.scores[c], 0) / votes.length);
+    agg.mean.total = round1(votes.reduce((s, v) => s + v.total, 0) / votes.length);
+  }
+  const order = arms
+    .map((e) => ({ e, a: byModel.get(e.model)! }))
+    .sort(
+      (x, y) =>
+        y.a.mean.total - x.a.mean.total ||
+        VERIFY_ORDER[x.e.verify_outcome] - VERIFY_ORDER[y.e.verify_outcome] ||
+        (x.e.tokens_out ?? Number.MAX_SAFE_INTEGER) - (y.e.tokens_out ?? Number.MAX_SAFE_INTEGER),
+    );
+  order.forEach((o, i) => (o.a.rank = i + 1));
+  const top = order[0]?.a;
+  const firsts = new Set(ok.map(([, r]) => r.winner ?? ''));
+  const consensus: Aggregated['consensus'] = ok.length <= 1 ? 'single' : firsts.size === 1 ? 'unanimous' : 'split';
+  // one judge reads as a plain paragraph; several are labelled so the page can tell them apart
+  const summary = ok.length === 1 ? (ok[0]![1].summary ?? '') : ok.map(([judge, r]) => `【${judge}】${r.summary}`).join('\n');
+  return { arms: [...byModel.values()], winner: top && top.mean.total > 0 ? top.model : null, consensus, summary };
 }

@@ -6,8 +6,11 @@ import { getTask, latestRun, listRunsForTask, setStatus } from '../tasks.js';
 import { diffstat } from '../git/worktree.js';
 import { cleanupWorktree } from '../orchestrator/cleanup.js';
 import { notify } from '../notify.js';
-import { getBenchmark, type Benchmark, type BenchmarkArmView } from './store.js';
-import { runBenchJudge, type ArmEvidence, type BenchJudgeExec } from './judge.js';
+import { getBenchmark, judgeList, type Benchmark, type BenchmarkArmView } from './store.js';
+import { aggregateJudgements, runBenchJudge, type ArmEvidence, type BenchJudgeExec, type BenchJudgeResult } from './judge.js';
+import { getModelManager, type ModelManager } from '../local/modelManager.js';
+import { activeLocalRunCount } from '../tasks.js';
+import { isLocalModel, localId } from '../local/models.js';
 
 /**
  * Benchmark completion: once every arm task is terminal, collect each arm's evidence (verify
@@ -39,6 +42,7 @@ export async function judgeBenchmark(
   db: Database.Database,
   id: string,
   exec?: BenchJudgeExec,
+  opts: { judges?: string[]; modelManager?: Pick<ModelManager, 'state' | 'ensureLoaded'> } = {},
 ): Promise<Benchmark | null> {
   if (judging.has(id)) return null;
   const detail = getBenchmark(db, id);
@@ -48,22 +52,40 @@ export async function judgeBenchmark(
     const bench = detail.benchmark;
     db.prepare("UPDATE benchmarks SET status = 'judging', error = NULL WHERE id = ?").run(id);
     const evidence = detail.arms.map((arm) => collectArmEvidence(db, bench, arm));
-    const result = await runBenchJudge(db, bench, evidence, exec);
-
-    if (!result.ok) {
-      db.prepare("UPDATE benchmarks SET status = 'judge_failed', error = ? WHERE id = ?").run(result.error, id);
-      logEvent(db, { kind: 'note', detail: `benchmark ${id}: judge failed — ${result.error}` });
-      await notify(db, { title: 'Loop: benchmark 評比失敗', message: `${bench.title}: ${result.error}`, tags: ['warning'] });
+    const judges = opts.judges?.length ? opts.judges : judgeList(bench);
+    // every judge scores on its own; one failing does not sink the others
+    const per = new Map<string, BenchJudgeResult>();
+    const putJ = db.prepare(
+      `INSERT INTO benchmark_judgements (benchmark_id, judge_model, result_json, summary, winner, error) VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(benchmark_id, judge_model) DO UPDATE SET result_json = excluded.result_json, summary = excluded.summary, winner = excluded.winner, error = excluded.error, created_at = datetime('now')`,
+    );
+    for (const judge of judges) {
+      const r = await runBenchJudge(db, bench, evidence, exec, judge);
+      per.set(judge, r);
+      putJ.run(id, judge, r.ok ? JSON.stringify(r) : null, r.ok ? r.summary : null, r.ok ? r.winner : null, r.ok ? null : r.error);
+    }
+    const failures = [...per.entries()].filter(([, r]) => !r.ok).map(([j, r]) => `${j}: ${(r as { error: string }).error}`);
+    if (failures.length === judges.length) {
+      const error = failures.join(' | ');
+      db.prepare("UPDATE benchmarks SET status = 'judge_failed', error = ? WHERE id = ?").run(error, id);
+      logEvent(db, { kind: 'note', detail: `benchmark ${id}: judge failed — ${error}` });
+      await notify(db, { title: 'Loop: benchmark 評比失敗', message: `${bench.title}: ${error}`, tags: ['warning'] });
       return getBenchmark(db, id)!.benchmark;
     }
 
+    const result = aggregateJudgements(per, evidence);
     const upd = db.prepare(
       'UPDATE benchmark_arms SET judge_score = ?, judge_rank = ?, scores_json = ?, notes = ? WHERE benchmark_id = ? AND model = ?',
     );
-    for (const a of result.arms) upd.run(a.total, a.rank, JSON.stringify(a.scores), a.notes, id, a.model);
+    for (const a of result.arms) {
+      const votes = Object.entries(a.per_judge);
+      // a single judge's note reads as a plain sentence; several are labelled
+      const notes = votes.length === 1 ? (votes[0]![1].notes ?? '') : votes.map(([j, v]) => `【${j}】${v.notes}`).join('\n');
+      upd.run(a.mean.total, a.rank, JSON.stringify({ ...a.per_judge, mean: a.mean }), notes, id, a.model);
+    }
     db.prepare(
-      "UPDATE benchmarks SET status = 'judged', winner = ?, summary = ?, result_json = ?, judged_at = datetime('now') WHERE id = ?",
-    ).run(result.winner, result.summary, JSON.stringify({ ...result, evidence }), id);
+      "UPDATE benchmarks SET status = 'judged', winner = ?, summary = ?, result_json = ?, consensus = ?, error = ?, judged_at = datetime('now') WHERE id = ?",
+    ).run(result.winner, result.summary, JSON.stringify({ ...result, evidence }), result.consensus, failures.length ? `部分評審失敗：${failures.join(' | ')}` : null, id);
 
     for (const arm of detail.arms) {
       const t = getTask(db, arm.task_id);
@@ -76,14 +98,24 @@ export async function judgeBenchmark(
 
     const podium = [...result.arms]
       .sort((a, b) => a.rank - b.rank)
-      .map((a) => `${a.rank}. ${a.model} ${a.total}`)
+      .map((a) => `${a.rank}. ${a.model} ${a.mean.total}`)
       .join(' · ');
-    logEvent(db, { kind: 'note', detail: `benchmark ${id} judged by ${bench.judge_model}: ${podium}` });
+    logEvent(db, { kind: 'note', detail: `benchmark ${id} judged by ${judges.join('+')} (${result.consensus}): ${podium}` });
     await notify(db, {
       title: 'Loop: benchmark 完成',
       message: `${bench.title} (${bench.domain})\n${podium}\n${result.summary}`,
       tags: ['trophy'],
     });
+    // the arms may have switched vLLM around; put the operator's model back when nothing local runs
+    const restore = bench.restore_model;
+    if (restore && activeLocalRunCount(db) === 0) {
+      const mm = opts.modelManager ?? getModelManager(db);
+      const loaded = mm.state().loaded;
+      if (loaded !== restore) {
+        const r = mm.ensureLoaded(restore);
+        logEvent(db, { kind: 'note', detail: `benchmark ${id}: switching back to ${restore} (${r})` });
+      }
+    }
     return getBenchmark(db, id)!.benchmark;
   } finally {
     judging.delete(id);

@@ -93,6 +93,23 @@ export interface BoardState {
   forecast: { weekly_backlog_pct: number; weekly_headroom: number; capacity_more_M: number; verdict: string };
   // 本地模型 topbar chip: what vLLM serves (ModelManager state persisted in settings) + local runs in flight.
   local: { enabled: boolean; loaded: string | null; status: string; inflight: number };
+  // 評比使用中: the chat page greys out model switching while a benchmark owns the GPU
+  benchmark: { id: string; title: string; status: string; arms_done: number; arm_count: number } | null;
+}
+
+/** The benchmark currently occupying the machine, if any (cheap: one indexed row). */
+function runningBenchmark(db: Database.Database): BoardState['benchmark'] {
+  if (!getBool(db, 'benchmark_enabled', false)) return null;
+  const row = db
+    .prepare(
+      `SELECT b.id, b.title, b.status,
+              (SELECT COUNT(*) FROM benchmark_arms a WHERE a.benchmark_id = b.id) AS arm_count,
+              (SELECT COUNT(*) FROM benchmark_arms a JOIN tasks t ON t.id = a.task_id
+                WHERE a.benchmark_id = b.id AND t.status IN ('review','attention','failed','closed')) AS arms_done
+         FROM benchmarks b WHERE b.status IN ('running','judging') ORDER BY b.created_at DESC LIMIT 1`,
+    )
+    .get() as BoardState['benchmark'];
+  return row ?? null;
 }
 
 /** Render one tool_use content block as a compact activity line (→ Edit src/foo.ts). */
@@ -382,6 +399,7 @@ export function boardState(db: Database.Database): BoardState {
       status: getSetting(db, 'local_model_status') || 'idle',
       inflight: activeLocalRunCount(db),
     },
+    benchmark: runningBenchmark(db),
     forecast: {
       weekly_backlog_pct: fc.weekly_backlog_pct,
       weekly_headroom: fc.weekly_headroom,

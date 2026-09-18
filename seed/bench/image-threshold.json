@@ -1,0 +1,18 @@
+{
+  "key": "image-threshold",
+  "title": "二值化與連通元件（純 Python）",
+  "goal": "在 src/blobs.py 實作 threshold(img, t) 與 label(binary) -> (labels, count)：img 是 list[list[int]] 灰階；label 用 4-連通、標籤從 1 起、背景 0；再實作 bboxes(labels, count) -> list[(x0,y0,x1,y1)]。不可用 numpy。",
+  "domain": "cv",
+  "complexity": "M",
+  "verification_steps": [
+    "python3 -m unittest discover -s tests -v"
+  ],
+  "verify_rubric": "連通元件正確（含 U 型、對角不連通）、bbox 正確、大圖不會遞迴爆掉（用迭代）。",
+  "files": {
+    "README.md": "# Threshold + CCL\n\n見 PLAN.md\n\n驗證：`python3 -m unittest discover -s tests -v`（tests/ 內的測試就是驗收標準，不要改測試）。\n",
+    "PLAN.md": "# 二值化與連通元件\n\n## 目標\n實作 src/blobs.py。\n\n## 規則\n- 只改 `src/`，不要動 `tests/`。\n- 純標準函式庫（Python 3.10+），不安裝套件。\n- 通過 `python3 -m unittest discover -s tests -v` 後結束。\n- 4-連通；對角相鄰不算同一元件。\n- 用 BFS/DFS 迭代版，200×200 的圖不可 RecursionError。\n",
+    "src/__init__.py": "",
+    "src/blobs.py": "def threshold(img, t):\n    raise NotImplementedError\n\n\ndef label(binary):\n    raise NotImplementedError\n\n\ndef bboxes(labels, count):\n    raise NotImplementedError\n",
+    "tests/test_blobs.py": "import unittest\nfrom src.blobs import threshold, label, bboxes\n\n\nclass T(unittest.TestCase):\n    def test_threshold(self):\n        self.assertEqual(threshold([[0, 128, 255]], 100), [[0, 1, 1]])\n\n    def test_two_blobs_diagonal_not_connected(self):\n        b = [[1, 0, 0], [0, 1, 0], [0, 0, 0]]\n        labels, n = label(b)\n        self.assertEqual(n, 2)\n        self.assertNotEqual(labels[0][0], labels[1][1])\n\n    def test_u_shape_is_one(self):\n        b = [[1, 0, 1], [1, 0, 1], [1, 1, 1]]\n        labels, n = label(b)\n        self.assertEqual(n, 1)\n        self.assertEqual(bboxes(labels, n), [(0, 0, 2, 2)])\n\n    def test_big_image_iterative(self):\n        b = [[1] * 200 for _ in range(200)]\n        labels, n = label(b)\n        self.assertEqual(n, 1)\n        self.assertEqual(bboxes(labels, n), [(0, 0, 199, 199)])\n\n    def test_bbox_order_by_label(self):\n        b = [[0, 0, 1], [1, 0, 0]]\n        labels, n = label(b)\n        self.assertEqual(n, 2)\n        self.assertEqual(sorted(bboxes(labels, n)), [(0, 1, 0, 1), (2, 0, 2, 0)])\n\n\nif __name__ == '__main__':\n    unittest.main()\n"
+  }
+}

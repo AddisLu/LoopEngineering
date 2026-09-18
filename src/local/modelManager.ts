@@ -45,6 +45,8 @@ export interface ModelManagerDeps {
   launch?: (repo: string, recipe: string, logPath: string) => LauncherHandle;
   /** Run a short command (docker stop/rm); resolves with the exit code, never rejects. */
   exec?: (cmd: string, args: string[], timeoutMs: number) => Promise<number | null>;
+  /** Is a container with this name still known to docker? (the --rm removal race, see switchTo) */
+  containerExists?: (name: string) => Promise<boolean>;
   fetch?: (url: string, init?: { signal?: AbortSignal }) => Promise<{ ok: boolean; json(): Promise<unknown> }>;
   /** Free VRAM held by the whisper / bge-m3 warm workers before vLLM claims the GPU. */
   shutdownWorkers?: () => void;
@@ -76,6 +78,14 @@ function defaultLaunch(repo: string, recipe: string, logPath: string): LauncherH
   };
 }
 
+function defaultContainerExists(name: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    nodeExecFile('docker', ['ps', '-a', '--filter', `name=^${name}$`, '--format', '{{.ID}}'], { timeout: 10_000 }, (err, stdout) => {
+      resolve(!err && stdout.trim().length > 0);
+    });
+  });
+}
+
 function defaultExec(cmd: string, args: string[], timeoutMs: number): Promise<number | null> {
   return new Promise((resolve) => {
     nodeExecFile(cmd, args, { timeout: timeoutMs }, (err) => {
@@ -104,6 +114,7 @@ export class ModelManager {
     this.d = {
       launch: deps.launch ?? defaultLaunch,
       exec: deps.exec ?? defaultExec,
+      containerExists: deps.containerExists ?? defaultContainerExists,
       fetch: deps.fetch ?? ((url, init) => fetch(url, init)),
       shutdownWorkers:
         deps.shutdownWorkers ??
@@ -204,6 +215,12 @@ export class ModelManager {
     this.d.shutdownWorkers();
     await this.d.exec('docker', ['stop', this.container()], 120_000);
     await this.d.exec('docker', ['rm', '-f', this.container()], 60_000);
+    // launch-cluster.sh runs the container with `--rm`, so the daemon removes it asynchronously
+    // after a stop: `docker rm -f` can return while the name is still taken, and the next
+    // `docker run --name vllm_node` then dies with "name already in use" — which is how a demo
+    // machine ended up serving nothing at all. Wait for the name to actually free up.
+    const freed = await this.waitForContainerGone();
+    if (!freed) return this.fail(id, `container ${this.container()} 還在（docker rm 沒清掉），沒有啟動新的模型`);
 
     const repo = getSetting(this.db, 'local_vllm_repo') || '';
     const logPath = path.join(paths.logsDir, `vllm-${id}-${started}.log`);
@@ -226,6 +243,17 @@ export class ModelManager {
       }
     }
     return this.fail(id, `timed out after ${Math.round((this.d.now() - started) / 1000)}s loading ${id} — see ${logPath}`);
+  }
+
+  /** Poll until no container holds our name (bounded); true when the name is free. */
+  private async waitForContainerGone(timeoutMs = 60_000): Promise<boolean> {
+    const exists = this.d.containerExists;
+    const until = this.d.now() + timeoutMs;
+    while (await exists(this.container())) {
+      if (this.d.now() >= until) return false;
+      await this.d.sleep(1000);
+    }
+    return true;
   }
 
   private async servedModelId(): Promise<string | null> {

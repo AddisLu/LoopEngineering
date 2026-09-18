@@ -1,0 +1,18 @@
+{
+  "key": "rate-limiter",
+  "title": "Token bucket 限流器",
+  "goal": "在 src/ratelimit.py 實作 TokenBucket(rate_per_s, burst, clock=time.monotonic)：allow(n=1) 回傳 bool、令牌隨時間補充但不超過 burst、retry_after() 回傳還要等幾秒才夠 1 個令牌；多執行緒安全。",
+  "domain": "python",
+  "complexity": "M",
+  "verification_steps": [
+    "python3 -m unittest discover -s tests -v"
+  ],
+  "verify_rubric": "浮點補充精確、retry_after 合理、threading.Lock 保護。",
+  "files": {
+    "README.md": "# Token bucket\n\n見 PLAN.md\n\n驗證：`python3 -m unittest discover -s tests -v`（tests/ 內的測試就是驗收標準，不要改測試）。\n",
+    "PLAN.md": "# Token bucket 限流器\n\n## 目標\n實作 src/ratelimit.py 的 TokenBucket。\n\n## 規則\n- 只改 `src/`，不要動 `tests/`。\n- 純標準函式庫（Python 3.10+），不安裝套件。\n- 通過 `python3 -m unittest discover -s tests -v` 後結束。\n- clock 可注入。\n- 補充要依經過時間連續計算，不是每秒一次。\n",
+    "src/__init__.py": "",
+    "src/ratelimit.py": "import time\n\n\nclass TokenBucket:\n    def __init__(self, rate_per_s: float, burst: int, clock=time.monotonic):\n        raise NotImplementedError\n",
+    "tests/test_ratelimit.py": "import unittest\nfrom src.ratelimit import TokenBucket\n\n\nclass Clock:\n    def __init__(self):\n        self.t = 0.0\n\n    def __call__(self):\n        return self.t\n\n\nclass T(unittest.TestCase):\n    def test_burst_then_block(self):\n        clk = Clock()\n        b = TokenBucket(1.0, 3, clock=clk)\n        self.assertTrue(all(b.allow() for _ in range(3)))\n        self.assertFalse(b.allow())\n\n    def test_refill(self):\n        clk = Clock()\n        b = TokenBucket(2.0, 2, clock=clk)\n        b.allow(); b.allow()\n        clk.t = 0.5\n        self.assertTrue(b.allow())\n        self.assertFalse(b.allow())\n\n    def test_retry_after(self):\n        clk = Clock()\n        b = TokenBucket(1.0, 1, clock=clk)\n        b.allow()\n        self.assertAlmostEqual(b.retry_after(), 1.0, places=3)\n        clk.t = 0.25\n        self.assertAlmostEqual(b.retry_after(), 0.75, places=3)\n\n    def test_cap(self):\n        clk = Clock()\n        b = TokenBucket(10.0, 2, clock=clk)\n        clk.t = 100\n        self.assertTrue(b.allow(2))\n        self.assertFalse(b.allow())\n\n\nif __name__ == '__main__':\n    unittest.main()\n"
+  }
+}

@@ -305,7 +305,7 @@
       <ul>
         <li><b>最右邊一排圖示鈕永遠看得到</b>：由上而下是 任務／調參／知識庫／PRD ─ 模型／機台／評比。點一下切換面板、再點同一個收起；<b>Alt+1～7</b> 直接切換。面板收起時圖示仍在（亮著的那個留一道標記），所以「面板不見了、切不回來」不會發生。任務有待處理時，圖示右上角會出現數字。</li>
         <li><b>三欄可收折</b>：頂欄 ☰ 收左欄、▤ 或點亮著的圖示收右側面板；兩邊都收起時對話區幾乎佔滿視窗（1920 寬螢幕實測 1868px）。收合狀態與上次看的面板記在瀏覽器（<code>loop_shell_rail</code>／<code>loop_shell_dock</code>／<code>loop_shell_tab</code>）。手機寬度左欄與面板都變成側滑抽屜，圖示列改成最上面一排。</li>
-        <li><b>右側面板</b>：<b>調參</b>＝智慧調整參數（見第 26 章）；<b>任務</b>＝看板的即時精簡版（同一條 SSE，計數＋依狀態分組的卡片，點卡直接開看板該張卡的細節）；<b>知識庫</b>＝文件／片段數、RAG 搜尋、快速記一筆；<b>PRD</b>＝開新的 PRD（五步精靈，見第 26 章）＋最近的草稿；<b>模型</b>＝切換、下載、建置映像（見第 26 章）；<b>機台</b>＝這次回答的速度、目前模型、記憶體、GPU；<b>Benchmark</b>＝清單。</li>
+        <li><b>右側面板</b>：<b>調參</b>＝智慧調整參數（見第 26 章）；<b>任務</b>＝看板的即時精簡版（同一條 SSE，計數＋依狀態分組的卡片，點卡直接開看板該張卡的細節）；<b>知識庫</b>＝文件／片段數、RAG 搜尋、快速記一筆；<b>PRD</b>＝開新的 PRD（五步精靈，見第 26 章）＋最近的草稿；<b>模型</b>＝切換、下載、建置映像（見第 26 章）；<b>機台</b>＝這次回答的速度、目前模型、記憶體、GPU；<b>評比</b>＝模型戰績與歷次評比（見第 26 章）。</li>
         <li><b>對話標題</b>：頂欄標題點一下即可改名；「⋯」選單有匯出 Markdown／匯出 HTML／分享連結／刪除。</li>
       </ul>
 
@@ -1171,13 +1171,25 @@ loop prd submit my-feature.md --model local:qwen38-flash
 loop prd submit my-feature.md --bench-models local:qwen38-flash,local:qwen3-coder-next</code></pre>
 
       <h3>Benchmark：同一題交給多個模型各做一次</h3>
+      <p>對話頁的<b>評比</b>面板（圖示列最後一個，Alt+7）是儀表板：正在跑的評比、<b>模型戰績</b>（每個模型的勝場／參賽／平均分／驗證通過率）與最近幾次的結果；點任何一列就跳到 <code>/benchmarks.html#b=&lt;id&gt;</code> 看細節。按「＋ 新評比」進到建立流程。</p>
       <ul>
-        <li><b>建立</b>：看板頂欄「Benchmark」頁、<code>loop bench add</code> 或 MCP <code>loop_bench_add</code>。至少 2 個模型、至少 1 條驗證指令，並選一個領域（cuda／cv／cpp／csharp／typescript／python／other）。可以放一個 <code>sonnet</code> 當雲端對照組（會花 token）。</li>
-        <li><b>執行</b>：每個模型是一張普通任務（標題 <code>[bench] …</code>），各自的 worktree、驗證與續跑，但<b>永遠不會合併</b>回 base branch。本地 arm 會依已載入模型分批跑，每多一個模型最多多一次切換。</li>
-        <li><b>評比</b>：所有 arm 結束後，外部評審（<code>bench_judge_model</code>，預設 opus）一次讀完每個 arm 的驗證結果與 diff（每個 arm 最多 <code>bench_diff_cap_chars</code> 字），依<b>正確性／完整性／程式品質／遵循度</b>各給 0–10 分。arm 以 Arm A/B… 匿名，名次由分數計算（同分時驗證通過者優先、再比輸出 token 少者），不是 LLM 自己排。</li>
-        <li><b>結果</b>：推播一次；Benchmark 頁的<b>模型 × 領域矩陣</b>累積平均分數、勝率、驗證通過率、平均輸出 token 與耗時。評比後 arm 的 worktree 會清掉，<code>loop/&lt;任務 id&gt;</code> 分支保留供檢視。</li>
-        <li><b>花費</b>：評審是一個 benchmark <b>唯一的 Anthropic 花費</b>（一次 <code>claude -p</code>）。用量已達硬上限時會延後並標為「評比失敗」，可在頁面按「重新評比」或執行 <code>loop bench judge &lt;id&gt;</code>。</li>
+        <li><b>① 題目</b>四種來源：
+          <ul>
+            <li><b>內建題庫</b>（<code>seed/bench/*.json</code>）：slugify、LRU cache、CSV 解析、token bucket、二值化＋連通元件、log 分析——都是中性小題，各自附 <code>tests/</code> 當驗收（<code>python3 -m unittest discover</code>）。每次評比會在 <code>spike_root/.bench/</code> 開一個<b>全新的 repo</b>（含自己的 bare origin），不碰任何現有專案。</li>
+            <li><b>看板任務</b>：沿用那張任務的 repo、計畫與驗證指令。</li>
+            <li><b>PRD 草稿</b>：精靈寫好的草稿，送出前照樣過 PRD 閘門。</li>
+            <li><b>現場輸入</b>：直接填標題、目標、repo、驗證指令。</li>
+          </ul>
+        </li>
+        <li><b>② 參賽模型</b>（至少 2 個）：本地模型直接從模型目錄來，跑不動的會灰掉並寫原因（權重沒下載、映像沒建、需要 2 台 Spark）；雲端模型（Sonnet／Opus／Haiku）會標「花訂閱額度」。</li>
+        <li><b>③ 評審</b>（可多選）：每位雲端評審<b>各評一次</b>，看每組的驗證結果與 diff（每組最多 <code>bench_diff_cap_chars</code> 字），依<b>正確性／完整性／程式品質／遵循度</b>各給 0–10 分。組別以 Arm A/B… 匿名。多位評審時，每項分數取平均後重新排名，並標出<b>評審一致</b>或<b>評審分歧</b>；某位評審失敗不影響其他人（全部失敗才算「評分失敗」）。</li>
+        <li><b>④ 送出</b>前會估時間：切換本地模型的次數 × 每次幾分鐘 ＋ 各組實作 ＋ 評分。</li>
+        <li><b>執行</b>：每個模型是一張普通任務（標題 <code>[bench] …</code>），各自的 worktree、驗證與續跑，但<b>永遠不會合併</b>回 base branch。一台 Spark 一次只載入一個模型，所以本地組會輪流切換；評比進行中，對話頁的模型面板會顯示<b>「評比使用中」</b>並鎖住切換鈕，評分完成後自動<b>切回原本的模型</b>。</li>
+        <li><b>結果</b>：推播一次；評比頁的<b>模型 × 領域矩陣</b>累積平均分數、勝率、驗證通過率、平均輸出 token 與耗時。評比後 arm 的 worktree 會清掉，<code>loop/&lt;任務 id&gt;</code> 分支保留供檢視。</li>
+        <li><b>花費</b>：評審是一個 benchmark <b>唯一的 Anthropic 花費</b>（每位評審一次 <code>claude -p</code>）。用量達硬上限時會延後並標為「評分失敗」，可在詳細頁按「重新評分」或執行 <code>loop bench judge &lt;id&gt;</code>。</li>
+        <li><b>PRD 精靈</b>第⑤步的「實作模型」選「評比：多個模型各做一次」就能直接把同一份 PRD 送成評比。</li>
       </ul>
+      <p>API：<code>GET /api/benchmarks/summary</code>（儀表板）、<code>GET /api/benchmarks/builtin</code>（題庫）、<code>POST /api/benchmarks {source:{kind,ref}, models[], judge_models[], overrides?}</code>、<code>GET /api/benchmarks/:id</code>（含每位評審的 <code>judgements</code>）、<code>POST /api/benchmarks/:id/judge {judge_models?}</code>。</p>
       <pre><code>loop config set benchmark_enabled true
 loop bench add --title "matmul kernel" --goal "實作 tiled matmul" --repo ~/bench/cuda-toy \
   --verify "make test" --plan ~/bench/matmul-prd.md --domain cuda \

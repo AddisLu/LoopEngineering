@@ -165,6 +165,11 @@ function paintTopbarUsage(s) {
 
 onBoard((s) => {
   paintTopbarUsage(s);
+  const wasBench = benchBusy && benchBusy.id;
+  benchBusy = s.benchmark || null;
+  setText('act-bench-badge', benchBusy ? `${benchBusy.arms_done}/${benchBusy.arm_count}` : '');
+  $('act-bench-badge').hidden = !benchBusy;
+  if ((benchBusy && benchBusy.id) !== wasBench && catalogData) paintCatalog(catalogData);
   const needsYou = (s.counts || {}).attention || 0;
   setText('act-tasks-badge', needsYou ? String(needsYou) : '');
   $('act-tasks-badge').hidden = !needsYou;
@@ -183,6 +188,7 @@ const RECO_LABEL = { chat: '對話', code: '寫程式', fast: '小而快' };
 let switching = false;
 let jobTimer = null;
 let catalogData = null;
+let benchBusy = null; // board snapshot: a benchmark owns the GPU, so switching must wait
 
 function actionButton(e, data) {
   const busy = data.job && data.job.status === 'running';
@@ -204,7 +210,8 @@ function actionButton(e, data) {
     b.textContent = `建置映像（${e.container}）`;
     b.onclick = () => startJob('build', e.recipe, e.name);
   }
-  if (busy || switching) b.disabled = true;
+  if (busy || switching || (benchBusy && e.action === 'switch')) b.disabled = true;
+  if (benchBusy && e.action === 'switch') b.title = `評比使用中：${benchBusy.title}`;
   return b;
 }
 
@@ -247,6 +254,11 @@ function paintCatalog(data) {
   const note = $('switch-state');
   note.classList.toggle('busy', st.status !== 'ready' && st.status !== 'idle');
   note.classList.toggle('bad', st.status === 'error');
+  if (benchBusy) {
+    note.classList.add('busy');
+    note.textContent = `評比使用中：${benchBusy.title}（${benchBusy.arms_done}/${benchBusy.arm_count} 組）——評比會自己輪流切換模型，結束後切回原本的`;
+    return;
+  }
   note.textContent =
     st.status === 'ready'
       ? (cur && cur.name) || st.loaded || '目前模型'
@@ -507,31 +519,75 @@ async function loadPrdDrafts() {
 $('prd-refresh').onclick = loadPrdDrafts;
 
 // ---- Benchmark --------------------------------------------------------------
-let benchLoaded = false;
+// The dashboard view: which model actually wins, what is running right now, and the last few
+// runs. Everything deeper (picking a question, models and judges) lives on /benchmarks.html.
+let benchTimer = null;
+const BENCH_STATUS = { running: '進行中', judging: '評分中', judged: '已評分', judge_failed: '評分失敗' };
+const CONSENSUS = { unanimous: '評審一致', split: '評審分歧', single: '單一評審' };
+
+function benchRow(b) {
+  const a = el('a', 'bench-row');
+  a.href = `/benchmarks.html#b=${encodeURIComponent(b.id)}`;
+  a.append(el('span', 't', b.title));
+  const meta = el('span', 'm');
+  meta.append(el('span', `chip ${b.status === 'judged' ? 'ok' : b.status === 'judge_failed' ? 'bad' : ''}`, BENCH_STATUS[b.status] || b.status));
+  if (b.winner_label) meta.append(el('span', 'chip', `勝：${b.winner_label}`));
+  if (b.consensus && b.status === 'judged') meta.append(el('span', 'chip', CONSENSUS[b.consensus] || b.consensus));
+  meta.append(el('span', 'chip', `${b.models.length} 個模型`));
+  if (b.judges && b.judges.length > 1) meta.append(el('span', 'chip', `${b.judges.length} 位評審`));
+  meta.append(el('span', 'chip', when(b.created_at)));
+  a.append(meta);
+  return a;
+}
+
+function paintBenchSummary(data) {
+  // 進行中
+  const run = data.running;
+  $('bench-running').hidden = !run;
+  if (run) {
+    setText('bench-running-title', run.title);
+    const pctDone = run.arm_count ? Math.round((100 * run.arms_done) / run.arm_count) : 0;
+    $('bench-running-bar').style.width = `${pctDone}%`;
+    setText('bench-running-meta', `${BENCH_STATUS[run.status] || run.status} · ${run.arms_done}/${run.arm_count} 組完成 · ${run.models.join('、')}`);
+  }
+
+  // 模型戰績
+  const box = $('bench-models');
+  if (!data.models.length) {
+    box.replaceChildren(el('p', 'hint', '還沒有評分完成的評比。'));
+  } else {
+    const rows = [el('div', 'score-row head')];
+    rows[0].append(el('span', 'n', '模型'), el('span', 's', '勝/場'), el('span', 's', '平均'), el('span', 's', '驗證'));
+    for (const m of data.models) {
+      const r = el('div', 'score-row');
+      r.append(
+        el('span', 'n', m.label),
+        el('span', 's', `${m.wins}/${m.n}`),
+        el('span', 's', m.avg_score == null ? '–' : m.avg_score.toFixed(1)),
+        el('span', 's', `${Math.round(m.verify_pass_rate * 100)}%`),
+      );
+      rows.push(r);
+    }
+    box.replaceChildren(...rows);
+  }
+
+  // 最近
+  const list = $('bench-list');
+  list.replaceChildren(...(data.recent.length ? data.recent.map(benchRow) : [el('p', 'hint', '還沒有評比。點「＋ 新評比」開始。')]));
+
+  // while something is running the panel follows it (arms take minutes each)
+  if (benchTimer) clearInterval(benchTimer);
+  benchTimer = null;
+  if (run && !$('pane-bench').hidden) benchTimer = setInterval(() => (!$('pane-bench').hidden ? loadBenchmarks() : clearInterval(benchTimer)), 10000);
+}
+
 async function loadBenchmarks() {
-  if (benchLoaded) return;
-  benchLoaded = true;
-  const box = $('bench-list');
-  box.replaceChildren(el('p', 'hint', '載入中…'));
   try {
-    const data = await api('/api/benchmarks');
-    const items = data.benchmarks || data.items || [];
-    if (!items.length) return box.replaceChildren(el('p', 'hint', '還沒有 benchmark。'));
-    box.replaceChildren(
-      ...items.slice(0, 20).map((b) => {
-        const a = el('a', 'bench-row');
-        a.href = '/benchmarks.html';
-        a.append(el('span', 't', b.title || b.name || b.id));
-        const meta = el('span', 'm');
-        meta.append(el('span', 'chip', b.status || '—'));
-        if (b.winner) meta.append(el('span', 'chip', `勝：${b.winner}`));
-        if (b.arms) meta.append(el('span', 'chip', `${fmtInt(b.arms.length || b.arms)} 組`));
-        a.append(meta);
-        return a;
-      }),
-    );
+    paintBenchSummary(await api('/api/benchmarks/summary'));
   } catch (err) {
-    box.replaceChildren(el('p', 'err', err.message));
+    $('bench-list').replaceChildren(
+      el('p', 'hint', /404/.test(err.message) ? '評比模式未啟用：loop config set benchmark_enabled true' : `讀不到評比：${err.message}`),
+    );
   }
 }
 

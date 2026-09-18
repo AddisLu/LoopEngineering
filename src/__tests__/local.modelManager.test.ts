@@ -17,8 +17,9 @@ afterEach(() => {
  * Zero-docker/zero-GPU harness. `served` is the sequence of ids /v1/models answers with (null =
  * not up); the last entry repeats. Every side effect is recorded in `calls` for ordering checks.
  */
-function harness(opts: { served?: (string | null)[]; cached?: boolean; launcherExit?: number | null } = {}) {
+function harness(opts: { served?: (string | null)[]; cached?: boolean; launcherExit?: number | null; containerLingers?: number } = {}) {
   const calls: string[] = [];
+  let lingering = opts.containerLingers ?? 0;
   const served = [...(opts.served ?? [null])];
   let t = 1_000_000;
   const deps: ModelManagerDeps = {
@@ -39,6 +40,11 @@ function harness(opts: { served?: (string | null)[]; cached?: boolean; launcherE
       const id = served.length > 1 ? served.shift()! : (served[0] ?? null);
       return id ? { ok: true, json: async () => ({ data: [{ id }] }) } : { ok: false, json: async () => ({}) };
     },
+    // `--rm` makes the daemon remove the container asynchronously; the switch waits for the name
+    containerExists: async () => {
+      calls.push('containerExists');
+      return lingering-- > 0;
+    },
     shutdownWorkers: () => calls.push('shutdownWorkers'),
     isCached: () => opts.cached ?? true,
     sleep: async (ms) => {
@@ -56,6 +62,27 @@ const events = () =>
   );
 
 describe('ModelManager switch', () => {
+  it('waits for the old container to disappear before launching, and fails instead of colliding', async () => {
+    // docker run --name vllm_node dies with "name already in use" if we launch too early: the
+    // demo machine ended up serving nothing at all that way
+    const ok = harness({ served: [null, null, QWEN], containerLingers: 2 });
+    const mm = new ModelManager(db, ok.deps);
+    mm.ensureLoaded('qwen38-flash');
+    await mm.waitForSwitch();
+    expect(mm.state().status).toBe('ready');
+    expect(ok.calls.filter((c) => c === 'containerExists')).toHaveLength(3); // twice taken, then free
+    expect(ok.calls.indexOf('launch qwen3.8-flash-next-nvfp4-solo')).toBeGreaterThan(ok.calls.lastIndexOf('containerExists'));
+
+    // a container that never goes away fails the switch instead of launching into a name clash
+    const stuck = harness({ served: [null], containerLingers: 10_000 });
+    const mm2 = new ModelManager(db, stuck.deps);
+    mm2.ensureLoaded('qwen3-coder-next');
+    await mm2.waitForSwitch();
+    expect(mm2.state()).toMatchObject({ status: 'error' });
+    expect(mm2.state().error).toContain('docker rm');
+    expect(stuck.calls.some((c) => c.startsWith('launch'))).toBe(false);
+  });
+
   it('frees workers, restarts the container, launches the recipe and becomes ready', async () => {
     const h = harness({ served: [null, null, null, QWEN] });
     const mm = new ModelManager(db, h.deps);
@@ -71,6 +98,7 @@ describe('ModelManager switch', () => {
       'shutdownWorkers',
       'docker stop vllm_node',
       'docker rm -f vllm_node',
+      'containerExists',
       'launch qwen3.8-flash-next-nvfp4-solo',
     ]);
     expect(events().some((d) => /qwen38-flash ready after \d+s/.test(d))).toBe(true);

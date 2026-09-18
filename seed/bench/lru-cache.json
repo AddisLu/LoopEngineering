@@ -1,0 +1,18 @@
+{
+  "key": "lru-cache",
+  "title": "LRU cache with TTL",
+  "goal": "在 src/lru.py 實作 LRUCache(capacity, ttl_s=None, clock=time.monotonic)：get/put O(1)、超容量淘汰最久未用、TTL 過期的鍵視為不存在、stats() 回傳 hits/misses/evictions。",
+  "domain": "python",
+  "complexity": "M",
+  "verification_steps": [
+    "python3 -m unittest discover -s tests -v"
+  ],
+  "verify_rubric": "O(1)（用 OrderedDict 或雙向鏈結）、TTL 用可注入的 clock、統計正確。",
+  "files": {
+    "README.md": "# LRU cache\n\n見 PLAN.md\n\n驗證：`python3 -m unittest discover -s tests -v`（tests/ 內的測試就是驗收標準，不要改測試）。\n",
+    "PLAN.md": "# LRU cache with TTL\n\n## 目標\n實作 src/lru.py 的 LRUCache。\n\n## 規則\n- 只改 `src/`，不要動 `tests/`。\n- 純標準函式庫（Python 3.10+），不安裝套件。\n- 通過 `python3 -m unittest discover -s tests -v` 後結束。\n- 建構子接 clock 參數，測試會注入假時鐘。\n- get 命中要把鍵移到最新。\n",
+    "src/__init__.py": "",
+    "src/lru.py": "import time\n\n\nclass LRUCache:\n    def __init__(self, capacity: int, ttl_s: float | None = None, clock=time.monotonic):\n        raise NotImplementedError\n",
+    "tests/test_lru.py": "import unittest\nfrom src.lru import LRUCache\n\n\nclass FakeClock:\n    def __init__(self):\n        self.t = 0.0\n\n    def __call__(self):\n        return self.t\n\n\nclass T(unittest.TestCase):\n    def test_evicts_least_recent(self):\n        c = LRUCache(2)\n        c.put('a', 1); c.put('b', 2); c.get('a'); c.put('c', 3)\n        self.assertIsNone(c.get('b'))\n        self.assertEqual(c.get('a'), 1)\n        self.assertEqual(c.get('c'), 3)\n\n    def test_ttl(self):\n        clk = FakeClock()\n        c = LRUCache(10, ttl_s=5, clock=clk)\n        c.put('k', 'v')\n        clk.t = 4.9\n        self.assertEqual(c.get('k'), 'v')\n        clk.t = 5.1\n        self.assertIsNone(c.get('k'))\n\n    def test_stats(self):\n        c = LRUCache(1)\n        c.put('a', 1); c.get('a'); c.get('zz'); c.put('b', 2)\n        self.assertEqual(c.stats(), {'hits': 1, 'misses': 1, 'evictions': 1})\n\n    def test_update_moves_to_front(self):\n        c = LRUCache(2)\n        c.put('a', 1); c.put('b', 2); c.put('a', 9); c.put('c', 3)\n        self.assertIsNone(c.get('b'))\n        self.assertEqual(c.get('a'), 9)\n\n\nif __name__ == '__main__':\n    unittest.main()\n"
+  }
+}

@@ -91,6 +91,37 @@ function plan(name: string, goal: string, urls: string[]): string {
   ].join('\n');
 }
 
+/**
+ * A fresh git repo with its own bare origin (the engine cuts worktrees from a fetched
+ * `origin/<base>`), seeded with `files` and one commit. Shared by spikes and built-in benchmark
+ * questions. Cleans up after itself when git fails.
+ */
+export function initRepo(root: string, slug: string, files: Record<string, string>, commitMsg: string, git: (args: string[], cwd: string) => void = defaultGit): { repo: string; origin: string } {
+  fs.mkdirSync(path.join(root, '.origins'), { recursive: true });
+  const repo = path.join(root, slug);
+  const origin = path.join(root, '.origins', `${slug}.git`);
+  try {
+    git(['init', '--bare', '-b', 'main', origin], root);
+    fs.mkdirSync(repo);
+    git(['init', '-b', 'main'], repo);
+    for (const [rel, content] of Object.entries(files)) {
+      const abs = path.join(repo, rel);
+      fs.mkdirSync(path.dirname(abs), { recursive: true });
+      fs.writeFileSync(abs, content);
+    }
+    git(['add', '-A'], repo);
+    git(['-c', 'user.name=Loop Engineering', '-c', 'user.email=loop@local', 'commit', '-q', '-m', commitMsg], repo);
+    git(['remote', 'add', 'origin', origin], repo);
+    git(['push', '-q', '-u', 'origin', 'main'], repo);
+  } catch (err) {
+    fs.rmSync(repo, { recursive: true, force: true });
+    fs.rmSync(origin, { recursive: true, force: true });
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new SpikeError(`建立 repo 失敗：${msg.slice(0, 200)}`);
+  }
+  return { repo, origin };
+}
+
 export function createSpike(db: Database.Database, input: SpikeInput, deps: SpikeDeps = {}): { task: Task; repo_path: string } {
   const root = deps.root ?? spikeRoot(db);
   const git = deps.git ?? defaultGit;
@@ -99,26 +130,18 @@ export function createSpike(db: Database.Database, input: SpikeInput, deps: Spik
   if (!input.goal.trim()) throw new SpikeError('goal is required');
   fs.mkdirSync(path.join(root, '.origins'), { recursive: true });
   const slug = uniqueSlug(root, slugify(name));
-  const repo = path.join(root, slug);
-  const origin = path.join(root, '.origins', `${slug}.git`);
   const urls = input.urls.filter((u) => /^https?:\/\//.test(u)).slice(0, 8);
-  try {
-    git(['init', '--bare', '-b', 'main', origin], root);
-    fs.mkdirSync(repo);
-    git(['init', '-b', 'main'], repo);
-    fs.writeFileSync(path.join(repo, 'README.md'), readme(name, input.goal.trim(), urls));
-    fs.writeFileSync(path.join(repo, 'PLAN.md'), plan(name, input.goal.trim(), urls));
-    fs.writeFileSync(path.join(repo, '.gitignore'), 'node_modules/\n.venv/\nvenv/\n__pycache__/\n*.log\ndata/\n');
-    git(['add', '-A'], repo);
-    git(['-c', 'user.name=Loop Engineering', '-c', 'user.email=loop@local', 'commit', '-q', '-m', `spike: ${name}`], repo);
-    git(['remote', 'add', 'origin', origin], repo);
-    git(['push', '-q', '-u', 'origin', 'main'], repo);
-  } catch (err) {
-    fs.rmSync(repo, { recursive: true, force: true });
-    fs.rmSync(origin, { recursive: true, force: true });
-    const msg = err instanceof Error ? err.message : String(err);
-    throw new SpikeError(`建立 spike repo 失敗：${msg.slice(0, 200)}`);
-  }
+  const { repo } = initRepo(
+    root,
+    slug,
+    {
+      'README.md': readme(name, input.goal.trim(), urls),
+      'PLAN.md': plan(name, input.goal.trim(), urls),
+      '.gitignore': 'node_modules/\n.venv/\nvenv/\n__pycache__/\n*.log\ndata/\n',
+    },
+    `spike: ${name}`,
+    git,
+  );
   const taskInput: NewTaskInput = {
     title: `驗證：${name}`.slice(0, 120),
     goal: `${input.goal.trim()}\n\n實驗 repo：${repo}\n${urls.map((u) => `- ${u}`).join('\n')}`.trim(),

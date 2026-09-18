@@ -275,11 +275,23 @@
           </div>
 
           <div class="dock-pane" id="pane-bench" role="tabpanel" aria-labelledby="act-bench" hidden>
-            <div class="card">
-              <h2>Benchmark</h2>
-              <p class="hint">同一份題目跑本地與雲端模型，比對誰答得準、花多久。</p>
+            <section class="card" id="bench-running" hidden>
+              <h2>進行中的評比</h2>
+              <p class="job-title" id="bench-running-title"></p>
+              <div class="bar"><span class="fill job" id="bench-running-bar"></span></div>
+              <p class="hint" id="bench-running-meta"></p>
+            </section>
+
+            <section class="card">
+              <h2>模型戰績 <a class="mini" id="bench-new" href="/benchmarks.html#new">＋ 新評比</a></h2>
+              <p class="hint">同一份題目交給多個模型各做一次，雲端評審看 diff 打分。</p>
+              <div id="bench-models"></div>
+            </section>
+
+            <section class="card">
+              <h2>最近的評比</h2>
               <div id="bench-list"></div>
-            </div>
+            </section>
             <p class="pane-foot"><a href="/benchmarks.html">開啟完整 Benchmark 頁 ↗</a></p>
           </div>
         </div>

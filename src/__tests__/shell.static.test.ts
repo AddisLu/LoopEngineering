@@ -194,7 +194,7 @@ describe('chat-first shell', () => {
     const js = read('dock.js');
     // the first paint reads `let` state declared throughout the module; calling it any earlier is a
     // temporal-dead-zone crash that silently disables every handler after it
-    for (const decl of ['let benchLoaded', 'let switching', 'let jobTimer', 'let catalogData', 'let tuneLatest', 'let tuneBusy', 'let dockRail']) {
+    for (const decl of ['let benchTimer', 'let switching', 'let jobTimer', 'let catalogData', 'let benchBusy', 'let tuneLatest', 'let tuneBusy', 'let dockRail']) {
       expect(js.lastIndexOf('paintTabs();'), decl).toBeGreaterThan(js.indexOf(decl));
     }
     // Alt+digit types a symbol on macOS — the shortcut must read e.code

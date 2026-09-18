@@ -1,0 +1,18 @@
+{
+  "key": "log-analyzer",
+  "title": "Log 分析：錯誤統計與時間窗",
+  "goal": "在 src/loganalyze.py 實作 parse_line(line) -> dict|None（格式 `2026-09-18T07:00:01Z LEVEL module: message`）、summarize(lines) -> {level 計數, 每模組錯誤數, 最忙的 5 分鐘窗(起始時間, 數量)}；非法行略過。",
+  "domain": "python",
+  "complexity": "S",
+  "verification_steps": [
+    "python3 -m unittest discover -s tests -v"
+  ],
+  "verify_rubric": "時間解析用 datetime、視窗計算正確、非法行不會炸。",
+  "files": {
+    "README.md": "# Log analyzer\n\n見 PLAN.md\n\n驗證：`python3 -m unittest discover -s tests -v`（tests/ 內的測試就是驗收標準，不要改測試）。\n",
+    "PLAN.md": "# Log 分析\n\n## 目標\n實作 src/loganalyze.py。\n\n## 規則\n- 只改 `src/`，不要動 `tests/`。\n- 純標準函式庫（Python 3.10+），不安裝套件。\n- 通過 `python3 -m unittest discover -s tests -v` 後結束。\n- 5 分鐘視窗以整點對齊（07:00、07:05…）。\n- summarize 回傳 {'levels': {...}, 'errors_by_module': {...}, 'busiest': ('2026-09-18T07:00', n)}。\n",
+    "src/__init__.py": "",
+    "src/loganalyze.py": "def parse_line(line: str):\n    raise NotImplementedError\n\n\ndef summarize(lines):\n    raise NotImplementedError\n",
+    "tests/test_log.py": "import unittest\nfrom src.loganalyze import parse_line, summarize\n\nLINES = [\n    '2026-09-18T07:00:01Z INFO grab: frame ok',\n    '2026-09-18T07:01:02Z ERROR ip: rdma timeout',\n    '2026-09-18T07:03:59Z ERROR ip: rdma timeout',\n    'garbage line',\n    '2026-09-18T07:06:10Z WARN control: recipe reload',\n    '2026-09-18T07:07:00Z ERROR control: lost heartbeat',\n]\n\n\nclass T(unittest.TestCase):\n    def test_parse(self):\n        self.assertEqual(parse_line(LINES[1])['module'], 'ip')\n        self.assertEqual(parse_line(LINES[1])['level'], 'ERROR')\n        self.assertIsNone(parse_line('garbage line'))\n\n    def test_summary(self):\n        s = summarize(LINES)\n        self.assertEqual(s['levels'], {'INFO': 1, 'ERROR': 3, 'WARN': 1})\n        self.assertEqual(s['errors_by_module'], {'ip': 2, 'control': 1})\n        self.assertEqual(s['busiest'], ('2026-09-18T07:00', 3))\n\n\nif __name__ == '__main__':\n    unittest.main()\n"
+  }
+}

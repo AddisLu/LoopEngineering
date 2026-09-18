@@ -189,9 +189,16 @@
           <div class="prd-actions">
             <button class="btn" type="button" id="prev-5">← 上一步</button>
             <button class="btn" type="button" id="check-btn">檢查</button>
-            <label class="lbl" for="model-select">實作模型</label><select id="model-select"><option value="">（設定的預設）</option></select>
+            <label class="lbl" for="model-select">實作模型</label><select id="model-select"><option value="">（設定的預設）</option><option value="__bench">評比：多個模型各做一次</option></select>
             <label class="chk-row"><input type="checkbox" id="queue-box" checked /> 通過後直接排程</label>
             <button class="btn primary" type="button" id="submit-btn" disabled>建立任務</button>
+          </div>
+          <div id="bench-pick" hidden>
+            <p class="hint">同一份 PRD 交給每個模型各做一次，跑完由雲端評審看 diff 打分（見 <a href="/benchmarks.html" target="_blank" rel="noopener">評比頁</a>）。本地模型會輪流載入，每次幾分鐘。</p>
+            <p class="lbl">參賽模型（至少 2 個）</p>
+            <div class="bench-picks" id="bench-models"></div>
+            <p class="lbl">評審（雲端，每位各評一次）</p>
+            <div class="bench-picks" id="bench-judges"></div>
           </div>
           <div id="check-result">
             <p class="hint" id="result-empty">還沒檢查。</p>

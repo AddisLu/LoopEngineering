@@ -459,6 +459,27 @@ main.shell.dock-wide .dock-inner { min-width: 460px; }
 .bench-row:hover { background: var(--bg-2); }
 .bench-row .t { font-size: 13px; font-weight: 500; }
 .bench-row .m { display: flex; flex-wrap: wrap; gap: 4px; }
+.bench-row .chip.ok { color: var(--ok); background: var(--ok-soft); }
+.bench-row .chip.bad { color: var(--danger); }
+.score-row {
+  display: grid; grid-template-columns: 1fr 52px 44px 44px; gap: 6px; align-items: baseline;
+  padding: 5px 8px; border-radius: var(--r-sm); font-size: 12.5px;
+}
+.score-row:nth-child(odd) { background: var(--surface-sunk); }
+.score-row.head { font-weight: 600; color: var(--text-3); font-size: 11.5px; background: none; }
+.score-row .n { overflow-wrap: anywhere; }
+.score-row .s { text-align: right; font-variant-numeric: tabular-nums; }
+#bench-running .bar .fill.job { background: var(--accent); }
+#bench-new { float: right; font-weight: 400; text-decoration: none; }
+
+/* PRD 精靈 ⑤: 評比 model/judge pickers */
+.bench-picks { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 10px; }
+.bench-pick {
+  display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px;
+  padding: 5px 10px; border: 1px solid var(--border); border-radius: 999px; cursor: pointer;
+}
+.bench-pick.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.bench-pick.off { opacity: .5; cursor: not-allowed; }
 
 /* ---- per-message action bar ------------------------------------------------ */
 /* Hidden until the message is hovered or focused: a wall of buttons under every turn makes the

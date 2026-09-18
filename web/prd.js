@@ -619,14 +619,40 @@ $('copy-btn').onclick = async () => {
   }
 };
 
+const BENCH_JUDGES = ['opus', 'sonnet', 'fable', 'fable-5'];
+const benchPick = { models: new Set(), judges: new Set(['opus']) };
+
+function pickBox(boxId, items, set) {
+  const box = $(boxId);
+  box.replaceChildren(
+    ...items.map(([value, label, disabledWhy]) => {
+      const l = el('label', `bench-pick${set.has(value) ? ' on' : ''}${disabledWhy ? ' off' : ''}`);
+      const cb = el('input');
+      cb.type = 'checkbox';
+      cb.value = value;
+      cb.checked = set.has(value);
+      cb.disabled = Boolean(disabledWhy);
+      cb.onchange = () => {
+        if (cb.checked) set.add(value);
+        else set.delete(value);
+        l.classList.toggle('on', cb.checked);
+      };
+      l.append(cb, el('span', null, disabledWhy ? `${label}（${disabledWhy}）` : label));
+      return l;
+    }),
+  );
+}
+
 async function loadModels() {
   const sel = $('model-select');
+  const local = [];
   try {
     const { models } = await api('/api/local/models');
     for (const m of models.filter((x) => x.enabled)) {
       const o = el('option', null, `${m.display_name}（本地）`);
       o.value = `local:${m.id}`;
       sel.append(o);
+      local.push([`local:${m.id}`, m.display_name, m.runnable ? '' : m.blocked_by || '未就緒']);
     }
   } catch (e) {
     /* leave the default */
@@ -636,6 +662,15 @@ async function loadModels() {
     o.value = alias;
     sel.append(o);
   }
+  // 評比: the same PRD, several models — the pickers only matter once that option is chosen
+  pickBox('bench-models', [...local, ['sonnet', 'Sonnet（雲端）', ''], ['opus', 'Opus（雲端）', '']], benchPick.models);
+  pickBox('bench-judges', BENCH_JUDGES.map((j) => [j, j, '']), benchPick.judges);
+  sel.onchange = () => {
+    const bench = sel.value === '__bench';
+    $('bench-pick').hidden = !bench;
+    $('queue-box').parentElement.hidden = bench; // arms are queued by definition
+    $('submit-btn').textContent = bench ? '建立評比' : '建立任務';
+  };
 }
 
 function ul(id, items, cls) {
@@ -704,6 +739,9 @@ $('check-btn').onclick = async () => {
 $('submit-btn').onclick = async () => {
   const markdown = composePrd(form);
   if (lastChecked !== markdown) return toast('內容變了，請再檢查一次', 'warn');
+  const bench = $('model-select').value === '__bench';
+  if (bench && benchPick.models.size < 2) return toast('評比至少要選 2 個參賽模型', 'warn');
+  if (bench && !benchPick.judges.size) return toast('評比至少要選 1 位評審', 'warn');
   $('submit-btn').disabled = true;
   const box = $('submit-result');
   box.replaceChildren(el('p', 'hint', '建立中…'));
@@ -712,12 +750,24 @@ $('submit-btn').onclick = async () => {
       method: 'POST',
       body: JSON.stringify({
         markdown,
-        model: $('model-select').value || null,
+        model: bench ? null : $('model-select').value || null,
         queue: $('queue-box').checked,
         verify_llm: Boolean(form.verify.llm),
         draft_id: draftId || undefined,
+        ...(bench ? { benchmark_models: [...benchPick.models], judge_models: [...benchPick.judges] } : {}),
       }),
     });
+    if (r.benchmark) {
+      const p = el('p', 'ok');
+      p.append(`✓ 已建立評比 ${r.benchmark.id}（${r.arms.length} 組）　`);
+      const a = el('a', null, '看評比 →');
+      a.href = `/benchmarks.html#b=${encodeURIComponent(r.benchmark.id)}`;
+      p.append(a);
+      box.replaceChildren(p);
+      setText('draft-state', '已建成評比');
+      toast(`已建立評比 ${r.benchmark.id}`, 'ok', { text: '看評比 ↗', href: `/benchmarks.html#b=${r.benchmark.id}` });
+      return;
+    }
     const p = el('p', 'ok');
     p.append(`✓ 已建立任務 ${r.task.id}（${r.task.status}）　`);
     const a = el('a', null, '在看板打開 →');
