@@ -100,6 +100,7 @@ const saveDraft = debounce(async () => {
       const d = await api('/api/prd/drafts', { method: 'POST', body: JSON.stringify(body) });
       draftId = d.id;
       history.replaceState(null, '', `/prd.html?draft=${encodeURIComponent(draftId)}`);
+      $('draft-delete').hidden = false;
     }
     setText('draft-state', `已儲存 ${when(new Date().toISOString().replace('T', ' ').slice(0, 19))}`);
   } catch (e) {
@@ -812,6 +813,22 @@ function hydrate(f, atStep) {
   showStep(atStep || 1);
 }
 
+// Deleting the draft you have open: the wizard is the only place that knows it is worth keeping.
+// A submitted draft's task is untouched — only this half-written form goes away.
+$('draft-delete').onclick = async () => {
+  if (!draftId) return;
+  if (!window.confirm('刪除這份 PRD 草稿？已經建立的任務不會被刪除。')) return;
+  $('draft-delete').disabled = true;
+  try {
+    await api(`/api/prd/drafts/${encodeURIComponent(draftId)}`, { method: 'DELETE' });
+    store('loop_prd_wizard', '');
+    location.href = '/';
+  } catch (e) {
+    $('draft-delete').disabled = false;
+    toast(`刪不掉：${e.message}`, 'bad');
+  }
+};
+
 async function boot() {
   try {
     await api('/api/prd/template'); // cheapest gate probe
@@ -829,6 +846,7 @@ async function boot() {
       hydrate(JSON.parse(d.form_json || '{}'), d.step);
       if (d.status === 'submitted') setText('draft-state', `已建成任務 ${d.task_id || ''}`);
       else setText('draft-state', `草稿 · 上次 ${when(d.updated_at)}`);
+      $('draft-delete').hidden = false;
       await loadRepos();
       return;
     } catch (e) {

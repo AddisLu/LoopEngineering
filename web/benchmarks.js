@@ -33,7 +33,10 @@
   const STATUS = { running: '進行中', judging: '評分中', judged: '已評分', judge_failed: '評分失敗' };
   const VERIFY = { pass: '通過', manual: '待人工', fail: '失敗' };
   const CONSENSUS = { unanimous: '評審一致', split: '評審分歧', single: '單一評審' };
-  const SOURCE = { builtin: '內建題庫', task: '看板任務', draft: 'PRD 草稿', manual: '現場輸入' };
+  // the same wording the dock uses for a task's state
+  const TASK_LABEL = { draft: '草稿', ready: '就緒', queued: '排隊中', blocked: '卡住', running: '執行中', verifying: '驗證中', review: '待結案', attention: '要你處理', failed: '失敗', closed: '已結案' };
+  const taskLabel = (s) => TASK_LABEL[s] || s || '未知';
+  const SOURCE = { builtin: '內建題庫', task: '看板任務', draft: 'PRD 草稿', manual: '自己出題' };
   const CLOUD = [
     ['sonnet', 'Sonnet', '雲端 · 快、便宜'],
     ['opus', 'Opus', '雲端 · 最強，最貴'],
@@ -173,7 +176,7 @@
           per = JSON.parse(a.scores_json || '{}') || {};
         } catch (e) { /* older rows */ }
         const perJudge = judges.map((j) => (per[j] ? fmt(per[j].total) : '–'));
-        const task = el('a', null, a.task_status || '?');
+        const task = el('a', null, a.task_status ? taskLabel(a.task_status) : '任務已刪除');
         task.href = `/board.html#task=${encodeURIComponent(a.task_id)}`;
         const notes = el('details');
         notes.append(el('summary', null, '看評語'), el('p', 'summary', a.notes || '（無）'));
@@ -223,13 +226,13 @@
   };
 
   // ================= new view =================
-  const draftState = { source: 'builtin', ref: null, models: new Set(), judges: new Set(['opus']), switchMin: 6 };
+  const draftState = { source: 'task', ref: null, models: new Set(), judges: new Set(['opus']), switchMin: 6 };
 
   function setSource(kind) {
     draftState.source = kind;
     draftState.ref = null;
     for (const t of $('source-tabs').querySelectorAll('.tab')) t.classList.toggle('on', t.dataset.src === kind);
-    for (const k of ['builtin', 'task', 'draft', 'manual']) $(`src-${k}`).hidden = k !== kind;
+    for (const k of ['task', 'draft', 'manual', 'builtin']) $(`src-${k}`).hidden = k !== kind;
     paintEstimate();
   }
   for (const t of $('source-tabs').querySelectorAll('.tab')) t.onclick = () => setSource(t.dataset.src);
@@ -278,6 +281,11 @@
     }
   }
 
+  const taskGate = new Map(); // task id -> passes the PRD gate (can be used as a question)
+  // the gate speaks in column names; this page is Chinese all the way through
+  const GATE_FIELD = { plan_ref: '計畫檔', repo_path: 'repo 路徑', base_branch: '分支', verification_steps: '驗證指令', goal: '目標', verify_rubric: '驗收標準', setup_cmd: '前置指令', requires: '執行環境' };
+  const gateLabel = (m) => GATE_FIELD[String(m).split(/[ (]/)[0]] || String(m).split(/[ (]/)[0];
+
   async function loadTasks() {
     const sel = $('task-select');
     sel.replaceChildren(el('option', null, '（選一張任務）'));
@@ -285,9 +293,13 @@
       // the board snapshot is the task list this deployment already serves — show all of it, so
       // "what is on my board" and "what can I benchmark" are the same list
       const { cards } = await api('/api/board');
+      taskGate.clear();
       for (const t of cards.slice(0, 200)) {
         const arm = t.title.startsWith('[bench]');
-        const o = el('option', null, `${t.title}（${t.status}${arm ? ' · 評比用' : ''}）`);
+        const ok = !t.gate || t.gate.ok !== false;
+        taskGate.set(t.id, ok);
+        const why = ok ? '' : ` · 缺 ${(t.gate.missing || []).map(gateLabel).join('、') || '必填欄位'}`;
+        const o = el('option', null, `${t.title}（${taskLabel(t.status)}${arm ? ' · 評比用' : ''}${why}）`);
         o.value = t.id;
         sel.appendChild(o);
       }
@@ -389,7 +401,7 @@
   }
 
   function sourceLabel() {
-    if (draftState.source === 'manual') return $('m-title').value.trim() || '（現場輸入）';
+    if (draftState.source === 'manual') return $('m-title').value.trim() || '（自己出題）';
     if (!draftState.ref) return null;
     if (draftState.source === 'builtin') return `內建題：${draftState.ref}`;
     if (draftState.source === 'task') return $('task-select').selectedOptions[0]?.textContent || draftState.ref;
@@ -403,7 +415,9 @@
     const problems = [];
     const label = sourceLabel();
     if (!label) problems.push('還沒選題目');
-    if (draftState.source === 'manual' && !$('m-goal').value.trim()) problems.push('現場輸入要填目標');
+    if (draftState.source === 'manual' && !$('m-goal').value.trim()) problems.push('自己出題要填目標');
+    if (draftState.source === 'manual' && !$('m-repo').value.trim()) problems.push('自己出題要填 Repo 路徑');
+    if (draftState.source === 'task' && taskGate.get(draftState.ref) === false) problems.push('這張任務還缺 repo 或計畫，先在看板補齊才能當題目');
     if (models.length < 2) problems.push('至少選 2 個參賽模型');
     if (!draftState.judges.size) problems.push('至少選 1 位評審');
 

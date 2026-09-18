@@ -433,6 +433,16 @@ main.shell.dock-wide .dock-inner { min-width: 460px; }
 .mini-card.s-review    { --rail: var(--st-review); }
 .mini-card.s-attention { --rail: var(--st-attention); }
 
+/* a row that carries a card plus one small side action (PRD drafts) */
+.mini-row { display: flex; align-items: stretch; gap: 6px; }
+.mini-row .mini-card { flex: 1 1 auto; min-width: 0; }
+.mini-row .mini-del {
+  flex: 0 0 auto; width: 30px; font: inherit; font-size: 13px; line-height: 1; cursor: pointer;
+  color: var(--text-3); background: transparent; border: 1px solid var(--border); border-radius: var(--r-sm);
+}
+.mini-row .mini-del:hover { color: var(--danger, #c33); border-color: var(--danger, #c33); }
+.mini-row .mini-del:disabled { opacity: .5; cursor: default; }
+
 /* ---- dock: 知識庫 / PRD / Benchmark --------------------------------------- */
 .dock-pane form { display: flex; flex-direction: column; gap: 7px; }
 .dock-pane input[type="text"], .dock-pane input:not([type]), .dock-pane input[type="search"], .dock-pane textarea {

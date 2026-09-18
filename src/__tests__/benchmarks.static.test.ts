@@ -59,6 +59,37 @@ describe('benchmarks page + local model board wiring: static assets', () => {
     expect(js).toContain('評比用');
   });
 
+  it('the question tabs lead with the board and park the practice set last', () => {
+    const html = fs.readFileSync(path.join(WEB_DIR, 'benchmarks.html'), 'utf8');
+    const order = [...html.matchAll(/data-src="([a-z]+)"/g)].map((m) => m[1]);
+    expect(order).toEqual(['task', 'draft', 'manual', 'builtin']);
+    // "現場輸入" said nothing about what it does
+    expect(html).toContain('自己出題');
+    expect(html).not.toContain('現場輸入');
+    // every pane explains itself, the typed-in one included
+    const manual = html.slice(html.indexOf('id="src-manual"'), html.indexOf('id="src-builtin"'));
+    expect(manual).toContain('class="hint"');
+    const js = fs.readFileSync(path.join(WEB_DIR, 'benchmarks.js'), 'utf8');
+    expect(js).toContain("source: 'task'");
+    // a task that cannot pass the gate cannot be a question either
+    expect(js).toContain('taskGate');
+    expect(js).toContain('要填 Repo 路徑');
+  });
+
+  it('a PRD draft can be deleted from the dock and from the wizard', () => {
+    const dock = fs.readFileSync(path.join(WEB_DIR, 'dock.js'), 'utf8');
+    expect(dock).toMatch(/\/api\/prd\/drafts\/.*method: 'DELETE'|method: 'DELETE'/);
+    expect(dock).toContain('mini-del');
+    expect(dock).not.toMatch(/innerHTML/);
+    expect(fs.readFileSync(path.join(WEB_DIR, 'shell.css'), 'utf8')).toContain('.mini-row');
+    const html = fs.readFileSync(path.join(WEB_DIR, 'prd.html'), 'utf8');
+    expect(html).toContain('id="draft-delete"');
+    const js = fs.readFileSync(path.join(WEB_DIR, 'prd.js'), 'utf8');
+    expect(js).toContain("method: 'DELETE'");
+    // deleting a submitted draft must not read as deleting its task
+    expect(js).toContain('已經建立的任務不會被刪除');
+  });
+
   it('the dock shows the dashboard in Chinese, not raw enum values', () => {
     const dock = fs.readFileSync(path.join(WEB_DIR, 'dock.js'), 'utf8');
     expect(dock).toContain('/api/benchmarks/summary');

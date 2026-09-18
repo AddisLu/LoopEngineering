@@ -1135,7 +1135,7 @@ loop local stop                 # 停掉 vLLM、釋放 GPU
 loop add --title "…" --goal "…" --plan plan.md --repo . --verify "npm test" --model local:qwen38-flash</code></pre>
 
       <h3>PRD 精靈（<code>/prd.html</code>）：從「修改軟體」出發的五步引導</h3>
-      <p>要讓模型改好軟體，PRD 必須講清楚三件事：<b>原始碼在哪</b>（repo／分支／模組）、<b>要改什麼</b>（症狀→期望、相關檔案）、<b>怎麼驗證</b>。精靈把這三件事拆成五步，每步都有「為什麼要填」的提示，右側即時顯示產生的 PRD；草稿自動存在伺服器（依使用者分開），對話工作台右側「PRD」面板列出最近的草稿可接著寫。</p>
+      <p>要讓模型改好軟體，PRD 必須講清楚三件事：<b>原始碼在哪</b>（repo／分支／模組）、<b>要改什麼</b>（症狀→期望、相關檔案）、<b>怎麼驗證</b>。精靈把這三件事拆成五步，每步都有「為什麼要填」的提示，右側即時顯示產生的 PRD；草稿自動存在伺服器（依使用者分開），對話工作台右側「PRD」面板列出最近的草稿可接著寫；不要的草稿按卡片右邊的 <b>✕</b> 就刪掉（精靈頁上方也有「刪除草稿」），已經建成任務的草稿刪掉後<b>任務仍然留著</b>。</p>
       <ol>
         <li><b>改哪套軟體</b>：先選改動類型（演算法修正／功能新增／錯誤修復／效能，會帶入預設的驗證方式與提示）；repo 從已登錄的知識來源選或手動填絕對路徑，系統會確認是不是 git、列出分支與頂層目錄（影響模組），並顯示本主機能力。</li>
         <li><b>要改什麼</b>：標題、現況／症狀、期望行為、相關檔案。「用知識庫找」會把描述轉成關鍵字、在該 repo 的索引裡檢索，再由本地模型排序並說明理由（零 token）；勾選就加入。</li>
@@ -1175,10 +1175,10 @@ loop prd submit my-feature.md --bench-models local:qwen38-flash,local:qwen3-code
       <ul>
         <li><b>① 題目</b>四種來源：
           <ul>
-            <li><b>內建題庫</b>（<code>seed/bench/*.json</code>）：slugify、LRU cache、CSV 解析、token bucket、二值化＋連通元件、log 分析——都是中性小題，各自附 <code>tests/</code> 當驗收（<code>python3 -m unittest discover</code>）。每次評比會在 <code>spike_root/.bench/</code> 開一個<b>全新的 repo</b>（含自己的 bare origin），不碰任何現有專案。</li>
-            <li><b>看板任務</b>：沿用那張任務的 repo、計畫與驗證指令。</li>
+            <li><b>看板任務</b>（預設）：沿用那張任務的 repo、計畫與驗證指令；缺 repo 或計畫的任務會標「缺 …」，選了也不能送出。</li>
             <li><b>PRD 草稿</b>：精靈寫好的草稿，送出前照樣過 PRD 閘門。</li>
-            <li><b>現場輸入</b>：直接填標題、目標、repo、驗證指令。</li>
+            <li><b>自己出題</b>：看板上沒有這張任務、但臨時想比一題時用——填標題、目標、<b>現有 repo 的路徑</b>與驗證指令，系統照這份描述幫每個模型各開一張任務。</li>
+            <li><b>內建題庫</b>（<code>seed/bench/*.json</code>，放在最後）：slugify、LRU cache、CSV 解析、token bucket、二值化＋連通元件、log 分析——練習用的中性小題，各自附 <code>tests/</code> 當驗收（<code>python3 -m unittest discover</code>）。每次評比會在 <code>spike_root/.bench/</code> 開一個<b>全新的 repo</b>（含自己的 bare origin），不碰任何現有專案。第一次試用評比、或只想比「純寫程式能力」時才用。</li>
           </ul>
         </li>
         <li><b>② 參賽模型</b>（至少 2 個）：本地模型直接從模型目錄來，跑不動的會灰掉並寫原因（權重沒下載、映像沒建、需要 2 台 Spark）；雲端模型（Sonnet／Opus／Haiku）會標「花訂閱額度」。</li>

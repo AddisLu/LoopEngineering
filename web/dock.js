@@ -496,6 +496,7 @@ $('capture-form').addEventListener('submit', async (e) => {
 const STEP_LABEL = ['', '改哪套軟體', '要改什麼', '怎麼驗證', '範圍與限制', '預覽與送出'];
 
 function draftRow(d) {
+  const wrap = el('div', 'mini-row');
   const a = el('a', 'mini-card');
   a.href = d.status === 'submitted' && d.task_id ? `/board.html#task=${encodeURIComponent(d.task_id)}` : `/prd.html?draft=${encodeURIComponent(d.id)}`;
   a.append(el('div', 't', d.title));
@@ -503,7 +504,26 @@ function draftRow(d) {
   m.append(el('span', 'chip', d.status === 'submitted' ? `已建任務 ${d.task_id || ''} ↗` : `第 ${d.step} 步 · ${STEP_LABEL[d.step] || ''}`));
   m.append(el('span', 'chip', when(d.updated_at)));
   a.append(m);
-  return a;
+  const del = el('button', 'mini-del', '✕');
+  del.type = 'button';
+  del.title = '刪除這份草稿';
+  del.setAttribute('aria-label', `刪除草稿 ${d.title}`);
+  // a submitted draft's task lives on its own; deleting the draft only clears this list
+  del.onclick = async () => {
+    const extra = d.status === 'submitted' ? '（已建立的任務不會被刪除）' : '';
+    if (!window.confirm(`刪除草稿「${d.title}」？${extra}`)) return;
+    del.disabled = true;
+    try {
+      await api(`/api/prd/drafts/${encodeURIComponent(d.id)}`, { method: 'DELETE' });
+      toast('草稿已刪除', 'ok');
+      loadPrdDrafts();
+    } catch (err) {
+      del.disabled = false;
+      toast(`刪不掉：${err.message}`, 'bad');
+    }
+  };
+  wrap.append(a, del);
+  return wrap;
 }
 
 async function loadPrdDrafts() {

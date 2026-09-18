@@ -152,18 +152,13 @@
         <section>
           <div class="step-head"><span class="n">1</span><h2>要比什麼題目？</h2></div>
           <div class="tabs" id="source-tabs">
-            <button class="tab" type="button" data-src="builtin">內建題庫</button>
             <button class="tab" type="button" data-src="task">看板任務</button>
             <button class="tab" type="button" data-src="draft">PRD 草稿</button>
-            <button class="tab" type="button" data-src="manual">現場輸入</button>
+            <button class="tab" type="button" data-src="manual">自己出題</button>
+            <button class="tab" type="button" data-src="builtin">內建題庫</button>
           </div>
 
-          <div class="src-pane" id="src-builtin">
-            <p class="hint">中性的小題目，各自附單元測試當驗收；每次評比會開一個全新的 repo，不碰現有專案。</p>
-            <div class="qcards" id="builtin-list"></div>
-          </div>
-
-          <div class="src-pane" id="src-task" hidden>
+          <div class="src-pane" id="src-task">
             <p class="hint">拿看板上的一張任務當題目（沿用它的 repo、計畫與驗證指令），每個模型各做一次。</p>
             <label>任務 <select id="task-select"></select></label>
           </div>
@@ -174,9 +169,10 @@
           </div>
 
           <div class="src-pane" id="src-manual" hidden>
+            <p class="hint">臨時想比一題、但看板上沒有這張任務時用：自己填標題與目標，指定一個現有的 repo 與驗證指令，系統會照這份描述幫每個模型各開一張任務。</p>
             <label>標題 <input id="m-title" type="text" placeholder="例：CSV 解析器" /></label>
             <label>目標 <textarea id="m-goal" rows="3" placeholder="要做出什麼、怎樣算完成"></textarea></label>
-            <label>Repo 路徑 <input id="m-repo" type="text" placeholder="/home/you/project" /></label>
+            <label>Repo 路徑（必填，要是已存在的 git repo） <input id="m-repo" type="text" placeholder="/home/auo001/Addis/…" /></label>
             <label>Base branch <input id="m-branch" type="text" value="main" /></label>
             <label>驗證指令（一行一個） <textarea id="m-verify" rows="2" placeholder="npm test"></textarea></label>
             <label>領域
@@ -190,6 +186,11 @@
                 <option value="python">python</option>
               </select>
             </label>
+          </div>
+
+          <div class="src-pane" id="src-builtin" hidden>
+            <p class="hint">練習用的中性小題目（字串處理、快取、CSV 解析…），各自附單元測試當驗收；每次評比開一個全新的 repo，不碰你的專案。第一次試用評比、或想比「純寫程式能力」時才用。</p>
+            <div class="qcards" id="builtin-list"></div>
           </div>
         </section>
 
