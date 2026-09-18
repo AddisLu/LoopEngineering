@@ -127,6 +127,10 @@ describe('模型對話 scripts', () => {
     expect(js).toContain('fencedBlocks');
     expect(js).toContain('printDoc'); // 列印／存成 PDF
     expect(js).toContain('image/svg+xml');
+    // the deck is the one format the browser cannot make; the row waits for the server to confirm
+    expect(js).toContain('/api/chat/export/formats');
+    expect(js).toContain('簡報（.pptx）');
+    expect(js).toContain('/pptx');
     expect(js).toContain('匯出整段對話（Markdown）');
     expect(fs.readFileSync(path.join(WEB_DIR, 'shell.css'), 'utf8')).toContain('dialog.save-dialog');
   });

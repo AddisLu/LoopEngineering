@@ -311,7 +311,7 @@
         <li><b>最右邊一排圖示鈕永遠看得到</b>：由上而下是 任務／調參／知識庫／PRD ─ 模型／機台／評比。點一下切換面板、再點同一個收起；<b>Alt+1～7</b> 直接切換。面板收起時圖示仍在（亮著的那個留一道標記），所以「面板不見了、切不回來」不會發生。任務有待處理時，圖示右上角會出現數字。</li>
         <li><b>三欄可收折</b>：頂欄 ☰ 收左欄、▤ 或點亮著的圖示收右側面板；兩邊都收起時對話區幾乎佔滿視窗（1920 寬螢幕實測 1868px）。收合狀態與上次看的面板記在瀏覽器（<code>loop_shell_rail</code>／<code>loop_shell_dock</code>／<code>loop_shell_tab</code>）。手機寬度左欄與面板都變成側滑抽屜，圖示列改成最上面一排。</li>
         <li><b>右側面板</b>：<b>調參</b>＝智慧調整參數（見第 26 章）；<b>任務</b>＝看板的即時精簡版（同一條 SSE，計數＋依狀態分組的卡片，點卡直接開看板該張卡的細節）；<b>知識庫</b>＝文件／片段數、RAG 搜尋、快速記一筆；<b>PRD</b>＝開新的 PRD（五步精靈，見第 26 章）＋最近的草稿；<b>模型</b>＝切換、下載、建置映像（見第 26 章）；<b>機台</b>＝這次回答的速度、目前模型、記憶體、GPU；<b>評比</b>＝模型戰績與歷次評比（見第 26 章）。</li>
-        <li><b>對話標題</b>：頂欄標題點一下即可改名；「⋯」選單有匯出 Markdown／匯出 HTML／分享連結／刪除。</li>
+        <li><b>對話標題</b>：頂欄標題點一下即可改名；「⋯」選單是<b>整段對話</b>的動作（匯出 Markdown／HTML、分享連結、刪除）。單獨存一則回答用該則下方的<b>「存檔」</b>。</li>
       </ul>
 
       <h3>任務看板（<code>/board.html</code>）</h3>
@@ -1260,7 +1260,9 @@ loop bench list | loop bench show &lt;id&gt; | loop bench matrix | loop bench ju
         <li><b>調參建議（輸入框晶片）</b>：打開「調參建議」晶片後描述症狀（例：ROI 邊緣常把正常紋路判成刮傷），模型會先查知識庫定位程式與參數，最後輸出一張建議表：檔案、參數、目前值、建議值、原因、風險、怎麼驗。<b>這只是建議，系統沒有任何寫入機台或設定檔的路徑</b>；按「轉成任務」會開一張 Loop <b>草稿</b>任務帶著整張表（<code>created_by=chat</code>、<code>verify_mode=manual</code>、goal 內明寫「不得自動套用到機台」），要不要排程仍由人決定。同一則回答重複按只會有一張任務（<code>source_ref=chat:&lt;messageId&gt;</code>）。</li>
         <li><b>存進知識庫</b>：把回答寫成 vault 筆記並立刻建索引，之後對話查得到；同一則回答只會存一次。需要先用 <code>loop ingest add --vault &lt;路徑&gt;</code> 登錄一個 vault 來源。</li>
         <li><b>請雲端複核</b>：把這則本地回答送給雲端高階模型複核（指出錯誤、補遺漏、給最終建議）。<b>預設關閉</b>（<code>chat_escalate_enabled=false</code>），因為這是頁面上唯一會離開本機、花訂閱額度的動作；開啟後仍受 <code>hard_limit_pct</code> 同一道預算閘門管制，逾時 <code>chat_escalate_timeout_ms</code>（預設 240 秒；實測一則短回答的複核約 112 秒。連線若先斷掉，複核仍會在背景完成並存起來，重新整理就看得到）。複核結果以雲端樣式另存一則訊息，<b>不會</b>被帶進後續提問的上下文。</li>
-        <li><b>匯出與分享</b>：頂欄「⋯」可匯出 Markdown（伺服器產生，含出處與已轉任務／已存 KB 的註記）或 HTML（目前畫面）；「建立分享連結」會產生 <code>/share.html#s_…</code> 唯讀頁並複製到剪貼簿——網址裡的代碼就是憑證，任何拿到的人都看得到（不含圖片），可隨時「取消分享」立即失效。<code>chat_share_enabled=false</code> 可整個關掉。</li>
+        <li><b>存檔（單則回答）</b>：每則回答下方的「存檔」列出<b>這一則實際產生的東西</b>：<b>Markdown</b>（模型原始文字）、<b>HTML</b>（排版後、只含這一則）、<b>列印／存成 PDF</b>（開瀏覽器列印，目的地選另存 PDF）、<b>簡報 .pptx</b>，以及每一段 <code>```</code> 區塊各自成檔——SVG 圖存 <code>.svg</code>、產生的網頁存 <code>.html</code>、程式碼依語言給副檔名。沒有圖就不會出現圖那一列。檔案一律下載到你的裝置，伺服器不留檔；要留在機器上請用「存進知識庫」。</li>
+        <li><b>簡報（.pptx）怎麼來的</b>：回答的 markdown 在伺服器切成投影片（<code>src/chat/pptx.ts</code>：標題成頁、條列成點、markdown 表格成真表格、每段程式碼一頁、每張 SVG 轉圖一頁），再由 <code>scripts/answer_pptx.py</code> 用 python-pptx 畫成 16:9。<b>不是</b>第 25 章那條企業週報管線（那條要公司範本，版面不可自由生成）。需要一個裝了 python-pptx 的 python：設定 <code>office_python</code>（空白時依序退回 <code>report_pptx_python</code>、資料目錄下的 <code>office-venv/bin/python</code>、<code>python3</code>）。這台已指向 <code>office-venv</code>；沒有的話「簡報」那一列會變灰並寫出原因。上限：40 頁、每頁 7 點、程式碼 22 行、表格 12 列。</li>
+        <li><b>匯出與分享（整段對話）</b>：頂欄「⋯」可匯出 Markdown（伺服器產生，含出處與已轉任務／已存 KB 的註記）或 HTML（目前畫面）；「建立分享連結」會產生 <code>/share.html#s_…</code> 唯讀頁並複製到剪貼簿——網址裡的代碼就是憑證，任何拿到的人都看得到（不含圖片），可隨時「取消分享」立即失效。<code>chat_share_enabled=false</code> 可整個關掉。</li>
         <li><b>貼圖提問</b>：在頁面任何地方按 Ctrl+V 貼上截圖，或拖放、按「加入圖片」（一次最多 4 張，自動縮到長邊 1600 px）。圖片存在伺服器（<code>&lt;data&gt;/chat-images/</code>），資料庫只存路徑；回放的舊圖只供檢視，不會再送進模型。</li>
         <li><b>HTML / SVG 直接顯示</b>：回答以 Markdown 排版；<code>```html</code>、<code>```svg</code> 或整段 <code>&lt;svg&gt;</code> 寫完後直接顯示預覽（高度上限 2400px，可按「放大」用整個視窗看），可切換「原始碼」或複製。預覽跑在沙箱內，讀不到本頁與 API token，也不能連網（只允許載入 jsDelivr / cdnjs 的程式庫）。</li>
         <li><b>引用 CF-AOI 知識庫</b>：開啟後每個問題會先用混合檢索（全文＋bge-m3 向量）找出最相關的 8 段資料，放進提示讓模型依據回答並標出處編號 [1]、[2]。檢索前會先請本地模型把問題轉成 3–8 個關鍵字——因為全文索引把整句問題當成一個片語比對，口語問句幾乎搜不到，關鍵字才搜得到程式碼裡的名稱；回答下方可展開每則參考資料的檔案、行號與原文。知識庫沒有的內容模型會說沒找到。需要 <code>rag_enabled=true</code>。</li>
@@ -1278,6 +1280,7 @@ loop bench list | loop bench show &lt;id&gt; | loop bench matrix | loop bench ju
           <tr><td><code>chat_retention_days</code></td><td>0</td><td>保留天數，0＝永久。<code>loop chat prune</code> 用它。</td></tr>
           <tr><td><code>chat_escalate_enabled</code> / <code>chat_escalate_model</code> / <code>chat_escalate_timeout_ms</code></td><td>false / opus / 240000</td><td>請雲端複核的開關、模型與逾時。</td></tr>
           <tr><td><code>chat_share_enabled</code></td><td>true</td><td>分享連結（<code>/share.html</code>）。</td></tr>
+          <tr><td><code>office_python</code></td><td>（空）</td><td>有 python-pptx 的 python，供「存檔 → 簡報」使用（見第 26 章）。</td></tr>
           <tr><td><code>prd_repo_allowlist</code></td><td>（空）</td><td>PRD 精靈的 repo 選擇器／圖集檢查可讀的額外根目錄（絕對路徑 CSV）。</td></tr>
           <tr><td><code>local_spark_nodes</code></td><td>1</td><td>這個部署有幾台 DGX Spark；模型切換清單依它決定哪些跑得動。</td></tr>
           <tr><td><code>chat_tools_enabled</code> / <code>chat_search_url</code></td><td>false / http://127.0.0.1:8080</td><td>上網／工具（見 26a）：總開關與 SearXNG 位址。</td></tr>

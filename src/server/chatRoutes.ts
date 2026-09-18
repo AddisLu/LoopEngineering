@@ -22,6 +22,8 @@ import { createSpike, SpikeError } from '../spike/create.js';
 import { GenerationBusyError, getGenerationRegistry, type GenerationRegistry } from '../chat/generation.js';
 import { escalateMessage } from '../chat/escalate.js';
 import { exportFilename, toMarkdown } from '../chat/export.js';
+import { ANSWER_PPTX_SCRIPT, answerToDeck, officePython } from '../chat/pptx.js';
+import { ENGINE_REPO_ROOT } from '../config.js';
 import { builtinTools, mcpTools, type ToolDef } from '../chat/tools.js';
 import type { McpPool } from '../mcp/client.js';
 import { runToolLoop } from '../chat/toolLoop.js';
@@ -106,8 +108,13 @@ export interface GpuInfo {
 
 export type ChatFetch = (url: string, init?: RequestInit) => Promise<Response>;
 
+/** Spawn of scripts/answer_pptx.py: (python, args, deck JSON on stdin) → stdout. */
+export type PptxExec = (bin: string, args: string[], stdin: string) => Promise<string>;
+
 export interface ChatRouteOptions {
   fetch?: ChatFetch;
+  /** Test injection for 存成簡報 — without it the route spawns the real python. */
+  answerPptxExec?: PptxExec;
   /** Test injection for 使用者辨識 (defaults to the Tailscale-header/manual-name resolver). */
   identity?: (req: FastifyRequest) => ChatIdentity;
   /** Test injection for the CF-AOI knowledge search (defaults to the SSoT hybrid RAG search). */
@@ -812,6 +819,80 @@ export function registerChatRoutes(app: FastifyInstance, db: Database.Database, 
       .type('text/markdown; charset=utf-8')
       .header('content-disposition', `attachment; filename*=UTF-8''${encodeURIComponent(exportFilename(conv))}`)
       .send(md);
+  });
+
+  /**
+   * 一則回答 → .pptx. The markdown is sliced into slides in src/chat/pptx.ts (pure, tested) and
+   * drawn by scripts/answer_pptx.py with python-pptx. Everything else about saving an answer is
+   * done in the browser; this one needs python, so it is the only server-side format.
+   */
+  const pptxExec: PptxExec =
+    opts.answerPptxExec ??
+    ((bin, args, stdin) =>
+      new Promise((resolve, reject) => {
+        const child = execFile(bin, args, { timeout: 120_000, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) =>
+          err ? reject(new Error(String(stderr || err.message).slice(-400))) : resolve(String(stdout)),
+        );
+        child.stdin?.end(stdin);
+      }));
+
+  // A success never changes; a failure usually means "not installed yet", so it is only cached
+  // briefly — fixing the python and retrying must not need a restart.
+  let pptxProbe: { ok: boolean; detail: string; at: number } | null = null;
+  const probePptx = async (): Promise<{ ok: boolean; detail: string }> => {
+    if (pptxProbe && (pptxProbe.ok || Date.now() - pptxProbe.at < 60_000)) return pptxProbe;
+    const script = path.join(ENGINE_REPO_ROOT, ANSWER_PPTX_SCRIPT);
+    try {
+      const out = await pptxExec(officePython(db), [script, '--probe'], '');
+      pptxProbe = out.trim().startsWith('ok')
+        ? { ok: true, detail: out.trim(), at: Date.now() }
+        : { ok: false, detail: `python-pptx 沒裝好：${out.trim()}`, at: Date.now() };
+    } catch (err) {
+      pptxProbe = { ok: false, detail: `python-pptx 不可用（設定 office_python 指向有 python-pptx 的 python）：${(err as Error).message.slice(-120)}`, at: Date.now() };
+    }
+    return pptxProbe;
+  };
+
+  /** What the 存檔 dialog may offer. Everything but pptx is done in the browser. */
+  app.get('/api/chat/export/formats', async (req, reply) => {
+    const me = gate(req, reply);
+    if (!me) return reply;
+    const p = await probePptx();
+    return { pptx: p.ok, pptx_detail: p.detail };
+  });
+
+  app.post('/api/chat/messages/:id/pptx', async (req, reply) => {
+    const me = gate(req, reply);
+    if (!me) return reply;
+    const { id } = req.params as { id: string };
+    const found = getMessage(db, id, me.user_key);
+    if (!found) return reply.code(404).send({ error: 'message not found' });
+    if (found.message.role !== 'assistant') return reply.code(400).send({ error: '只有模型的回答可以轉成簡報' });
+    const p = await probePptx();
+    if (!p.ok) return reply.code(503).send({ error: p.detail });
+
+    const model = found.message.model_id ? getLocalModel(db, found.message.model_id)?.display_name ?? found.message.model_id : null;
+    const deck = answerToDeck(found.message.content, {
+      title: found.conversation.title,
+      subtitle: [model ? `${model} 產生` : '本地模型產生', String(found.message.created_at ?? '').slice(0, 16)].filter(Boolean).join(' · '),
+      footer: 'Loop Engineering · CF-AOI 維運大腦 · 本地模型產生，僅供參考',
+    });
+
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'loop-pptx-'));
+    const out = path.join(dir, 'answer.pptx');
+    try {
+      await pptxExec(officePython(db), [path.join(ENGINE_REPO_ROOT, ANSWER_PPTX_SCRIPT), '--out', out], JSON.stringify(deck));
+      const buf = fs.readFileSync(out);
+      const name = `${(found.conversation.title || '回答').replace(/[\\/:*?"<>|]+/g, ' ').trim().slice(0, 60) || '回答'}.pptx`;
+      return reply
+        .type('application/vnd.openxmlformats-officedocument.presentationml.presentation')
+        .header('content-disposition', `attachment; filename*=UTF-8''${encodeURIComponent(name)}`)
+        .send(buf);
+    } catch (err) {
+      return reply.code(500).send({ error: `簡報產生失敗：${(err as Error).message.slice(-300)}` });
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   // 分享連結: a read-only page for people who have no account here. The token in the URL is the

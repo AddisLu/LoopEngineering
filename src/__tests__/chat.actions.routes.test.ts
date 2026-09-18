@@ -408,3 +408,57 @@ describe('分享連結 under a configured API token', () => {
     await guarded.close();
   });
 });
+
+describe('存成簡報 (.pptx)', () => {
+  const deckApp = async (exec: (bin: string, args: string[], stdin: string) => Promise<string>) => {
+    const a = Fastify();
+    registerChatRoutes(a, db, { fetch: async () => new Response('{}'), localChat: async () => ({ ok: true, content: 't' }), answerPptxExec: exec });
+    await a.ready();
+    return a;
+  };
+
+  it('slices the answer, calls python once, and sends the file back as a download', async () => {
+    const calls: Array<{ bin: string; args: string[]; deck: string }> = [];
+    const pptx = await deckApp(async (bin, args, stdin) => {
+      calls.push({ bin, args, deck: stdin });
+      const i = args.indexOf('--out');
+      if (i >= 0 && args[i + 1]) fs.writeFileSync(args[i + 1]!, 'PK-fake-pptx');
+      return 'ok 3';
+    });
+    const { a } = await answer('# 標題\n- 一\n- 二\n\n```svg\n<svg viewBox="0 0 4 4"><rect/></svg>\n```');
+    const res = await pptx.inject({ method: 'POST', url: `/api/chat/messages/${a.id}/pptx`, headers: ME });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toContain('presentationml');
+    expect(String(res.headers['content-disposition'])).toContain('attachment');
+    expect(res.rawPayload.subarray(0, 2).toString()).toBe('PK');
+    // one probe + one render, and the deck carries the slides the answer produced
+    expect(calls).toHaveLength(2);
+    expect(calls[0]!.args).toContain('--probe');
+    const deck = JSON.parse(calls[1]!.deck) as { slides: { kind: string }[]; footer: string };
+    expect(deck.slides.map((s) => s.kind)).toEqual(['bullets', 'image']);
+    expect(deck.footer).toContain('僅供參考');
+    await pptx.close();
+  });
+
+  it('says so when python-pptx is missing, and never touches someone else answer', async () => {
+    const pptx = await deckApp(async () => {
+      throw new Error("No module named 'pptx'");
+    });
+    const { a } = await answer('內容');
+    const formats = await pptx.inject({ method: 'GET', url: '/api/chat/export/formats', headers: ME });
+    expect(formats.json()).toMatchObject({ pptx: false });
+    expect(formats.json().pptx_detail).toContain('python-pptx');
+    const res = await pptx.inject({ method: 'POST', url: `/api/chat/messages/${a.id}/pptx`, headers: ME });
+    expect(res.statusCode).toBe(503);
+    expect(res.json().error).toContain('python-pptx');
+    await pptx.close();
+
+    const ok = await deckApp(async (_b, args) => {
+      const i = args.indexOf('--out');
+      if (i >= 0 && args[i + 1]) fs.writeFileSync(args[i + 1]!, 'PK');
+      return 'ok 1';
+    });
+    expect((await ok.inject({ method: 'POST', url: `/api/chat/messages/${a.id}/pptx`, headers: OTHER })).statusCode).toBe(404);
+    await ok.close();
+  });
+});

@@ -1,4 +1,4 @@
-import { api, el, toast } from './shell.js';
+import { api, authHeaders, el, nameHeader, toast } from './shell.js';
 
 /**
  * The per-message action bar.
@@ -527,6 +527,48 @@ export function fencedBlocks(markdown) {
 
 const safeName = (s) => (s || '回答').replace(/[\\/:*?"<>|\n\r\t]+/g, ' ').trim().slice(0, 60) || '回答';
 
+// The browser can make every format except the deck: python-pptx lives on the server. Asked once.
+let pptxReady = null;
+async function pptxAvailable() {
+  if (pptxReady === null) {
+    try {
+      const r = await api('/api/chat/export/formats');
+      pptxReady = { ok: Boolean(r.pptx), detail: r.pptx_detail || '' };
+    } catch (e) {
+      pptxReady = { ok: false, detail: e.message };
+    }
+  }
+  return pptxReady;
+}
+
+/** Ask the server to draw this answer as slides, then hand the file to the browser. */
+async function downloadPptx(view, btn) {
+  if (!view.messageId) return toast('這則回答還沒存好，稍等一下再試', 'warn');
+  const was = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '產生中…';
+  try {
+    const r = await fetch(`/api/chat/messages/${encodeURIComponent(view.messageId)}/pptx`, { method: 'POST', headers: { ...authHeaders, ...nameHeader() } });
+    if (!r.ok) {
+      const d = await r.json().catch(() => ({}));
+      throw new Error(d.error || `HTTP ${r.status}`);
+    }
+    const blob = await r.blob();
+    const name = /filename\*=UTF-8''([^;]+)/.exec(r.headers.get('content-disposition') || '');
+    const a = el('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name && name[1] ? decodeURIComponent(name[1]) : '回答.pptx';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    toast('簡報已下載', 'ok');
+  } catch (e) {
+    toast(`簡報產生失敗：${e.message}`, 'bad');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = was;
+  }
+}
+
 /** 存檔: everything this one answer can become. Only offers what the answer actually contains. */
 function openSaveDialog(view) {
   const md = view.entry && typeof view.entry.content === 'string' ? view.entry.content : view.body.textContent;
@@ -553,6 +595,21 @@ function openSaveDialog(view) {
   row('Markdown（.md）', '模型寫出來的原始文字', () => download(`${base}.md`, md, 'text/markdown'));
   row('HTML（.html）', '排版後的樣子，含表格與圖', () => download(`${base}.html`, htmlDoc(base, bodyHtml), 'text/html'));
   row('列印／存成 PDF', '開列印視窗，目的地選「另存為 PDF」', () => printDoc(base, bodyHtml));
+
+  // the deck is drawn on the server; the row appears only once the server says it can
+  const deckRow = el('button', 'opt');
+  deckRow.type = 'button';
+  deckRow.hidden = true;
+  deckRow.append(el('b', null, '簡報（.pptx）'), el('span', null, '標題、條列、表格與圖各成一頁'));
+  deckRow.onclick = () => downloadPptx(view, deckRow.querySelector('b'));
+  rows.append(deckRow);
+  pptxAvailable().then((p) => {
+    deckRow.hidden = false;
+    if (!p.ok) {
+      deckRow.disabled = true;
+      deckRow.querySelector('span').textContent = p.detail || '這台機器沒有 python-pptx';
+    }
+  });
 
   const svgs = blocks.filter((b) => b.lang === 'svg');
   const pages = blocks.filter((b) => b.lang === 'html' || b.lang === 'htm');

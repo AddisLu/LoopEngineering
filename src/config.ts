@@ -393,6 +393,10 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   report_pptx_template: '',
   report_pptx_manifest: '',
   report_pptx_python: '',
+  // python that has python-pptx / python-docx (this box: the office-venv in the data dir).
+  // Used by 存檔 → 簡報 (scripts/answer_pptx.py); empty falls back to report_pptx_python,
+  // then <data dir>/office-venv/bin/python, then plain python3.
+  office_python: '',
   report_pptx_timeout_ms: '120000',
 
   // 報告生成 D 續篇（src/report/pptx/{status,quality}.ts）：LLM status 生成 + 品質閘門(T3)。
