@@ -361,20 +361,25 @@ export function mountConvMenu(ctx) {
     return b;
   };
 
+  // build() awaits the server in the middle, so two quick opens used to interleave: the second
+  // pass cleared and refilled the list, then the first pass appended 分享／刪除 on top of it.
+  let buildSeq = 0;
   async function build() {
+    const mine = ++buildSeq;
     const id = ctx.conversation();
     list.replaceChildren();
     if (!id) return list.append(el('p', 'menu-note', '先問一個問題，這個對話才會存起來。'));
 
     list.append(
-      item('匯出 Markdown', () => {
+      el('p', 'menu-note', '只要存一則回答（含它產生的圖或程式碼），用那則回答下方的「存檔」。'),
+      item('匯出整段對話（Markdown）', () => {
         // a plain link download: the server sets the filename, including Chinese titles
         const a = el('a');
         a.href = `/api/chat/conversations/${id}/export?format=md`;
         a.download = '';
         a.click();
       }),
-      item('匯出 HTML（目前畫面）', () => exportHtml()),
+      item('匯出整段對話（HTML）', () => exportHtml()),
     );
 
     let shared = null;
@@ -383,6 +388,7 @@ export function mountConvMenu(ctx) {
     } catch (e) {
       /* the menu still offers export */
     }
+    if (mine !== buildSeq) return; // a newer build owns the list now
     const token = shared && shared.conversation ? shared.conversation.share_token : null;
     if (token) {
       const url = `${location.origin}/share.html#${token}`;
@@ -447,6 +453,126 @@ export function mountConvMenu(ctx) {
   });
 }
 
+// ---- saving one answer -------------------------------------------------------------------
+// The whole-conversation export lives in the ⋯ menu; what people actually want is the diagram or
+// the script *this* answer produced, as a file, without the rest of the conversation around it.
+
+const EXPORT_CSS = [
+  'body{font:15px/1.7 system-ui,"PingFang TC","Noto Sans TC",sans-serif;max-width:900px;margin:32px auto;padding:0 18px;color:#2a2621;background:#fbf8f2}',
+  '.msg{margin:0 0 22px}.who{font-size:12px;opacity:.6;margin-bottom:4px}',
+  '.msg.user .body{background:#e7eef7;padding:10px 14px;border-radius:12px;white-space:pre-wrap}',
+  'pre{background:#efeae0;padding:10px 12px;border-radius:8px;overflow-x:auto}',
+  'table{border-collapse:collapse}th,td{border:1px solid #e4ddd0;padding:6px 10px}',
+  'svg{max-width:100%;height:auto}',
+  '.meta{font-size:12px;opacity:.6}.refs{font-size:13px}.tools{font-size:13px}.tools ol{list-style:none;padding:0}.tools ul{font-size:12.5px}',
+].join('');
+
+/** Strip everything interactive from a copy of a rendered message/log. */
+function staticCopy(node) {
+  const copy = node.cloneNode(true);
+  for (const n of copy.querySelectorAll('button, iframe, .actions, .trim-note, .codebar')) n.remove();
+  for (const d of copy.querySelectorAll('details')) d.setAttribute('open', '');
+  return copy;
+}
+
+function htmlDoc(title, bodyHtml) {
+  return `<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><title>${title}</title><style>${EXPORT_CSS}</style></head><body><h1>${title}</h1>${bodyHtml}</body></html>`;
+}
+
+function download(name, text, mime) {
+  const a = el('a');
+  a.href = URL.createObjectURL(new Blob([text], { type: `${mime}; charset=utf-8` }));
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+}
+
+/** Print to paper or to PDF without touching the page: same document, hidden iframe. */
+function printDoc(title, bodyHtml) {
+  const frame = el('iframe');
+  frame.setAttribute('aria-hidden', 'true');
+  frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;opacity:0';
+  document.body.append(frame);
+  frame.srcdoc = htmlDoc(title, bodyHtml);
+  frame.onload = () => {
+    try {
+      frame.contentWindow.focus();
+      frame.contentWindow.print();
+    } catch (e) {
+      toast('這個瀏覽器不給列印，請用「匯出 HTML」再列印', 'warn');
+    }
+    setTimeout(() => frame.remove(), 60000);
+  };
+}
+
+const CODE_EXT = {
+  python: 'py', py: 'py', javascript: 'js', js: 'js', typescript: 'ts', ts: 'ts', bash: 'sh', sh: 'sh', shell: 'sh',
+  json: 'json', yaml: 'yml', yml: 'yml', sql: 'sql', cpp: 'cpp', 'c++': 'cpp', c: 'c', csharp: 'cs', cs: 'cs',
+  html: 'html', htm: 'html', xml: 'xml', css: 'css', markdown: 'md', md: 'md', svg: 'svg', mermaid: 'mmd',
+};
+
+/** Fenced blocks of an answer, in order — the same source the renderer drew from. */
+export function fencedBlocks(markdown) {
+  const out = [];
+  const re = /```([^\n`]*)\n([\s\S]*?)```/g;
+  let m;
+  while ((m = re.exec(markdown || '')) !== null) {
+    const lang = (m[1] || '').trim().toLowerCase().split(/\s+/)[0] || '';
+    const code = m[2] ?? '';
+    const isSvg = lang === 'svg' || ((lang === '' || lang === 'xml') && /^\s*<svg[\s>]/i.test(code));
+    out.push({ lang: isSvg ? 'svg' : lang, code, ext: isSvg ? 'svg' : CODE_EXT[lang] || 'txt' });
+  }
+  return out;
+}
+
+const safeName = (s) => (s || '回答').replace(/[\\/:*?"<>|\n\r\t]+/g, ' ').trim().slice(0, 60) || '回答';
+
+/** 存檔: everything this one answer can become. Only offers what the answer actually contains. */
+function openSaveDialog(view) {
+  const md = view.entry && typeof view.entry.content === 'string' ? view.entry.content : view.body.textContent;
+  const title = document.getElementById('conv-title');
+  const base = safeName(`${title ? title.textContent : '對話'}-回答${view.ord ? ` ${view.ord}` : ''}`);
+  const bodyHtml = staticCopy(view.wrap).outerHTML;
+  const blocks = fencedBlocks(md);
+
+  const dlg = el('dialog', 'save-dialog');
+  dlg.append(el('h3', null, '存這則回答'));
+  dlg.append(el('p', 'dialog-hint', '只存這一則，不含對話的其他部分。圖與程式碼各自成檔。'));
+  const rows = el('div', 'save-rows');
+  const row = (label, hint, run) => {
+    const b = el('button', 'opt');
+    b.type = 'button';
+    b.append(el('b', null, label), el('span', null, hint));
+    b.onclick = () => {
+      run();
+      dlg.close();
+    };
+    rows.append(b);
+  };
+
+  row('Markdown（.md）', '模型寫出來的原始文字', () => download(`${base}.md`, md, 'text/markdown'));
+  row('HTML（.html）', '排版後的樣子，含表格與圖', () => download(`${base}.html`, htmlDoc(base, bodyHtml), 'text/html'));
+  row('列印／存成 PDF', '開列印視窗，目的地選「另存為 PDF」', () => printDoc(base, bodyHtml));
+
+  const svgs = blocks.filter((b) => b.lang === 'svg');
+  const pages = blocks.filter((b) => b.lang === 'html' || b.lang === 'htm');
+  const code = blocks.filter((b) => b.lang !== 'svg' && b.lang !== 'html' && b.lang !== 'htm');
+  svgs.forEach((b, i) => row(`圖 ${i + 1}（.svg）`, '向量圖，可放進簡報或 Word', () => download(`${base}-圖${i + 1}.svg`, b.code, 'image/svg+xml')));
+  pages.forEach((b, i) => row(`網頁 ${i + 1}（.html）`, '這則回答產生的頁面本身', () => download(`${base}-頁${i + 1}.html`, b.code, 'text/html')));
+  code.forEach((b, i) => row(`程式碼 ${i + 1}（.${b.ext}）`, b.lang || '純文字', () => download(`${base}-${i + 1}.${b.ext}`, b.code, 'text/plain')));
+
+  dlg.append(rows);
+  const foot = el('div', 'dialog-foot');
+  const close = el('button', 'btn sm', '關閉');
+  close.type = 'button';
+  close.onclick = () => dlg.close();
+  foot.append(close);
+  dlg.append(foot);
+  dlg.addEventListener('close', () => dlg.remove());
+  document.body.append(dlg);
+  dlg.showModal();
+}
+
 /**
  * HTML export is done here rather than on the server: the page already holds the rendered
  * answer, tables and all. Interactive bits (buttons, previews) are dropped; code stays as text.
@@ -491,6 +617,7 @@ export function mountActions(view, ctx) {
     bar.append(
       actionBtn('重答', '丟掉這個回答，請模型重新回答一次', () => ctx.regenerate(view)),
       actionBtn('複製', '複製這個回答的原始文字', (b) => copyText(text(), b)),
+      actionBtn('存檔', '把這則回答存成檔案：Markdown、HTML、PDF，或它產生的圖與程式碼', () => openSaveDialog(view)),
       actionBtn('存進知識庫', '把這個回答存成知識庫筆記，之後對話查得到', (b) => capture(view, b)),
       actionBtn('轉成任務', '先判斷這則回答該變成哪種工作（軟體修正／功能／驗證新技術／待辦），確認後再開', (b) => toTask(view, b)),
       actionBtn('請雲端複核', '把這個回答送給雲端高階模型複核（會花訂閱額度，預設關閉）', (b) => escalate(view, b, ctx)),

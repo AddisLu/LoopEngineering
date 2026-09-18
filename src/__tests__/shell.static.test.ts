@@ -164,7 +164,7 @@ describe('chat-first shell', () => {
     // the page must say, in the page, that a tuning suggestion is only a suggestion
     expect(page).toContain('只產生建議，不會改機台');
     const actions = read('chat-actions.js');
-    for (const label of ['重答', '編輯重問', '存進知識庫', '轉成任務', '請雲端複核', '建立分享連結', '匯出 Markdown']) {
+    for (const label of ['重答', '編輯重問', '存進知識庫', '轉成任務', '請雲端複核', '建立分享連結', '存檔', '匯出整段對話（Markdown）']) {
       expect(actions, `action bar lost ${label}`).toContain(label);
     }
   });

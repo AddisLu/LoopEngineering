@@ -252,6 +252,19 @@ dialog.task-chooser .url-list .url { flex-direction: row; align-items: center; g
 dialog.task-chooser .url-list input { width: auto; }
 @media (max-width: 720px) { dialog.task-chooser .opts { grid-template-columns: 1fr; } }
 
+/* 存檔: one answer, every format it can become */
+dialog.save-dialog { width: min(520px, 94vw); }
+dialog.save-dialog .save-rows { display: flex; flex-direction: column; gap: 6px; margin: 10px 0 14px; max-height: 60vh; overflow-y: auto; }
+dialog.save-dialog .opt {
+  display: flex; flex-direction: column; gap: 2px; text-align: left; cursor: pointer;
+  padding: 9px 12px; border-radius: var(--r-sm); border: 1px solid var(--border);
+  background: var(--surface-sunk); color: var(--text); font: inherit;
+}
+dialog.save-dialog .opt:hover { border-color: var(--accent); background: var(--accent-soft); }
+dialog.save-dialog .opt b { font-size: 13.5px; }
+dialog.save-dialog .opt span { font-size: 12px; opacity: .7; }
+dialog.save-dialog .dialog-foot { display: flex; justify-content: flex-end; }
+
 /* ---- composer ------------------------------------------------------------ */
 .attach { display: flex; flex-wrap: wrap; gap: 10px; margin: 2px 0 8px; }
 .thumb { position: relative; }

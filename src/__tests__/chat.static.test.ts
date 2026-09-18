@@ -118,4 +118,23 @@ describe('模型對話 scripts', () => {
     expect(first).not.toMatch(/192\.168\.|10\.\d+\.\d+\.\d+/);
     expect(first).not.toContain('/styles.css');
   });
+
+  it('every answer can be saved on its own, in the formats it actually produced', () => {
+    const js = fs.readFileSync(path.join(WEB_DIR, 'chat-actions.js'), 'utf8');
+    // the ⋯ menu only ever exported the whole conversation
+    expect(js).toContain("actionBtn('存檔'");
+    expect(js).toContain('openSaveDialog');
+    expect(js).toContain('fencedBlocks');
+    expect(js).toContain('printDoc'); // 列印／存成 PDF
+    expect(js).toContain('image/svg+xml');
+    expect(js).toContain('匯出整段對話（Markdown）');
+    expect(fs.readFileSync(path.join(WEB_DIR, 'shell.css'), 'utf8')).toContain('dialog.save-dialog');
+  });
+
+  it('the conversation menu cannot double up its own items', () => {
+    const js = fs.readFileSync(path.join(WEB_DIR, 'chat-actions.js'), 'utf8');
+    // build() awaits mid-way; two quick opens appended 分享／刪除 twice
+    expect(js).toContain('buildSeq');
+    expect(js).toContain('if (mine !== buildSeq) return;');
+  });
 });
