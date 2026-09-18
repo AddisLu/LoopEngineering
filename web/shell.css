@@ -324,6 +324,9 @@ main.shell.dock-wide .dock-inner { min-width: 460px; }
 .dock-pane .err { color: var(--danger); }
 .pane-foot { margin-top: auto; padding-top: 4px; }
 .pane-foot a { font-size: 12.5px; color: var(--accent); }
+/* every panel opens its full page from the same place: a button row at the top */
+.pane-top { display: flex; flex-wrap: wrap; gap: 6px; flex: 0 0 auto; }
+.pane-top .btn { text-decoration: none; }
 
 .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
 .tiles > div { background: var(--surface-sunk); border-radius: var(--r-sm); padding: 9px 11px; display: flex; flex-direction: column; gap: 2px; }

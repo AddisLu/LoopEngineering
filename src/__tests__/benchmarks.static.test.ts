@@ -39,6 +39,26 @@ describe('benchmarks page + local model board wiring: static assets', () => {
     }
   });
 
+  it('every dock panel opens its full page from a button row at the top', () => {
+    const html = fs.readFileSync(path.join(WEB_DIR, 'index.html'), 'utf8');
+    // the links used to sit at the bottom of the scrolling panel, below the content
+    expect(html).not.toContain('pane-foot');
+    for (const pane of ['pane-tasks', 'pane-tune', 'pane-kb', 'pane-prd', 'pane-bench']) {
+      const start = html.indexOf(`id="${pane}"`);
+      const slice = html.slice(start, html.indexOf('<div class="dock-pane"', start + 1));
+      expect(slice, `${pane} has no top button row`).toContain('class="pane-top"');
+    }
+    expect(fs.readFileSync(path.join(WEB_DIR, 'shell.css'), 'utf8')).toContain('.pane-top');
+  });
+
+  it('the benchmark task picker mirrors the board', () => {
+    const js = fs.readFileSync(path.join(WEB_DIR, 'benchmarks.js'), 'utf8');
+    expect(js).toContain("api('/api/board')");
+    // it used to hide the benchmark arms, so the picker showed fewer tasks than the board
+    expect(js).not.toMatch(/filter\(\(c\) => !c\.title\.startsWith/);
+    expect(js).toContain('評比用');
+  });
+
   it('the dock shows the dashboard in Chinese, not raw enum values', () => {
     const dock = fs.readFileSync(path.join(WEB_DIR, 'dock.js'), 'utf8');
     expect(dock).toContain('/api/benchmarks/summary');

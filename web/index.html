@@ -101,16 +101,22 @@
       <aside class="dock" id="dock" aria-label="工作面板">
         <div class="dock-inner">
           <div class="dock-pane" id="pane-tasks" role="tabpanel" aria-labelledby="act-tasks" hidden>
+            <div class="pane-top">
+              <a class="btn sm" href="/board.html">開啟完整看板 ↗</a>
+              <a class="btn sm" href="/board.html#new">＋ 新增 task</a>
+            </div>
             <div class="card">
               <h2>任務狀態</h2>
               <div class="counts" id="task-counts"></div>
               <p class="hint" id="sched-note">連線中…</p>
             </div>
             <div class="task-list" id="task-list"></div>
-            <p class="pane-foot"><a href="/board.html">開啟完整看板 ↗</a> · <a href="/board.html#new">＋ 新增 task</a></p>
           </div>
 
           <div class="dock-pane" id="pane-tune" role="tabpanel" aria-labelledby="act-tune" hidden>
+            <div class="pane-top">
+              <a class="btn sm" href="/board.html">開啟完整看板 ↗</a>
+            </div>
             <div class="card">
               <h2>智慧調整參數</h2>
               <p class="hint">描述機台症狀，模型會先查 CF-AOI 知識庫，再給出可調的檔案與參數。<b>只產生建議，不會改機台</b>；建議可一鍵轉成 Loop 任務。</p>
@@ -139,6 +145,9 @@
           </div>
 
           <div class="dock-pane" id="pane-kb" role="tabpanel" aria-labelledby="act-kb" hidden>
+            <div class="pane-top">
+              <a class="btn sm" href="/brain.html">開啟知識星圖 ↗</a>
+            </div>
             <div class="card">
               <h2>CF-AOI 知識庫</h2>
               <dl>
@@ -163,21 +172,19 @@
               </form>
               <p class="hint" id="capture-note">寫進 vault 來源並立刻建立索引，之後對話就查得到。</p>
             </div>
-            <p class="pane-foot"><a href="/brain.html">開啟知識星圖 ↗</a></p>
           </div>
 
           <div class="dock-pane" id="pane-prd" role="tabpanel" aria-labelledby="act-prd" hidden>
+            <div class="pane-top">
+              <a class="btn sm primary" id="prd-new" href="/prd.html">開新的 PRD ↗</a>
+              <button class="btn sm" type="button" id="prd-refresh">重新整理</button>
+            </div>
             <div class="card">
               <h2>PRD 精靈</h2>
               <p class="hint">用五步把「改哪套軟體、改什麼、怎麼驗證」寫清楚，通過閘門才變成 Loop 任務。</p>
-              <div class="prd-actions">
-                <a class="btn sm primary" id="prd-new" href="/prd.html">開新的 PRD</a>
-                <button class="btn sm" type="button" id="prd-refresh">重新整理</button>
-              </div>
               <h3>最近的草稿</h3>
               <div id="prd-drafts"></div>
             </div>
-            <p class="pane-foot"><a href="/prd.html">開啟 PRD 精靈 ↗</a></p>
           </div>
 
           <div class="dock-pane" id="pane-model" role="tabpanel" aria-labelledby="act-model">
@@ -275,6 +282,10 @@
           </div>
 
           <div class="dock-pane" id="pane-bench" role="tabpanel" aria-labelledby="act-bench" hidden>
+            <div class="pane-top">
+              <a class="btn sm" href="/benchmarks.html">開啟完整評比頁 ↗</a>
+              <a class="btn sm primary" id="bench-new" href="/benchmarks.html#new">＋ 新評比</a>
+            </div>
             <section class="card" id="bench-running" hidden>
               <h2>進行中的評比</h2>
               <p class="job-title" id="bench-running-title"></p>
@@ -283,7 +294,7 @@
             </section>
 
             <section class="card">
-              <h2>模型戰績 <a class="mini" id="bench-new" href="/benchmarks.html#new">＋ 新評比</a></h2>
+              <h2>模型戰績</h2>
               <p class="hint">同一份題目交給多個模型各做一次，雲端評審看 diff 打分。</p>
               <div id="bench-models"></div>
             </section>
@@ -292,7 +303,6 @@
               <h2>最近的評比</h2>
               <div id="bench-list"></div>
             </section>
-            <p class="pane-foot"><a href="/benchmarks.html">開啟完整 Benchmark 頁 ↗</a></p>
           </div>
         </div>
       </aside>

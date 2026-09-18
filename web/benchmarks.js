@@ -282,14 +282,19 @@
     const sel = $('task-select');
     sel.replaceChildren(el('option', null, '（選一張任務）'));
     try {
-      // the board snapshot is the task list this deployment already serves
+      // the board snapshot is the task list this deployment already serves — show all of it, so
+      // "what is on my board" and "what can I benchmark" are the same list
       const { cards } = await api('/api/board');
-      for (const t of cards.filter((c) => !c.title.startsWith('[bench]')).slice(0, 200)) {
-        const o = el('option', null, `${t.title}（${t.status}）`);
+      for (const t of cards.slice(0, 200)) {
+        const arm = t.title.startsWith('[bench]');
+        const o = el('option', null, `${t.title}（${t.status}${arm ? ' · 評比用' : ''}）`);
         o.value = t.id;
         sel.appendChild(o);
       }
-    } catch (e) { /* board may be empty */ }
+      if (!cards.length) sel.appendChild(el('option', null, '看板上還沒有任務'));
+    } catch (e) {
+      sel.replaceChildren(el('option', null, `讀不到看板：${e.message}`));
+    }
     sel.onchange = () => {
       draftState.ref = sel.value || null;
       paintEstimate();
