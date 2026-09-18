@@ -7,6 +7,8 @@ import type { FastifyInstance } from 'fastify';
 import { openTestDb, setSetting } from '../db/index.js';
 import { buildApp } from '../server/app.js';
 import { TerminalError, TerminalManager, defaultShell, type PtyLike, type SpawnPty } from '../terminal/sessions.js';
+import { ensureUserWorktree, userBranch, worktreeSlug } from '../terminal/worktree.js';
+import { execFileSync } from 'node:child_process';
 import { parseAllowedUsers, terminalAccess } from '../terminal/access.js';
 import type { FastifyRequest } from 'fastify';
 import { WebSocket as WsClient } from 'ws';
@@ -62,6 +64,7 @@ describe('TerminalManager', () => {
   let timers: Array<{ fn: () => void; ms: number }> = [];
   beforeEach(() => {
     db = openTestDb();
+    setSetting(db, 'terminal_worktree', 'false'); // the worktree suite below turns it on
     timers = [];
   });
   afterEach(() => db.close());
@@ -202,6 +205,89 @@ describe('terminalAccess', () => {
   });
 });
 
+describe('per-user worktrees', () => {
+  let db: Database.Database;
+  let repo = '';
+  let root = '';
+  const git = (args: string[], cwd: string) => execFileSync('git', args, { cwd, encoding: 'utf8' });
+
+  beforeEach(() => {
+    db = openTestDb();
+    repo = fs.mkdtempSync(path.join(os.tmpdir(), 'wt-repo-'));
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'wt-root-'));
+    git(['init', '-q', '-b', 'main'], repo);
+    fs.writeFileSync(path.join(repo, 'README.md'), '# repo\n');
+    git(['add', '-A'], repo);
+    git(['-c', 'user.name=t', '-c', 'user.email=t@e', 'commit', '-qm', 'init'], repo);
+    setSetting(db, 'terminal_cwd', repo);
+    setSetting(db, 'terminal_worktree', 'true');
+    setSetting(db, 'terminal_worktree_root', root);
+  });
+  afterEach(() => {
+    db.close();
+    fs.rmSync(repo, { recursive: true, force: true });
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('names a directory per identity and never collides', () => {
+    expect(worktreeSlug({ user_key: 'local' })).toBe('local');
+    expect(worktreeSlug({ user_key: 'ts:addis@example.com' })).toMatch(/^addis-[0-9a-f]{4}$/);
+    // a Chinese display name sanitises to nothing: fall back to a hash, never an empty path
+    expect(worktreeSlug({ user_key: 'name:呂侑儒' })).toMatch(/^u-[0-9a-f]{4}$/);
+    expect(worktreeSlug({ user_key: 'ts:a@x.com' })).not.toBe(worktreeSlug({ user_key: 'name:a' }));
+    expect(userBranch({ user_key: 'local' })).toBe('desk/local');
+  });
+
+  it('cuts one worktree per person, reuses it, and leaves the source checkout alone', () => {
+    const before = git(['rev-parse', 'HEAD'], repo).trim();
+    const a = ensureUserWorktree(db, { user_key: 'ts:addis@example.com' }, { home: '/home/x' });
+    expect(a.created).toBe(true);
+    expect(a.path.startsWith(root)).toBe(true);
+    expect(fs.existsSync(path.join(a.path, 'README.md'))).toBe(true);
+    expect(git(['rev-parse', '--abbrev-ref', 'HEAD'], a.path).trim()).toBe(a.branch);
+
+    // the same person comes back: same directory, no second branch
+    const again = ensureUserWorktree(db, { user_key: 'ts:addis@example.com' }, { home: '/home/x' });
+    expect(again).toMatchObject({ path: a.path, branch: a.branch, created: false });
+    const b = ensureUserWorktree(db, { user_key: 'name:guest' }, { home: '/home/x' });
+    expect(b.path).not.toBe(a.path);
+    // the checkout the engine runs from is untouched: same commit, same branch, clean tree
+    expect(git(['rev-parse', 'HEAD'], repo).trim()).toBe(before);
+    expect(git(['rev-parse', '--abbrev-ref', 'HEAD'], repo).trim()).toBe('main');
+    expect(git(['status', '--porcelain'], repo).trim()).toBe('');
+  });
+
+  it('a new shell lands in the worktree and says so, once per session', () => {
+    const f = fakePty();
+    const m = new TerminalManager({ spawnPty: f.spawn, db, presets: { log: () => ({ file: 'tail', args: ['-f', '/tmp/x'], title: 'log' }) }, home: '/home/x' });
+    const s = m.open({ user: USER });
+    const wt = path.join(root, worktreeSlug(USER));
+    expect(f.spawned[0]).toMatchObject({ cwd: wt });
+    const seen: string[] = [];
+    m.attach(s.id, USER.user_key, { send: (j) => seen.push(j) });
+    expect(JSON.parse(seen[0]!).data).toContain(wt);
+    expect(JSON.parse(seen[0]!).data).toContain('worktree');
+    // a log tail is not a place to work: presets stay in the repo root
+    m.open({ user: USER, preset: 'log' });
+    expect(f.spawned[1]).toMatchObject({ cwd: repo });
+  });
+
+  it('a git failure still gets you a shell, in the repo, with the reason on screen', () => {
+    const f = fakePty();
+    const m = new TerminalManager({
+      spawnPty: f.spawn,
+      db,
+      home: '/home/x',
+      worktree: { git: () => { throw new Error('git is not installed'); } },
+    });
+    const s = m.open({ user: USER });
+    expect(f.spawned[0]).toMatchObject({ cwd: repo });
+    const seen: string[] = [];
+    m.attach(s.id, USER.user_key, { send: (j) => seen.push(j) });
+    expect(JSON.parse(seen[0]!).data).toContain('開不起來');
+  });
+});
+
 describe('/api/terminal over a real socket', () => {
   let db: Database.Database;
   let app: FastifyInstance;
@@ -211,6 +297,7 @@ describe('/api/terminal over a real socket', () => {
     db = openTestDb();
     setSetting(db, 'terminal_enabled', 'true');
     setSetting(db, 'terminal_allowed_users', 'ts:addis@example.com');
+    setSetting(db, 'terminal_worktree', 'false'); // exercised on its own below
     app = buildApp({ db, apiToken: 'tok', terminalSpawnPty: f.spawn });
     await app.listen({ port: 0, host: '127.0.0.1' });
     const addr = app.server.address() as { port: number };

@@ -200,6 +200,11 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // and a collaborator lands where the code is. A shell can still cd elsewhere (a pty is not a
   // jail) — this is a starting point and a hint, not a sandbox.
   terminal_cwd: ENGINE_REPO_ROOT,
+  // 專屬 worktree: every person who opens a shell gets their own git worktree of terminal_cwd
+  // (branch desk/<slug>) and lands there, so the checkout the engine runs its own tasks from
+  // never picks up someone else's edits. Off → everyone shares terminal_cwd.
+  terminal_worktree: 'true',
+  terminal_worktree_root: path.join(os.homedir(), 'Addis', 'loop-worktrees'),
   terminal_idle_min: '30',
   terminal_max_sessions: '4',
   terminal_scrollback_kb: '256',

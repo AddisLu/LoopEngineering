@@ -36,7 +36,7 @@ export const NONNEG_KEYS = new Set([
 export const UNIT_INTERVAL_KEYS = new Set(['rag_hybrid_alpha']);
 // Phase 3 feature flags: stored as 'true'/'false'.
 export const BOOL_KEYS = new Set([
-  'chat_history_enabled', 'chat_escalate_enabled', 'chat_share_enabled', 'chat_tools_enabled', 'terminal_enabled', 'chat_mcp_enabled',
+  'chat_history_enabled', 'chat_escalate_enabled', 'chat_share_enabled', 'chat_tools_enabled', 'terminal_enabled', 'terminal_worktree', 'chat_mcp_enabled',
   'scheduler_paused',
   'window_checkpoint', 'weekly_packing', 'concurrency_reserve', 'priority_aging',
   'dep_auto_queue',
@@ -161,6 +161,8 @@ export function validateSetting(key: string, value: string): string | null {
     }
   } else if (key === 'terminal_cwd') {
     if (value !== '' && !value.startsWith('/')) return 'terminal_cwd must be an absolute path (or empty for the home directory)';
+  } else if (key === 'terminal_worktree_root') {
+    if (value !== '' && !value.startsWith('/')) return 'terminal_worktree_root must be an absolute path';
   } else if (key === 'terminal_allowed_users') {
     const bad = value.split(',').map((s) => s.trim()).filter(Boolean).filter((s) => !/^(ts:\S+|name:\S+|local)$/i.test(s));
     if (bad.length) return `terminal_allowed_users entries must be ts:<login>, name:<name> or local (got: ${bad.join(', ')})`;

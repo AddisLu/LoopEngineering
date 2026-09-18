@@ -2,7 +2,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import type Database from 'better-sqlite3';
 import { nanoid } from 'nanoid';
-import { getNum, getSetting } from '../db/index.js';
+import { getBool, getNum, getSetting } from '../db/index.js';
+import { ensureUserWorktree, type WorktreeDeps } from './worktree.js';
 
 /**
  * Interactive shells behind the chat shell's terminal drawer. One pty per session, owned by the
@@ -58,6 +59,8 @@ export interface TerminalManagerDeps {
   clearTimer?: (t: unknown) => void;
   env?: NodeJS.ProcessEnv;
   home?: string;
+  /** injected in tests: how a per-user worktree is made (git) */
+  worktree?: WorktreeDeps;
 }
 
 export class TerminalError extends Error {
@@ -102,6 +105,7 @@ export class TerminalManager {
   private readonly clearTimer: (t: unknown) => void;
   private readonly env: NodeJS.ProcessEnv;
   private readonly home: string;
+  private readonly worktreeDeps: WorktreeDeps;
 
   constructor(deps: TerminalManagerDeps) {
     this.db = deps.db;
@@ -112,6 +116,26 @@ export class TerminalManager {
     this.clearTimer = deps.clearTimer ?? ((t) => clearTimeout(t as NodeJS.Timeout));
     this.env = deps.env ?? process.env;
     this.home = deps.home ?? os.homedir();
+    this.worktreeDeps = { home: deps.home, ...(deps.worktree ?? {}) };
+  }
+
+  /**
+   * Where an interactive shell lands: the user's own worktree when terminal_worktree is on, so the
+   * checkout the engine runs its own tasks from stays clean. Falls back to cwd() with a visible
+   * reason — not being able to make a worktree must never stop someone getting a shell.
+   */
+  private shellDir(user: TerminalUser): { cwd: string; notice: string | null } {
+    const base = this.cwd();
+    if (!getBool(this.db, 'terminal_worktree', false)) return { cwd: base, notice: null };
+    try {
+      const wt = ensureUserWorktree(this.db, user, this.worktreeDeps);
+      const line = wt.created
+        ? `\x1b[36m● 幫你開了專屬 worktree ${wt.path}（分支 ${wt.branch}）——主 checkout 不會被你的修改影響。\x1b[0m\r\n`
+        : `\x1b[36m● 你的 worktree：${wt.path}（分支 ${wt.branch}）\x1b[0m\r\n`;
+      return { cwd: wt.path, notice: line };
+    } catch (err) {
+      return { cwd: base, notice: `\x1b[33m● 專屬 worktree 開不起來（${(err as Error).message}），這個 shell 開在 ${base}。\x1b[0m\r\n` };
+    }
   }
 
   /**
@@ -199,7 +223,9 @@ export class TerminalManager {
     }
     // the bearer token must not leak into an interactive shell's environment
     const { LOOP_API_TOKEN: _t, LOOP_READONLY_TOKEN: _r, ...clean } = this.env;
-    const cwd = this.cwd();
+    // a preset is a log tail, not a place to work: it stays in the repo root
+    const place = o.preset ? { cwd: this.cwd(), notice: null } : this.shellDir(o.user);
+    const cwd = place.cwd;
     const env: NodeJS.ProcessEnv = { ...clean, TERM: 'xterm-256color', COLORTERM: 'truecolor', LOOP_TERMINAL: '1', PWD: cwd };
 
     const pty = this.spawnPty(file, args, { cols, rows, cwd, env });
@@ -220,6 +246,11 @@ export class TerminalManager {
       exit_code: null,
       idle: null,
     };
+    // the notice is the first thing in the scrollback, so it survives detach/attach
+    if (place.notice) {
+      s.scrollback.push(place.notice);
+      s.scrollbackBytes += Buffer.byteLength(place.notice);
+    }
     this.sessions.set(id, s);
     this.db
       .prepare(

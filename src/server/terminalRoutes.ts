@@ -1,7 +1,8 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type Database from 'better-sqlite3';
 import type { WebSocket } from 'ws';
-import { getSetting } from '../db/index.js';
+import { getBool, getSetting } from '../db/index.js';
+import { userWorktreePath } from '../terminal/worktree.js';
 import { terminalAccess } from '../terminal/access.js';
 import { TerminalError, TerminalManager, type PresetResolver, type SpawnPty, type TerminalClient } from '../terminal/sessions.js';
 import { getJobRunner } from '../local/jobs.js';
@@ -77,8 +78,11 @@ export function registerTerminalRoutes(app: FastifyInstance, db: Database.Databa
 
   app.get('/api/terminal/access', async (req) => {
     const a = access(req);
-    // cwd so the drawer can say where a new shell lands (setting terminal_cwd)
-    return { allowed: a.allowed, reason: a.reason, user_label: a.user?.label ?? null, presets: Object.keys(PRESETS), cwd: getSetting(db, 'terminal_cwd') || null };
+    // where a new shell would land, so the drawer can say it without opening one. With
+    // terminal_worktree on that is this person's own worktree — computed here, created on open.
+    const worktree = Boolean(a.user) && getBool(db, 'terminal_worktree', false);
+    const cwd = worktree && a.user ? userWorktreePath(db, a.user) : getSetting(db, 'terminal_cwd') || null;
+    return { allowed: a.allowed, reason: a.reason, user_label: a.user?.label ?? null, presets: Object.keys(PRESETS), cwd, worktree };
   });
 
   app.get('/api/terminal/sessions', async (req, reply) => {

@@ -272,7 +272,7 @@ fetch('/api/terminal/access', { headers: { ...(TOKEN ? { Authorization: `Bearer 
   .then((r) => r.json())
   .then((a) => {
     const hint = $('term-hint');
-    if (a && a.cwd && hint) hint.textContent = `開在 ${a.cwd} · Ctrl+\` 開關 · 關掉抽屜不會結束 shell`;
+    if (a && a.cwd && hint) hint.textContent = `${a.worktree ? '你的 worktree' : '開在'} ${a.cwd} · Ctrl+\` 開關 · 關掉抽屜不會結束 shell`;
   })
   .catch(() => {});
 
