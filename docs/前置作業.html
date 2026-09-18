@@ -80,6 +80,8 @@
   <span class="mk" aria-hidden="true"></span>
   <b>Loop Engineering · 連線前置作業</b>
   <span class="grow"></span>
+  <a class="btn" href="/" id="back" hidden>← 回到對話</a>
+  <a class="btn" href="/docs/demo-guide.html" id="quick" hidden>3 分鐘上手</a>
   <button class="btn" type="button" id="theme">☾</button>
 </header>
 <main>
@@ -222,6 +224,12 @@
       paint();
     };
     paint();
+    // opened from the site: offer the way back. Opened from an email attachment (file://),
+    // those links would point at the local disk, so they stay hidden.
+    if (location.protocol === 'http:' || location.protocol === 'https:') {
+      document.getElementById('back').hidden = false;
+      document.getElementById('quick').hidden = false;
+    }
   })();
 </script>
 </body>

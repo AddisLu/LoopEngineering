@@ -61,6 +61,8 @@
   .spacer { margin-left: auto; }
   .tbtn { font: inherit; font-size: 14px; cursor: pointer; border: 1px solid var(--border); background: var(--surface-2); color: var(--ink); border-radius: 9px; padding: 6px 12px; }
   .tbtn:hover { background: var(--sunk); }
+  a.tbtn { text-decoration: none; display: inline-block; }
+  @media (max-width: 720px) { .hide-narrow { display: none; } }
 
   .layout { display: grid; grid-template-columns: 264px minmax(0,1fr); gap: 0; max-width: 1180px; margin: 0 auto; }
   .toc {
@@ -141,6 +143,8 @@
 <header class="topbar">
   <div class="brand"><span class="mk"></span><span>Loop Engineering<small>操作說明手冊</small></span></div>
   <span class="spacer"></span>
+  <a class="tbtn" href="/">← 回到對話</a>
+  <a class="tbtn hide-narrow" href="/docs/demo-guide.html">3 分鐘上手</a>
   <button class="tbtn menu-toggle" id="menu-btn" aria-label="目錄">☰ 目錄</button>
   <button class="tbtn" id="theme-btn" aria-label="切換佈景">☾</button>
 </header>

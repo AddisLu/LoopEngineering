@@ -109,6 +109,10 @@ describe('模型對話 scripts', () => {
     expect(quick.match(/→ 完整說明第/g)?.length ?? 0).toBeGreaterThanOrEqual(8);
     expect(quick).toContain('worktree');
     expect(quick).toContain('轉成任務');
+    // every guide can get back to the app; the manual had no way out at all
+    expect(quick).toContain('href="/"');
+    expect(manual).toContain('href="/"');
+    expect(first).toContain('id="back"'); // shown only when served, hidden in an emailed copy
     // it is emailed to people who cannot reach the site yet: no address, no token, standalone
     expect(first).not.toMatch(/ts\.net\/|Bearer |token=[A-Za-z0-9]/);
     expect(first).not.toMatch(/192\.168\.|10\.\d+\.\d+\.\d+/);
