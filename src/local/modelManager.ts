@@ -8,6 +8,7 @@ import { getNum, getSetting, setSetting, logEvent } from '../db/index.js';
 import { notify } from '../notify.js';
 import { getLocalModel, listLocalModels } from './models.js';
 import { weightsComplete } from './weights.js';
+import { scopedCommand, unitName } from './scope.js';
 import { shutdownWarmWorkers } from '../voice/daemon.js';
 import { getTranscribeWarmWorkerSingleton } from '../voice/transcribe.js';
 import { getEmbedWarmWorkerSingleton } from '../knowledge/embed.js';
@@ -70,10 +71,21 @@ export function launchArgs(repo: string, recipe: string): string[] {
   return [path.join(repo, 'run-recipe.sh'), recipe, '--solo', '--earlyoom', '-e', 'HF_HUB_OFFLINE=1'];
 }
 
+/**
+ * `detached` alone does not survive `systemctl --user restart`: the whole service cgroup is
+ * killed, run-recipe.sh traps the signal and stops the container — a deploy would take the
+ * model the operator is talking to down with it. The launcher therefore runs in its own
+ * transient scope (src/local/scope.ts) and reconcile() re-adopts it after the restart.
+ */
+export function launchCommand(repo: string, recipe: string, logName: string, env: NodeJS.ProcessEnv = process.env): { cmd: string; args: string[] } {
+  return scopedCommand('bash', launchArgs(repo, recipe), unitName('loop', logName), env);
+}
+
 function defaultLaunch(repo: string, recipe: string, logPath: string): LauncherHandle {
   const fd = fs.openSync(logPath, 'a');
+  const { cmd, args } = launchCommand(repo, recipe, path.basename(logPath, '.log'));
   // detached + unref: vLLM outlives an engine restart (reconcile() re-adopts it).
-  const child = nodeSpawn('bash', launchArgs(repo, recipe), {
+  const child = nodeSpawn(cmd, args, {
     cwd: repo,
     detached: true,
     stdio: ['ignore', fd, fd],

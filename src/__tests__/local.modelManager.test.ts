@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type Database from 'better-sqlite3';
 import { openTestDb, getSetting, setSetting } from '../db/index.js';
-import { ModelManager, type ModelManagerDeps, launchArgs } from '../local/modelManager.js';
+import { ModelManager, type ModelManagerDeps, launchArgs, launchCommand } from '../local/modelManager.js';
 
 const QWEN = 'local-inference-lab/Qwen3.8-Flash-Next-NVFP4';
 
@@ -62,6 +62,17 @@ const events = () =>
   );
 
 describe('launchArgs', () => {
+  it('runs the launcher in its own systemd scope so a deploy cannot kill the model', () => {
+    // systemctl restart kills the service cgroup; run-recipe.sh traps it and stops the container
+    const scoped = launchCommand('/r/spark', 'rec', 'vllm-rec-123', { XDG_RUNTIME_DIR: '/run/user/1000', PATH: '/usr/bin' });
+    expect(scoped.cmd).toBe('systemd-run');
+    expect(scoped.args.slice(0, 4)).toEqual(['--user', '--scope', '--quiet', '--collect']);
+    expect(scoped.args).toContain('--unit=loop-vllm-rec-123');
+    expect(scoped.args.slice(-7)).toEqual(['bash', ...launchArgs('/r/spark', 'rec')]);
+    // no user manager (a bare shell, a container): run it directly
+    expect(launchCommand('/r/spark', 'rec', 'log', {})).toEqual({ cmd: 'bash', args: launchArgs('/r/spark', 'rec') });
+  });
+
   it('runs the recipe solo with the hub switched off', () => {
     // a new upstream revision must never turn a switch into a 100 GB download
     expect(launchArgs('/r/spark', 'qwen3.8-flash-next-nvfp4-solo')).toEqual([

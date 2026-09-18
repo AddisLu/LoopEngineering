@@ -7,6 +7,10 @@ import { getSetting, setSetting, logEvent } from '../db/index.js';
 import { clearImageCache, imageExists } from './images.js';
 import { weightsBytes, weightsComplete } from './weights.js';
 import { registerRecipe } from './models.js';
+import { scopedCommand, unitName } from './scope.js';
+
+// re-exported so existing callers/tests keep one import site for the scope helper
+export { scopedCommand } from './scope.js';
 
 /**
  * The one long host job the 模型 panel can start: pull a model's weights, or build the container
@@ -69,36 +73,9 @@ export class JobBusyError extends Error {}
 const SETTING = 'local_job_json';
 const TAIL_BYTES = 8192;
 
-/**
- * Put the job in its own transient systemd scope when we can. `detached` alone is not enough:
- * `systemctl restart loop-engineering` kills the service's whole cgroup, and a 24 GB docker pull
- * died that way on the first real run. `systemd-run --scope` execs the command inside a new
- * scope under the user manager, so the pid we get back is the command's and it outlives us.
- */
-export function scopedCommand(cmd: string, args: string[], unit: string, env: NodeJS.ProcessEnv = process.env, hasSystemdRun = systemdRunAvailable): { cmd: string; args: string[] } {
-  if (!env.XDG_RUNTIME_DIR || !hasSystemdRun()) return { cmd, args };
-  return { cmd: 'systemd-run', args: ['--user', '--scope', '--quiet', '--collect', `--unit=${unit}`, '--', cmd, ...args] };
-}
-
-let systemdRunCached: boolean | null = null;
-function systemdRunAvailable(): boolean {
-  if (systemdRunCached == null) {
-    systemdRunCached = (process.env.PATH ?? '').split(':').some((d) => {
-      try {
-        fs.accessSync(path.join(d, 'systemd-run'), fs.constants.X_OK);
-        return true;
-      } catch {
-        return false;
-      }
-    });
-  }
-  return systemdRunCached;
-}
-
 export function defaultJobLaunch(cmd: string, args: string[], cwd: string, logPath: string, env: NodeJS.ProcessEnv = process.env): JobHandle {
   const fd = fs.openSync(logPath, 'a');
-  const unit = `loop-local-${path.basename(logPath, '.log').replace(/[^a-zA-Z0-9_.-]+/g, '-')}`;
-  const scoped = scopedCommand(cmd, args, unit, env);
+  const scoped = scopedCommand(cmd, args, unitName('loop-local', path.basename(logPath, '.log')), env);
   // detached + unref: the pull outlives an engine restart; the runner re-adopts it by pid
   const child = nodeSpawn(scoped.cmd, scoped.args, { cwd, detached: true, stdio: ['ignore', fd, fd], env });
   fs.closeSync(fd);
