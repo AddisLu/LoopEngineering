@@ -316,6 +316,33 @@ async function escalate(view, btn, ctx) {
  * The ⋯ menu for the open conversation: export, share, delete.
  * Sharing publishes a read-only page, so the button says so and the link is shown, not hidden.
  */
+/**
+ * The 說明 menu in the topbar. Static links (the pages are plain HTML), so this only has to open
+ * and close — but it has to be in the topbar: both guides used to live at the bottom of the
+ * history drawer, below the conversation list, where nobody scrolls.
+ */
+export function mountHelpMenu() {
+  const btn = document.getElementById('help-menu');
+  const list = document.getElementById('help-menu-list');
+  if (!btn || !list) return;
+  const close = () => {
+    list.hidden = true;
+    btn.setAttribute('aria-expanded', 'false');
+  };
+  btn.onclick = () => {
+    if (!list.hidden) return close();
+    list.hidden = false;
+    btn.setAttribute('aria-expanded', 'true');
+  };
+  for (const a of list.querySelectorAll('a')) a.addEventListener('click', close);
+  document.addEventListener('click', (e) => {
+    if (!list.hidden && !list.contains(e.target) && e.target !== btn) close();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') close();
+  });
+}
+
 export function mountConvMenu(ctx) {
   const btn = document.getElementById('conv-menu');
   const list = document.getElementById('conv-menu-list');

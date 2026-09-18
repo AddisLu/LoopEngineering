@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="zh-Hant" data-mode="light">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Loop Engineering · 連線前置作業</title>
+<script>
+  // same rule as web/theme-boot.js: follow the saved mode, else the OS
+  (function () {
+    try {
+      var m = localStorage.getItem('loop_mode');
+      if (m !== 'light' && m !== 'dark') m = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-mode', m);
+    } catch (e) {}
+  })();
+</script>
+<style>
+  :root {
+    --bg: #f7f4ee; --surface: #fffdf8; --sunk: #efe9de; --line: #e3dccf;
+    --ink: #2a2723; --ink-2: #5f5a51; --ink-3: #8a8479;
+    --accent: #b25a34; --accent-soft: #f6e6dc; --ok: #2f7d4f; --ok-soft: #e3f1ea; --warn: #a9701c; --warn-soft: #f7ecd9; --blue: #3b6ea8; --blue-soft: #e7eef7;
+    --sans: ui-sans-serif, system-ui, "PingFang TC", "Noto Sans TC", sans-serif; --mono: ui-monospace, "JetBrains Mono", Menlo, monospace;
+  }
+  :root[data-mode="dark"] {
+    --bg: #1a1917; --surface: #232120; --sunk: #1e1c1a; --line: #3a3733;
+    --ink: #ece7de; --ink-2: #b1aa9c; --ink-3: #837c6f;
+    --accent: #e08b5f; --accent-soft: #3a2a20; --ok: #6fbf8c; --ok-soft: #22352a; --warn: #d9a25a; --warn-soft: #3a2f1c; --blue: #7fa6d9; --blue-soft: #223449;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body { background: var(--bg); color: var(--ink); font-family: var(--sans); font-size: 16px; line-height: 1.7; }
+  a { color: var(--accent); }
+  header { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 12px; padding: 12px 22px; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
+  header .mk { width: 22px; height: 22px; border-radius: 7px; background: linear-gradient(150deg, var(--accent), #d99); }
+  header b { font-size: 15px; }
+  header .grow { flex: 1; }
+  header .btn { font: inherit; font-size: 13px; padding: 5px 11px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; text-decoration: none; }
+  main { max-width: 880px; margin: 0 auto; padding: 26px 18px 70px; }
+  h1 { font-size: 30px; margin: 6px 0 6px; letter-spacing: -.3px; }
+  .lead { color: var(--ink-2); margin: 0 0 8px; font-size: 17px; }
+  .print-note { color: var(--ink-3); font-size: 13px; margin: 0 0 22px; }
+  h2 { font-size: 20px; margin: 30px 0 10px; }
+  p { margin: 0 0 12px; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 16px 20px; margin: 14px 0; }
+  .step { display: flex; gap: 14px; align-items: flex-start; }
+  .step .n { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 50%; background: var(--accent); color: #fff; font-weight: 700; font-size: 14px; flex: 0 0 auto; margin-top: 2px; }
+  .step h3 { font-size: 17px; margin: 2px 0 6px; }
+  .step .body { flex: 1 1 auto; min-width: 0; }
+  .step p:last-child { margin-bottom: 0; }
+  table { width: 100%; border-collapse: collapse; font-size: 14.5px; margin: 10px 0 2px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--ink-2); font-weight: 600; white-space: nowrap; }
+  code { font-family: var(--mono); font-size: 13.5px; background: var(--sunk); padding: 1px 6px; border-radius: 5px; word-break: break-all; }
+  .note { border-radius: 12px; padding: 12px 16px; margin: 14px 0; font-size: 14.5px; }
+  .note.warn { background: var(--warn-soft); }
+  .note.ok { background: var(--ok-soft); }
+  .note.info { background: var(--blue-soft); }
+  .note b { display: block; margin-bottom: 2px; }
+  .fig { width: 100%; max-width: 640px; margin: 8px auto 4px; }
+  .fig svg { width: 100%; height: auto; display: block; font-family: var(--sans); }
+  .fig text { fill: var(--ink); font-size: 11px; }
+  .fig .muted { fill: var(--ink-3); }
+  .fig .box { fill: var(--surface); stroke: var(--line); }
+  .fig .accs { fill: var(--accent-soft); stroke: var(--accent); }
+  .fig .oks { fill: var(--ok-soft); stroke: var(--ok); }
+  .fig .line { stroke: var(--line); }
+  .fig .dash { stroke: var(--accent); stroke-dasharray: 5 4; }
+  ul { margin: 0 0 12px; padding-left: 22px; }
+  li { margin: 3px 0; }
+  footer { text-align: center; color: var(--ink-3); font-size: 12.5px; margin-top: 34px; }
+  .loop { animation-iteration-count: infinite; animation-timing-function: ease-in-out; }
+  @keyframes flow { 0% { stroke-dashoffset: 36; } 100% { stroke-dashoffset: 0; } }
+  @keyframes fade { 0%, 40% { opacity: 0; } 60%, 100% { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { .loop { animation: none !important; } }
+  @media print { header { position: static; } .note, .card { break-inside: avoid; } }
+</style>
+</head>
+<body>
+<header>
+  <span class="mk" aria-hidden="true"></span>
+  <b>Loop Engineering · 連線前置作業</b>
+  <span class="grow"></span>
+  <button class="btn" type="button" id="theme">☾</button>
+</header>
+<main>
+  <h1>第一次使用：先讓你的裝置連得上</h1>
+  <p class="lead">Loop Engineering 跑在辦公室那台 DGX Spark 上，<b>沒有對網際網路開放</b>。所以在看任何操作說明之前，你的筆電或手機要先加入我們的私有網路（Tailscale）。全部大約十分鐘，一台裝置只要做一次。</p>
+  <p class="print-note">這份文件是獨立檔案，離線也看得到，可以直接轉寄。</p>
+
+  <h2>你會拿到什麼</h2>
+  <div class="card">
+    <table>
+      <tr><th>① Tailscale 邀請信</th><td>寄到你的公司信箱，主旨大致是「You've been invited to join a Tailscale network」。點信裡的連結就能加入。</td></tr>
+      <tr><th>② 站台網址</th><td>形如 <code>https://&lt;機器名&gt;.&lt;你的網路&gt;.ts.net</code>，由管理者另外傳給你。<b>這個網址只有在 Tailscale 連線時才打得開。</b></td></tr>
+      <tr><th>③ 一次性 token</th><td>附在網址後面（<code>?token=…</code>）。點過一次，瀏覽器就記住了，之後直接開網址即可。</td></tr>
+    </table>
+  </div>
+  <div class="note warn"><b>token 請當成密碼</b>拿到網址的人就等於拿到這台機器上的資料。請不要貼到群組、不要轉寄給名單外的人；需要給新同事時，請管理者另外發給他。</div>
+
+  <h2>為什麼要裝 Tailscale？</h2>
+  <p>這台機器只聽自己的本機位址，公司內網和外網都連不到它。Tailscale 會在你的裝置和那台 Spark 之間拉一條加密的點對點通道，等於把你的筆電「放進」它旁邊。裝好之後不分地點：公司、家裡、出差都一樣能連。</p>
+  <div class="fig" aria-hidden="true">
+    <svg viewBox="0 0 620 170" xmlns="http://www.w3.org/2000/svg">
+      <rect x="16" y="46" width="150" height="78" rx="12" class="box"/>
+      <text x="40" y="78" font-weight="700">你的筆電／手機</text>
+      <text x="40" y="98" class="muted">已登入 Tailscale</text>
+      <rect x="454" y="46" width="150" height="78" rx="12" class="box"/>
+      <text x="478" y="78" font-weight="700">DGX Spark</text>
+      <text x="478" y="98" class="muted">Loop Engineering 站台</text>
+      <path d="M170 85 H450" class="dash loop" fill="none" stroke-width="3" style="animation: flow 1.6s linear infinite"/>
+      <rect x="236" y="20" width="148" height="30" rx="15" class="accs"/>
+      <text x="252" y="40" font-weight="700">加密的私有通道</text>
+      <text x="238" y="120" class="muted">網際網路上看不到這條線，也搜尋不到這個網址</text>
+    </svg>
+  </div>
+
+  <h2>四個步驟</h2>
+
+  <div class="card step">
+    <span class="n">1</span>
+    <div class="body">
+      <h3>接受邀請，建立 Tailscale 帳號</h3>
+      <p>打開邀請信，按邀請連結，用<b>公司的 Google 帳號</b>登入（不必另外設密碼）。看到網路名稱出現在畫面上就完成了。</p>
+    </div>
+  </div>
+
+  <div class="card step">
+    <span class="n">2</span>
+    <div class="body">
+      <h3>在裝置上安裝 Tailscale 並登入</h3>
+      <table>
+        <tr><th>Windows</th><td>到 <code>tailscale.com/download</code> 下載安裝，登入後右下角工作列會有圖示，狀態要是 <b>Connected</b>。</td></tr>
+        <tr><th>macOS</th><td>App Store 搜尋 Tailscale 安裝，或同一個下載頁。登入後右上角選單列會有圖示。</td></tr>
+        <tr><th>iPhone／iPad</th><td>App Store 安裝 Tailscale，登入後把開關打開，狀態列會出現 VPN 字樣。</td></tr>
+        <tr><th>Android</th><td>Play 商店安裝 Tailscale，登入後打開開關。</td></tr>
+      </table>
+      <p>登入時務必選<b>和邀請信同一個帳號</b>，否則會加進別的網路，看不到這台機器。</p>
+    </div>
+  </div>
+
+  <div class="card step">
+    <span class="n">3</span>
+    <div class="body">
+      <h3>用管理者給你的完整網址打開站台</h3>
+      <p>在瀏覽器貼上帶 <code>?token=…</code> 的完整網址。看到左上角「Loop Engineering · CF-AOI 維運大腦」就成功了。之後把<b>不含 token 的網址</b>加到書籤即可，瀏覽器已經記住憑證。</p>
+      <p>建議用 Chrome 或 Edge。手機也可以，版面會自動收成單欄。</p>
+    </div>
+  </div>
+
+  <div class="card step">
+    <span class="n">4</span>
+    <div class="body">
+      <h3>填一次你的名字</h3>
+      <p>左上角 ☰ 打開「對話紀錄」，在下方填你的名字後按「記住」。這只是把每個人的對話分開放，方便各自找回自己問過的東西。</p>
+      <div class="note info" style="margin-bottom:0"><b>這不是權限控管</b>知道網址與 token 的人都看得到這台機器上的全部資料，包括別人的對話。真正的界線是「誰拿得到網址與 token」。</div>
+    </div>
+  </div>
+
+  <h2>連好之後，從這裡開始</h2>
+  <div class="card">
+    <p>站台右上角有一顆「<b>？</b>」，裡面就是全部的說明：</p>
+    <ul>
+      <li><b>3 分鐘上手</b>：八張動畫卡，看完就知道每個按鈕在做什麼。</li>
+      <li><b>完整操作說明</b>：每個功能的細節、設定與疑難排解。</li>
+      <li><b>連線前置作業</b>：就是這份，可以轉寄給還沒連上的同事。</li>
+    </ul>
+    <div class="fig" aria-hidden="true">
+      <svg viewBox="0 0 620 110" xmlns="http://www.w3.org/2000/svg">
+        <rect x="10" y="14" width="600" height="46" rx="10" class="box"/>
+        <rect x="22" y="26" width="22" height="22" rx="7" fill="var(--accent)"/>
+        <text x="54" y="42" font-weight="700">Loop Engineering</text>
+        <text x="190" y="42" class="muted">新對話</text>
+        <rect x="392" y="24" width="72" height="26" rx="13" class="box"/><text x="404" y="42" class="muted">任務看板 ↗</text>
+        <circle cx="486" cy="37" r="13" class="accs loop" style="animation: fade 2.4s infinite"/><text x="482" y="41" font-weight="700">？</text>
+        <rect x="508" y="24" width="26" height="26" rx="13" class="box"/><text x="516" y="42" class="muted">☾</text>
+        <rect x="540" y="24" width="26" height="26" rx="13" class="box"/><text x="548" y="42" class="muted">▤</text>
+        <g class="loop" style="animation: fade 2.4s infinite">
+          <rect x="400" y="64" width="180" height="38" rx="10" class="box"/>
+          <text x="412" y="80">3 分鐘上手 · 完整操作說明</text>
+          <text x="412" y="95" class="muted">第一次來？連線前置作業</text>
+        </g>
+      </svg>
+    </div>
+  </div>
+
+  <h2>連不上的時候，照這張表檢查</h2>
+  <div class="card">
+    <table>
+      <tr><th>網址完全打不開</th><td>先看 Tailscale 的狀態是不是 <b>Connected</b>。手機容易在省電模式被關掉，打開開關再試一次。</td></tr>
+      <tr><th>出現「請提供 token」或空白頁</th><td>你開的是不含 token 的網址，而瀏覽器換過（或清過資料）。用管理者給你的完整網址重開一次。</td></tr>
+      <tr><th>連得上，但看不到任何資料</th><td>token 過期或被換掉了，請管理者重發。</td></tr>
+      <tr><th>頁面上方寫「模型啟動中」或「模型未載入」</th><td>那台機器正在換模型或剛重開，通常幾分鐘內會變回「模型就緒」，等一下再問。</td></tr>
+      <tr><th>回答很慢</th><td>模型在本機跑，有人同時在問或正在跑評比就會變慢。右側「機台」面板可以看目前的速度。</td></tr>
+      <tr><th>用手機看版面很擠</th><td>左上 ☰ 和右上 ▤ 可以把兩側收起來，只留對話。</td></tr>
+    </table>
+  </div>
+
+  <h2>幾件先知道會比較好的事</h2>
+  <div class="card">
+    <ul>
+      <li><b>回答是在公司這台機器上算出來的</b>，不會送到雲端，也不花公司的訂閱額度。只有你明確按「請雲端複核」或跑模型評比時才會用到雲端。</li>
+      <li><b>它知道的是 CF-AOI 的程式碼與文件</b>。問它公司外的事情，除非你打開「上網／工具」，否則它只能靠既有知識回答。</li>
+      <li><b>它不會去動機台</b>。調參那些是建議，要不要套用由工程師決定。</li>
+      <li><b>看板上的任務是真的會被執行的</b>。如果你只是想記一件事，用「待辦」就好，不要按排入佇列。</li>
+      <li><b>終端機、切換模型這類按鈕</b>只有工程師身分看得到，看不到是正常的。</li>
+    </ul>
+  </div>
+
+  <div class="note ok"><b>需要協助</b>連線、token、帳號的問題，找這台機器的管理者（呂侑儒）。功能怎麼用的問題，直接在站台右上角「？」→「3 分鐘上手」通常就有答案。</div>
+
+  <footer>Loop Engineering · CF-AOI 維運大腦 · 這份文件不含任何網址、token 或帳號資訊，可以安全轉寄</footer>
+</main>
+<script>
+  (function () {
+    var b = document.getElementById('theme');
+    var mode = function () { return document.documentElement.getAttribute('data-mode') === 'dark' ? 'dark' : 'light'; };
+    var paint = function () { b.textContent = mode() === 'dark' ? '☀' : '☾'; };
+    b.onclick = function () {
+      var next = mode() === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-mode', next);
+      try { localStorage.setItem('loop_mode', next); } catch (e) {}
+      paint();
+    };
+    paint();
+  })();
+</script>
+</body>
+</html>

@@ -83,4 +83,35 @@ describe('模型對話 scripts', () => {
     const html = fs.readFileSync(path.join(WEB_DIR, 'index.html'), 'utf8');
     expect(html).toContain('id="svc-state"');
   });
+
+  it('the help menu is in the topbar and reaches all three guides', () => {
+    const html = fs.readFileSync(path.join(WEB_DIR, 'index.html'), 'utf8');
+    // the guides used to sit at the bottom of the history drawer, under the conversation list
+    const head = html.slice(html.indexOf('<header'), html.indexOf('</header>'));
+    expect(head).toContain('id="help-menu"');
+    for (const doc of ['/docs/demo-guide.html', '/docs/操作說明.html', '/docs/前置作業.html']) {
+      expect(head, `help menu misses ${doc}`).toContain(doc);
+    }
+    expect(html.slice(html.indexOf('rail-nav'), html.indexOf('</nav>'))).not.toContain('/docs/');
+    expect(fs.readFileSync(path.join(WEB_DIR, 'chat-actions.js'), 'utf8')).toContain('mountHelpMenu');
+    expect(fs.readFileSync(path.join(WEB_DIR, 'chat.js'), 'utf8')).toContain('mountHelpMenu()');
+  });
+
+  it('the three guides exist, cross-link each other, and the prerequisites one leaks nothing', () => {
+    const DOCS = path.join(__dirname, '..', '..', 'docs');
+    const quick = fs.readFileSync(path.join(DOCS, 'demo-guide.html'), 'utf8');
+    const manual = fs.readFileSync(path.join(DOCS, '操作說明.html'), 'utf8');
+    const first = fs.readFileSync(path.join(DOCS, '前置作業.html'), 'utf8');
+    for (const [name, doc] of [['quickstart', quick], ['manual', manual]] as const) {
+      expect(doc, `${name} does not link the prerequisites guide`).toContain('/docs/前置作業.html');
+    }
+    // the quickstart drifted from the manual once; every card now names its chapter
+    expect(quick.match(/→ 完整說明第/g)?.length ?? 0).toBeGreaterThanOrEqual(8);
+    expect(quick).toContain('worktree');
+    expect(quick).toContain('轉成任務');
+    // it is emailed to people who cannot reach the site yet: no address, no token, standalone
+    expect(first).not.toMatch(/ts\.net\/|Bearer |token=[A-Za-z0-9]/);
+    expect(first).not.toMatch(/192\.168\.|10\.\d+\.\d+\.\d+/);
+    expect(first).not.toContain('/styles.css');
+  });
 });

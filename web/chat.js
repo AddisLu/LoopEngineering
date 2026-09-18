@@ -1,6 +1,6 @@
 import { $, api, authHeaders, drawer, el, fmtInt, fmtSec, nameHeader, onBoard, phone, rail, setText, store, stored, toast, when, wireTheme } from './shell.js';
 import { renderMarkdown } from './chat-md.js';
-import { mountActions, mountConvMenu } from './chat-actions.js';
+import { mountActions, mountConvMenu, mountHelpMenu } from './chat-actions.js';
 
 /**
  * The conversation itself: streaming answers from the local model, pasted screenshots, and the
@@ -1261,6 +1261,7 @@ async function openConv(id) {
   }
 }
 
+mountHelpMenu();
 mountConvMenu({
   conversation: () => convId,
   afterDelete: () => {

@@ -102,12 +102,13 @@
   <b>Loop Engineering · 3 分鐘上手</b>
   <span class="grow"></span>
   <a class="btn" href="/">回到對話 ↗</a>
-  <a class="btn" href="/docs/操作說明.html">完整說明</a>
+  <a class="btn" href="/docs/操作說明.html">完整操作說明</a>
+  <a class="btn" href="/docs/前置作業.html">連線前置作業</a>
   <button class="btn" type="button" id="theme">☾</button>
 </header>
 <main>
   <h1>一個對話框，整台 Spark 都在後面</h1>
-  <p class="lead">進站就是對話。要查資料、看模型、開 shell、寫需求、下任務——都從這裡出發，右邊一排圖示切面板，鍵盤 <kbd>Alt</kbd>+數字直達。</p>
+  <p class="lead">進站就是對話。查資料、看模型、開 shell、寫需求、下任務、比模型——都從這裡出發，右邊一排圖示切面板，鍵盤 <kbd>Alt</kbd>+數字直達。每張卡右下角有「完整說明」的對應章節。</p>
 
   <div class="grid">
 
@@ -130,8 +131,8 @@
           <text x="30" y="146" class="muted">首字 0.3 s · 26 tok/s · 全程在本機，不花 token</text>
         </g>
       </svg></div>
-      <p>回答完全在這台 Spark 上產生。勾著「引用知識庫」時，先檢索 CF-AOI 程式碼與文件，句尾標 [n] 出處。</p>
-      <div class="how"><b>做法</b>：輸入問題 → <kbd>Shift</kbd>+<kbd>Enter</kbd>。可 <kbd>Ctrl</kbd>+<kbd>V</kbd> 貼截圖；答完可「重答」「存進知識庫」「轉成任務」「請雲端複核」。</div>
+      <p>回答完全在這台 Spark 上產生。勾著「引用知識庫」時，先檢索 CF-AOI 程式碼與文件，句尾標 [n] 出處。答到一半切到看板再回來也不會斷——伺服器會繼續寫，回來自動接著播。</p>
+      <div class="how"><b>做法</b>：輸入問題 → <kbd>Shift</kbd>+<kbd>Enter</kbd>。可 <kbd>Ctrl</kbd>+<kbd>V</kbd> 貼截圖；答完可「重答」「存進知識庫」「轉成任務」「請雲端複核」；想停就按「停止」。<b>→ 完整說明第 26 章</b></div>
     </section>
 
     <!-- 2 icon bar -->
@@ -145,14 +146,14 @@
           <text x="358" y="29">任務</text><text x="358" y="53">調參</text><text x="358" y="77">知識庫</text><text x="358" y="101">PRD</text><text x="358" y="125">模型</text><text x="358" y="149">機台</text><text x="358" y="171">評比</text>
         </g>
         <g class="loop" style="animation: paneIn 9s infinite">
-          <text x="30" y="36" font-weight="700">任務狀態</text>
-          <rect x="30" y="48" width="180" height="26" rx="8" class="blues"/><text x="38" y="65">調參建議：ROI 邊緣誤判</text>
-          <rect x="30" y="82" width="140" height="26" rx="8" class="oks"/><text x="38" y="99">RDMA 收圖改 SEND/RECV</text>
-          <text x="30" y="150" class="muted">開啟完整看板 ↗ · ＋ 新增 task</text>
+          <rect x="30" y="26" width="104" height="20" rx="8" class="accs"/><text x="38" y="40" class="acc" font-weight="700">開啟完整看板 ↗</text>
+          <rect x="140" y="26" width="74" height="20" rx="8" class="card" stroke-width="1"/><text x="148" y="40">＋ 新增 task</text>
+          <rect x="30" y="56" width="180" height="26" rx="8" class="blues"/><text x="38" y="73">調參建議：ROI 邊緣誤判</text>
+          <rect x="30" y="90" width="140" height="26" rx="8" class="oks"/><text x="38" y="107">RDMA 收圖改 SEND/RECV</text>
         </g>
       </svg></div>
-      <p>任務／調參／知識庫／PRD ─ 模型／機台／評比。點一下切換，再點同一個收起；圖示永遠在，面板不會「不見」。</p>
-      <div class="how"><b>快捷鍵</b>：<kbd>Alt</kbd>+<kbd>1</kbd>～<kbd>7</kbd>；<kbd>☰</kbd> 收左欄、<kbd>▤</kbd> 收右欄，兩邊都收起時對話幾乎全螢幕。</div>
+      <p>任務／調參／知識庫／PRD ─ 模型／機台／評比。每個面板<b>最上面一排就是按鈕</b>：開完整頁、新增一筆。點圖示切換，再點同一個收起。</p>
+      <div class="how"><b>快捷鍵</b>：<kbd>Alt</kbd>+<kbd>1</kbd>～<kbd>7</kbd>；<kbd>☰</kbd> 收左欄、<kbd>▤</kbd> 收右欄，兩邊都收起時對話幾乎全螢幕。<b>→ 完整說明第 26 章</b></div>
     </section>
 
     <!-- 3 models -->
@@ -162,24 +163,24 @@
         <rect x="14" y="14" width="372" height="147" rx="12" class="card"/>
         <rect x="28" y="28" width="60" height="18" rx="9" class="accs"/><text x="38" y="41" class="acc" font-weight="700">小而快</text>
         <text x="98" y="41" font-weight="700">Qwen3.6-35B-A3B-NVFP4</text>
-        <text x="28" y="66" class="muted">約 21.9 GB · 尚未下載權重</text>
+        <text x="28" y="66" class="muted">約 21.9 GB · 下載到一半（可續傳）</text>
         <rect x="28" y="80" width="168" height="10" rx="5" class="line" fill="var(--sunk)" stroke-width="1"/>
         <rect x="28" y="80" width="0" height="10" rx="5" class="acc loop" style="animation: fill 8s infinite"/>
-        <g class="loop" style="animation: swapText1 8s infinite"><rect x="28" y="104" width="118" height="24" rx="8" class="accs"/><text x="40" y="120" class="acc" font-weight="700">下載（≈21.9 GB）</text></g>
+        <g class="loop" style="animation: swapText1 8s infinite"><rect x="28" y="104" width="118" height="24" rx="8" class="accs"/><text x="40" y="120" class="acc" font-weight="700">繼續下載（21.9 GB）</text></g>
         <g class="loop" style="animation: swapText2 8s infinite"><rect x="28" y="104" width="150" height="24" rx="8" class="blues"/><text x="40" y="120" class="blue" font-weight="700">建置映像（vllm-node）</text></g>
         <g class="loop" style="animation: swapText3 8s infinite"><rect x="28" y="104" width="64" height="24" rx="8" class="oks"/><text x="40" y="120" class="ok" font-weight="700">切換</text></g>
-        <text x="220" y="66" class="muted">使用中 · Qwen3.8 Flash Next</text>
+        <text x="220" y="66" class="muted">使用中 · Qwen3 Coder Next</text>
         <text x="220" y="84" class="muted">磁碟剩餘 3.0 TB · 34 個配方</text>
         <text x="220" y="120" class="muted">下載／建置在背景跑，</text>
         <text x="220" y="136" class="muted">不影響正在服務的模型。</text>
       </svg></div>
-      <p>列出 spark-vllm-docker 裡每一個 recipe，每列只有一個下一步。三張推薦卡：對話、寫程式、小而快。</p>
-      <div class="how"><b>做法</b>：<kbd>Alt</kbd>+<kbd>5</kbd> → 按卡片上的按鈕。切換會重啟 vLLM（幾分鐘），先跳確認。「機台」（<kbd>Alt</kbd>+<kbd>6</kbd>）看記憶體、GPU、這次回答的速度。</div>
+      <p>列出 spark-vllm-docker 裡每一個配方，每列只有一個下一步：下載、建置、或切換。跑不動的會寫原因（要兩台 Spark、權重沒下載完）。</p>
+      <div class="how"><b>做法</b>：<kbd>Alt</kbd>+<kbd>5</kbd> → 按卡片上的按鈕。切換會重啟 vLLM（幾分鐘），先跳確認；工作卡的「看 log」直接開終端機分頁。機台狀態在 <kbd>Alt</kbd>+<kbd>6</kbd>。<b>→ 完整說明第 26 章</b></div>
     </section>
 
     <!-- 4 tools -->
     <section class="step">
-      <h2><span class="n">4</span>上網／工具：讓模型去查</h2>
+      <h2><span class="n">4</span>上網／工具：一個晶片，模型自己決定</h2>
       <div class="fig" aria-hidden="true"><svg viewBox="0 0 400 175">
         <rect x="14" y="14" width="372" height="147" rx="12" class="card"/>
         <rect x="28" y="126" width="78" height="22" rx="11" class="loop" style="animation: chipOn 7s infinite" stroke="var(--line)"/>
@@ -196,8 +197,8 @@
           <text x="176" y="112" class="muted">來源：https://github.com/vllm-project/…</text>
         </g>
       </svg></div>
-      <p>模型自己不會上網；勾了晶片才把 web_search／fetch_url 交給它。搜尋走自架 SearXNG，不經第三方 API；內網一律擋。</p>
-      <div class="how"><b>做法</b>：點「上網／工具」晶片再問。回答下方多一張工具卡（查了什麼、多久、來源網址）。</div>
+      <p>模型自己不會上網。打開晶片就是把整組工具交給它，<b>要不要用、用哪一個由它判斷</b>，你不用挑。搜尋走自架 SearXNG，不經第三方 API；內網位址一律擋。</p>
+      <div class="how"><b>做法</b>：點「上網／工具」晶片再問。回答下方多一張工具卡：查了什麼、花多久、來源網址。<b>→ 完整說明第 26a 章</b></div>
     </section>
 
     <!-- 5 mcp -->
@@ -215,36 +216,36 @@
           <text x="236" y="106" font-weight="700">🧩 gh.pr_list</text>
           <text x="236" y="124" class="muted">#31 feat/local-models · merged</text>
         </g>
-        <text x="30" y="142" class="muted">同一份設定也給 opencode 任務端用</text>
+        <text x="30" y="142" class="muted">同一份設定也給任務端的 opencode 用</text>
       </svg></div>
-      <p>同一個晶片，多出 🧩 工具：唯讀檔案系統（只在登錄過的 repo 內）、Loop 自己的 API、GitHub（gh）。本地模型跑任務時也拿到同一組。</p>
-      <div class="how"><b>試試</b>：「用工具列出 cf-aoi 的 ip/ 目錄並說明」「最近有哪些 PR？」路徑逃出 repo 會被拒絕。</div>
+      <p>同一個晶片，多出 🧩 工具：唯讀檔案系統（只在登錄過的 repo 內）、Loop 自己的 API、GitHub（gh）。本地模型跑任務時拿到同一組。</p>
+      <div class="how"><b>試試</b>：「用工具列出 cf-aoi 的 ip/ 目錄並說明」「最近有哪些 PR？」路徑逃出 repo 會被拒絕。<b>→ 完整說明第 26a 章</b></div>
     </section>
 
     <!-- 6 terminal -->
     <section class="step">
-      <h2><span class="n">6</span>終端機：需要時再叫出來</h2>
+      <h2><span class="n">6</span>終端機：每個人自己的 worktree</h2>
       <div class="fig" aria-hidden="true"><svg viewBox="0 0 400 175">
         <rect x="14" y="14" width="372" height="147" rx="12" class="card"/>
         <g class="loop" style="animation: press 7s infinite">
           <rect x="30" y="30" width="38" height="24" rx="6" class="card" stroke-width="1.5"/><text x="39" y="46" font-size="10" font-weight="700">Ctrl</text>
           <rect x="74" y="30" width="24" height="24" rx="6" class="card" stroke-width="1.5"/><text x="83" y="46" font-size="12" font-weight="700">`</text>
         </g>
-        <text x="110" y="46" class="muted">或頂欄 ⌨</text>
+        <text x="110" y="46" class="muted">或頂欄 ⌨（只有白名單看得到）</text>
         <clipPath id="tclip"><rect x="14" y="70" width="372" height="91" rx="0"/></clipPath>
         <g clip-path="url(#tclip)">
           <g class="loop" style="animation: rise 7s infinite">
             <rect x="14" y="70" width="372" height="91" class="term"/>
             <rect x="24" y="76" width="52" height="16" rx="5" fill="rgba(255,255,255,.14)"/><text x="31" y="88" class="termink" font-size="10">shell 1</text>
             <text x="82" y="88" class="termink" font-size="10" opacity=".6">＋</text>
-            <text x="24" y="112" class="termink" font-size="11">➜ ~ uname -a</text>
-            <text x="24" y="128" class="termink" font-size="11" opacity=".8">Linux spark-c16f 6.14.0-nvidia aarch64</text>
-            <text x="24" y="146" class="termink" font-size="11">➜ ~ <tspan class="loop" style="animation: blink 1s steps(1) infinite">▍</tspan></text>
+            <text x="24" y="108" class="termink" font-size="10" opacity=".75">● 幫你開了專屬 worktree ~/Addis/loop-worktrees/你（分支 desk/你）</text>
+            <text x="24" y="128" class="termink" font-size="11">➜ 你 git status</text>
+            <text x="24" y="146" class="termink" font-size="11" opacity=".8">On branch desk/你 · nothing to commit <tspan class="loop" style="animation: blink 1s steps(1) infinite">▍</tspan></text>
           </g>
         </g>
       </svg></div>
-      <p>底部抽屜裡是這台 Spark 的真 shell。收起不會關掉 shell，重開接回原畫面；只有白名單身分看得到。</p>
-      <div class="how"><b>做法</b>：<kbd>Ctrl</kbd>+<kbd>`</kbd> 開關；＋ 開分頁、雙擊改名、拖上緣改高度。模型面板工作卡的「看 log」直接開 tail 分頁。</div>
+      <p>底部抽屜裡是這台 Spark 的真 shell。第一次開會幫你切一份自己的 git worktree，主 checkout 不會被任何人的修改弄髒；下次再開還是同一份。收起不會關掉 shell。</p>
+      <div class="how"><b>做法</b>：<kbd>Ctrl</kbd>+<kbd>`</kbd> 開關；＋ 開分頁、雙擊改名、拖上緣改高度。改完就 push 自己的 <code>desk/…</code> 分支。<b>→ 完整說明第 26a 章</b></div>
     </section>
 
     <!-- 7 PRD -->
@@ -267,28 +268,53 @@
         </g>
         <g class="loop" style="animation: arrow 6s infinite"><text x="330" y="124" font-size="18" class="acc">✓</text><text x="300" y="150" class="muted">看板 · queued</text></g>
       </svg></div>
-      <p>從「修改軟體」的角度引導：原始碼在哪、症狀→期望、用測試指令／圖集比對／人工清單驗證。本地模型幫找檔案、寫驗收條件；過閘門才建任務。</p>
-      <div class="how"><b>做法</b>：<kbd>Alt</kbd>+<kbd>4</kbd> → 「開新的 PRD」。圖集只以路徑引用，絕不複製。</div>
+      <p>從「修改軟體」的角度引導：原始碼在哪、症狀→期望、用測試指令／圖集比對／人工清單驗證。本地模型幫找檔案、寫驗收條件；過閘門才建任務。草稿存在伺服器，PRD 面板可以接著寫，不要的按 ✕ 刪掉。</p>
+      <div class="how"><b>做法</b>：<kbd>Alt</kbd>+<kbd>4</kbd> → 「開新的 PRD」。圖集只以路徑引用，絕不複製。<b>→ 完整說明第 26 章</b></div>
     </section>
 
     <!-- 8 tune -->
     <section class="step">
-      <h2><span class="n">8</span>調參建議：只建議，人來套用</h2>
+      <h2><span class="n">8</span>調參建議與「轉成任務」</h2>
       <div class="fig" aria-hidden="true"><svg viewBox="0 0 400 175">
         <rect x="14" y="14" width="372" height="147" rx="12" class="card"/>
-        <text x="28" y="40">症狀：ROI 邊緣把正常紋路判成刮傷</text>
+        <text x="28" y="38">症狀：ROI 邊緣把正常紋路判成刮傷</text>
         <g class="loop" style="animation: pop 6s infinite">
-          <rect x="28" y="54" width="344" height="52" rx="8" class="accs"/>
-          <text x="38" y="72" font-weight="700">ip/config/config_optimized.ini · edge_margin_px</text>
-          <text x="38" y="90">目前 4 → 建議 8 · 風險 low · 用圖集 20260615 重跑比對</text>
+          <rect x="28" y="48" width="344" height="46" rx="8" class="accs"/>
+          <text x="38" y="66" font-weight="700">ip/config/config_optimized.ini · edge_margin_px</text>
+          <text x="38" y="84">目前 4 → 建議 8 · 風險 low · 用圖集 20260615 重跑比對</text>
         </g>
         <g class="loop" style="animation: pop2 6s infinite">
-          <rect x="28" y="120" width="86" height="24" rx="8" class="oks"/><text x="40" y="136" class="ok" font-weight="700">轉成任務 →</text>
-          <text x="126" y="136" class="muted">歷次建議都留在面板，點回原對話</text>
+          <rect x="28" y="106" width="86" height="24" rx="8" class="oks"/><text x="40" y="122" class="ok" font-weight="700">轉成任務 →</text>
+          <rect x="124" y="104" width="248" height="46" rx="8" class="card" stroke-width="1"/>
+          <text x="134" y="120" font-size="10">軟體修正（PRD 精靈）　驗證新技術（開 repo）</text>
+          <text x="134" y="138" font-size="10">功能與效能　　　　　　待辦（只記一筆）</text>
         </g>
       </svg></div>
-      <p>只引用知識庫裡真的存在的檔名與參數；不會改機台。建議可一鍵變成 Loop 任務，交給工程師驗證。</p>
-      <div class="how"><b>做法</b>：<kbd>Alt</kbd>+<kbd>2</kbd> → 填症狀 → 產生建議；或在對話勾「調參建議」晶片。任何回答按「轉成任務」都會先問你：軟體修正（進 PRD 精靈）／驗證新技術（開 spike repo）／待辦。</div>
+      <p>只引用知識庫裡真的存在的檔名與參數，不會改機台。任何一則回答按「轉成任務」都會先問你要哪一種：軟體修正走 PRD 精靈、驗證新技術直接開一個新 repo 給它跑、待辦就只記一筆。</p>
+      <div class="how"><b>做法</b>：<kbd>Alt</kbd>+<kbd>2</kbd> 填症狀產生建議，或在對話勾「調參建議」晶片。<b>→ 完整說明第 26 章</b></div>
+    </section>
+
+    <!-- 9 benchmark -->
+    <section class="step">
+      <h2><span class="n">9</span>評比：同一題，幾個模型各做一次</h2>
+      <div class="fig" aria-hidden="true"><svg viewBox="0 0 400 175">
+        <rect x="14" y="14" width="372" height="147" rx="12" class="card"/>
+        <text x="28" y="36" font-weight="700">題目：看板任務「slugify」</text>
+        <text x="28" y="54" class="muted">參賽：Qwen3.8 Flash Next · Qwen3 Coder Next　評審：Opus＋Sonnet</text>
+        <g class="loop" style="animation: pop 7s infinite">
+          <rect x="28" y="70" width="0" height="18" rx="5" class="accs"/>
+          <rect x="28" y="70" width="230" height="18" rx="5" class="oks"/>
+          <text x="36" y="83">1. Qwen3.8 Flash Next · 9.5 · 驗證通過</text>
+        </g>
+        <g class="loop" style="animation: pop2 7s infinite">
+          <rect x="28" y="96" width="180" height="18" rx="5" class="accs"/>
+          <text x="36" y="109">2. Qwen3 Coder Next · 8.1 · 驗證通過</text>
+          <text x="28" y="134" class="muted">評審一致 · 跑完自動切回你原本的模型</text>
+          <text x="28" y="152" class="muted">一次只跑一個評比；跑到一半可以按「取消評比」</text>
+        </g>
+      </svg></div>
+      <p>題目可以是看板任務、PRD 草稿、自己出題，或內建題庫。每個模型各開一張任務去做，雲端評審看 diff 與驗證結果匿名打分，多位評審會標「一致」或「分歧」。</p>
+      <div class="how"><b>做法</b>：<kbd>Alt</kbd>+<kbd>7</kbd> 看戰績 →「＋ 新評比」。花費只有評審那幾次雲端呼叫，送出前會先告訴你目前用量。<b>→ 完整說明第 26 章</b></div>
     </section>
   </div>
 
@@ -296,19 +322,20 @@
     <h2>Demo 腳本（約 5 分鐘）</h2>
     <ol>
       <li><b>對話＋知識庫</b>：問「RDMA 收圖為什麼會掉幀？」→ 看 [n] 出處與速度。</li>
-      <li><b>機台</b>：<kbd>Alt</kbd>+<kbd>6</kbd> 看記憶體 92%、GPU、這次回答 tok/s。</li>
-      <li><b>模型</b>：<kbd>Alt</kbd>+<kbd>5</kbd> 三張推薦卡；指出 Coder Next 已「可切換」（映像剛從面板建好）。</li>
+      <li><b>不怕切頁</b>：答到一半按「任務看板」再回來，答案自己接上。</li>
+      <li><b>機台</b>：<kbd>Alt</kbd>+<kbd>6</kbd> 看記憶體、GPU、這次回答 tok/s。</li>
+      <li><b>模型</b>：<kbd>Alt</kbd>+<kbd>5</kbd> 三張推薦卡，指出哪一個現在可以切換、哪一個還缺什麼。</li>
       <li><b>上網</b>：勾「上網／工具」，問「vLLM 最新正式版本？附來源」→ 工具卡 → 引用 GitHub。</li>
       <li><b>MCP</b>：同一晶片，問「用工具列出 cf-aoi 的 ip/ 目錄並說明」→ 🧩 loop-fs 卡。</li>
-      <li><b>終端機</b>：<kbd>Ctrl</kbd>+<kbd>`</kbd>，<code>nvidia-smi</code>；收起再開，畫面還在。</li>
-      <li><b>PRD → 任務</b>：<kbd>Alt</kbd>+<kbd>4</kbd> 開精靈，走一遍五步（可用草稿），建任務 → 看板。</li>
-      <li><b>評比</b>：<kbd>Alt</kbd>+<kbd>7</kbd> 看模型戰績（誰勝場多、驗證通過率多少）；「＋ 新評比」可選內建題目、多個本地模型與多位雲端評審。</li>
+      <li><b>終端機</b>：<kbd>Ctrl</kbd>+<kbd>`</kbd>，第一行就寫出你自己的 worktree；跑 <code>nvidia-smi</code>，收起再開畫面還在。</li>
+      <li><b>轉成任務</b>：任一則回答按「轉成任務」→ 選「軟體修正」→ PRD 精靈五步 → 看板 queued。</li>
+      <li><b>評比</b>：<kbd>Alt</kbd>+<kbd>7</kbd> 看模型戰績，「＋ 新評比」示範選題目、參賽模型與評審。</li>
     </ol>
     <div class="keys">
       <span><kbd>Shift</kbd>+<kbd>Enter</kbd> 送出</span><span><kbd>Alt</kbd>+<kbd>1</kbd>～<kbd>7</kbd> 面板</span><span><kbd>Ctrl</kbd>+<kbd>`</kbd> 終端機</span><span><kbd>Ctrl</kbd>+<kbd>V</kbd> 貼截圖</span><span><kbd>Esc</kbd> 關抽屜／選單</span>
     </div>
   </div>
-  <footer>Loop Engineering · CF-AOI 維運大腦 · 全部在這台 DGX Spark 上，不經雲端、不花 token（雲端複核除外）</footer>
+  <footer>Loop Engineering · CF-AOI 維運大腦 · 全部在這台 DGX Spark 上，不經雲端、不花 token（雲端複核與評比評審除外）</footer>
 </main>
 <script>
   (function () {
