@@ -77,7 +77,8 @@ export function registerTerminalRoutes(app: FastifyInstance, db: Database.Databa
 
   app.get('/api/terminal/access', async (req) => {
     const a = access(req);
-    return { allowed: a.allowed, reason: a.reason, user_label: a.user?.label ?? null, presets: Object.keys(PRESETS) };
+    // cwd so the drawer can say where a new shell lands (setting terminal_cwd)
+    return { allowed: a.allowed, reason: a.reason, user_label: a.user?.label ?? null, presets: Object.keys(PRESETS), cwd: getSetting(db, 'terminal_cwd') || null };
   });
 
   app.get('/api/terminal/sessions', async (req, reply) => {

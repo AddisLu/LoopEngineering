@@ -1,7 +1,8 @@
+import fs from 'node:fs';
 import os from 'node:os';
 import type Database from 'better-sqlite3';
 import { nanoid } from 'nanoid';
-import { getNum } from '../db/index.js';
+import { getNum, getSetting } from '../db/index.js';
 
 /**
  * Interactive shells behind the chat shell's terminal drawer. One pty per session, owned by the
@@ -113,6 +114,23 @@ export class TerminalManager {
     this.home = deps.home ?? os.homedir();
   }
 
+  /**
+   * Where a new shell starts: setting `terminal_cwd` (default: this checkout) when it is a real
+   * directory, else the home directory. A pty is not a jail — the shell can still cd anywhere the
+   * unix user can reach — so this is the landing spot, not a boundary.
+   */
+  private cwd(): string {
+    const want = (getSetting(this.db, 'terminal_cwd') ?? '').trim();
+    if (want) {
+      try {
+        if (fs.statSync(want).isDirectory()) return want;
+      } catch {
+        /* configured directory is gone — fall back rather than refuse to open a shell */
+      }
+    }
+    return this.home;
+  }
+
   private idleMs(): number {
     return Math.max(1, getNum(this.db, 'terminal_idle_min', 30)) * 60_000;
   }
@@ -181,9 +199,10 @@ export class TerminalManager {
     }
     // the bearer token must not leak into an interactive shell's environment
     const { LOOP_API_TOKEN: _t, LOOP_READONLY_TOKEN: _r, ...clean } = this.env;
-    const env: NodeJS.ProcessEnv = { ...clean, TERM: 'xterm-256color', COLORTERM: 'truecolor', LOOP_TERMINAL: '1' };
+    const cwd = this.cwd();
+    const env: NodeJS.ProcessEnv = { ...clean, TERM: 'xterm-256color', COLORTERM: 'truecolor', LOOP_TERMINAL: '1', PWD: cwd };
 
-    const pty = this.spawnPty(file, args, { cols, rows, cwd: this.home, env });
+    const pty = this.spawnPty(file, args, { cols, rows, cwd, env });
     const id = ID();
     const s: Session = {
       id,

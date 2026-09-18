@@ -159,6 +159,8 @@ export function validateSetting(key: string, value: string): string | null {
     } catch (err) {
       return (err as Error).message;
     }
+  } else if (key === 'terminal_cwd') {
+    if (value !== '' && !value.startsWith('/')) return 'terminal_cwd must be an absolute path (or empty for the home directory)';
   } else if (key === 'terminal_allowed_users') {
     const bad = value.split(',').map((s) => s.trim()).filter(Boolean).filter((s) => !/^(ts:\S+|name:\S+|local)$/i.test(s));
     if (bad.length) return `terminal_allowed_users entries must be ts:<login>, name:<name> or local (got: ${bad.join(', ')})`;

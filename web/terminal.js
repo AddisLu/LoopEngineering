@@ -267,6 +267,15 @@ window.addEventListener('resize', () => {
   if (!drawer.hidden && active) activate(active);
 });
 
+// say where a new shell starts, so nobody has to run pwd to find out (setting terminal_cwd)
+fetch('/api/terminal/access', { headers: { ...(TOKEN ? { Authorization: `Bearer ${TOKEN}` } : {}), ...nameHeader() } })
+  .then((r) => r.json())
+  .then((a) => {
+    const hint = $('term-hint');
+    if (a && a.cwd && hint) hint.textContent = `開在 ${a.cwd} · Ctrl+\` 開關 · 關掉抽屜不會結束 shell`;
+  })
+  .catch(() => {});
+
 toggle.onclick = toggleDrawer;
 newBtn.onclick = () => {
   const t = tabs.get(active);

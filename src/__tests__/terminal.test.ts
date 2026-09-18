@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type Database from 'better-sqlite3';
 import type { FastifyInstance } from 'fastify';
@@ -9,11 +12,11 @@ import type { FastifyRequest } from 'fastify';
 import { WebSocket as WsClient } from 'ws';
 
 /** A pty that echoes input back and reports resizes — enough to drive the manager and the socket. */
-function fakePty(): { spawn: SpawnPty; spawned: Array<{ file: string; args: string[]; env: NodeJS.ProcessEnv; pty: FakePty }> } {
-  const spawned: Array<{ file: string; args: string[]; env: NodeJS.ProcessEnv; pty: FakePty }> = [];
+function fakePty(): { spawn: SpawnPty; spawned: Array<{ file: string; args: string[]; env: NodeJS.ProcessEnv; cwd: string; pty: FakePty }> } {
+  const spawned: Array<{ file: string; args: string[]; env: NodeJS.ProcessEnv; cwd: string; pty: FakePty }> = [];
   const spawn: SpawnPty = (file, args, o) => {
     const p = new FakePty(o.cols, o.rows);
-    spawned.push({ file, args, env: o.env, pty: p });
+    spawned.push({ file, args, env: o.env, cwd: o.cwd, pty: p });
     return p;
   };
   return { spawn, spawned };
@@ -92,6 +95,27 @@ describe('TerminalManager', () => {
     const row = db.prepare('SELECT * FROM terminal_sessions WHERE id = ?').get(s.id) as { user_key: string; shell: string; pid: number; ended_at: string | null };
     expect(row).toMatchObject({ user_key: USER.user_key, shell: '/bin/zsh', pid: 4242, ended_at: null });
     expect(defaultShell({})).toMatch(/\/bin\/(bash|zsh)/);
+  });
+
+  it('a shell starts in terminal_cwd (the Loop checkout), and falls back when it is gone', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'term-cwd-'));
+    try {
+      setSetting(db, 'terminal_cwd', dir);
+      const f = fakePty();
+      const m = manager(f.spawn);
+      m.open({ user: USER });
+      expect(f.spawned[0]).toMatchObject({ cwd: dir });
+      expect(f.spawned[0]!.env.PWD).toBe(dir);
+      // a directory that no longer exists must not stop anyone opening a shell
+      setSetting(db, 'terminal_cwd', path.join(dir, 'gone'));
+      m.open({ user: USER });
+      expect(f.spawned[1]).toMatchObject({ cwd: '/home/x' });
+      setSetting(db, 'terminal_cwd', '');
+      m.open({ user: USER });
+      expect(f.spawned[2]).toMatchObject({ cwd: '/home/x' });
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('replays scrollback on attach, forwards input/output, and marks exit in the audit row', () => {

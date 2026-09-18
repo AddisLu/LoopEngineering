@@ -196,6 +196,10 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // `ts:<tailscale login>`, `name:<typed name>` (LAN only, unauthenticated) or `local`.
   terminal_enabled: 'false',
   terminal_allowed_users: '',
+  // where a new shell starts. Default: this checkout, so the browser terminal is "the Loop repo"
+  // and a collaborator lands where the code is. A shell can still cd elsewhere (a pty is not a
+  // jail) — this is a starting point and a hint, not a sandbox.
+  terminal_cwd: ENGINE_REPO_ROOT,
   terminal_idle_min: '30',
   terminal_max_sessions: '4',
   terminal_scrollback_kb: '256',

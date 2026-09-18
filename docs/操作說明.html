@@ -1277,7 +1277,7 @@ loop bench list | loop bench show &lt;id&gt; | loop bench matrix | loop bench ju
           <tr><td><code>local_spark_nodes</code></td><td>1</td><td>這個部署有幾台 DGX Spark；模型切換清單依它決定哪些跑得動。</td></tr>
           <tr><td><code>chat_tools_enabled</code> / <code>chat_search_url</code></td><td>false / http://127.0.0.1:8080</td><td>上網／工具（見 26a）：總開關與 SearXNG 位址。</td></tr>
           <tr><td><code>chat_mcp_enabled</code> / <code>mcp_servers_json</code> / <code>mcp_timeout_ms</code></td><td>true / 內建三個 / 30000</td><td>MCP bridge（見 26a）。</td></tr>
-          <tr><td><code>terminal_enabled</code> / <code>terminal_allowed_users</code> / <code>terminal_idle_min</code></td><td>false / （空） / 30</td><td>終端機（見 26a）。</td></tr>
+          <tr><td><code>terminal_enabled</code> / <code>terminal_allowed_users</code> / <code>terminal_idle_min</code> / <code>terminal_cwd</code></td><td>false / （空） / 30 / 這份 checkout</td><td>終端機（見 26a）；<code>terminal_cwd</code> 是新分頁的起始目錄。</td></tr>
         </tbody>
       </table>
       </div>
@@ -1326,6 +1326,8 @@ loop bench list | loop bench show &lt;id&gt; | loop bench matrix | loop bench ju
       <ul>
         <li><b>誰看得到</b>：<code>terminal_enabled=true</code> 且你的身分在 <code>terminal_allowed_users</code>（CSV：<code>ts:&lt;Tailscale 登入&gt;</code>、<code>name:&lt;名字&gt;</code>（只有信任的 LAN 才用）、<code>local</code>）。其他人連按鈕都沒有；伺服器端也擋（404／403）。</li>
         <li><b>怎麼用</b>：底部抽屜、可拖高、多分頁（＋／✕、雙擊改名）。「收起」只是把抽屜藏起來，shell 還在；重新打開會接回原本的畫面。斷線自動重連。閒置 <code>terminal_idle_min</code>（30）分鐘自動關。</li>
+        <li><b>開在哪裡</b>：新分頁一律開在 <code>terminal_cwd</code>（預設＝Loop Engineering 這份 checkout），分頁列上會寫出路徑。這是<b>起點不是牢籠</b>：pty 不是沙箱，shell 仍然可以 <code>cd</code> 到這個 unix 使用者能到的任何地方。要換起點：<code>loop config set terminal_cwd /path/to/repo</code>（留空＝家目錄）。</li>
+        <li><b>多人共用同一份 checkout 要小心</b>：引擎自己的任務也從這份 checkout 切 worktree，工作區一髒，正在跑的任務就會從自動合併退成 <code>pending</code>。要讓別人改程式，建議各自 <code>git worktree add ~/Addis/loop-guests/&lt;名字&gt; -b &lt;branch&gt;</code>，不要直接改主 checkout。</li>
         <li><b>預設分頁</b>：模型面板工作卡的「看 log」會開一個 <code>tail -f</code> 該工作 log 的分頁；另有 <code>vllmlog</code>（docker logs）、<code>enginelog</code>（journalctl）。頁面<b>不能</b>自己指定任意指令。</li>
         <li><b>安全</b>：shell 的環境變數已拿掉 <code>LOOP_API_TOKEN</code>；只稽核誰／何時／哪個 shell（<code>terminal_sessions</code> 表），<b>不記錄鍵盤與輸出</b>；xterm.js 放在 <code>web/lib/xterm</code>，不靠 CDN。</li>
         <li><b>啟用</b>：<code>loop config set terminal_enabled true</code>、<code>loop config set terminal_allowed_users ts:you@example.com</code>。</li>
