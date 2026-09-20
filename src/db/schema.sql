@@ -505,3 +505,16 @@ CREATE TABLE IF NOT EXISTS prd_drafts (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_prd_drafts_user ON prd_drafts(user_key, status, updated_at DESC);
+
+-- Materialised cross-layer similarity edges for the brain graph view (src/knowledge/bridge.ts).
+-- Derived data only: safe to delete at any time, rebuilt on the next request whose signature
+-- does not match. Rows carry the signature they were built from, so a stale set never matches.
+CREATE TABLE IF NOT EXISTS knowledge_bridge_edges (
+  src       TEXT NOT NULL,
+  dst       TEXT NOT NULL,
+  relation  TEXT NOT NULL DEFAULT 'related',
+  signature TEXT NOT NULL,
+  built_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (src, dst)
+);
+CREATE INDEX IF NOT EXISTS idx_knowledge_bridge_signature ON knowledge_bridge_edges(signature);

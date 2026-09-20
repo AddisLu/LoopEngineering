@@ -140,3 +140,79 @@ export function bridgeEdges(db: Database.Database, opts: BridgeOptions = {}, knn
   }
   return [...seen.values()];
 }
+
+/**
+ * 快取: the brain view used to recompute every cross-layer edge on every page load — one
+ * vector KNN per curated node plus one per OpenProject document, several hundred searches,
+ * ~600 ms while the rest of the graph query takes 3 ms. Nothing about those edges changes
+ * between two page loads unless the underlying nodes, documents or embeddings changed, so
+ * they are materialised once into knowledge_bridge_edges and read back with one indexed
+ * SELECT. Same idea as an indexed code-graph server: build on change, answer from the index.
+ *
+ * The signature is what a rebuild depends on. It is deliberately cheap (four COUNTs and two
+ * MAXes, ~0.3 ms) — never a hash of content — so the hit path stays a single comparison.
+ */
+export function bridgeSignature(db: Database.Database, opts: BridgeOptions = {}): string {
+  const one = (sql: string): string => {
+    try {
+      const row = db.prepare(sql).get() as Record<string, unknown> | undefined;
+      return String(Object.values(row ?? {})[0] ?? '');
+    } catch {
+      return '?';
+    }
+  };
+  return [
+    'v1',
+    opts.topK ?? DEFAULT_TOP_K,
+    opts.threshold ?? '-',
+    one(`SELECT COUNT(*) FROM knowledge_nodes WHERE status = 'approved' AND invalid_at IS NULL`),
+    one(`SELECT COALESCE(MAX(updated_at), '') FROM knowledge_nodes`),
+    one(`SELECT COUNT(*) FROM documents WHERE invalid_at IS NULL`),
+    one(`SELECT COALESCE(MAX(updated_at), '') FROM documents`),
+    one(`SELECT COUNT(*) FROM chunks WHERE invalid_at IS NULL`),
+    one(`SELECT COUNT(*) FROM vec_nodes`),
+  ].join('|');
+}
+
+/** Drop the cache — used by tests and by anything that knows it invalidated the inputs. */
+export function clearBridgeCache(db: Database.Database): void {
+  try {
+    db.prepare(`DELETE FROM knowledge_bridge_edges`).run();
+  } catch {
+    /* table not there yet */
+  }
+}
+
+/**
+ * The same edges as bridgeEdges(), served from knowledge_bridge_edges when the inputs have
+ * not changed. A miss costs exactly what the old code cost on every call; a hit is one query.
+ */
+export function bridgeEdgesCached(db: Database.Database, opts: BridgeOptions = {}, knn: BridgeKnn = vecKnn): BridgeEdge[] {
+  const signature = bridgeSignature(db, opts);
+  try {
+    const rows = db.prepare(`SELECT src, dst FROM knowledge_bridge_edges WHERE signature = ?`).all(signature) as {
+      src: string;
+      dst: string;
+    }[];
+    // an empty graph caches as one sentinel row, so "no rows" always means "not built yet"
+    if (rows.length) return rows.filter((r) => r.src !== SENTINEL).map((r) => ({ src: r.src, dst: r.dst, relation: 'related' as const }));
+  } catch {
+    return bridgeEdges(db, opts, knn); // no table (older DB) — behave exactly as before
+  }
+
+  const edges = bridgeEdges(db, opts, knn);
+  try {
+    const insert = db.prepare(`INSERT OR REPLACE INTO knowledge_bridge_edges (src, dst, relation, signature) VALUES (?, ?, ?, ?)`);
+    db.transaction(() => {
+      db.prepare(`DELETE FROM knowledge_bridge_edges`).run();
+      for (const e of edges) insert.run(e.src, e.dst, e.relation, signature);
+      if (!edges.length) insert.run(SENTINEL, SENTINEL, 'related', signature);
+    })();
+  } catch {
+    /* read-only DB or no table: the answer is still correct, just uncached */
+  }
+  return edges;
+}
+
+/** Marks "built, and the answer was empty" — without it an empty graph rebuilds every load. */
+const SENTINEL = '__none__';

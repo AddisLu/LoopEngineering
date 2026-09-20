@@ -3,7 +3,7 @@ import type Database from 'better-sqlite3';
 import { nanoid } from 'nanoid';
 import type { KnowledgeNode, KnowledgeEdge, Kind, Source, Status } from './types.js';
 import { resyncNodeWikilinks } from './wikilink.js';
-import { bridgeEdges, type BridgeEdge } from './bridge.js';
+import { bridgeEdgesCached, type BridgeEdge } from './bridge.js';
 
 // ---- nodes ----
 
@@ -550,7 +550,7 @@ export function graph(
     const draftEdges = edgesFor(db, [...baseNodeIds], { status: 'draft' }).filter(
       (e) => baseNodeIds.has(e.src) && baseNodeIds.has(e.dst),
     );
-    edges = [...edges, ...draftEdges, ...bridgeEdges(db)];
+    edges = [...edges, ...draftEdges, ...bridgeEdgesCached(db)];
   }
   let documents = loadGraphDocuments(db, view);
 

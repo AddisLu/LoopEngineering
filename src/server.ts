@@ -11,6 +11,7 @@ import { shutdownWarmWorkers } from './voice/daemon.js';
 import { getTranscribeWarmWorkerSingleton } from './voice/transcribe.js';
 import { getEmbedWarmWorkerSingleton } from './knowledge/embed.js';
 import { checkBenchmarks } from './benchmark/complete.js';
+import { bridgeEdgesCached } from './knowledge/bridge.js';
 
 /** Production entry: runs the scheduling loop AND serves the API/board. systemd runs this. */
 export async function main(): Promise<void> {
@@ -60,6 +61,14 @@ export async function main(): Promise<void> {
     void pumpIngest(db, lastIngestPumpAt, Date.now()).then((t) => {
       lastIngestPumpAt = t;
     });
+    // 知識星圖: keep the cross-layer edge cache warm so no one waits for the rebuild (bridge.ts).
+    // A hit is one signature comparison (~0.3 ms); only an ingest that actually changed the
+    // knowledge base pays the KNN pass, and it pays it here instead of in someone's browser.
+    try {
+      bridgeEdgesCached(db);
+    } catch (err) {
+      console.error('[graph] bridge cache:', err);
+    }
   };
 
   const bind = process.env.LOOP_BIND ?? '127.0.0.1';

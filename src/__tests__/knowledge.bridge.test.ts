@@ -7,7 +7,7 @@ import type Database from 'better-sqlite3';
 import { openTestDb } from '../db/index.js';
 import { upsertNode } from '../knowledge/store.js';
 import { vecUpsert } from '../knowledge/vec.js';
-import { bridgeEdges, type BridgeKnn } from '../knowledge/bridge.js';
+import { bridgeEdges, bridgeEdgesCached, bridgeSignature, clearBridgeCache, type BridgeKnn } from '../knowledge/bridge.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -183,5 +183,63 @@ describe('bridgeEdges: knn call signature reaches the real vecKnn by default', (
 
     expect(() => bridgeEdges(db)).not.toThrow();
     expect(Array.isArray(bridgeEdges(db))).toBe(true);
+  });
+});
+
+describe('bridgeEdgesCached', () => {
+  const knnFor = (chunkId: number) => {
+    let calls = 0;
+    const knn: BridgeKnn = (_db, table, _e, _k) => {
+      calls += 1;
+      return table === 'vec_chunks' ? [{ rowid: chunkId, refId: chunkId, distance: 0.1 }] : [];
+    };
+    return { knn, calls: () => calls };
+  };
+
+  it('computes once, then answers from the table until an input changes', () => {
+    insertSource('src_op', 'http://op.example');
+    const doc = insertDocument({ path: 'op:1', title: '【X】P1', doc_kind: 'op_project', sourceId: 'src_op' });
+    const chunk = insertChunk(doc, 0, 'a');
+    const nodeId = insertCuratedNode('Node A');
+    const { knn, calls } = knnFor(chunk);
+
+    const first = bridgeEdgesCached(db, { topK: 3 }, knn);
+    expect(first).toEqual([{ src: nodeId, dst: `doc_${doc}`, relation: 'related' }]);
+    const after = calls();
+    expect(after).toBeGreaterThan(0);
+
+    // the expensive path must not run again for an unchanged graph
+    expect(bridgeEdgesCached(db, { topK: 3 }, knn)).toEqual(first);
+    expect(bridgeEdgesCached(db, { topK: 3 }, knn)).toEqual(first);
+    expect(calls()).toBe(after);
+    expect((db.prepare('SELECT COUNT(*) AS n FROM knowledge_bridge_edges').get() as { n: number }).n).toBe(1);
+
+    // a new curated node changes the signature -> recompute
+    insertCuratedNode('Node B');
+    const grown = bridgeEdgesCached(db, { topK: 3 }, knn);
+    expect(calls()).toBeGreaterThan(after);
+    expect(grown.length).toBe(2);
+
+    // different options are a different answer, so they must not read each other's rows
+    const before = calls();
+    bridgeEdgesCached(db, { topK: 1, threshold: 0.05 }, knn);
+    expect(calls()).toBeGreaterThan(before);
+  });
+
+  it('caches "no edges" too, and never fails when the cache table is missing', () => {
+    insertSource('src_op', 'http://op.example');
+    insertCuratedNode('Alone');
+    const empty: BridgeKnn = () => [];
+    expect(bridgeEdgesCached(db, {}, empty)).toEqual([]);
+    // a sentinel row marks "built and empty" — otherwise an empty graph recomputes every load
+    expect((db.prepare('SELECT COUNT(*) AS n FROM knowledge_bridge_edges').get() as { n: number }).n).toBe(1);
+    expect(bridgeEdgesCached(db, {}, empty)).toEqual([]);
+
+    clearBridgeCache(db);
+    expect((db.prepare('SELECT COUNT(*) AS n FROM knowledge_bridge_edges').get() as { n: number }).n).toBe(0);
+
+    db.prepare('DROP TABLE knowledge_bridge_edges').run();
+    expect(bridgeEdgesCached(db, {}, empty)).toEqual([]); // older DB: same answer, just uncached
+    expect(bridgeSignature(db)).toContain('v1|');
   });
 });
