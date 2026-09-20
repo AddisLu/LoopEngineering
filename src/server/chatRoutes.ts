@@ -6,6 +6,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type Database from 'better-sqlite3';
 import { getBool, getNum, getSetting } from '../db/index.js';
 import { getLocalModel } from '../local/models.js';
+import { currentRevision } from '../local/weights.js';
 import { search as ragSearch, type RetrievedChunk } from '../knowledge/retrieve.js';
 import { getSource } from '../knowledge/ingest/sources.js';
 import { chatLocal } from '../local/chat.js';
@@ -236,19 +237,35 @@ function readModelFiles(servedId: string, hubDir: string): ModelFiles {
   } catch {
     /* not in this cache */
   }
+  // An aborted download leaves a second snapshot holding config.json and the weight index but
+  // none of the shards. Taking whichever directory readdir returns first therefore lost the
+  // parameter counts (the header read fails) while the arch summary still worked — 參數組成 went
+  // blank. Try the revision that is actually loaded first, then any snapshot whose weights read.
+  let params: ParamCounts | null = null;
   try {
-    for (const snap of fs.readdirSync(path.join(repo, 'snapshots'))) {
-      const p = path.join(repo, 'snapshots', snap, 'config.json');
-      if (fs.existsSync(p)) {
-        config = JSON.parse(fs.readFileSync(p, 'utf8')) as Record<string, unknown>;
-        snapshotDir = path.join(repo, 'snapshots', snap);
+    const dir = path.join(repo, 'snapshots');
+    const rev = currentRevision(repo);
+    const snaps = fs.readdirSync(dir);
+    for (const snap of rev && snaps.includes(rev) ? [rev, ...snaps.filter((s) => s !== rev)] : snaps) {
+      const cfg = path.join(dir, snap, 'config.json');
+      if (!fs.existsSync(cfg)) continue;
+      const parsed = JSON.parse(fs.readFileSync(cfg, 'utf8')) as Record<string, unknown>;
+      const counted = countParams(path.join(dir, snap), parsed);
+      if (!config) {
+        config = parsed;
+        snapshotDir = path.join(dir, snap);
+      }
+      if (counted) {
+        config = parsed;
+        snapshotDir = path.join(dir, snap);
+        params = counted;
         break;
       }
     }
   } catch {
     /* no snapshot */
   }
-  const res = { disk_bytes: disk, config, params: snapshotDir ? countParams(snapshotDir, config) : null };
+  const res = { disk_bytes: disk, config, params };
   if (disk != null) filesCache.set(key, res);
   return res;
 }

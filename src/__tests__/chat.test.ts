@@ -201,6 +201,31 @@ describe('/api/chat with a fake vLLM', () => {
     fs.rmSync(hubDir, { recursive: true, force: true });
   });
 
+  it('counts parameters from the loaded revision, not an aborted download that sorts first', async () => {
+    // the real cache had two snapshots: '7c4f…' (10 files: config + index, no shards) and the
+    // complete 'ada4…'. Reading whichever came first lost 參數組成 while 架構 still worked.
+    const repo = path.join(hubDir, `models--${SERVED.replace('/', '--')}`);
+    const cfg = JSON.stringify({ text_config: { num_hidden_layers: 48, num_experts: 4, num_experts_per_tok: 1 } });
+    const header = { 'model.layers.0.self_attn.q_proj.weight': { dtype: 'BF16', shape: [4, 4], data_offsets: [0, 32] } };
+    const json = Buffer.from(JSON.stringify(header));
+    const len = Buffer.alloc(8);
+    len.writeBigUInt64LE(BigInt(json.length));
+    for (const [rev, complete] of [['0abandoned', false], ['zcomplete', true]] as const) {
+      const dir = path.join(repo, 'snapshots', rev);
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'config.json'), cfg);
+      fs.writeFileSync(path.join(dir, 'model.safetensors.index.json'), JSON.stringify({ weight_map: { 'model.layers.0.self_attn.q_proj.weight': 'model-00001.safetensors' } }));
+      if (complete) fs.writeFileSync(path.join(dir, 'model-00001.safetensors'), Buffer.concat([len, json]));
+    }
+    fs.mkdirSync(path.join(repo, 'refs'), { recursive: true });
+    fs.writeFileSync(path.join(repo, 'refs', 'main'), 'zcomplete');
+    setSetting(db, 'local_model_status', 'ready');
+    setSetting(db, 'local_model_loaded', 'qwen38-flash');
+    const s = (await app.inject({ method: 'GET', url: '/api/chat/stats' })).json();
+    expect(s.model.params).toMatchObject({ language_total: 16, other_language: 16 });
+    expect(s.model.arch).toMatchObject({ layers: 48 });
+  });
+
   it('reports model size, memory, KV cache, spec decode and GPU', async () => {
     setSetting(db, 'local_model_status', 'ready');
     setSetting(db, 'local_model_loaded', 'qwen38-flash');
