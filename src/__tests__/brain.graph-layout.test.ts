@@ -16,6 +16,10 @@ import {
   decayAlpha,
   shouldStep,
   shouldShowLabel,
+  ensure3D,
+  categoryAnchors3D,
+  stepForce3D,
+  stepForceClustered3D,
   LOD,
 } from '../../web/graph-layout.js';
 
@@ -347,5 +351,78 @@ describe('graph-layout: shouldShowLabel LoD gate (GRAPH G3)', () => {
     const v = { id: 'a', degree: 1 };
     expect(shouldShowLabel(v, { scale: 1 })).toBe(false);
     expect(shouldShowLabel(v, { scale: LOD.labelScale })).toBe(true);
+  });
+});
+
+describe('3D layout (WebGL view)', () => {
+  const build = (n: number) => {
+    const state = { vertices: new Map(), edges: [] as { src: string; dst: string }[], alpha: 1 } as never as ReturnType<typeof buildGraphState>;
+    const tops = ['策展', '程式碼', '筆記'];
+    for (let i = 0; i < n; i++) {
+      (state.vertices as Map<string, Record<string, unknown>>).set(`v${i}`, {
+        id: `v${i}`, x: (i % 13) - 6, y: (i % 7) - 3, vx: 0, vy: 0, degree: i % 5,
+        type: 'node', category: { top: tops[i % tops.length], sub: 'x' },
+      });
+    }
+    for (let i = 1; i < n; i++) state.edges.push({ src: `v${i - 1}`, dst: `v${i}` });
+    return state;
+  };
+  const vertex = (state: ReturnType<typeof buildGraphState>, id: string) =>
+    (state.vertices as unknown as Map<string, { x: number; y: number; z: number }>).get(id)!;
+
+  it('seeds z deterministically so the cloud is never a flat disc, and never twice', () => {
+    const a = build(30);
+    const b = build(30);
+    ensure3D(a);
+    ensure3D(b);
+    expect(vertex(a, 'v3').z).toBe(vertex(b, 'v3').z); // same graph -> same starting cloud
+    expect(vertex(a, 'v3').z).not.toBe(vertex(a, 'v4').z);
+    expect([...(a.vertices as unknown as Map<string, { z: number }>).values()].every((v) => Number.isFinite(v.z))).toBe(true);
+    const before = vertex(a, 'v3').z;
+    ensure3D(a); // idempotent: a second call must not re-seed a vertex that already moved
+    expect(vertex(a, 'v3').z).toBe(before);
+  });
+
+  it('spreads category anchors over a sphere, with the radius following member count', () => {
+    const anchors = categoryAnchors3D(build(60));
+    expect([...anchors.keys()].sort()).toEqual(['策展', '筆記', '程式碼'].sort());
+    const [a, b] = [...anchors.values()];
+    expect(Math.hypot(a!.x - b!.x, a!.y - b!.y, a!.z - b!.z)).toBeGreaterThan(100);
+    expect([...anchors.values()].some((p) => Math.abs(p.z) > 1)).toBe(true); // truly 3D, not a ring
+    const small = categoryAnchors3D(build(6));
+    const big = categoryAnchors3D(build(600));
+    const radius = (p: { x: number; y: number; z: number }) => Math.hypot(p.x, p.y, p.z);
+    expect(radius(big.get('策展')!)).toBeGreaterThan(radius(small.get('策展')!));
+  });
+
+  it('separates categories in space, stays finite, and leaves the 2D path alone', () => {
+    const state = build(90);
+    for (let i = 0; i < 200; i++) stepForceClustered3D(state);
+    const verts = [...(state.vertices as unknown as Map<string, { x: number; y: number; z: number; category: { top: string } }>).values()];
+    expect(verts.every((v) => Number.isFinite(v.x) && Number.isFinite(v.y) && Number.isFinite(v.z))).toBe(true);
+    const centroid = (top: string) => {
+      const m = verts.filter((v) => v.category.top === top);
+      return { x: m.reduce((s, v) => s + v.x, 0) / m.length, y: m.reduce((s, v) => s + v.y, 0) / m.length, z: m.reduce((s, v) => s + v.z, 0) / m.length };
+    };
+    const c1 = centroid('策展');
+    const c2 = centroid('程式碼');
+    expect(Math.hypot(c1.x - c2.x, c1.y - c2.y, c1.z - c2.z)).toBeGreaterThan(50);
+    // the graph must occupy volume, not a plane
+    const zs = verts.map((v) => v.z);
+    expect(Math.max(...zs) - Math.min(...zs)).toBeGreaterThan(100);
+
+    // the 2D step is untouched by the 3D one: it never writes z
+    const flat = build(20);
+    stepForce(flat);
+    expect([...(flat.vertices as unknown as Map<string, { z?: number }>).values()].every((v) => v.z === undefined)).toBe(true);
+  });
+
+  it('a 3D step at the real graph size stays far inside one frame', () => {
+    const state = build(550);
+    stepForce3D(state); // warm
+    const t = performance.now();
+    for (let i = 0; i < 20; i++) stepForce3D(state);
+    const perStep = (performance.now() - t) / 20;
+    expect(perStep).toBeLessThan(8); // a 16.7 ms frame; measured ~0.5 ms on the Spark
   });
 });

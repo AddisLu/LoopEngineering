@@ -76,4 +76,26 @@ describe('brain page: static assets', () => {
       js.match(/globalCompositeOperation = 'source-over'/g)?.length,
     );
   });
+
+  it('3D view: three.js is vendored, imported lazily, and never from a CDN', () => {
+    const lib = path.join(WEB_DIR, 'lib', 'three');
+    expect(fs.existsSync(path.join(lib, 'three.module.min.js'))).toBe(true);
+    expect(fs.existsSync(path.join(lib, 'LICENSE'))).toBe(true); // MIT, shipped with the build
+    const three = fs.readFileSync(path.join(lib, 'three.module.min.js'), 'utf8');
+    expect(three.length).toBeGreaterThan(100_000);
+
+    const g3d = fs.readFileSync(path.join(WEB_DIR, 'brain3d.js'), 'utf8');
+    expect(g3d).toContain("from './lib/three/three.module.min.js'");
+    // this box is Wi-Fi-only and sometimes offline: nothing may be fetched at runtime
+    expect(g3d).not.toMatch(/https?:\/\/(?!www\.w3\.org)/);
+    expect(g3d).toContain('AdditiveBlending');
+    expect(g3d).toContain('stepForceClustered3D');
+
+    const brain = fs.readFileSync(path.join(WEB_DIR, 'brain.js'), 'utf8');
+    // lazy: nobody downloads 670 KB of three.js unless they press 立體
+    expect(brain).toContain("await import('./brain3d.js')");
+    expect(brain).not.toMatch(/^import .*three/m);
+    const html = fs.readFileSync(path.join(WEB_DIR, 'brain.html'), 'utf8');
+    for (const id of ['graph-canvas-3d', 'graph-labels-3d', 'graph-3d']) expect(html).toContain(`id="${id}"`);
+  });
 });

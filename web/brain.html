@@ -24,6 +24,9 @@
          drawer (☰ 清單). -->
     <main id="graph-stage" class="graph-stage">
       <canvas id="graph-canvas" class="graph-canvas" width="1280" height="800"></canvas>
+      <!-- 3D view: same graph, WebGL. Hidden until 立體 is switched on (web/brain3d.js). -->
+      <canvas id="graph-canvas-3d" class="graph-canvas" hidden></canvas>
+      <div id="graph-labels-3d" class="g3d-labels" hidden aria-hidden="true"></div>
       <div id="graph-tooltip" class="graph-tooltip" hidden></div>
       <div id="graph-empty" class="graph-empty" hidden>知識庫目前沒有節點</div>
 
@@ -76,6 +79,7 @@
         <label class="gdepth">展開跳數<input id="graph-depth" type="number" min="1" max="6" value="2" /></label>
         <button id="graph-zoom-out" class="gbtn icon" type="button" title="縮小" aria-label="縮小">－</button>
         <button id="graph-zoom-in" class="gbtn icon" type="button" title="放大" aria-label="放大">＋</button>
+        <button id="graph-3d" class="gbtn" type="button" aria-pressed="false" title="平面／立體切換">立體</button>
         <button id="graph-reset" class="gbtn" type="button">重置視圖</button>
       </div>
 

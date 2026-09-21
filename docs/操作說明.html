@@ -783,7 +783,7 @@ npm run loop -- add --title "Epic: 上線通知系統" \
       <h3>知識怎麼進來</h3>
       <ul>
         <li><b>MCP 一句話</b>：任何 Claude Code 對話說「記住：公司只能用 Python 3.8.10」→ <code>loop_remember</code> 入庫；<code>loop_recall</code> 搜尋、<code>loop_link</code> 建關聯。</li>
-        <li><b>知識庫頁（知識星圖）</b>：整頁就是一張<b>全螢幕沉浸式知識圖譜</b>——四大分類（策展／程式碼／OpenProject／筆記）各自成一片「星系」分區、以顏色與圖例（左側面板，含即時計數）標示；畫法是<b>星雲</b>：節點畫成小光點（大小依連線數），連線用加色疊加，交會處自然變亮，密的地方燒成白色，所以看得出結構而不是一片彩色圓點；點圖例可單獨聚焦某一類（或按數字鍵 1–4），懸停高亮鄰居、點節點聚焦展開、滾輪縮放、拖曳平移。頂欄「☰ 清單」滑出<b>管理抽屜</b>：搜尋（中文 FTS）／中文 kind 篩選／新增編輯／建關聯／草稿核可。來源與分類皆已中文化（如 <code>src_xxx</code> 顯示為 LoopEngineering／OpenProject／SSoT 筆記…）。</li>
+        <li><b>知識庫頁（知識星圖）</b>：整頁就是一張<b>全螢幕沉浸式知識圖譜</b>——四大分類（策展／程式碼／OpenProject／筆記）各自成一片「星系」分區、以顏色與圖例（左側面板，含即時計數）標示；畫法是<b>星雲</b>：節點畫成小光點（大小依連線數），連線用加色疊加，交會處自然變亮，密的地方燒成白色，所以看得出結構而不是一片彩色圓點。右下角的<b>「立體」</b>可以切換成 WebGL 3D：同一份圖、同一組篩選與聚焦行為，改成可以旋轉的星系（拖曳轉動、滾輪遠近、Shift 或右鍵平移、點節點聚焦）。three.js 是<b>本機 vendor</b>（<code>web/lib/three/</code>，MIT，絕不連 CDN）且<b>延遲載入</b>——不按「立體」就不會下載。分類在 3D 是四面體方向而不是平面圓環（類別數少時的圓環會退化成一條直線）；點圖例可單獨聚焦某一類（或按數字鍵 1–4），懸停高亮鄰居、點節點聚焦展開、滾輪縮放、拖曳平移。頂欄「☰ 清單」滑出<b>管理抽屜</b>：搜尋（中文 FTS）／中文 kind 篩選／新增編輯／建關聯／草稿核可。來源與分類皆已中文化（如 <code>src_xxx</code> 顯示為 LoopEngineering／OpenProject／SSoT 筆記…）。</li>
         <li><b>自動蒸餾</b>：任務結案時用 haiku 從 HANDOFF 萃取候選知識 →<b>草稿</b>（琥珀徽章），你在知識庫頁<b>核可後才會注入</b>（<code>knowledge_distill</code> 可關）。</li>
         <li><b>CLI</b>：<code>loop knowledge &lt;list|search|add|import|export|relate&gt;</code>（<code>relate</code> 見本章「知識圖譜關聯」）。</li>
       </ul>

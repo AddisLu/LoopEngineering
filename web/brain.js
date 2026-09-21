@@ -478,6 +478,11 @@ function vertexHSL(v) {
   return hexToHSL(swatch);
 }
 /** Node fill; `dim` desaturates to a quiet grey-blue (not merely fades) for the spotlight. */
+/** three.js's Color.setStyle only parses the comma form of hsl(), not the modern space form. */
+function vertexColorCss(v) {
+  const c = vertexHSL(v);
+  return `hsl(${Math.round(c.h)}, ${Math.round(c.s)}%, ${Math.round(c.l)}%)`;
+}
 function vertexColor(v, dim = false) {
   const c = vertexHSL(v);
   return `hsl(${c.h} ${dim ? c.s * 0.25 : c.s}% ${c.l}%)`;
@@ -757,6 +762,96 @@ function graphLoop() {
   drawGraph();
   graphRaf = requestAnimationFrame(graphLoop);
 }
+// ---- 立體 (WebGL) mode ---------------------------------------------------------------
+// The 2D canvas stays the default and keeps every behaviour it had; 3D is a second renderer
+// fed from the same graphState, the same filters and the same hover/focus ids. brain3d.js is
+// imported lazily so nobody downloads three.js (670 KB) unless they ask for the view.
+let galaxy3d = null;
+let mode3d = false;
+
+function labelFor3D(v) {
+  const lit = v.id === hoveredVertexId || v.id === graphFocusId;
+  if (lit) return String(v.label ?? '').slice(0, 26);
+  if (hoveredVertexId || graphFocusId) return '';
+  // no selection: the same LoD rule the 2D view uses, so the sky is not a wall of text
+  return shouldShowLabel(v, { scale: 1.2, hoveredId: null, focusId: null }) && v.type !== 'document'
+    ? String(v.label ?? '').slice(0, 22)
+    : '';
+}
+
+async function enter3D() {
+  const canvas = $('graph-canvas-3d');
+  const labels = $('graph-labels-3d');
+  // show the canvas BEFORE asking for a WebGL context: a display:none canvas has no backing
+  // surface, and some software renderers refuse to create a context for one
+  $('graph-canvas').hidden = true;
+  canvas.hidden = false;
+  labels.hidden = false;
+  if (!galaxy3d) {
+    const mod = await import('./brain3d.js');
+    galaxy3d = mod.createGalaxy3D({
+      canvas,
+      labelLayer: labels,
+      background: cssVar('--graph-bg-1', '#070a0f'),
+      getState: () => graphState,
+      visible: () => visibleGraphVertices(),
+      colorOf: (v) => vertexColorCss(v),
+      labelFor: labelFor3D,
+      onHover: (id, evt) => {
+        const v = id ? graphState?.vertices.get(id) : null;
+        canvas.style.cursor = v ? 'pointer' : 'grab';
+        if (hoveredVertexId !== id) {
+          hoveredVertexId = id;
+          galaxy3d.setHighlight(id, id ? neighborIds(graphState, id) : null);
+        }
+        updateTooltip(v ?? null, evt);
+      },
+      onPick: (id) => {
+        const v = id ? graphState?.vertices.get(id) : null;
+        graphFocusId = id ?? null;
+        galaxy3d.setHighlight(id, id ? neighborIds(graphState, id) : null);
+        galaxy3d.focus(id);
+        if (v) expandVertex(v);
+      },
+      onRebuildNeeded: () => galaxy3d?.rebuild(),
+    });
+  }
+  stopGraphLoop();
+  galaxy3d.start();
+  mode3d = true;
+  $('graph-3d').setAttribute('aria-pressed', 'true');
+  $('graph-3d').textContent = '平面';
+  try {
+    localStorage.setItem('loop_graph_3d', '1');
+  } catch (e) { /* private mode */ }
+}
+
+function exit3D() {
+  if (galaxy3d) galaxy3d.stop();
+  $('graph-canvas-3d').hidden = true;
+  $('graph-labels-3d').hidden = true;
+  $('graph-canvas').hidden = false;
+  mode3d = false;
+  $('graph-3d').setAttribute('aria-pressed', 'false');
+  $('graph-3d').textContent = '立體';
+  try {
+    localStorage.removeItem('loop_graph_3d');
+  } catch (e) { /* private mode */ }
+  stopGraphLoop();
+  graphLoop();
+}
+
+$('graph-3d').onclick = () => {
+  if (mode3d) exit3D();
+  else {
+    void enter3D().catch((err) => {
+      graphEmpty.hidden = false;
+      graphEmpty.textContent = `立體檢視載入失敗：${err.message}`;
+      exit3D();
+    });
+  }
+};
+
 function stopGraphLoop() {
   if (graphRaf) cancelAnimationFrame(graphRaf);
   graphRaf = null;
@@ -896,6 +991,7 @@ async function openGraphView(nodeId) {
   computeDegrees(graphState);
   reheat(graphState);
   populateGraphFilterChips();
+  if (mode3d) galaxy3d?.rebuild();
 
   graphTitle.textContent = nodeId
     ? (graphState.vertices.get(nodeId)?.label ?? '')
@@ -980,6 +1076,12 @@ $('graph-reset').onclick = () => {
   graphFocusId = null;
   soloCategory = null;
   renderLegend();
+  if (mode3d) {
+    hoveredVertexId = null;
+    galaxy3d?.setHighlight(null, null);
+    galaxy3d?.focus(null);
+    return;
+  }
   fitGraphView();
 };
 $('graph-zoom-in').onclick = () => { graphView.scale = Math.min(graphView.scale * 1.25, 4); };
@@ -1318,4 +1420,10 @@ captureForm.addEventListener('submit', async (e) => {
 (async () => {
   await loadSourceMeta();
   await openGraphView(null);
+  // whoever left in 立體 comes back to it — three.js is still only fetched in that case
+  let want3d = false;
+  try {
+    want3d = localStorage.getItem('loop_graph_3d') === '1';
+  } catch (e) { /* private mode */ }
+  if (want3d) await enter3D().catch(() => exit3D());
 })();
