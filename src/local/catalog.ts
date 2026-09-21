@@ -15,6 +15,9 @@ import type { JobView } from './jobs.js';
  */
 
 export type Recommend = 'chat' | 'code' | 'fast' | null;
+/** 用途標籤: what a recipe is FOR. Every entry has one — see roleFor(). */
+export const ROLES = ['chat', 'code', 'fast', 'vision', 'think', 'big'] as const;
+export type Role = (typeof ROLES)[number];
 export type CatalogAction = 'switch' | 'download' | 'build' | 'none';
 
 export interface CatalogEntry {
@@ -36,7 +39,10 @@ export interface CatalogEntry {
   image_ready: boolean;
   runnable: boolean;
   blocked_by: string | null;
+  /** one of the three the panel vouches for; decides the 推薦 cards, nothing else */
   recommend: Recommend;
+  /** 用途標籤, shown on every row and on the cards */
+  role: Role;
   /** the one thing the operator can do next */
   action: CatalogAction;
   size_bytes: number | null;
@@ -73,6 +79,48 @@ export const RECOMMENDED: Record<string, Exclude<Recommend, null>> = {
   'qwen3-coder-next-int4-autoround': 'code',
   'qwen3.6-35b-a3b-nvfp4': 'fast',
 };
+
+/**
+ * The few recipes the rules below get wrong. Each one says why — a hand entry with no reason is
+ * how a table like this rots.
+ */
+export const ROLE_OVERRIDE: Record<string, Role> = {
+  // 106 GB would score as 大模型, but this IS the everyday chat model on this box
+  'qwen3.8-flash-next-nvfp4-solo': 'chat',
+  'qwen3.8-flash-next-nvfp4-cluster': 'chat',
+};
+
+const GB = 1_000_000_000; // HF reports decimal GB, and so does the panel's ≈ size
+
+/** Total parameters from a model id — `Qwen3.5-397B-A17B` → 397, `Flash-Next` → null. */
+export function paramsB(model: string | null): number | null {
+  const m = /(?:^|[-_/.])(\d+(?:\.\d+)?)b(?:[-_.]|$)/i.exec(model ?? '');
+  return m ? Number(m[1]) : null;
+}
+
+/**
+ * 用途標籤. Derived from facts the recipe already carries — the model id, the node count, and the
+ * weight size HF reports — so a recipe added upstream is labelled without anyone editing this file.
+ * Nothing here is a claim about quality; it answers "what is this for", which the 全部模型 list
+ * could not answer at all before (31 of 34 rows had no label).
+ *
+ * Size comes first because it is what the model actually costs on this machine; the parameter
+ * count is the offline fallback (the HF lookup returns null with no WAN).
+ */
+export function roleFor(e: { recipe: string; model: string | null; name: string; nodes: number; size_bytes: number | null }): Role {
+  const override = ROLE_OVERRIDE[e.recipe];
+  if (override) return override;
+  const id = `${e.model ?? ''} ${e.name}`;
+  if (/coder/i.test(id)) return 'code';
+  if (/vision|[-_]vl(?:[-_]|$)/i.test(id)) return 'vision';
+  if (/(?:^|[-_ /])thinking(?:[-_ /]|$)/i.test(`${e.recipe} ${id}`)) return 'think';
+  const params = paramsB(e.model);
+  if (e.nodes >= 2) return 'big';
+  if (e.size_bytes != null && e.size_bytes >= 100 * GB) return 'big';
+  if (params != null && params >= 100) return 'big';
+  if (e.size_bytes != null) return e.size_bytes <= 30 * GB ? 'fast' : 'chat';
+  return params != null && params <= 40 ? 'fast' : 'chat';
+}
 
 // minutes assume a wired link; the panel also shows the size because on this Spark's Wi-Fi
 // (~5 MB/s measured) a 24 GB pull is over an hour
@@ -238,6 +286,7 @@ export async function buildCatalog(
       runnable: action === 'switch',
       blocked_by: blocked,
       recommend: RECOMMENDED[recipe] ?? null,
+      role: roleFor({ recipe, model, name: info?.name ?? recipe, nodes, size_bytes: size.size_bytes }),
       action,
       size_bytes: size.size_bytes,
       gated: size.gated,

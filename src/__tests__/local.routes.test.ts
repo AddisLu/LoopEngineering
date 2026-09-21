@@ -323,6 +323,9 @@ describe('/api/local', () => {
       const by = Object.fromEntries(cat.entries.map((e: { recipe: string }) => [e.recipe, e]));
       expect(by['qwen3.6-35b-a3b-nvfp4']).toMatchObject({ action: 'download', size_bytes: 24e9, recommend: 'fast', registered_id: 'qwen36-35b' });
       expect(by['qwen3-coder-next-int4-autoround']).toMatchObject({ action: 'build', downloaded: true });
+      // the panel labels every row, not just the three it recommends
+      expect(by['qwen3-coder-next-int4-autoround'].role).toBe('code');
+      expect(cat.entries.every((e: { role: string }) => e.role)).toBe(true);
       expect(by['glm-5.3-flash']).toMatchObject({ action: 'none', nodes: 2 });
       expect(cat.images.find((i: { container: string }) => i.container === 'vllm-node')).toMatchObject({ ready: false, kind: 'pull', waiting: 2 });
       expect(cat.job).toBeNull();

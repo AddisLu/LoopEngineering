@@ -2,10 +2,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it, expect } from 'vitest';
+import { ROLES } from '../local/catalog.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WEB_DIR = path.join(__dirname, '..', '..', 'web');
 const read = (f: string) => fs.readFileSync(path.join(WEB_DIR, f), 'utf8');
+
 const exists = (f: string) => fs.existsSync(path.join(WEB_DIR, f));
 
 /**
@@ -233,6 +235,12 @@ describe('chat-first shell', () => {
     expect(dock).toContain('/api/local/jobs');
     expect(dock).not.toContain("api('/api/local/models')");
     expect(page).toContain('切換會重新啟動 vLLM');
+    // every role the server can emit needs wording here, or a row shows a blank badge
+    const css = read('shell.css');
+    for (const role of ROLES) {
+      expect(dock, role).toMatch(new RegExp(`${role}: '`));
+      expect(css, role).toContain(`.reco-tag.${role}`);
+    }
   });
 
   it('ships the terminal drawer without a CDN and only for the allowlist', () => {

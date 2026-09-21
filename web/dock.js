@@ -184,7 +184,23 @@ onBoard((s) => {
 const GiB = 1024 ** 3;
 const size = (b) => (b == null ? '—' : `${(b / GiB).toFixed(b >= 100 * GiB ? 0 : 1)} GB`);
 const tb = (b) => (b == null ? '' : b >= 1024 * GiB ? `${(b / (1024 * GiB)).toFixed(1)} TB` : size(b));
-const RECO_LABEL = { chat: '對話', code: '寫程式', fast: '小而快' };
+// 用途標籤 — the server derives `role` for every recipe (src/local/catalog.ts roleFor); the panel
+// owns the wording. The hint answers "why does this one say that", which a bare badge cannot.
+const ROLE_LABEL = { chat: '對話', code: '寫程式', fast: '小而快', vision: '看得懂圖', think: '會推理', big: '大模型' };
+const ROLE_HINT = {
+  chat: '一般問答、寫文件，日常就用這種',
+  code: '針對寫程式調校過的模型',
+  fast: '單機就跑得動、約 30 GB 以內，回得快',
+  vision: '看得懂圖片，不是只有文字',
+  think: '會先想過再回答，慢但比較穩',
+  big: '參數或體積很大，要很多記憶體或兩台 Spark',
+};
+
+function roleTag(e, small) {
+  const tag = el('span', `reco-tag ${e.role || 'chat'}${small ? ' sm' : ''}`, ROLE_LABEL[e.role] || '模型');
+  if (ROLE_HINT[e.role]) tag.title = ROLE_HINT[e.role];
+  return tag;
+}
 let switching = false;
 let jobTimer = null;
 let catalogData = null;
@@ -218,7 +234,9 @@ function actionButton(e, data) {
 function modelRow(e, data) {
   const row = el('div', `model-row${e.loaded ? ' on' : ''}${e.action === 'none' ? ' off' : ''}`);
   const txt = el('div', 'txt');
-  txt.append(el('div', 'n', e.name));
+  const n = el('div', 'n');
+  n.append(roleTag(e, true), el('span', 'name', e.name));
+  txt.append(n);
   const bits = [];
   if (e.downloaded) bits.push(`已下載 ${size(e.disk_bytes)}`);
   else if (e.partial) bits.push(`下載到一半 ${size(e.disk_bytes)}`);
@@ -235,7 +253,7 @@ function modelRow(e, data) {
 function recoCard(e, data) {
   const card = el('div', `reco-card${e.loaded ? ' on' : ''}`);
   const head = el('div', 'head');
-  head.append(el('span', `reco-tag ${e.recommend}`, RECO_LABEL[e.recommend] || '推薦'));
+  head.append(roleTag(e, false));
   head.append(el('span', 'n', e.name));
   card.append(head);
   const bits = [e.downloaded ? `已下載 ${size(e.disk_bytes)}` : e.partial ? `下載到一半 ${size(e.disk_bytes)}` : e.size_bytes ? `約 ${size(e.size_bytes)}` : null, e.blocked_by]

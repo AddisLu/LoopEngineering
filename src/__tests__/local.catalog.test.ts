@@ -4,7 +4,7 @@ import path from 'node:path';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type Database from 'better-sqlite3';
 import { openTestDb } from '../db/index.js';
-import { buildCatalog, modelSize } from '../local/catalog.js';
+import { buildCatalog, modelSize, paramsB, roleFor } from '../local/catalog.js';
 import { clearRecipeCache, listRecipes, recipeInfo } from '../local/recipes.js';
 import { clearImageCache } from '../local/images.js';
 import { weightInfo } from '../local/weights.js';
@@ -169,6 +169,9 @@ describe('buildCatalog', () => {
     // loaded + registered seed: the id is the seed's, not the recipe name — and a disabled alias
     // of the same recipe (the demo DB has one) must not hide the loaded row
     expect(by['qwen3.8-flash-next-nvfp4-solo']).toMatchObject({ registered_id: 'qwen38-flash', loaded: true, action: 'switch', recommend: 'chat', size_bytes: 106e9 + 100 });
+    // the badge on the card and the badge on the list row are one field: 106 GB alone would read
+    // as 大模型, so the override keeps it 對話 in both places
+    expect(by['qwen3.8-flash-next-nvfp4-solo'].role).toBe('chat');
     // downloaded but the shared image is missing -> build
     expect(by['qwen3.6-35b-a3b-fp8']).toMatchObject({ action: 'build', downloaded: true, image_ready: false, registered_id: null });
     expect(by['qwen3.6-35b-a3b-fp8'].blocked_by).toContain('vllm-node');
@@ -176,6 +179,11 @@ describe('buildCatalog', () => {
     expect(by['qwen3.6-35b-a3b-fp8-dflash']).toMatchObject({ action: 'build', name: 'Qwen36-35B-A3B' });
     // not on disk -> download, with the size the button shows
     expect(by['qwen3.6-35b-a3b-nvfp4']).toMatchObject({ action: 'download', recommend: 'fast', size_bytes: 23.5e9 + 100 });
+    expect(by['qwen3.6-35b-a3b-nvfp4'].role).toBe('fast');
+    // every row is labelled — that is the whole point; 31 of 34 used to have nothing
+    expect(cat.entries.every((e) => e.role)).toBe(true);
+    expect(by['glm-5.3-flash'].role).toBe('big');
+    expect(by['broken'].role).toBe('chat');
     // interrupted pull on a cluster-only recipe: the node limit wins, the partial flag still shows
     expect(by['glm-5.3-flash']).toMatchObject({ action: 'none', nodes: 2, partial: true, downloaded: false });
     expect(by['glm-5.3-flash'].blocked_by).toContain('2 台 Spark');
@@ -222,5 +230,49 @@ describe('registerRecipe', () => {
     db.prepare(`UPDATE local_models SET enabled = 0 WHERE id = 'glm53-flash'`).run();
     expect(registerRecipe(db, { recipe: 'glm-5.3-flash', name: null, model: 'm' }).enabled).toBe(1);
     expect(getLocalModel(db, 'glm53-flash')!.enabled).toBe(1);
+  });
+});
+
+describe('roleFor', () => {
+  const r = (model: string | null, over: Partial<{ recipe: string; name: string; nodes: number; size_bytes: number | null }> = {}) =>
+    roleFor({ recipe: over.recipe ?? 'r', name: over.name ?? '', model, nodes: over.nodes ?? 1, size_bytes: over.size_bytes ?? null });
+
+  it('reads the parameter count out of a model id, and only when it really is one', () => {
+    expect(paramsB('Qwen/Qwen3.5-397B-A17B-int4-AutoRound')).toBe(397);
+    expect(paramsB('nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4')).toBe(120);
+    expect(paramsB('openai/gpt-oss-120b')).toBe(120);
+    expect(paramsB('google/gemma-4-26B-A4B-it')).toBe(26);
+    // "4bit" is a quantisation, not 4 billion parameters
+    expect(paramsB('cyankiwi/GLM-4.7-Flash-AWQ-4bit')).toBeNull();
+    expect(paramsB('local-inference-lab/Qwen3.8-Flash-Next-NVFP4')).toBeNull();
+    expect(paramsB(null)).toBeNull();
+  });
+
+  it('labels what a recipe is for, from facts the recipe already carries', () => {
+    // what it is beats how big it is
+    expect(r('Intel/Qwen3-Coder-Next-int4-AutoRound')).toBe('code');
+    expect(r('deepseek-ai/DeepSeek-V4-Flash-Vision-Exp', { nodes: 2 })).toBe('vision');
+    expect(r('nvidia/diffusiongemma-26B-A4B-it-NVFP4', { recipe: 'diffusion-gemma-nvfp4-thinking' })).toBe('think');
+    // ...but the org name "thinkingmachines" is not a thinking variant
+    expect(r('thinkingmachines/Inkling-Small-NVFP4', { size_bytes: 20e9 })).toBe('fast');
+    // then size on this machine, then parameters, then node count
+    expect(r('nvidia/Qwen3.6-35B-A3B-NVFP4', { size_bytes: 23.5e9 })).toBe('fast');
+    expect(r('local-inference-lab/GLM-5.3-Flash-NVFP4-Spark', { size_bytes: 175e9, nodes: 2 })).toBe('big');
+    // 120B in only 65 GB: the parameter count still makes it a big model
+    expect(r('nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4', { size_bytes: 65e9 })).toBe('big');
+    expect(r('stepfun-ai/Step-3.7-Flash-FP8', { nodes: 2 })).toBe('big');
+    // offline (HF size unknown) the parameter count carries it
+    expect(r('nvidia/Qwen3.8-27B-NVFP4')).toBe('fast');
+    // mid-sized and unremarkable — the honest answer is "general chat"
+    expect(r('google/gemma-4-26B-A4B-it', { size_bytes: 52e9 })).toBe('chat');
+    expect(r(null)).toBe('chat');
+  });
+
+  it('the override table wins over the rules', () => {
+    // 106 GB scores as 大模型 by the rules; it is the box's everyday chat model
+    expect(r('local-inference-lab/Qwen3.8-Flash-Next-NVFP4', { recipe: 'qwen3.8-flash-next-nvfp4-solo', size_bytes: 106e9 })).toBe('chat');
+    // and the table stays small: "Inkling-Small" is 159 GB across two Sparks, so the rules are
+    // right to call it 大模型 and it needs no entry
+    expect(r('thinkingmachines/Inkling-Small-NVFP4', { recipe: 'inkling-small-nvfp4', nodes: 2, size_bytes: 159e9 })).toBe('big');
   });
 });

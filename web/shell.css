@@ -588,7 +588,8 @@ a.menu-item { display: block; text-decoration: none; color: inherit; }
 .model-row.on { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
 .model-row.off { opacity: .62; }
 .model-row .txt { min-width: 0; flex: 1 1 auto; }
-.model-row .n { font-size: 13px; font-weight: 500; line-height: 1.35; }
+.model-row .n { font-size: 13px; font-weight: 500; line-height: 1.35; display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.model-row .n .name { min-width: 0; overflow-wrap: anywhere; }
 .model-row .s { font-size: 11.5px; opacity: .7; font-variant-numeric: tabular-nums; }
 .model-row .mini { flex: 0 0 auto; }
 .model-row .badge-now { font-size: 11px; color: var(--ok); background: var(--ok-soft); border-radius: 999px; padding: 3px 9px; white-space: nowrap; }
@@ -616,6 +617,11 @@ a.menu-item { display: block; text-decoration: none; color: inherit; }
 .reco-tag.chat { color: var(--accent); background: var(--accent-soft); }
 .reco-tag.code { color: var(--ok); background: var(--ok-soft); }
 .reco-tag.fast { color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent); }
+.reco-tag.think { color: var(--st-verifying); background: color-mix(in srgb, var(--st-verifying) 14%, transparent); }
+.reco-tag.vision { color: var(--text-2); background: color-mix(in srgb, var(--st-draft) 26%, transparent); }
+.reco-tag.big { color: var(--text-3); background: transparent; box-shadow: inset 0 0 0 1px var(--border-2); }
+/* row variant: sits in front of the model name, must never push it off the line */
+.reco-tag.sm { font-size: 10.5px; padding: 1px 6px; white-space: nowrap; }
 
 /* background job card */
 #model-job .job-title { font-size: 13px; font-weight: 600; margin: 0 0 4px; }
