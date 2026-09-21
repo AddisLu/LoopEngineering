@@ -38,6 +38,9 @@ export function promptFor(ctx: DispatchContext): string {
 }
 
 export function buildClaudeArgs(ctx: DispatchContext): string[] {
+  // 任務執行中查知識庫: the loop/loop-fs tools join the allow-list itself (they are values of
+  // --allowed-tools, not standalone flags) so a mid-run lookup never stops on a prompt.
+  const allowed = [...DEFAULT_ALLOWED_TOOLS, ...(ctx.mcpConfigPath ? (ctx.mcpTools ?? []) : [])];
   const args = [
     '-p',
     promptFor(ctx),
@@ -48,8 +51,11 @@ export function buildClaudeArgs(ctx: DispatchContext): string[] {
     '--permission-mode',
     'acceptEdits',
     '--allowed-tools',
-    ...DEFAULT_ALLOWED_TOOLS,
+    ...allowed,
   ];
+  // --strict-mcp-config keeps the user's own servers out of a task run: what a task may reach
+  // is decided here, not by whatever is in ~/.claude.json.
+  if (ctx.mcpConfigPath) args.push('--mcp-config', ctx.mcpConfigPath, '--strict-mcp-config');
   if (ctx.model && ctx.model !== 'default') args.push('--model', ctx.model);
   if (ctx.resumeSessionId) args.push('--resume', ctx.resumeSessionId);
   return args;

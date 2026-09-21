@@ -253,7 +253,7 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // LOOP_TASK.md on every dispatch (see src/knowledge/context.ts). Char budget is a
   // greedy-pack cap so the section stays small relative to Goal/Plan.
   knowledge_inject: 'true',
-  knowledge_budget_chars: '2500',
+  knowledge_budget_chars: '6000', // 2500 let only ~7 of 180 nodes reach a task; see knowledge/context.ts
   // gated auto-learning: on task close, fire-and-forget a cheap haiku pass over the
   // HANDOFF/gap-review/goal to draft candidate knowledge nodes (status='draft', never
   // injected — see src/knowledge/distill.ts). Off restores the old close-only behavior.
@@ -343,6 +343,9 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // (hybrid FTS+vec search scoped to the task's repo) into their own `## 相關語料 (RAG)`
   // section — separate from the curated `## Knowledge / Environment` block above.
   rag_inject_task_context: 'false',
+  // 任務執行中查知識庫: give a dispatched run the read-only loop/loop-fs MCP servers so it can
+  // call loop_recall / loop_search instead of relying only on the dispatch-time excerpt.
+  task_mcp_enabled: 'true',
 
   // OpenProject connector (src/knowledge/ingest/openproject.ts, scripts/openproject_dump.py):
   // stdlib-only, no venv needed (unlike embed_python) — overridable for hosts where the

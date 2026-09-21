@@ -32,6 +32,7 @@ import { registerReportRoutes } from './reportRoutes.js';
 import { registerReportPptxRoutes } from './reportPptxRoutes.js';
 import { environmentMap } from '../deploy/store.js';
 import { collectDistillMaterial, runDistiller, type DistillExec } from '../knowledge/distill.js';
+import { selectKnowledge } from '../knowledge/context.js';
 import type { RelateExec } from '../knowledge/relate.js';
 import type { EmbedExec } from '../knowledge/embed.js';
 import type { TranscribeExec } from '../voice/transcribe.js';
@@ -332,6 +333,18 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
 
   // Task result for editors/MCP: PR link, gap-review, failure reason, recent log —
   // so a caller can see the outcome without opening the board.
+  /**
+   * 知識注入預覽: exactly what this task would get, and why. Answers "did my knowledge base
+   * reach the task" before the task ever runs — including the usual reason it did not (the
+   * nodes live in a repo scope this task does not point at).
+   */
+  app.get('/api/tasks/:id/knowledge', async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    const t = getTask(db, id);
+    if (!t) return reply.code(404).send({ error: 'not found' });
+    return selectKnowledge(db, t);
+  });
+
   app.get('/api/tasks/:id/result', async (req, reply) => {
     const r = taskResult(db, (req.params as any).id);
     if (!r) return reply.code(404).send({ error: 'not found' });

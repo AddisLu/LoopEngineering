@@ -36,7 +36,7 @@ export const NONNEG_KEYS = new Set([
 export const UNIT_INTERVAL_KEYS = new Set(['rag_hybrid_alpha']);
 // Phase 3 feature flags: stored as 'true'/'false'.
 export const BOOL_KEYS = new Set([
-  'chat_history_enabled', 'chat_escalate_enabled', 'chat_share_enabled', 'chat_tools_enabled', 'terminal_enabled', 'terminal_worktree', 'chat_mcp_enabled',
+  'chat_history_enabled', 'chat_escalate_enabled', 'chat_share_enabled', 'chat_tools_enabled', 'terminal_enabled', 'terminal_worktree', 'chat_mcp_enabled', 'task_mcp_enabled',
   'scheduler_paused',
   'window_checkpoint', 'weekly_packing', 'concurrency_reserve', 'priority_aging',
   'dep_auto_queue',

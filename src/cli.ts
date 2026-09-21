@@ -27,6 +27,7 @@ import { DEFAULT_SETTINGS, ENGINE_REPO_ROOT, type Complexity } from './config.js
 import { validateSetting } from './settings.js';
 import { upsertNode, listNodes, searchNodes, importNodes, type ImportNodeInput, type ImportEdgeInput } from './knowledge/store.js';
 import { exportClaudeMd } from './knowledge/export.js';
+import { selectKnowledge } from './knowledge/context.js';
 import type { KnowledgeNode, Kind, Status } from './knowledge/types.js';
 import { collectDistillMaterial, runDistiller } from './knowledge/distill.js';
 import { suggestRelations } from './knowledge/relate.js';
@@ -392,6 +393,49 @@ knowledge
   .action((o) => {
     const db = getDb();
     printNodes(listNodes(db, { kind: o.kind as Kind, scope: o.scope, status: o.status as Status }));
+  });
+
+knowledge
+  .command('rescope')
+  .description('move approved nodes from one scope to another (e.g. a repo scope no task points at)')
+  .requiredOption('--from <scope>', "source scope, e.g. 'repo:/home/me/proj'")
+  .requiredOption('--to <scope>', "target scope, e.g. 'global'")
+  .option('--kind <kind>', 'only this kind (environment|constraint|preference|project|tech|fact|person|repo)')
+  .option('--yes', 'actually write; without it this is a dry run')
+  .action((o) => {
+    const db = getDb();
+    const where = ["status = 'approved'", 'invalid_at IS NULL', 'scope = ?'];
+    const params: unknown[] = [o.from];
+    if (o.kind) {
+      where.push('kind = ?');
+      params.push(o.kind);
+    }
+    const rows = db.prepare(`SELECT id, kind, title FROM knowledge_nodes WHERE ${where.join(' AND ')} ORDER BY kind, title`).all(...params) as Array<{ id: string; kind: string; title: string }>;
+    if (!rows.length) return console.log(`no approved nodes in scope '${o.from}'${o.kind ? ` of kind '${o.kind}'` : ''}`);
+    for (const r of rows) console.log(`  [${r.kind}] ${r.title}`);
+    if (!o.yes) return console.log(`\n${rows.length} node(s) would move ${o.from} -> ${o.to}. Re-run with --yes to apply.`);
+    const upd = db.prepare("UPDATE knowledge_nodes SET scope = ?, updated_at = datetime('now') WHERE id = ?");
+    const tx = db.transaction(() => {
+      for (const r of rows) upd.run(o.to, r.id);
+    });
+    tx();
+    console.log(`\nmoved ${rows.length} node(s): ${o.from} -> ${o.to}`);
+  });
+
+knowledge
+  .command('preview <taskId>')
+  .description('show exactly which knowledge a task would be given at dispatch, and what was skipped')
+  .action((taskId: string) => {
+    const db = getDb();
+    const task = getTask(db, taskId);
+    if (!task) return fail(`task not found: ${taskId}`);
+    const sel = selectKnowledge(db, task);
+    console.log(`task   ${task.id}  ${task.title}`);
+    console.log(`repo   ${task.repo_path ?? '(none)'}`);
+    console.log(`scopes ${sel.scopes.join(', ')}`);
+    console.log(`inject ${sel.enabled ? 'on' : 'OFF (knowledge_inject=false)'} · ${sel.used}/${sel.budget} chars · ${sel.items.filter((i) => i.included).length}/${sel.items.length} nodes`);
+    for (const i of sel.items) console.log(`  ${i.included ? '✓' : ' '} [${i.kind}] ${i.title}  (rel ${i.score}, w${i.weight}, ${i.chars}c)`);
+    for (const s of sel.skipped) console.log(`  ! ${s.count} approved node(s) in scope '${s.scope}' — this task does not point there`);
   });
 
 knowledge

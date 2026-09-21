@@ -785,11 +785,13 @@ npm run loop -- add --title "Epic: 上線通知系統" \
         <li><b>MCP 一句話</b>：任何 Claude Code 對話說「記住：公司只能用 Python 3.8.10」→ <code>loop_remember</code> 入庫；<code>loop_recall</code> 搜尋、<code>loop_link</code> 建關聯。</li>
         <li><b>知識庫頁（知識星圖）</b>：整頁就是一張<b>全螢幕沉浸式知識圖譜</b>——四大分類（策展／程式碼／OpenProject／筆記）各自成一片「星系」分區、以顏色與圖例（左側面板，含即時計數）標示；畫法是<b>星雲</b>：節點畫成小光點（大小依連線數），連線用加色疊加，交會處自然變亮，密的地方燒成白色，所以看得出結構而不是一片彩色圓點。右下角的<b>「立體」</b>可以切換成 WebGL 3D：同一份圖、同一組篩選與聚焦行為，改成可以旋轉的星系（拖曳轉動、滾輪遠近、Shift 或右鍵平移、點節點聚焦）。three.js 是<b>本機 vendor</b>（<code>web/lib/three/</code>，MIT，絕不連 CDN）且<b>延遲載入</b>——不按「立體」就不會下載。分類在 3D 是四面體方向而不是平面圓環（類別數少時的圓環會退化成一條直線）；點圖例可單獨聚焦某一類（或按數字鍵 1–4），懸停高亮鄰居、點節點聚焦展開、滾輪縮放、拖曳平移。頂欄「☰ 清單」滑出<b>管理抽屜</b>：搜尋（中文 FTS）／中文 kind 篩選／新增編輯／建關聯／草稿核可。來源與分類皆已中文化（如 <code>src_xxx</code> 顯示為 LoopEngineering／OpenProject／SSoT 筆記…）。</li>
         <li><b>自動蒸餾</b>：任務結案時用 haiku 從 HANDOFF 萃取候選知識 →<b>草稿</b>（琥珀徽章），你在知識庫頁<b>核可後才會注入</b>（<code>knowledge_distill</code> 可關）。</li>
-        <li><b>CLI</b>：<code>loop knowledge &lt;list|search|add|import|export|relate&gt;</code>（<code>relate</code> 見本章「知識圖譜關聯」）。</li>
+        <li><b>CLI</b>：<code>loop knowledge &lt;list|search|add|import|export|relate|preview|rescope&gt;</code>（<code>relate</code> 見本章「知識圖譜關聯」）。</li>
       </ul>
       <h3>知識怎麼被用</h3>
       <ul>
-        <li><b>自動注入</b>：派工時依 scope（global／repo:路徑／env:名稱＋一跳關聯）選節點，environment/constraint 優先，塞進 <code>knowledge_budget_chars</code>(2500) 預算，寫入 LOOP_TASK.md 的「Knowledge / Environment」段（空知識庫＝完全不出現；<code>knowledge_inject</code> 可關）。</li>
+        <li><b>自動注入</b>：派工時依 scope（global／repo:路徑／env:名稱＋一跳關聯）選出候選節點，<b>用這張任務的標題與目標算相關度再排序</b>（中文以 bigram 比對，不需要模型），塞進 <code>knowledge_budget_chars</code>(6000) 預算，寫入 LOOP_TASK.md 的「Knowledge / Environment」段（空知識庫＝完全不出現；<code>knowledge_inject</code> 可關）。相關度高的排前面，但 <b>environment／constraint 另有 45% 的保留預算</b>，所以安全限制不會被一堆相關的 fact 擠掉。舉例：同一份 181 條的知識庫，RDMA 收圖的任務拿到的是 RDMA 那幾條（相關度 0.6–0.8），交換機埠速的任務拿到的是交換機那幾條（相關度 1.0）。</li>
+        <li><b>任務執行中可以自己查</b>（<code>task_mcp_enabled</code>，預設開）：派工時會產生一份只含唯讀伺服器的 MCP 設定（<code>loop</code>／<code>loop-fs</code>，<b>不含 gh 或任何會寫入的工具</b>）給 Claude Code，並在 LOOP_TASK.md 多一段「查知識庫」明寫<b>什麼時候該查</b>：要改設定檔／機台參數／網路硬體前先 <code>loop_recall</code>，需要背景脈絡用 <code>loop_search</code>。設定檔寫在資料目錄、不在 worktree 裡，所以永遠不會被 <code>git add -A</code> 掃進任務分支；工具名稱一併進 <code>--allowed-tools</code>，查詢不會停在權限詢問。</li>
+        <li><b>看得到有沒有進去</b>：看板點開任務 →「知識注入」區塊列出會注入幾條、用掉多少預算、每條的相關度，以及<b>最常見的失敗</b>——知識在某個 <code>repo:</code> scope 裡、但這張任務不指向那裡，會直接寫出「有 N 條在 X，這張任務拿不到」。CLI 是 <code>loop knowledge preview &lt;taskId&gt;</code>；要把一批知識換 scope 用 <code>loop knowledge rescope --from repo:/path --to global [--kind constraint] --yes</code>（不加 <code>--yes</code> 是試跑）。</li>
         <li><b>任務可指定環境</b>：新增任務的 Model 旁有 environment 欄（如 <code>company</code>／<code>home</code>）→ 該環境的知識隨之注入。</li>
         <li><b>CLAUDE.md 匯出</b>：<code>loop knowledge export --repo &lt;路徑&gt;</code> 把環境約束寫進該 repo 的 CLAUDE.md（標記區塊、冪等）——公司電腦上的 Claude/Cursor 也共享同一份知識。</li>
       </ul>
@@ -1280,6 +1282,7 @@ loop bench list | loop bench show &lt;id&gt; | loop bench matrix | loop bench ju
           <tr><td><code>chat_retention_days</code></td><td>0</td><td>保留天數，0＝永久。<code>loop chat prune</code> 用它。</td></tr>
           <tr><td><code>chat_escalate_enabled</code> / <code>chat_escalate_model</code> / <code>chat_escalate_timeout_ms</code></td><td>false / opus / 240000</td><td>請雲端複核的開關、模型與逾時。</td></tr>
           <tr><td><code>chat_share_enabled</code></td><td>true</td><td>分享連結（<code>/share.html</code>）。</td></tr>
+          <tr><td><code>task_mcp_enabled</code></td><td>true</td><td>任務執行中可呼叫 <code>loop_recall</code>／<code>loop_search</code>（見第 14 章）。</td></tr>
           <tr><td><code>office_python</code></td><td>（空）</td><td>有 python-pptx 的 python，供「存檔 → 簡報」使用（見第 26 章）。</td></tr>
           <tr><td><code>prd_repo_allowlist</code></td><td>（空）</td><td>PRD 精靈的 repo 選擇器／圖集檢查可讀的額外根目錄（絕對路徑 CSV）。</td></tr>
           <tr><td><code>local_spark_nodes</code></td><td>1</td><td>這個部署有幾台 DGX Spark；模型切換清單依它決定哪些跑得動。</td></tr>

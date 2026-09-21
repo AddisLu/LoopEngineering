@@ -47,7 +47,7 @@ const DISCIPLINE_BLOCK = `
 export function writeTaskFile(
   cwd: string,
   task: Task,
-  extras?: { knowledge?: string | null; rag?: string | null; discipline?: boolean },
+  extras?: { knowledge?: string | null; rag?: string | null; discipline?: boolean; mcpServers?: string[] },
 ): string {
   const steps = parseSteps(task);
   const modes = parseVerifyMode(task);
@@ -64,12 +64,23 @@ export function writeTaskFile(
   const manualRule = modes.has('manual')
     ? '\n- 你可能無法在此環境完整驗證（缺硬體/非目標 OS）。盡量自動驗證能驗的部分，並在 repo 根目錄寫一份 `VERIFY.md`：列出你做了什麼、還有哪些必須在目標環境（硬體/公司 Windows）手動驗證的具體步驟與預期結果。'
     : '';
+  // The injected knowledge above is a packed excerpt chosen at dispatch time. When the task
+  // also has the MCP tools, say so and say WHEN — an agent that does not know a tool exists
+  // never calls it, and "look it up if you feel like it" is not a trigger anyone acts on.
+  const askBlock = extras?.mcpServers?.length
+    ? `\n## 查知識庫（執行中隨時可用）\n` +
+      `上面的 Knowledge 只是派工當下挑出來的摘要，不是全部。遇到下列情況請先查再動手：\n` +
+      `- 要改設定檔、機台參數、網路或硬體相關的東西 → \`loop_recall\`（查已核可的限制與環境知識）\n` +
+      `- 需要背景脈絡、歷史決策、別處的做法 → \`loop_search\`（查語料庫，會回傳檔案路徑與行號）\n` +
+      `- 要讀本 repo 以外、但已登錄的專案檔案 → \`list_dir\` / \`read_file\` / \`search_text\`（唯讀）\n` +
+      `查到的限制與 Knowledge 段落同等有效；若與 Plan 衝突，以 Plan 為準，並在 HANDOFF.md 註明衝突。\n`
+    : '';
   const disciplineBlock = extras?.discipline ? DISCIPLINE_BLOCK : '';
   const body = `# Loop task: ${task.title}
 
 ## Goal
 ${task.goal}
-${knowledgeBlock}${ragBlock}
+${knowledgeBlock}${ragBlock}${askBlock}
 ## Plan
 ${planContent(task)}
 

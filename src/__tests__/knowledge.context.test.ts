@@ -8,7 +8,7 @@ import { openTestDb, setSetting } from '../db/index.js';
 import { createTask, getTask } from '../tasks.js';
 import { upsertNode, invalidateNode, addEdge } from '../knowledge/store.js';
 import { repoScope } from '../knowledge/types.js';
-import { knowledgeContext, ragTaskContext } from '../knowledge/context.js';
+import { knowledgeContext, ragTaskContext, relevance, selectKnowledge, tokens } from '../knowledge/context.js';
 import type { EmbedExec } from '../knowledge/embed.js';
 import { runTask } from '../orchestrator/run.js';
 import { createMergeTask } from '../orchestrator/mergeTask.js';
@@ -396,5 +396,64 @@ describe('createMergeTask: environment inheritance', () => {
 
     const mt = createMergeTask(db, orig, ['base.txt'], 'origin/main');
     expect(getTask(db, mt.id)!.environment).toBe('prod-cluster');
+  });
+});
+
+// ---- relevance-ranked injection (what the task is actually about) ----
+
+describe('knowledgeContext: relevance', () => {
+  const node = (title: string, body: string, kind = 'fact' as const) => upsertNode(db, { title, body, kind, scope: 'global', weight: 3 });
+
+  it('tokenises Chinese as bigrams and latin as words', () => {
+    const t = tokens('HPE 5945 交換機設定');
+    expect(t.has('hpe')).toBe(true);
+    expect(t.has('5945')).toBe(true);
+    expect(t.has('交換')).toBe(true); // no spaces in Chinese: bigrams or nothing matches
+    expect(t.has('換機')).toBe(true);
+    expect(tokens('a bb').has('bb')).toBe(false); // <3 chars, not a useful token
+    expect(relevance({ title: '相機掉幀', body: '', tags: '[]' }, tokens('相機 為什麼掉幀'))).toBeGreaterThan(0);
+    expect(relevance({ title: '完全無關', body: 'x', tags: '[]' }, tokens('相機 掉幀'))).toBe(0);
+  });
+
+  it('a tight budget keeps the node the task is about and drops the one it is not', () => {
+    setSetting(db, 'knowledge_budget_chars', '70'); // room for exactly one line
+    node('相機掉幀的處理', '收圖佇列深度不足時會掉幀，改用 SEND/RECV。');
+    node('週報產出流程', '每週五產出 PPTX 週報，範本在 templates 目錄。');
+    const task = getTask(db, createTask(db, { title: '修正相機掉幀', goal: '收圖偶爾掉幀，請找出原因' }).id)!;
+
+    const out = knowledgeContext(db, task)!;
+    expect(out).toMatch(/相機掉幀的處理/);
+    expect(out).not.toMatch(/週報產出流程/);
+  });
+
+  it('a safety constraint is never pushed out by a more relevant fact', () => {
+    setSetting(db, 'knowledge_budget_chars', '260');
+    node('機台電源限制', '任何情況下都不得在產線時間重啟控制器。', 'constraint');
+    for (let i = 0; i < 6; i++) node(`相機掉幀筆記 ${i}`, '相機 掉幀 收圖 佇列 深度 SEND RECV 都在這裡');
+    const task = getTask(db, createTask(db, { title: '相機掉幀', goal: '相機 掉幀 收圖 佇列' }).id)!;
+
+    const sel = selectKnowledge(db, task);
+    expect(sel.text).toMatch(/機台電源限制/); // the reserved share is what guarantees this
+    expect(sel.items.filter((i) => i.included).length).toBeGreaterThan(1);
+    expect(sel.used).toBeLessThanOrEqual(sel.budget);
+  });
+
+  it('reports what it searched, what it skipped and why, for the board preview', () => {
+    const other = mkTmpDir('other-repo');
+    upsertNode(db, { title: 'CF-AOI 限制', body: 'x', scope: repoScope(other) });
+    upsertNode(db, { title: '全域規則', body: 'y', scope: 'global' });
+    const task = getTask(db, createTask(db, { title: 't', goal: 'g' }).id)!; // no repo_path
+
+    const sel = selectKnowledge(db, task);
+    expect(sel.scopes).toEqual(['global']);
+    expect(sel.skipped).toEqual([{ scope: repoScope(other), count: 1 }]);
+    expect(sel.items.map((i) => i.title)).toEqual(['全域規則']);
+    expect(sel.enabled).toBe(true);
+
+    setSetting(db, 'knowledge_inject', 'false');
+    const off = selectKnowledge(db, task);
+    expect(off.enabled).toBe(false);
+    expect(off.text).toBeNull();
+    expect(off.items).toEqual([]);
   });
 });

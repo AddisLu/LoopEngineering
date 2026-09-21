@@ -19,6 +19,9 @@ export interface DispatchContext {
   localBaseUrl?: string;
   /** MCP servers (mcp_servers_json, with runtime env already merged) the opencode adapter passes on. */
   mcpServers?: McpServerCfg[];
+  /** 任務執行中查知識庫: --mcp-config file + the tool names to allow (see orchestrator/taskMcp.ts). */
+  mcpConfigPath?: string | null;
+  mcpTools?: string[];
   onEvent?: (evt: any) => void; // live stream (SSE later)
 }
 

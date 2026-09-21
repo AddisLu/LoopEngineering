@@ -1223,3 +1223,9 @@ dialog menu { display: flex; justify-content: flex-end; gap: 10px; margin: 18px 
   text-shadow: 0 0 4px rgba(6, 9, 14, .95), 0 0 9px rgba(6, 9, 14, .8);
 }
 .gbtn[aria-pressed='true'] { background: var(--accent-soft, rgba(178, 90, 52, .22)); border-color: var(--accent, #b25a34); color: var(--accent, #b25a34); }
+
+/* 任務詳情的知識注入預覽 */
+.d-knowledge { margin: 10px 0 4px; border: 1px solid var(--border, #e3dccf); border-radius: 10px; padding: 8px 12px; }
+.d-knowledge > summary { cursor: pointer; font-size: 13px; font-weight: 600; }
+.d-knowledge .d-list { margin-top: 8px; }
+.d-knowledge .banner { margin: 6px 0; font-size: 12.5px; }

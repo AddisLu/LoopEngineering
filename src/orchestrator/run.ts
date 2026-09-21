@@ -41,6 +41,7 @@ import { runDeployTask, type DeployExec } from './deployTask.js';
 import { getEnvironment } from '../deploy/store.js';
 import { isLocalModel, localId, getLocalModel } from '../local/models.js';
 import { parseMcpServers, runtimeEnvFor, type McpServerCfg } from '../mcp/config.js';
+import { cleanupTaskMcp, writeTaskMcp, type TaskMcp } from './taskMcp.js';
 
 /**
  * MCP servers a local-model task may use (mcp_servers_json), with the runtime env the chat page
@@ -226,10 +227,14 @@ export async function runTask(
     model: modelKey,
   });
 
+  // 任務執行中查知識庫: the read-only MCP servers this run may call (null when disabled).
+  // Written outside the worktree so `git add -A` can never sweep it into the task branch.
+  const taskMcp: TaskMcp | null = isMock || isGeneric ? null : writeTaskMcp(db, run.id, mcpServersForTask(db));
   const taskFilePath = writeTaskFile(worktreePath, task, {
     knowledge: knowledgeContext(db, task),
     rag: await ragTaskContext(db, task, opts.ragEmbedExec),
     discipline: disciplineOn,
+    mcpServers: taskMcp?.servers,
   });
   if (!isMock && !isGeneric) {
     // Keep engine-written artifacts out of the task branch/PR: exclude them locally
@@ -299,6 +304,8 @@ export async function runTask(
       local: isLocal ? (getLocalModel(db, localId(dispatchModel!)) ?? null) : null,
       localBaseUrl: getSetting(db, 'local_vllm_base_url') || undefined,
       mcpServers: isLocal ? mcpServersForTask(db) : undefined,
+      mcpConfigPath: taskMcp?.configPath ?? null,
+      mcpTools: taskMcp?.tools,
       resumeSessionId: resumeSid,
       resume: !!opts.resume,
       handoff,

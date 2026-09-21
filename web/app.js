@@ -764,6 +764,32 @@
     list.appendChild(dRow('建立 / 更新', `${t.created_at || '–'}  /  ${t.updated_at || '–'}`));
     detailBody.appendChild(list);
 
+    // 知識注入預覽: what this task will actually be given at dispatch. The usual failure is
+    // silent — the knowledge exists but sits in a repo scope this task does not point at —
+    // so the skipped scopes are spelled out rather than left to be discovered in a bad run.
+    const kbBox = el('details', 'd-knowledge');
+    kbBox.appendChild(el('summary', null, '知識注入（派工時會給這張任務什麼）'));
+    kbBox.appendChild(el('div', 'd-loading', '讀取中…'));
+    detailBody.appendChild(kbBox);
+    api('/api/tasks/' + id + '/knowledge', 'GET').then(
+      (k) => {
+        const box = el('div', 'd-list');
+        const included = (k.items || []).filter((i) => i.included);
+        box.appendChild(dRow('狀態', k.enabled ? `會注入 ${included.length} 條（候選 ${(k.items || []).length} 條）· ${k.used}/${k.budget} 字` : '已關閉（knowledge_inject=false）'));
+        box.appendChild(dRow('比對範圍', (k.scopes || []).join('　•　')));
+        for (const s of k.skipped || []) {
+          const warn = el('div', 'banner attn');
+          warn.textContent = `有 ${s.count} 條已核可知識在「${s.scope}」，這張任務不在那個範圍，所以拿不到。`;
+          box.appendChild(warn);
+        }
+        for (const i of included) box.appendChild(dRow(`[${i.kind}]`, `${i.title}　（相關度 ${i.score}）`));
+        const rest = (k.items || []).filter((i) => !i.included).slice(0, 5);
+        if (rest.length) box.appendChild(dRow('沒進去的', rest.map((i) => i.title).join('　•　') + ((k.items || []).length - included.length > rest.length ? ' …' : '')));
+        kbBox.replaceChildren(el('summary', null, `知識注入（${k.enabled ? `${included.length} 條` : '已關閉'}）`), box);
+      },
+      (e) => kbBox.replaceChildren(el('summary', null, '知識注入'), el('div', 'banner danger', '讀不到：' + e.message)),
+    );
+
     // epic hierarchy: list this epic's children with their statuses (simple list, not a
     // full tree widget — the rollup chip on the board card is the at-a-glance summary).
     const allCards = (lastBoard && Array.isArray(lastBoard.cards)) ? lastBoard.cards : [];
