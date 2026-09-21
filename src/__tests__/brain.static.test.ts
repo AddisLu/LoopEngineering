@@ -60,4 +60,20 @@ describe('brain page: static assets', () => {
     expect(html).toMatch(/href="\/brain\.html"/);
     expect(html).toContain('知識庫');
   });
+
+  it('the galaxy renderer draws edges additively and keeps node cores small', () => {
+    const js = fs.readFileSync(path.join(WEB_DIR, 'brain.js'), 'utf8');
+    // the old pass drew fat beads with source-over halos, so the graph read as confetti:
+    // structure came from nothing. Edges carry it now, and they only glow when summed.
+    expect(js).toContain("globalCompositeOperation = 'lighter'");
+    expect(js).toContain("globalCompositeOperation = 'source-over'"); // always restored
+    expect(js).toContain('coreMin');
+    expect(js).toContain('haloScale');
+    expect(js).toContain('haloColor');
+    expect(js).not.toContain('beadColor(v)'); // the glass-bead pass is gone
+    // additive must never escape onto the page itself — it only works on the dark canvas
+    expect(js.match(/globalCompositeOperation = 'lighter'/g)?.length).toBe(
+      js.match(/globalCompositeOperation = 'source-over'/g)?.length,
+    );
+  });
 });

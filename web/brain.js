@@ -380,13 +380,25 @@ const CATEGORY_DEFAULT_HSL = { h: 220, s: 8, l: 60 };
 // legend / KPI-strip order (top -> bottom)
 const CATEGORY_ORDER = ['策展', '程式碼', 'OpenProject', '筆記'];
 
+// Nebula rendering. The old pass drew fat bead-like nodes with source-over halos and nearly
+// invisible edges, so the picture read as confetti: no structure, every vertex equally loud.
+// This one inverts it the way a force-graph galaxy does — the EDGES carry the structure, drawn
+// additively so overlapping filaments accumulate toward white, and nodes are small bright cores
+// with an additive bloom whose size follows degree, so hubs burn and leaves stay quiet.
+// Additive only ever touches the dark canvas (never the page), which is why it glows instead of
+// turning to mud — the trap the earlier note warned about was additive on a light surface.
 const GRAPH_VISUAL = Object.freeze({
-  glowBlur: 5,       // restrained node halo (shadowBlur only — never 'lighter'/additive)
-  glowBlurHi: 15,    // hub / selected halo
-  edgeWidth: 0.6,    // hair-thin: 1062 lines read as a density gradient, not a sheet of mud
-  edgeAlphaBase: 0.10,
-  edgeAlphaHi: 0.55,
-  edgeAlphaDim: 0.03,
+  glowBlur: 5,       // kept for the selected-ring pass
+  glowBlurHi: 15,
+  edgeWidth: 0.9,    // hair-thin but visible; additive stacking does the rest
+  edgeAlphaBase: 0.26,
+  edgeAlphaHi: 0.75,
+  edgeAlphaDim: 0.04,
+  coreMin: 1.5,      // smallest node core in CSS px — a leaf is a pinpoint, not a bead
+  coreMax: 5.4,      // hub core
+  haloScale: 5.2,    // bloom radius = core * this
+  haloAlpha: 0.5,    // bloom peak (additive)
+  docCoreScale: 0.85,
   nodeAlphaDim: 0.14,
   curveAmount: 0.12, // fraction of edge length the bezier control point offsets by
   curveMax: 40,
@@ -472,11 +484,11 @@ function vertexColor(v, dim = false) {
 }
 /** Edge endpoint stop: desaturated + fixed mid-lightness so a same-category edge is a near-
  * solid quiet line and a cross-category bridge a subtle two-tone — structure without rainbow. */
-function edgeStop(v, a) { const c = vertexHSL(v); return `hsla(${c.h}, 22%, 58%, ${a})`; }
-/** Inner glass bead: same hue, lifted lightness — reads as lit-from-within, not a flat sticker. */
-function beadColor(v) { const c = vertexHSL(v); return `hsl(${c.h} ${c.s}% ${Math.min(96, c.l + 16)}%)`; }
+function edgeStop(v, a) { const c = vertexHSL(v); return `hsla(${c.h}, 52%, 52%, ${a})`; }
 /** White-hot pinpoint core for structural hubs. */
 function hubCore(v) { const c = vertexHSL(v); return `hsl(${c.h} 90% 96%)`; }
+/** Additive bloom around a node: saturated hue, mid lightness — it is summed, not blended. */
+function haloColor(v, a) { const c = vertexHSL(v); return `hsla(${c.h}, ${Math.min(95, c.s + 18)}%, 56%, ${a})`; }
 /** Faint watermark ink for a category's zone title drawn out in the sky. */
 function watermarkColor(top, a) { const c = CATEGORY_HSL[top] ?? CATEGORY_DEFAULT_HSL; return `hsla(${c.h}, 40%, 72%, ${a})`; }
 /** Per-zone nebula glow center color. */
@@ -594,7 +606,8 @@ function drawGraph() {
     }
   }
 
-  // ---- edges (draw before nodes; source-over only, never additive) ----
+  // ---- edges: the structure. Additive so crossing filaments brighten each other. ----
+  gctx.globalCompositeOperation = 'lighter';
   for (const e of graphState ? graphState.edges : []) {
     if (!visibleIds.has(e.src) || !visibleIds.has(e.dst)) continue;
     const a = graphState.vertices.get(e.src);
@@ -620,6 +633,7 @@ function drawGraph() {
     gctx.quadraticCurveTo((pa.x + pb.x) / 2 + (-dy / len) * bow, (pa.y + pb.y) / 2 + (dx / len) * bow, pb.x, pb.y);
     gctx.stroke();
   }
+  gctx.globalCompositeOperation = 'source-over';
   gctx.globalAlpha = 1;
 
   // ---- zone-title watermarks: the four 中文 category names living in the sky ----
@@ -634,12 +648,37 @@ function drawGraph() {
     }
   }
 
-  // ---- nodes ----
+  // ---- nodes: bloom first (additive, all of them), then the cores on top ----
+  const coreRadius = (v) => {
+    const deg = Math.max(0, v.degree ?? 0);
+    const base = GRAPH_VISUAL.coreMin + (GRAPH_VISUAL.coreMax - GRAPH_VISUAL.coreMin) * Math.min(1, Math.sqrt(deg) / 4);
+    return base * (v.type === 'document' ? GRAPH_VISUAL.docCoreScale : 1) * Math.min(2.2, Math.max(0.7, zoom));
+  };
+
+  gctx.globalCompositeOperation = 'lighter';
+  for (const v of vertices) {
+    const dimmed = highlight && !highlight.has(v.id);
+    const strength = dimmed ? lerp(1, 0.12, focus) : 1;
+    if (strength < 0.03) continue;
+    const p = worldToScreen(graphView, v.x, v.y, cssW, cssH);
+    const r = coreRadius(v);
+    const selected = v.id === graphCenterId || v.id === graphFocusId || v.id === hoveredVertexId;
+    const hubBloom = 1 + Math.min(0.8, Math.sqrt(Math.max(0, v.degree ?? 0)) / 6);
+    const halo = r * GRAPH_VISUAL.haloScale * hubBloom * (selected ? 1.7 : 1);
+    const g = gctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, halo);
+    g.addColorStop(0, haloColor(v, GRAPH_VISUAL.haloAlpha * strength * (selected ? 1.5 : 1)));
+    g.addColorStop(0.45, haloColor(v, GRAPH_VISUAL.haloAlpha * 0.28 * strength));
+    g.addColorStop(1, haloColor(v, 0));
+    gctx.fillStyle = g;
+    gctx.fillRect(p.x - halo, p.y - halo, halo * 2, halo * 2);
+  }
+  gctx.globalCompositeOperation = 'source-over';
+
   gctx.textAlign = 'center';
   gctx.textBaseline = 'top';
   for (const v of vertices) {
     const p = worldToScreen(graphView, v.x, v.y, cssW, cssH);
-    const r = vertexRadius(v) * zoom;
+    const r = coreRadius(v);
     const selected = v.id === graphCenterId || v.id === graphFocusId || v.id === hoveredVertexId;
     const dimmed = highlight && !highlight.has(v.id);
     const hub = isHub(v);
@@ -649,39 +688,22 @@ function drawGraph() {
     const color = vertexColor(v, dimmed && focus > 0.5);
     const shape = () => { gctx.beginPath(); doc ? gctx.rect(p.x - r, p.y - r, r * 2, r * 2) : gctx.arc(p.x, p.y, r, 0, Math.PI * 2); };
 
-    gctx.shadowColor = color;
-    gctx.shadowBlur = (selected || hub) && !dimmed ? GRAPH_VISUAL.glowBlurHi : GRAPH_VISUAL.glowBlur;
     gctx.fillStyle = color;
     shape();
     gctx.fill();
-    gctx.shadowBlur = 0;
-
-    if (!dimmed) {
-      // inner glass bead — lit-from-within depth
-      gctx.globalAlpha = 0.9;
-      gctx.fillStyle = beadColor(v);
+    // a white-hot pinpoint in the middle of anything that matters: hubs, hovered, focused
+    if (!dimmed && (hub || selected)) {
+      gctx.fillStyle = hubCore(v);
       gctx.beginPath();
-      doc ? gctx.rect(p.x - r * 0.42, p.y - r * 0.42, r * 0.84, r * 0.84) : gctx.arc(p.x, p.y, r * 0.42, 0, Math.PI * 2);
+      gctx.arc(p.x, p.y, Math.max(0.9, r * 0.42), 0, Math.PI * 2);
       gctx.fill();
-      if (hub) {
-        // white-hot pinpoint core + hue ring
-        gctx.fillStyle = hubCore(v);
-        gctx.beginPath();
-        gctx.arc(p.x, p.y, Math.max(1.2, r * 0.28), 0, Math.PI * 2);
-        gctx.fill();
-        gctx.globalAlpha = 1;
-        gctx.lineWidth = 1;
-        gctx.strokeStyle = vertexColor(v);
-        shape();
-        gctx.stroke();
-      }
-      gctx.globalAlpha = 1;
     }
 
     if (selected) {
-      gctx.lineWidth = 1.5;
+      gctx.lineWidth = 1.2;
       gctx.strokeStyle = textColor;
-      shape();
+      gctx.beginPath();
+      gctx.arc(p.x, p.y, r * 2.4, 0, Math.PI * 2);
       gctx.stroke();
     }
 
