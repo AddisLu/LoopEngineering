@@ -31,6 +31,8 @@ interface CacheEnvelope {
 const COOLDOWN_MIN_MS = 60_000;
 const COOLDOWN_MAX_MS = 3_900_000;
 const COOLDOWN_DEFAULT_MS = 300_000;
+/** TokenBar serves a cached copy younger than this rather than fetch; an older one means it could not fetch. */
+const TOKENBAR_SHARED_TTL_MS = 240_000;
 /**
  * How long past a published deadline this process keeps waiting before it asks again. The board
  * reads usage every second, so without a margin the retry lands within a second of the deadline —
@@ -150,24 +152,26 @@ export function readUsage(opts: { force?: boolean; refreshMs?: number } = {}): U
     if (got.live) {
       writeCache(got.reading); // blockedUntil dropped: the budget is evidently back
       // say so in the journal when this ends an outage, not on every routine refresh
-      if (!cache || cache.blockedUntil || Date.now() - cache.ts > refreshMs * 2) {
-        console.log(`[usage] live reading: session ${got.reading.session.percent}% weekly ${got.reading.weekly.percent}%${cache?.blockedUntil ? ' (cooldown over)' : ''}`);
+      if (!cache || Date.now() - cache.ts > refreshMs * 2) {
+        console.log(`[usage] live reading: session ${got.reading.session.percent}% weekly ${got.reading.weekly.percent}% (first in ${cache ? Math.round((Date.now() - cache.ts) / 60000) : 0} min)`);
       }
       return got.reading;
     }
     // TokenBar answered from a shared cache. Keep the reading's true age — re-dating it would let
     // a week-old number pass for fresh, for us and for every bar reading this file — and keep the
-    // cooldown envelope. A copy older than our refresh window means TokenBar could not fetch
-    // either, so park for a minute (or as long as its 429 asks) instead of asking again next second.
+    // cooldown envelope. A copy older than TokenBar's own TTL means it could not fetch either;
+    // either way a copy too old for our window gets a minute's pause (or as long as its 429 asks)
+    // instead of a new subprocess every second.
     const ageMs = Date.now() - got.takenAt;
     const stale = ageMs >= refreshMs;
+    const couldNotFetch = ageMs >= TOKENBAR_SHARED_TTL_MS;
     const cur = readCache();
     writeEnvelope({ ...(cur ?? {}), reading: got.reading, ts: got.takenAt });
-    const note = got.note ?? (stale ? `stale: TokenBar could not fetch a live reading (cached ${Math.round(ageMs / 1000)}s ago)` : undefined);
+    const note = got.note ?? (couldNotFetch ? `stale: TokenBar could not fetch a live reading (cached ${Math.round(ageMs / 1000)}s ago)` : undefined);
     if (got.cooldownMs || stale) {
       const ms = got.cooldownMs ?? COOLDOWN_MIN_MS;
       publishCooldown(ms);
-      console.warn(`[usage] TokenBar answered from cache (${Math.round(ageMs / 1000)}s old): ${note} — pausing ${Math.ceil(ms / 1000)}s`);
+      if (note) console.warn(`[usage] TokenBar answered from cache (${Math.round(ageMs / 1000)}s old): ${note} — pausing ${Math.ceil(ms / 1000)}s`);
     }
     return { ...got.reading, source: 'cache', ...(note ? { error: note } : {}) };
   } catch (err) {

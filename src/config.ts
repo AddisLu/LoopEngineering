@@ -454,7 +454,9 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   local_chat_timeout_ms: '180000',
 };
 
-export const TOKEN_REFRESH_MS = 180_000; // TokenBar cadence
+// TokenBar's shared-cache TTL (SHARED_TTL in mcp/usage-core.mjs): a copy younger than this is what
+// TokenBar itself serves instead of fetching, so asking sooner cannot get anything fresher.
+export const TOKEN_REFRESH_MS = 240_000;
 
 // Cross-tool shared usage cache: this engine, claude-usage-mcp and any other local
 // tool read+write the SAME file, so at most one of them hits oauth/usage per TTL
