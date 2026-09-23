@@ -3,14 +3,14 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { USAGE_CACHE_FILE } from '../config.js';
-import { readUsage } from '../token/usage.js';
+import { readUsage, _deps, COOLDOWN_GRACE_MS } from '../token/usage.js';
 
 /**
  * The usage reader shares one cross-tool cache file with TokenBar (mcp/usage-core.mjs), including
  * its account-wide `blockedUntil` 429 cooldown. Before this, a failed fetch left the cache alone,
  * so every board tick retried immediately — an offline Spark generated hundreds of 429s an hour.
  * These tests never touch the network: either a cooldown is in force, or TOKENBAR_MCP_DIR points
- * at a fake usage-core.
+ * at a fake usage-core. Credentials are injected too — a test must never read this host's login.
  */
 
 const reading = {
@@ -23,6 +23,7 @@ const reading = {
 };
 
 let tmp: string;
+let savedEnvToken: string | undefined;
 const writeCacheFile = (envelope: Record<string, unknown>) => {
   fs.mkdirSync(path.dirname(USAGE_CACHE_FILE), { recursive: true });
   fs.writeFileSync(USAGE_CACHE_FILE, JSON.stringify(envelope));
@@ -34,15 +35,29 @@ function fakeCore(body: string): string {
   fs.writeFileSync(path.join(dir, 'usage-core.mjs'), body);
   return dir;
 }
+/** A usage-core that must not be reached: reaching it leaves a marker the test can check. */
+function forbiddenCore(): string {
+  const dir = fakeCore(`import fs from 'node:fs'; export async function fetchUsage() { fs.writeFileSync(${JSON.stringify(path.join(os.tmpdir(), 'tokenbar-forbidden-marker'))}, '1'); throw new Error('must not fetch'); }`);
+  fs.rmSync(path.join(os.tmpdir(), 'tokenbar-forbidden-marker'), { force: true });
+  return dir;
+}
+const coreWasReached = () => fs.existsSync(path.join(os.tmpdir(), 'tokenbar-forbidden-marker'));
+
+const validSession = () => ({ accessToken: 'session-token', expiresAt: Date.now() + 3_600_000 });
 
 beforeEach(() => {
   tmp = '';
   delete process.env.TOKENBAR_MCP_DIR;
   delete process.env.LOOP_MOCK_USAGE;
+  savedEnvToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+  delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+  _deps.readCreds = validSession;
+  _deps.readLongLived = () => null;
   fs.rmSync(USAGE_CACHE_FILE, { force: true });
 });
 afterEach(() => {
   delete process.env.TOKENBAR_MCP_DIR;
+  if (savedEnvToken !== undefined) process.env.CLAUDE_CODE_OAUTH_TOKEN = savedEnvToken;
   if (tmp) fs.rmSync(tmp, { recursive: true, force: true });
   fs.rmSync(USAGE_CACHE_FILE, { force: true });
 });
@@ -68,12 +83,38 @@ describe('readUsage cooldown (shared with TokenBar)', () => {
     expect(got.error).toMatch(/cooldown/);
   });
 
-  it('ignores a cooldown that has already expired', () => {
+  it('ignores a cooldown that has already expired (grace included)', () => {
     tmp = fakeCore(`export async function fetchUsage() { return ${JSON.stringify({ ...reading, source: undefined })}; }`);
+    process.env.TOKENBAR_MCP_DIR = tmp;
+    writeCacheFile({ reading, ts: 0, blockedUntil: Date.now() - COOLDOWN_GRACE_MS - 1000 });
+
+    expect(readUsage().source).toBe('api');
+  });
+
+  it('keeps waiting for a grace period after the deadline, so the retry cannot land inside the penalty', () => {
+    tmp = forbiddenCore();
     process.env.TOKENBAR_MCP_DIR = tmp;
     writeCacheFile({ reading, ts: 0, blockedUntil: Date.now() - 1000 });
 
-    expect(readUsage().source).toBe('api');
+    const got = readUsage();
+
+    expect(coreWasReached()).toBe(false);
+    expect(got.source).toBe('cache');
+    expect(got.error).toMatch(/cooldown/);
+  });
+
+  it('honours the cooldown even for a forced read (run boundaries must not restart the hour)', () => {
+    tmp = forbiddenCore();
+    process.env.TOKENBAR_MCP_DIR = tmp;
+    const blockedUntil = Date.now() + 120_000;
+    writeCacheFile({ reading, ts: Date.now() - 10 * 60_000, blockedUntil });
+
+    const got = readUsage({ force: true });
+
+    expect(coreWasReached()).toBe(false);
+    expect(got.source).toBe('cache');
+    expect(got.session.percent).toBe(12);
+    expect(cacheFile().blockedUntil).toBe(blockedUntil);
   });
 
   it('publishes a cooldown when the read fails, so the next tick cannot retry immediately', () => {
@@ -90,6 +131,19 @@ describe('readUsage cooldown (shared with TokenBar)', () => {
     expect(after.reading).toBeTruthy(); // the last good reading is preserved for both tools
   });
 
+  it('never shortens a longer deadline a peer already published', () => {
+    // a 429 hour published by TokenBar, then our own read fails for a different reason
+    tmp = fakeCore(`export async function fetchUsage() { throw new Error('network down'); }`);
+    process.env.TOKENBAR_MCP_DIR = tmp;
+    const peerDeadline = Date.now() - COOLDOWN_GRACE_MS - 1000; // expired, so we do try …
+    writeCacheFile({ reading, ts: 0, blockedUntil: peerDeadline });
+
+    readUsage();
+
+    // … and the new deadline is ours (≥ 60s out), never pulled back to the peer's old one
+    expect(Number(cacheFile().blockedUntil)).toBeGreaterThan(Date.now() + 50_000);
+  });
+
   it('turns TokenBar’s own rate-limit answer into a cooldown of the length it asks for', () => {
     tmp = fakeCore(`export async function fetchUsage() { return { ok: false, error: 'rate-limited', retryAfterSeconds: 900 }; }`);
     process.env.TOKENBAR_MCP_DIR = tmp;
@@ -100,6 +154,28 @@ describe('readUsage cooldown (shared with TokenBar)', () => {
     const until = Number(cacheFile().blockedUntil);
     expect(until).toBeGreaterThan(Date.now() + 800_000);
     expect(until).toBeLessThan(Date.now() + 1_000_000);
+  });
+
+  it('treats a frozen reading TokenBar hands back under a 429 as a cooldown, not as a success', () => {
+    // usage-core answers a 429 with the last good reading, flagged — never with ok:false
+    tmp = fakeCore(
+      `export async function fetchUsage() {
+         return { ok: true, fromSharedCache: true, rateLimited: true, retryAfterSeconds: 900, cacheAgeSeconds: 7200,
+                  subscription: 'max', fetchedAt: ${JSON.stringify(new Date(Date.now() - 7_200_000).toISOString())},
+                  session: { percent: 5 }, weekly: { percent: 6 } };
+       }`,
+    );
+    process.env.TOKENBAR_MCP_DIR = tmp;
+
+    const got = readUsage();
+
+    expect(got.source).toBe('cache');
+    expect(got.session.percent).toBe(5);
+    expect(got.error).toMatch(/cooldown/);
+    const after = cacheFile();
+    expect(Number(after.blockedUntil)).toBeGreaterThan(Date.now() + 800_000);
+    // and the frozen reading keeps its real age instead of being re-dated as fresh
+    expect(Number(after.ts)).toBeLessThan(Date.now() - 7_000_000);
   });
 });
 
@@ -131,5 +207,86 @@ describe('readUsage delegation to TokenBar', () => {
     process.env.TOKENBAR_MCP_DIR = tmp;
 
     expect(readUsage().source).toBe('cache');
+  });
+
+  it('records a shared-cache reading at its real time and parks when it is stale', () => {
+    const takenAt = Date.now() - 3_600_000;
+    tmp = fakeCore(
+      `export async function fetchUsage() {
+         return { ok: true, fromSharedCache: true, cacheAgeSeconds: 3600, subscription: 'max',
+                  fetchedAt: ${JSON.stringify(new Date(takenAt).toISOString())},
+                  session: { percent: 5 }, weekly: { percent: 6 } };
+       }`,
+    );
+    process.env.TOKENBAR_MCP_DIR = tmp;
+
+    const got = readUsage();
+
+    expect(got.source).toBe('cache');
+    expect(got.error).toMatch(/stale/);
+    const after = cacheFile();
+    expect(Math.abs(Number(after.ts) - takenAt)).toBeLessThan(1000); // not re-dated to now
+    expect(Number(after.blockedUntil)).toBeGreaterThan(Date.now() + 50_000); // ≥ 60s before asking again
+  });
+
+  it('serves a young shared-cache reading as fresh without publishing a cooldown', () => {
+    const takenAt = Date.now() - 30_000;
+    tmp = fakeCore(
+      `export async function fetchUsage() {
+         return { ok: true, fromSharedCache: true, cacheAgeSeconds: 30, subscription: 'max',
+                  fetchedAt: ${JSON.stringify(new Date(takenAt).toISOString())},
+                  session: { percent: 5 }, weekly: { percent: 6 } };
+       }`,
+    );
+    process.env.TOKENBAR_MCP_DIR = tmp;
+
+    const got = readUsage();
+
+    expect(got.source).toBe('cache');
+    expect(got.error).toBeUndefined();
+    expect(cacheFile().blockedUntil).toBeUndefined();
+    // the next read within the refresh window comes from our own cache, no subprocess
+    fs.rmSync(tmp, { recursive: true, force: true });
+    expect(readUsage().session.percent).toBe(5);
+  });
+});
+
+describe('readUsage credentials', () => {
+  it('makes no request at all with an expired session token and nothing to fall back on', () => {
+    _deps.readCreds = () => ({ accessToken: 'old', expiresAt: Date.now() - 1000 });
+    tmp = forbiddenCore();
+    process.env.TOKENBAR_MCP_DIR = tmp;
+    writeCacheFile({ reading, ts: 0 });
+
+    const got = readUsage();
+
+    expect(coreWasReached()).toBe(false);
+    expect(got.source).toBe('cache');
+    expect(got.error).toMatch(/login expired/);
+    // parked for the default pause, not the 60s network one: the login will not fix itself
+    const until = Number(cacheFile().blockedUntil);
+    expect(until).toBeGreaterThan(Date.now() + 250_000);
+    expect(until).toBeLessThan(Date.now() + 350_000);
+  });
+
+  it('falls back to the long-lived setup-token when the session token has expired', () => {
+    _deps.readCreds = () => ({ accessToken: 'old', expiresAt: Date.now() - 1000 });
+    _deps.readLongLived = () => 'long-lived-token';
+    tmp = fakeCore(`export async function fetchUsage() { return ${JSON.stringify({ ...reading, source: undefined })}; }`);
+    process.env.TOKENBAR_MCP_DIR = tmp;
+
+    expect(readUsage().source).toBe('api');
+  });
+
+  it('degrades with a clear message when this host has never logged in', () => {
+    _deps.readCreds = () => null;
+    tmp = forbiddenCore();
+    process.env.TOKENBAR_MCP_DIR = tmp;
+
+    const got = readUsage();
+
+    expect(coreWasReached()).toBe(false);
+    expect(got.ok).toBe(false);
+    expect(got.error).toMatch(/not logged in/);
   });
 });
