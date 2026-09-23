@@ -198,7 +198,7 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
     const u = readUsage();
     return {
       paused: getBool(db, 'scheduler_paused'),
-      usage: { session: u.session.percent, weekly: u.weekly.percent, source: u.source },
+      usage: { session: u.session.percent, weekly: u.weekly.percent, source: u.source, error: u.error ?? null },
     };
   });
 

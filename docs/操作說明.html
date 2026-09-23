@@ -323,6 +323,7 @@
         <thead><tr><th>元件</th><th>說明</th></tr></thead>
         <tbody>
           <tr><td>使用率雙環</td><td><b>session</b>／<b>weekly</b> 用量百分比；依門檻變色：&lt;70% 綠、≥70% 琥珀、≥90% 紅。</td></tr>
+          <tr><td>用量狀態提示</td><td>雙環旁的琥珀／紅色 chip，只在<b>讀數不是即時</b>時出現：<b>登入已過期</b>（紅，請在主機執行一次 <code>claude</code> 重新登入；引擎不會拿過期的 token 去打用量 API）、<b>API 冷卻中</b>（429 退避，與 TokenBar 共用同一份冷卻，到期前不會再發請求）、或<b>讀不到</b>（網路）。此時雙環與排程都沿用上一次成功的讀數。</td></tr>
           <tr><td>SESSION 重置</td><td>距 session 窗重置的倒數。</td></tr>
           <tr><td>POLICY</td><td>目前時段（日間／夜間）與該時段 session 門檻。</td></tr>
           <tr><td>排程狀態</td><td>「排程執行中」或「已暫停」。</td></tr>

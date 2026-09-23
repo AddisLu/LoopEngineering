@@ -537,6 +537,9 @@ body {
   overflow: hidden; text-overflow: ellipsis;
 }
 .chip.mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+/* why the usage rings are not live (login expired / 429 cooldown / network); hidden when they are */
+.chip.usage-note[data-state="warn"] { color: var(--warn, #b45309); background: var(--warn-soft, rgba(245, 158, 11, .14)); }
+.chip.usage-note[data-state="danger"] { color: var(--danger, #b91c1c); background: var(--danger-soft, rgba(239, 68, 68, .14)); }
 .chip.cx { font-weight: 600; color: var(--text); }
 .chip.tool { max-width: 150px; }
 .chip.working { color: var(--st-running); border-color: color-mix(in srgb, var(--st-running) 30%, transparent); }

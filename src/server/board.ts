@@ -81,6 +81,9 @@ export interface BoardState {
     sessionResetsInMin: number | null;
     weeklyResetsInMin: number | null;
     source: string;
+    // Why the numbers are not a live reading (login expired, shared 429 cooldown, network) —
+    // null when they are. The topbar shows it; otherwise five stale days look like 58%.
+    error: string | null;
   };
   policy: { window: string; sessionMax: number; weeklyMax: number };
   // Why the scheduler last held / dispatched (e.g. "session 82% >= 65%"), so the board
@@ -387,6 +390,7 @@ export function boardState(db: Database.Database): BoardState {
       sessionResetsInMin: usage.session.resetsInMinutes,
       weeklyResetsInMin: usage.weekly.resetsInMinutes,
       source: usage.source,
+      error: usage.error ?? null,
     },
     policy: { window: policy.window, sessionMax: policy.sessionMax, weeklyMax: policy.weeklyMax },
     reason: schedRow?.detail ?? null,

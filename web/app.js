@@ -98,9 +98,26 @@
     $(pctId).textContent = `${Math.round(pct)}%`;
   }
 
+  // The rings show the last reading either way; this says when it is not a live one, and why.
+  function usageNote(err) {
+    if (!err) return null;
+    if (/login expired|not logged in|auth-expired/i.test(err)) return '這台的 Claude 登入已過期，用量沿用舊讀數 — 請在主機執行 claude 重新登入';
+    if (/cooldown|rate-limited/i.test(err)) return '用量 API 冷卻中（429 退避），沿用上次讀數';
+    return '用量讀不到，沿用上次讀數';
+  }
+
   function renderTop(s) {
     setRing('ring-session', 'session-pct', s.usage.session);
     setRing('ring-weekly', 'weekly-pct', s.usage.weekly);
+
+    const note = $('usage-note');
+    if (note) {
+      const msg = usageNote(s.usage.error);
+      note.hidden = !msg;
+      note.textContent = msg || '–';
+      note.title = s.usage.error || '用量讀取狀態';
+      note.setAttribute('data-state', /登入/.test(msg || '') ? 'danger' : 'warn');
+    }
 
     $('resets').querySelector('.tick-v').textContent = fmtDur(s.usage.sessionResetsInMin);
     $('policy').querySelector('.tick-v').textContent =
