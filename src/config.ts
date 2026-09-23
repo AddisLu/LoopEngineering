@@ -454,7 +454,10 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   local_chat_timeout_ms: '180000',
 };
 
-export const TOKEN_REFRESH_MS = 180_000; // TokenBar cadence
+// TokenBar's freshness window (usage-core SHARED_TTL, the bars' THROTTLE_MS): whoever reads first
+// after it pays for the fetch and everyone else reuses it. Shorter here meant Loop re-fetched a
+// reading TokenBar still considered fresh — extra requests against the same account-level limit.
+export const TOKEN_REFRESH_MS = 240_000;
 
 // Cross-tool shared usage cache: this engine, claude-usage-mcp and any other local
 // tool read+write the SAME file, so at most one of them hits oauth/usage per TTL

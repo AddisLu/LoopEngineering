@@ -166,8 +166,10 @@ export async function runTask(
   const isLocal = !isMock && isLocalModel(resolveModel(db, task));
   const hardLimit = getNum(db, 'hard_limit_pct', 95);
   // Bill the run against a fresh reading at both boundaries. A cached reading (TTL
-  // 180s) can make a short run look like ~0% delta and bias the estimator toward
+  // 240s) can make a short run look like ~0% delta and bias the estimator toward
   // zero. Mock runs stay on the cache (zero-token / deterministic tests).
+  // `force` skips the TTL, never a 429 cooldown: during one this is the cached reading,
+  // since a request made during the penalty restarts it for every tool on the account.
   const beforeReading = readUsage({ force: !isMock && !isLocal });
   const before = beforeReading.session.percent;
   const weeklyBefore = beforeReading.weekly.percent;
