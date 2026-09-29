@@ -6,7 +6,7 @@ import { getTask, latestRun, listRunsForTask, setStatus } from '../tasks.js';
 import { baseRefFor } from '../git/integrate.js';
 import { cleanupWorktree } from '../orchestrator/cleanup.js';
 import type { SandboxDeps } from '../exec/sandbox.js';
-import { armIterations, measureArm, type FinalMeasurement } from './attempts.js';
+import { armIterations, measureArm, measureBaseline, type FinalMeasurement } from './attempts.js';
 import { notify } from '../notify.js';
 import { getBenchmark, judgeList, type Benchmark, type BenchmarkArmView } from './store.js';
 import { aggregateJudgements, runBenchJudge, type ArmEvidence, type BenchJudgeExec, type BenchJudgeResult } from './judge.js';
@@ -77,6 +77,12 @@ export async function judgeBenchmark(
       for (const arm of live) {
         const final = await measureArm(db, arm.task_id, opts.sandboxDeps);
         if (final) putFinal.run(JSON.stringify(final), id, arm.model);
+      }
+      // the code the arms started from, measured the same way once: what "N× faster than before"
+      // is read against (only a benchmark with engine-checked numbers has something to compare)
+      if (bench.acceptance_metrics && !bench.baseline_json) {
+        const baseline = await measureBaseline(db, live.map((a) => a.task_id), opts.sandboxDeps);
+        if (baseline) db.prepare('UPDATE benchmarks SET baseline_json = ? WHERE id = ?').run(JSON.stringify(baseline), id);
       }
     }
     const previous = previousEvidence(bench);

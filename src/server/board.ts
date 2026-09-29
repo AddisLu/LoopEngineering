@@ -52,6 +52,10 @@ export interface BoardCard {
   pipeline_id?: string | null; // delivery pipeline: shared id across this template instance's stage tasks
   stage_name?: string | null; // delivery pipeline: this task's stage name within its pipeline_id
   source_ref?: string | null; // ADO/GitHub bridge: origin work item this task was imported from
+  created_at: string;
+  repo?: string | null; // the repo's folder name (the list view's 工作流程 column)
+  benchmark_id?: string | null; // benchmark mode: the benchmark this task is one arm of (總覽 groups them)
+  parent_task_id?: string | null; // an auto merge-conflict task: the task whose conflict it resolves
 }
 
 export interface EpicRollup {
@@ -101,6 +105,45 @@ export interface BoardState {
   local: { enabled: boolean; loaded: string | null; status: string; inflight: number };
   // 評比使用中: the chat page greys out model switching while a benchmark owns the GPU
   benchmark: { id: string; title: string; status: string; arms_done: number; arm_count: number } | null;
+  // every benchmark a card on the board belongs to: 總覽 draws each one as a group (question → arms →
+  // final measurement → judge), so it needs the title and where the judging stands
+  benchmarks: BoardBenchmark[];
+}
+
+export interface BoardBenchmark {
+  id: string;
+  title: string;
+  status: string;
+  domain: string;
+  winner: string | null;
+  judge_models: string | null;
+  judge_model: string;
+}
+
+/** The benchmarks the given arm tasks belong to (one small query). */
+function boardBenchmarks(db: Database.Database, ids: string[]): BoardBenchmark[] {
+  if (!ids.length || !getBool(db, 'benchmark_enabled', false)) return [];
+  const marks = ids.map(() => '?').join(',');
+  return db
+    .prepare(`SELECT id, title, status, domain, winner, judge_models, judge_model FROM benchmarks WHERE id IN (${marks}) ORDER BY created_at DESC`)
+    .all(...ids) as BoardBenchmark[];
+}
+
+/**
+ * The entry gate costs two synchronous git calls per task, and the board is rebuilt every second:
+ * keep each task's verdict until the task changes, and at most GATE_TTL_MS so a repo or branch
+ * that disappears underneath still shows up within a minute.
+ */
+const GATE_TTL_MS = 60_000;
+const gateCache = new Map<string, { key: string; at: number; gate: BoardCard['gate'] }>();
+function cachedGate(t: Task, hostCaps: string, envs: ReturnType<typeof environmentMap>, envKey: string): BoardCard['gate'] {
+  const key = `${t.updated_at}|${hostCaps}|${envKey}`;
+  const hit = gateCache.get(t.id);
+  const now = Date.now();
+  if (hit && hit.key === key && now - hit.at < GATE_TTL_MS) return hit.gate;
+  const gate = validateTask(t, hostCaps, envs);
+  gateCache.set(t.id, { key, at: now, gate });
+  return gate;
 }
 
 /** The benchmark currently occupying the machine, if any (cheap: one indexed row). */
@@ -216,10 +259,26 @@ function tsToMs(s: string): number {
   return new Date(s.includes('T') ? s : s.replace(' ', 'T') + 'Z').getTime();
 }
 
+/** The last `bytes` of a file (a run log can be megabytes; the board only shows its tail). */
+function readTail(file: string, bytes = 64 * 1024): string {
+  const fd = fs.openSync(file, 'r');
+  try {
+    const size = fs.fstatSync(fd).size;
+    const len = Math.min(size, bytes);
+    const buf = Buffer.alloc(len);
+    fs.readSync(fd, buf, 0, len, size - len);
+    const text = buf.toString('utf8');
+    // a cut through the middle of a line (or a multi-byte character) is dropped
+    return size > len ? text.slice(text.indexOf('\n') + 1) : text;
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
 export function tailLog(path: string | null, n = 6): string[] {
   if (!path) return [];
   try {
-    const lines = fs.readFileSync(path, 'utf8').trim().split('\n');
+    const lines = readTail(path).trim().split('\n');
     const out: string[] = [];
     for (const l of lines.slice(-40)) {
       // bound parse work; one assistant event can yield several tool lines
@@ -305,6 +364,7 @@ export function boardState(db: Database.Database): BoardState {
       ORDER BY id DESC LIMIT 1`,
   );
 
+  const envKey = JSON.stringify([...envs.values()]);
   const allTasks = listTasks(db);
   // epic hierarchy: group children by parent_id once, so each epic card's rollup is O(1)
   // instead of re-scanning all tasks per card.
@@ -334,13 +394,17 @@ export function boardState(db: Database.Database): BoardState {
       model: t.model,
       coding_tool: t.coding_tool,
       verify_count: Array.isArray(verify) ? verify.length : 0,
-      gate: validateTask(t, hostCaps, envs),
+      gate: cachedGate(t, hostCaps, envs, envKey),
       pr_url: t.pr_url,
       merge_status: t.merge_status,
       verify_mode: t.verify_mode,
       est_pct: estimatePct(db, t.complexity),
       updated_at: t.updated_at,
+      created_at: t.created_at,
     };
+    if (t.repo_path) card.repo = path.basename(t.repo_path);
+    if (t.benchmark_id) card.benchmark_id = t.benchmark_id;
+    if (t.parent_task_id) card.parent_task_id = t.parent_task_id;
     if (t.requires) card.requires = t.requires;
     if (t.parent_id) card.parent_id = t.parent_id;
     if (t.pipeline_id) {
@@ -438,6 +502,7 @@ export function boardState(db: Database.Database): BoardState {
       inflight: activeLocalRunCount(db),
     },
     benchmark: runningBenchmark(db),
+    benchmarks: boardBenchmarks(db, [...new Set(allTasks.map((t) => t.benchmark_id).filter((v): v is string => !!v))]),
     forecast: {
       weekly_backlog_pct: fc.weekly_backlog_pct,
       weekly_headroom: fc.weekly_headroom,

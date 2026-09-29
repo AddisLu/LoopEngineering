@@ -790,7 +790,7 @@ function recordVerification(
     }
     updateRun(db, runId, {
       verify_json: JSON.stringify(
-        results.map((r) => ({ step: r.step, ok: r.ok, exitCode: r.exitCode, timedOut: r.timedOut, tail: r.output.replace(/\s+$/, '').slice(-600) })),
+        results.map((r) => ({ step: r.step, ok: r.ok, exitCode: r.exitCode, timedOut: r.timedOut, tail: r.output.replace(/\s+$/, '').slice(-600), ...(r.ms != null ? { ms: r.ms } : {}) })),
       ),
       metrics_json: metrics ? JSON.stringify(metrics) : null,
       ...shas,

@@ -15,6 +15,8 @@ export interface VerifiedStep {
   exitCode: number | null;
   timedOut: boolean;
   tail: string;
+  /** wall-clock time of the step (absent on runs recorded before it was kept) */
+  ms?: number;
 }
 
 export function readVerify(run: Pick<TaskRun, 'verify_json'> | null | undefined): VerifiedStep[] {

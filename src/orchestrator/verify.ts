@@ -9,6 +9,8 @@ export interface VerifyStepResult {
   exitCode: number | null;
   timedOut: boolean;
   output: string;
+  /** how long the step took (wall clock), so the run history can show time per step */
+  ms?: number;
 }
 
 export interface VerifyResult {
@@ -51,7 +53,9 @@ export async function runVerification(
   const results: VerifyStepResult[] = [];
   for (const step of steps) {
     const sb = parseSandboxStep(step);
+    const started = Date.now();
     const r = sb === null ? await runStep(step, cwd, perStepTimeoutMs, shell) : await runSandboxStep(step, sb.command, sb.host, cwd, perStepTimeoutMs, sandbox ?? null);
+    r.ms = Date.now() - started;
     results.push(r);
     if (!r.ok) return { ok: false, results, failedStep: step };
   }

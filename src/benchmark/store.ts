@@ -58,6 +58,8 @@ export interface Benchmark {
   verify_plan_id: string | null;
   verify_timeout_min: number | null;
   timeout_min: number | null;
+  /** BaselineMeasurement: the base commit measured with the same verification (null = not measured) */
+  baseline_json: string | null;
 }
 
 export interface BenchmarkJudgement {
@@ -563,6 +565,8 @@ export interface Recommendation {
   cloud: MatrixRow | null;
   /** fewer than 3 judged benchmarks behind the local pick: a hint, not a finding */
   thin: boolean;
+  /** the verdict as a kind the page can colour: no local data, local cannot, local can, local weaker than cloud */
+  kind: 'none' | 'cannot' | 'can' | 'weaker';
   verdict: string;
 }
 
@@ -584,11 +588,78 @@ export function benchmarkRecommendations(db: Database.Database, opts: { min_n?: 
     const cloud = here.filter((r) => !r.local).sort(better)[0] ?? null;
     const thin = !local || local.n < 3;
     let verdict: string;
-    if (!local) verdict = '還沒有本地模型評比過這類工作';
-    else if (local.verify_pass_rate === 0) verdict = `本地模型還做不來（${local.model_label} 通過率 0%）${cloud ? `，先交給雲端 ${cloud.model_label}` : ''}`;
-    else if (!cloud || local.verify_pass_rate >= cloud.verify_pass_rate) verdict = `可以交給 ${local.model_label}（通過率 ${pct(local.verify_pass_rate)}，一次就過 ${pct(local.first_try_rate)}）`;
-    else verdict = `${local.model_label} 做得到但不如雲端（通過率 ${pct(local.verify_pass_rate)} 對 ${cloud.model_label} ${pct(cloud.verify_pass_rate)}），重要的工作交給雲端`;
-    out.push({ domain, local, cloud, thin, verdict: thin && local ? `${verdict}；只有 ${local.n} 場，僅供參考` : verdict });
+    let kind: Recommendation['kind'];
+    if (!local) {
+      kind = 'none';
+      verdict = '還沒有本地模型評比過這類工作';
+    } else if (local.verify_pass_rate === 0) {
+      kind = 'cannot';
+      verdict = `本地模型還做不來（${local.model_label} 通過率 0%）${cloud ? `，先交給雲端 ${cloud.model_label}` : ''}`;
+    } else if (!cloud || local.verify_pass_rate >= cloud.verify_pass_rate) {
+      kind = 'can';
+      verdict = `可以交給 ${local.model_label}（通過率 ${pct(local.verify_pass_rate)}，一次就過 ${pct(local.first_try_rate)}）`;
+    } else {
+      kind = 'weaker';
+      verdict = `${local.model_label} 做得到但不如雲端（通過率 ${pct(local.verify_pass_rate)} 對 ${cloud.model_label} ${pct(cloud.verify_pass_rate)}），重要的工作交給雲端`;
+    }
+    out.push({ domain, local, cloud, thin, kind, verdict: thin && local ? `${verdict}；只有 ${local.n} 場，僅供參考` : verdict });
   }
   return out;
+}
+
+export interface HeadToHead {
+  /** the row model and the column model */
+  a: string;
+  b: string;
+  /** benchmarks where both were judged, and how many of them a ranked above b */
+  n: number;
+  wins: number;
+  rate: number;
+}
+
+/**
+ * Model against model: in every judged benchmark both took part in, did one rank above the other.
+ * The LMArena-style pairwise table, read straight off judge_rank (which already puts arms that
+ * passed the measured bar above those that did not).
+ */
+export function benchmarkHeadToHead(
+  db: Database.Database,
+  filter: { domain?: string | null } = {},
+): { models: Array<{ model: string; label: string; local: boolean; n: number }>; pairs: HeadToHead[] } {
+  const rows = db
+    .prepare(
+      `SELECT a.benchmark_id AS bid, a.model AS model, a.judge_rank AS rank
+         FROM benchmark_arms a JOIN benchmarks b ON b.id = a.benchmark_id
+        WHERE b.status = 'judged' AND a.judge_rank IS NOT NULL${filter.domain ? ' AND b.domain = ?' : ''}`,
+    )
+    .all(...(filter.domain ? [filter.domain] : [])) as Array<{ bid: string; model: string; rank: number }>;
+  const byBench = new Map<string, Array<{ model: string; rank: number }>>();
+  const count = new Map<string, number>();
+  for (const r of rows) {
+    const list = byBench.get(r.bid) ?? [];
+    list.push({ model: r.model, rank: r.rank });
+    byBench.set(r.bid, list);
+    count.set(r.model, (count.get(r.model) ?? 0) + 1);
+  }
+  const tally = new Map<string, { n: number; wins: number }>();
+  for (const arms of byBench.values()) {
+    for (const x of arms) {
+      for (const y of arms) {
+        if (x.model === y.model) continue;
+        const k = `${x.model}\u0000${y.model}`;
+        const t = tally.get(k) ?? { n: 0, wins: 0 };
+        t.n += 1;
+        if (x.rank < y.rank) t.wins += 1;
+        tally.set(k, t);
+      }
+    }
+  }
+  const models = [...count.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([model, n]) => ({ model, label: modelLabel(db, model) ?? model, local: isLocalModel(model), n }));
+  const pairs: HeadToHead[] = [...tally.entries()].map(([k, t]) => {
+    const [a, b] = k.split('\u0000') as [string, string];
+    return { a, b, n: t.n, wins: t.wins, rate: Math.round((t.wins / t.n) * 100) / 100 };
+  });
+  return { models, pairs };
 }

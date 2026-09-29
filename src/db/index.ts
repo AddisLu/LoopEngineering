@@ -194,6 +194,9 @@ function migrate(db: Database.Database): void {
     ['attempts_json', 'TEXT'],
     ['final_json', 'TEXT'],
   ]);
+  // the starting code every arm began from, measured once with the same verification (baseline_json):
+  // what "faster than before" is measured against
+  add('benchmarks', [['baseline_json', 'TEXT']]);
   // 分享連結: an unguessable token makes one conversation readable without a login. Partial index
   // so the many NULLs (every unshared conversation) do not collide.
   add('chat_conversations', [

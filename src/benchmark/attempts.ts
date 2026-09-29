@@ -1,11 +1,14 @@
 import fs from 'node:fs';
+import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import type Database from 'better-sqlite3';
+import { paths } from '../config.js';
 import { getTask, latestRun } from '../tasks.js';
 import { runVerifyGate } from '../orchestrator/run.js';
-import { readMetrics, readVerify } from '../orchestrator/runSummary.js';
+import { readMetrics, readVerify, type VerifiedStep } from '../orchestrator/runSummary.js';
 import type { MetricCheck, MetricsReport } from '../orchestrator/acceptance.js';
 import type { SandboxDeps } from '../exec/sandbox.js';
-import type { TaskRun } from '../types.js';
+import type { Task, TaskRun } from '../types.js';
 
 /**
  * What a benchmark arm's verification found, attempt by attempt, and the final re-measurement the
@@ -32,6 +35,14 @@ export interface AttemptRecord {
   self_runs: number;
   /** one of them ran a profiler (ncu / nsys) */
   profiler: boolean;
+  /** when the attempt ran (ISO / sqlite UTC as stored); finished_at is null while it runs */
+  started_at: string | null;
+  finished_at: string | null;
+  duration_s: number | null;
+  tokens_in: number | null;
+  tokens_out: number | null;
+  /** its verification steps, with the time each took when that was recorded */
+  steps: VerifiedStep[];
 }
 
 export interface IterationSummary {
@@ -53,7 +64,7 @@ export interface FinalMeasurement {
   failed_step: string | null;
   metrics: Record<string, number | string> | null;
   checks: MetricCheck[] | null;
-  steps: Array<{ step: string; ok: boolean; exitCode: number | null; timedOut: boolean; tail: string }>;
+  steps: Array<{ step: string; ok: boolean; exitCode: number | null; timedOut: boolean; tail: string; ms?: number }>;
   measured_at: string;
 }
 
@@ -79,6 +90,13 @@ function lastStatus(db: Database.Database, runId: string): string | null {
     .prepare("SELECT detail FROM task_events WHERE run_id = ? AND kind = 'status' AND detail IS NOT NULL ORDER BY id DESC LIMIT 1")
     .get(runId) as { detail: string } | undefined;
   return row?.detail ? row.detail.split('\n')[0]!.slice(0, 200) : null;
+}
+
+/** sqlite writes "YYYY-MM-DD HH:MM:SS" (UTC); finishRun writes ISO */
+function tsMs(s: string | null | undefined): number | null {
+  if (!s) return null;
+  const t = new Date(s.includes('T') ? s : `${s.replace(' ', 'T')}Z`).getTime();
+  return Number.isFinite(t) ? t : null;
 }
 
 const num = (v: number | string | null | undefined) => (typeof v === 'number' ? String(Math.round(v * 1000) / 1000) : String(v ?? '—'));
@@ -127,6 +145,8 @@ export function armIterations(db: Database.Database, taskId: string): IterationS
     const verified = run.verify_json != null;
     const c = verified ? classify(steps, metrics) : { outcome: 'unverified' as const, failed: null };
     const sb = sandboxRuns(db, run.id);
+    const start = tsMs(run.started_at);
+    const end = tsMs(run.finished_at);
     return {
       attempt: i + 1,
       run_id: run.id,
@@ -137,6 +157,12 @@ export function armIterations(db: Database.Database, taskId: string): IterationS
       note: verified ? null : lastStatus(db, run.id),
       self_runs: sb.n,
       profiler: sb.profiler,
+      started_at: run.started_at ?? null,
+      finished_at: run.finished_at ?? null,
+      duration_s: start != null && end != null ? Math.max(0, Math.round((end - start) / 1000)) : null,
+      tokens_in: run.tokens_in ?? null,
+      tokens_out: run.tokens_out ?? null,
+      steps,
     };
   });
   const passIdx = attempts.findIndex((a) => a.outcome === 'pass');
@@ -165,7 +191,7 @@ export async function measureArm(db: Database.Database, taskId: string, sandboxD
   if (!task || !run?.worktree_path || !fs.existsSync(run.worktree_path)) return null;
   const gate = await runVerifyGate(db, task, run.worktree_path, run.id, task.base_branch, sandboxDeps, { record: false });
   if (!gate.ran && !gate.failure) return null; // nothing measurable here (no command steps / capability missing)
-  const steps = gate.results.map((r) => ({ step: r.step, ok: r.ok, exitCode: r.exitCode, timedOut: r.timedOut, tail: r.output.replace(/\s+$/, '').slice(-600) }));
+  const steps = gate.results.map((r) => ({ step: r.step, ok: r.ok, exitCode: r.exitCode, timedOut: r.timedOut, tail: r.output.replace(/\s+$/, '').slice(-600), ...(r.ms != null ? { ms: r.ms } : {}) }));
   const c = classify(steps, gate.metrics);
   return {
     outcome: c.outcome === 'unverified' ? 'functional' : c.outcome,
@@ -175,4 +201,78 @@ export async function measureArm(db: Database.Database, taskId: string, sandboxD
     steps,
     measured_at: new Date().toISOString(),
   };
+}
+
+/** The code every arm started from, measured with the same verification as the arms. */
+export interface BaselineMeasurement extends FinalMeasurement {
+  /** the commit that was measured: the base the arms recorded */
+  base_sha: string;
+}
+
+export type GitExec = (args: string[]) => void;
+const realGitExec: GitExec = (args) => {
+  execFileSync('git', args, { stdio: 'ignore', timeout: 60_000 });
+};
+
+/**
+ * Measure where the arms started: the base commit an arm recorded, checked out on its own (a
+ * detached worktree under the data dir, removed afterwards) and verified once exactly like the
+ * arms. It is what "N× faster than before" is measured against, and it tells an arm that made
+ * the code faster apart from a task that was already within the bar. Null when no arm recorded
+ * its base, or the repo will not check it out; the benchmark then simply has no baseline.
+ */
+export async function measureBaseline(
+  db: Database.Database,
+  taskIds: string[],
+  sandboxDeps?: SandboxDeps,
+  git: GitExec = realGitExec,
+): Promise<BaselineMeasurement | null> {
+  let task: Task | undefined;
+  let run: TaskRun | undefined;
+  for (const id of taskIds) {
+    const t = getTask(db, id);
+    if (!t?.repo_path) continue;
+    const r = db
+      .prepare('SELECT * FROM task_runs WHERE task_id = ? AND base_sha IS NOT NULL ORDER BY started_at DESC, rowid DESC LIMIT 1')
+      .get(id) as TaskRun | undefined;
+    if (r?.base_sha) {
+      task = t;
+      run = r;
+      break;
+    }
+  }
+  if (!task?.repo_path || !run?.base_sha) return null;
+  const sha = run.base_sha;
+  const dir = path.join(paths.worktreesDir, `baseline_${task.benchmark_id ?? task.id}_${Date.now().toString(36)}`);
+  try {
+    git(['-C', task.repo_path, 'worktree', 'add', '--detach', dir, sha]);
+  } catch {
+    return null;
+  }
+  try {
+    const gate = await runVerifyGate(db, task, dir, run.id, task.base_branch, sandboxDeps, { record: false });
+    if (!gate.ran && !gate.failure) return null;
+    const steps = gate.results.map((r) => ({ step: r.step, ok: r.ok, exitCode: r.exitCode, timedOut: r.timedOut, tail: r.output.replace(/\s+$/, '').slice(-600), ...(r.ms != null ? { ms: r.ms } : {}) }));
+    const c = classify(steps, gate.metrics);
+    return {
+      outcome: c.outcome === 'unverified' ? 'functional' : c.outcome,
+      failed_step: c.failed,
+      metrics: gate.metrics?.values ?? null,
+      checks: gate.metrics?.checks ?? null,
+      steps,
+      measured_at: new Date().toISOString(),
+      base_sha: sha,
+    };
+  } finally {
+    try {
+      git(['-C', task.repo_path, 'worktree', 'remove', '--force', dir]);
+    } catch {
+      fs.rmSync(dir, { recursive: true, force: true });
+      try {
+        git(['-C', task.repo_path, 'worktree', 'prune']);
+      } catch {
+        /* a stale worktree entry is harmless; git prunes it later */
+      }
+    }
+  }
 }

@@ -18,6 +18,7 @@ import { updateVerification, TaskEditError, type VerificationPatch } from '../ta
 import { identityOf, IdentityError } from './identity.js';
 import { latestRun } from '../tasks.js';
 import { boardState, taskResult } from './board.js';
+import { taskHistory } from '../orchestrator/history.js';
 import { forecastBacklog } from '../token/accounting.js';
 import { computeMetrics } from './metrics.js';
 import type { Complexity } from '../config.js';
@@ -398,6 +399,12 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
    * reach the task" before the task ever runs — including the usual reason it did not (the
    * nodes live in a repo scope this task does not point at).
    */
+  // 工作流程 canvas: every attempt, the event log, and where each lifecycle stage stands
+  app.get('/api/tasks/:id/runs', async (req, reply) => {
+    const h = taskHistory(db, (req.params as any).id);
+    return h ?? reply.code(404).send({ error: 'not found' });
+  });
+
   app.get('/api/tasks/:id/knowledge', async (req, reply) => {
     const id = (req.params as { id: string }).id;
     const t = getTask(db, id);
@@ -560,6 +567,14 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
   });
 
   // --- SSE: push a full board snapshot every second (+ immediately) ---
+  // Every open page shares one snapshot per second: building it walks every task (and a log tail
+  // per running one), so N open tabs used to cost N rebuilds a second.
+  let snap = { at: 0, data: '' };
+  const boardSnapshot = (): string => {
+    const now = Date.now();
+    if (!snap.data || now - snap.at >= 900) snap = { at: now, data: JSON.stringify(boardState(db)) };
+    return snap.data;
+  };
   app.get('/api/stream', (req, reply) => {
     reply.raw.writeHead(200, {
       'Content-Type': 'text/event-stream',
@@ -568,7 +583,7 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
     });
     const send = () => {
       try {
-        reply.raw.write(`data: ${JSON.stringify(boardState(db))}\n\n`);
+        reply.raw.write(`data: ${boardSnapshot()}\n\n`);
       } catch {
         /* client gone */
       }

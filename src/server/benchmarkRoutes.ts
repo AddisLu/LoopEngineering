@@ -5,6 +5,7 @@ import type { Complexity } from '../config.js';
 import {
   activeBenchmark,
   BenchmarkInputError,
+  benchmarkHeadToHead,
   benchmarkMatrix,
   benchmarkRecommendations,
   benchmarkSummary,
@@ -16,6 +17,8 @@ import {
 } from '../benchmark/store.js';
 import { isJudging, judgeBenchmark } from '../benchmark/complete.js';
 import { benchmarkReport } from '../benchmark/report.js';
+import { measureBaseline, type GitExec } from '../benchmark/attempts.js';
+import type { SandboxDeps } from '../exec/sandbox.js';
 import type { BenchJudgeExec } from '../benchmark/judge.js';
 import { listBuiltin, resolveSource, type ResolveDeps, type SourceKind } from '../benchmark/source.js';
 import { getDraft } from '../prd/drafts.js';
@@ -33,6 +36,9 @@ export interface BenchmarkRouteOptions {
   prdReviewExec?: PrdReviewExec;
   /** Kill an arm's live run before the cancel marks it failed (the server wires this to killRun). */
   onArmCancel?: (task: Task) => void;
+  /** Test-only: how a baseline measurement reaches git and the 沙盒. */
+  baselineGit?: GitExec;
+  sandboxDeps?: SandboxDeps;
 }
 
 const TERMINAL = new Set(['review', 'attention', 'failed', 'closed']);
@@ -71,6 +77,12 @@ export function registerBenchmarkRoutes(
     if (!enabled()) return off(reply);
     const minN = Number((req.query as Record<string, string | undefined>)?.min_n);
     return { recommendations: benchmarkRecommendations(db, { min_n: Number.isFinite(minN) && minN > 0 ? minN : 1 }) };
+  });
+
+  /** Model against model: how often one ranked above the other in the judged benchmarks both entered. */
+  app.get('/api/benchmarks/h2h', async (req, reply) => {
+    if (!enabled()) return off(reply);
+    return benchmarkHeadToHead(db, { domain: str((req.query as Record<string, string | undefined>)?.domain) });
   });
 
   /** What the dock shows: the running one, the last few, and each model's record. */
@@ -190,6 +202,32 @@ export function registerBenchmarkRoutes(
     const judges = list((req.body as Record<string, unknown> | undefined)?.judge_models);
     const benchmark = await judgeBenchmark(db, detail.benchmark.id, opts.judgeExec, { judges: judges.length ? judges : undefined });
     return benchmark ? { benchmark } : reply.code(409).send({ error: '已經有一次評分在進行中。' });
+  });
+
+  /**
+   * Measure (again) the code the arms started from, with the benchmark's own verification — for a
+   * benchmark judged before baselines were kept, or after the question's yardstick changed. It
+   * needs the GPU to itself, so not while arms still run or are being judged.
+   */
+  const measuringBaseline = new Set<string>();
+  app.post('/api/benchmarks/:id/baseline', async (req, reply) => {
+    if (!enabled()) return off(reply);
+    const id = (req.params as { id: string }).id;
+    const detail = getBenchmark(db, id);
+    if (!detail) return reply.code(404).send({ error: 'not found' });
+    if (detail.benchmark.status === 'running' || detail.benchmark.status === 'judging') {
+      return reply.code(409).send({ error: '評比還在進行，等評完再量基準（量測要獨占 GPU）。' });
+    }
+    if (measuringBaseline.has(id)) return reply.code(409).send({ error: '基準正在量測中。' });
+    measuringBaseline.add(id);
+    try {
+      const baseline = await measureBaseline(db, detail.arms.map((a) => a.task_id), opts.sandboxDeps, opts.baselineGit);
+      if (!baseline) return reply.code(422).send({ error: '量不到基準：參賽任務沒有記下起點（base commit），或 repo 讀不到。' });
+      db.prepare('UPDATE benchmarks SET baseline_json = ? WHERE id = ?').run(JSON.stringify(baseline), id);
+      return { benchmark: getBenchmark(db, id)!.benchmark };
+    } finally {
+      measuringBaseline.delete(id);
+    }
   });
 
   /** Stop a benchmark that is still running: its unfinished arms are failed and the GPU freed. */
