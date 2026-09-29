@@ -13,6 +13,16 @@ describe('operator pages: 新工作 / 驗收 / 驗證方案', () => {
     ['plans.html', 'plans.js'],
   ] as const;
 
+  it('the verdict banner kinds are not classes the board stylesheet owns (.progress is a 4px bar)', () => {
+    const m = read('task.js').match(/const kind = \{([^}]*)\}\[b\.verdict\]/);
+    expect(m).not.toBeNull();
+    const kinds = [...m![1].matchAll(/:\s*'([a-z-]+)'/g)].map((x) => x[1]);
+    expect(kinds).toHaveLength(4);
+    const styles = read('styles.css');
+    for (const k of kinds) expect(styles, k).not.toMatch(new RegExp(`(^|[,}]\\s*)\\.${k}(?![\\w-])`, 'm'));
+    expect(styles).toMatch(/^\.progress \{/m); // the guard would catch the old 'progress' kind
+  });
+
   it('render with textContent only (cheap XSS guard) and share ops.js / ops.css', () => {
     for (const js of ['ops.js', 'job.js', 'task.js', 'plans.js']) expect(read(js), js).not.toMatch(/innerHTML|outerHTML|insertAdjacentHTML|document\.write/);
     for (const [html, js] of pages) {

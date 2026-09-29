@@ -63,7 +63,7 @@
 
     // verdict
     const v = $('verdict');
-    const kind = { passed: 'ok', failed: 'bad', manual: 'manual', in_progress: 'progress' }[b.verdict];
+    const kind = { passed: 'ok', failed: 'bad', manual: 'manual', in_progress: 'running' }[b.verdict];
     v.className = `verdict ${kind}`;
     v.replaceChildren();
     v.appendChild(icon({ passed: 'circleCheck', failed: 'alert', manual: 'hand', in_progress: 'clock' }[b.verdict]));

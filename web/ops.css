@@ -70,7 +70,7 @@ body.ops .icon-btn svg { width: 18px; height: 18px; }
 .verdict.bad svg { color: var(--danger); }
 .verdict.manual { background: var(--warn-soft); }
 .verdict.manual svg { color: var(--warn); }
-.verdict.progress svg { color: var(--accent-2); }
+.verdict.running svg { color: var(--accent-2); } /* not .progress: styles.css owns that (a 4px bar) */
 
 /* tabs */
 .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); overflow-x: auto; }
