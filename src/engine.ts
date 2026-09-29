@@ -7,7 +7,7 @@ import { runTask } from './orchestrator/run.js';
 import { recoverOnStartup } from './orchestrator/recovery.js';
 import { tick, type TickInfo } from './scheduler/tick.js';
 import { releasePower } from './scheduler/power.js';
-import { paths, ENGINE_REPO_ROOT } from './config.js';
+import { paths, ENGINE_REPO_ROOT, USAGE_CACHE_FILE } from './config.js';
 
 /**
  * Rebuild + restart the engine in place, detached so it survives the engine's own
@@ -51,8 +51,11 @@ export interface Engine {
 export function createEngine(db: Database.Database = getDb()): Engine {
   const inflight = new Map<string, Promise<void>>();
 
-  // Let the budget-guard hook (spawned inside claude) find the shared cache + limit.
-  process.env.LOOP_USAGE_CACHE = process.env.LOOP_USAGE_CACHE ?? `${paths.dataDir}/usage-cache.json`;
+  // Let the budget-guard hook (spawned inside claude) find the shared cache + limit. It has to be
+  // the file readUsage actually writes, which config.ts resolved (and ~-expanded) at import — the
+  // hook reads this variable raw, and `${dataDir}/usage-cache.json` only matched it when
+  // LOOP_DATA_DIR was set, so by default the guard read a file nobody wrote and never tripped.
+  process.env.LOOP_USAGE_CACHE = USAGE_CACHE_FILE;
   process.env.LOOP_HARD_LIMIT_PCT = String(getNum(db, 'hard_limit_pct', 95));
 
   function startRun(task: Task, opts: { resume?: boolean }): void {
