@@ -11,6 +11,7 @@
       /* the classic columns live on as the 看板 view */
       #view-kanban { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
       #view-kanban .board { flex: 1 1 auto; min-height: 0; }
+      #view-kanban .card .btn { display: inline-block; border-radius: 999px; }
       #view-list { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: auto; }
       .views { flex: 1 1 auto; min-height: 0; display: flex; }
       .top-search { width: 280px; height: 36px; padding: 0 10px; display: flex; align-items: center; gap: 8px; border: 1px solid var(--border-2); border-radius: 9px; background: var(--surface-2); color: var(--text-2); }
@@ -36,6 +37,9 @@
       .fnode .ic svg { pointer-events: none; }
       @media (max-width: 820px) {
         .views { flex-direction: column; overflow-y: auto; }
+        /* phones: what needs you first, then the list of work */
+        .views > .inbox { order: -1; flex: 0 0 auto; overflow: visible; }
+        #view-list { flex: 0 0 auto; overflow: visible; }
         .canvas-wrap { min-height: 360px; }
         .top-search { display: none; }
         #view-switch button[data-view="kanban"] { display: none; }

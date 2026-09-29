@@ -1039,7 +1039,9 @@ function runInfo() {
   const put = (k, sub, sk = k) => {
     info[k] = { sub, state: s[sk] || 'idle', badge: STATE_BADGE[s[sk]] ? { kind: STATE_BADGE[s[sk]] } : null };
   };
-  put('need', t.status === 'draft' ? '草稿，還沒送出' : `已送出 · ${shortTime(t.created_at)}`, 'trigger');
+  put('need', t.status === 'draft' ? '草稿，還沒排入' : `已送出 · ${shortTime(t.created_at)}`, 'trigger');
+  // waiting for its turn (usage, time window, an upstream task) is not a problem: a clock, not a "!"
+  if ((t.status === 'queued' || t.status === 'ready') && s.trigger === 'warn') info.need = { sub: t.depends_on ? '排隊中 · 等上一步' : '排隊中 · 等派工', state: 'queued', badge: { kind: 'queued' } };
   put('setup', s.setup === 'active' ? '準備中…' : s.setup === 'fail' ? '準備環境失敗' : t.setup_cmd ? '前置指令' : 'worktree');
   const running = hist.active_run;
   const aiSub = running && s.implement === 'active'
