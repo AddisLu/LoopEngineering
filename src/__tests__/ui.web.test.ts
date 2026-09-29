@@ -128,7 +128,7 @@ describe('chart scales', () => {
 });
 
 describe('the new pages stay textContent-only and offline', () => {
-  const files = ['frame.js', 'charts.js', 'flow/layout.js', 'flow/canvas.js', 'flow.js', 'board-flow.js', 'benchmarks.js'];
+  const files = ['frame.js', 'charts.js', 'flow/layout.js', 'flow/canvas.js', 'flow.js', 'board-flow.js', 'benchmarks.js', 'prd-form.js'];
   it.each(files)('%s never builds markup from strings', (f) => {
     const src = fs.readFileSync(path.join(WEB, f), 'utf8');
     for (const bad of ['innerHTML', 'outerHTML', 'insertAdjacentHTML', 'document.write']) expect(src, `${f} uses ${bad}`).not.toContain(bad);

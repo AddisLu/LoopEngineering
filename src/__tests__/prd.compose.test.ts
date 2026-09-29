@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { composePrd, datasetCommand, emptyDataset, emptyForm, verifyModes } from '../../web/prd-compose.js';
 import { parsePrdToForm, type PrdForm } from '../prd/compose.js';
 import { lintPrd, sectionKey } from '../prd/lint.js';
+import { applyKind, applyPlan, mergeForm, planSteps } from '../../web/prd-form.js';
+import { KINDS } from '../../web/prd-kinds.js';
 
 /**
  * The wizard composes in the browser and the gate parses on the server. These tests run the real
@@ -177,6 +179,61 @@ typescript
     expect(cmd).toContain('compare_results.py');
     expect(cmd).toContain('--glmean-tol 0.25');
     expect(cmd).toContain('trap "kill $IP" EXIT');
+  });
+});
+
+describe('form builders shared by the 工作流程 page and 對話操作 (web/prd-form.js)', () => {
+  const plan = {
+    id: 'vp_1',
+    name: 'CCL 量尺',
+    host: 'local',
+    steps: ['bash run_bench.sh {dataset}'],
+    dataset_root: '/data/ccl',
+    dataset_default: 'masks',
+    metrics: 'correct == 1; max_ms <= 10',
+    artifacts: ['build/check.log'],
+    protected_paths: ['bench/**'],
+    manual_checks: ['看一眼輸出'],
+    setup_cmd: 'make -C ccl',
+    domain: 'cuda',
+    repo_path: '/home/x/ccl',
+  };
+
+  it('a 驗證方案 brings the whole yardstick, aimed at its machine', () => {
+    expect(planSteps(plan, '/data/ccl/masks')).toEqual(['sandbox: bash run_bench.sh /data/ccl/masks']);
+    expect(planSteps({ host: 'aoi-gpu', steps: ['sandbox: already aimed'] }, null)).toEqual(['sandbox: already aimed']);
+    const f = mergeForm(null);
+    applyPlan(f, plan);
+    expect(f).toMatchObject({
+      plan_id: 'vp_1',
+      repo: { path: '/home/x/ccl' },
+      verify: { commands: ['sandbox: bash run_bench.sh /data/ccl/masks'], metrics: ['correct == 1', 'max_ms <= 10'], artifacts: ['build/check.log'] },
+      scope: { protected: ['bench/**'], setup: ['make -C ccl'], domain: 'cuda' },
+    });
+    expect(f.scope.non_goals[0]).toContain('CCL 量尺');
+  });
+
+  it('a change type only fills what is empty, and the result passes the gate once the facts are in', () => {
+    for (const key of Object.keys(KINDS)) {
+      const f = mergeForm(null);
+      f.scope.non_goals = ['已寫好的非範圍'];
+      applyKind(f, key);
+      expect(f.kind).toBe(key);
+      expect(f.scope.non_goals).toEqual(['已寫好的非範圍']);
+      expect(f.acceptance.length).toBeGreaterThan(0);
+      f.repo = { path: '/home/x/repo', branch: 'main', module: null };
+      f.change = { title: '一個具體的修改', symptom: '現在的行為不對而且可以重現', expected: '改好之後應該照規格運作', files: [], extra: ['只改相關的程式'] };
+      f.verify.commands = ['npm test'];
+      const lint = lintPrd(composePrd(f), { exists });
+      expect(lint.missing, key).toEqual([]);
+    }
+  });
+
+  it('an old draft missing newer fields still opens', () => {
+    const f = mergeForm({ change: { title: 'x' } } as never);
+    expect(f.verify.metrics).toEqual([]);
+    expect(f.scope.protected).toEqual([]);
+    expect(f.flow).toEqual({ type: 'task', models: [], judges: ['opus'] });
   });
 });
 
