@@ -1,5 +1,6 @@
 // CUDA arithmetic micro-benchmark: vec_add / vec_sub / vec_mul / vec_div
-// over N = 1<<22 float elements, each op a grid-stride-loop kernel.
+// over N = 1<<22 float elements, each op a grid-stride-loop kernel using
+// float4 (128-bit) loads/stores with a scalar tail for any n % 4 remainder.
 // Build: nvcc -O3 -lineinfo -arch=sm_121 -o arith_kernel arith_kernel.cu
 #include <cstdio>
 #include <cstdlib>
@@ -20,22 +21,60 @@
         }                                                                    \
     } while (0)
 
+// Each kernel walks the bulk of the array as float4 (128-bit) loads/stores —
+// one grid-stride loop over n/4 vector groups — then a second grid-stride
+// loop mops up the [n/4*4, n) tail with scalar accesses, so n need not be a
+// multiple of 4. cudaMalloc buffers are always sufficiently aligned for
+// float4 reinterpretation.
 __global__ void vec_add(const float *a, const float *b, float *c, int n) {
-    for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < n;
+    const int n4 = n / 4;
+    const float4 *a4 = reinterpret_cast<const float4 *>(a);
+    const float4 *b4 = reinterpret_cast<const float4 *>(b);
+    float4 *c4 = reinterpret_cast<float4 *>(c);
+    for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < n4;
+         i += blockDim.x * gridDim.x) {
+        float4 av = a4[i];
+        float4 bv = b4[i];
+        c4[i] = make_float4(av.x + bv.x, av.y + bv.y, av.z + bv.z, av.w + bv.w);
+    }
+    const int tail_start = n4 * 4;
+    for (int i = tail_start + blockIdx.x * blockDim.x + threadIdx.x; i < n;
          i += blockDim.x * gridDim.x) {
         c[i] = a[i] + b[i];
     }
 }
 
 __global__ void vec_sub(const float *a, const float *b, float *c, int n) {
-    for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < n;
+    const int n4 = n / 4;
+    const float4 *a4 = reinterpret_cast<const float4 *>(a);
+    const float4 *b4 = reinterpret_cast<const float4 *>(b);
+    float4 *c4 = reinterpret_cast<float4 *>(c);
+    for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < n4;
+         i += blockDim.x * gridDim.x) {
+        float4 av = a4[i];
+        float4 bv = b4[i];
+        c4[i] = make_float4(av.x - bv.x, av.y - bv.y, av.z - bv.z, av.w - bv.w);
+    }
+    const int tail_start = n4 * 4;
+    for (int i = tail_start + blockIdx.x * blockDim.x + threadIdx.x; i < n;
          i += blockDim.x * gridDim.x) {
         c[i] = a[i] - b[i];
     }
 }
 
 __global__ void vec_mul(const float *a, const float *b, float *c, int n) {
-    for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < n;
+    const int n4 = n / 4;
+    const float4 *a4 = reinterpret_cast<const float4 *>(a);
+    const float4 *b4 = reinterpret_cast<const float4 *>(b);
+    float4 *c4 = reinterpret_cast<float4 *>(c);
+    for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < n4;
+         i += blockDim.x * gridDim.x) {
+        float4 av = a4[i];
+        float4 bv = b4[i];
+        c4[i] = make_float4(av.x * bv.x, av.y * bv.y, av.z * bv.z, av.w * bv.w);
+    }
+    const int tail_start = n4 * 4;
+    for (int i = tail_start + blockIdx.x * blockDim.x + threadIdx.x; i < n;
          i += blockDim.x * gridDim.x) {
         c[i] = a[i] * b[i];
     }
@@ -45,7 +84,19 @@ __global__ void vec_mul(const float *a, const float *b, float *c, int n) {
 // so the denominator stays > 0.5 by construction and division can never hit
 // (or straddle) zero — no NaN/Inf, no near-zero blow-ups.
 __global__ void vec_div(const float *a, const float *b, float *c, int n) {
-    for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < n;
+    const int n4 = n / 4;
+    const float4 *a4 = reinterpret_cast<const float4 *>(a);
+    const float4 *b4 = reinterpret_cast<const float4 *>(b);
+    float4 *c4 = reinterpret_cast<float4 *>(c);
+    for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < n4;
+         i += blockDim.x * gridDim.x) {
+        float4 av = a4[i];
+        float4 bv = b4[i];
+        c4[i] = make_float4(fdividef(av.x, bv.x), fdividef(av.y, bv.y),
+                             fdividef(av.z, bv.z), fdividef(av.w, bv.w));
+    }
+    const int tail_start = n4 * 4;
+    for (int i = tail_start + blockIdx.x * blockDim.x + threadIdx.x; i < n;
          i += blockDim.x * gridDim.x) {
         c[i] = fdividef(a[i], b[i]);
     }

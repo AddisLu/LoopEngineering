@@ -10,11 +10,16 @@ the kernels with Nsight Compute (`ncu`).
 - `arith_kernel.cu` — the four kernels (grid-stride loop, 256 threads/block by
   default, configurable via `argv[1]`) plus a `main()` that allocates/copies
   the input, runs each kernel, copies the result back, and verifies it
-  against a CPU loop with `1e-5` tolerance. `a[i]` is uniform random in
-  `[-5, 5)`; `b[i] = fabsf(cosf(i * 0.013f)) + 1.0f` is deterministic and
-  always in `[1, 2]`. `vec_div` therefore divides by a denominator that is
-  `> 0.5` by construction — it can never reach zero, straddle zero, or produce
-  NaN/Inf or near-zero blow-ups.
+  against a CPU loop with `1e-5` tolerance. Each kernel reads/writes its three
+  `float` arrays as `float4` (128-bit) in the main grid-stride loop — one
+  vector group (`n/4`) per iteration — then a second grid-stride loop over the
+  `[n/4*4, n)` remainder handles any tail with plain scalar accesses, so `n`
+  need not be a multiple of 4 (the current `N = 1<<22` happens to be, but the
+  tail path exists for generality and is exercised whenever `N` isn't).
+  `a[i]` is uniform random in `[-5, 5)`; `b[i] = fabsf(cosf(i * 0.013f)) +
+  1.0f` is deterministic and always in `[1, 2]`. `vec_div` therefore divides
+  by a denominator that is `> 0.5` by construction — it can never reach zero,
+  straddle zero, or produce NaN/Inf or near-zero blow-ups.
 - `run_ncu.sh` — builds with `nvcc -O3 -lineinfo -arch=sm_121`, runs the
   correctness check, then profiles with `ncu --set full` (falling back to
   `--section SpeedOfLight --section LaunchStats` if `--set full` isn't
@@ -98,7 +103,7 @@ The last line `run_ncu.sh` prints is one JSON object for Loop's 驗收指標, on
 exit after the correctness check — the `NCU SKIPPED` paths included:
 
 ```
-LOOP_METRICS {"pass":4,"fail":0,"ncu":1,"add_us":194.40,"sub_us":212.80,"mul_us":206.66,"div_us":192.16,"max_duration_us":212.80,"min_occupancy":90.82,"min_bandwidth_gbs":236.5}
+LOOP_METRICS {"pass":4,"fail":0,"ncu":1,"mul_us":187.87,"div_us":190.02,"sub_us":189.73,"add_us":189.73,"max_duration_us":190.02,"min_occupancy":89.03,"min_bandwidth_gbs":264.9}
 ```
 
 - `pass` / `fail` — PASS / FAIL lines from the CPU cross-check.
