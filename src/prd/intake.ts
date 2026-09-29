@@ -122,6 +122,7 @@ export async function submitPrd(db: Database.Database, markdown: string, opts: S
   // the human checklist rides along in the rubric so both the llm judge and VERIFY.md see it
   const rubric = [
     ...f.acceptance.map((a) => `- ${a}`),
+    ...(f.acceptance_metrics ? ['', `驗收指標（引擎自動檢查）：${f.acceptance_metrics}`] : []),
     ...(f.manual_checks.length ? ['', '人工驗收：', ...f.manual_checks.map((m) => `- ${m}`)] : []),
   ].join('\n');
   const common = {
@@ -143,6 +144,8 @@ export async function submitPrd(db: Database.Database, markdown: string, opts: S
       judge_models: opts.judge_models,
       setup_cmd: f.setup_steps?.length ? f.setup_steps.join(' && ') : null,
       source_kind: 'draft',
+      acceptance_metrics: f.acceptance_metrics,
+      protected_paths: f.protected_paths.length ? f.protected_paths.join(',') : null,
     });
     logEvent(db, { kind: 'note', detail: `PRD intake: benchmark ${benchmark.id} from ${path.basename(planRef)}` });
     return { ok: true, kind: 'benchmark', check, plan_ref: planRef, benchmark, arms };
@@ -162,9 +165,12 @@ export async function submitPrd(db: Database.Database, markdown: string, opts: S
     coding_tool: 'claude-code',
     model,
     verify_mode: [...modes].join(','),
-    requires: f.requires ?? (f.dataset ? 'gpu' : null),
+    // a local image set needs this machine's GPU; one on a sandbox host is measured over there
+    requires: f.requires ?? (f.dataset && !f.dataset.host ? 'gpu' : null),
     setup_cmd: f.setup_steps.length ? f.setup_steps.join(' && ') : null,
     created_by: 'prd',
+    acceptance_metrics: f.acceptance_metrics,
+    protected_paths: f.protected_paths.length ? f.protected_paths.join(',') : null,
   });
   const gate = validateTask(created, getSetting(db, 'host_capabilities') ?? '');
   if (gate.ok && opts.queue !== false) setStatus(db, created.id, 'queued', { detail: 'queued from PRD intake' });

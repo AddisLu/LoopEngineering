@@ -95,6 +95,9 @@ export interface NewBenchmarkInput {
   source_ref?: string | null;
   /** dev/test only: 'mock' runs every arm on the zero-token mock adapter. */
   coding_tool?: 'claude-code' | 'mock';
+  /** 驗收指標 / 保護路徑 from the PRD: every arm is held to the same engine-checked bar */
+  acceptance_metrics?: string | null;
+  protected_paths?: string | null;
 }
 
 /** Human name for a model id: local display name, else the alias itself. */
@@ -253,6 +256,8 @@ export function createBenchmark(
       verify_rubric: input.verify_rubric ?? null,
       experiment: `bench:${id}`,
       benchmark_id: id,
+      acceptance_metrics: input.acceptance_metrics ?? null,
+      protected_paths: input.protected_paths ?? null,
     });
     insertArm.run(id, model, task.id);
     setStatus(db, task.id, 'queued', { detail: `benchmark ${id} arm (${model})` });

@@ -558,7 +558,10 @@ const prdReport = (c) => [
 
 server.registerTool('loop_prd_template', {
   title: 'Get the Loop PRD template',
-  description: 'The section skeleton the PRD gate expects (目標/範圍/非範圍/驗收標準/驗證指令/Repo/領域/複雜度). Write PRDs in this shape so a local model can implement them unattended.',
+  description:
+    'The section skeleton the PRD gate expects (目標/範圍/非範圍/驗收標準/驗證指令/Repo/領域/複雜度). Write PRDs in this shape so a local model can implement them unattended. ' +
+    'Optional sections worth using for overnight runs: 驗收指標 (machine-checked thresholds like "detection_rate >= 0.98" that the engine compares against a LOOP_METRICS {json} line a verify command prints), ' +
+    '保護路徑 (globs such as scripts/eval/** the implementer must not change), 圖集比對 with 主機 (an exec host holding the image library; its verify command then starts with sandbox@<host>:).',
   inputSchema: {},
 }, async () => {
   try {
