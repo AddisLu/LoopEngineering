@@ -181,6 +181,7 @@
     <a href="#report-pptx">25 · 企業週報 PPTX（公版格式）</a>
     <a href="#local-models">26 · 本地模型（vLLM）、對話工作台與 Benchmark</a>
     <a href="#tools">26a · 上網／工具、MCP 與終端機</a>
+    <a href="#sandbox">26b · GPU 執行沙盒：自己跑、自己驗證</a>
     <a href="#appendix">27 · 附錄（API / 檔案位置）</a>
   </nav>
 
@@ -431,6 +432,8 @@
           <tr><td><code>forecast</code></td><td>Backlog 用量預估（見第 17 章）；若有可比較資料，尾端再附一行執行紀律 A/B 摘要（見第 18 章）。</td></tr>
           <tr><td><code>experiment [tag] [--days &lt;n&gt;]</code></td><td>A/B cohort 比較：把用 <code>--experiment &lt;名&gt;</code> 標記過的終態任務（closed／attention／failed）依標籤分組，列出 pass 率、平均 session%、attention 率、平均 resume。給 <code>tag</code> 只看前綴符合的 cohort。用來驗證「精準規格＋便宜模型」是否真的贏過基線（見第 18 章）。</td></tr>
           <tr><td><code>env list｜add &lt;name&gt;｜remove &lt;name&gt;</code></td><td>管理部署環境（見第 19 章）。<code>add</code> 旗標：<code>--kind</code> <code>--host</code> <code>--capabilities</code> <code>--deploy-cmd</code> <code>--auto-deploy</code>。</td></tr>
+          <tr><td><code>exec check [--profile]</code></td><td>GPU 執行沙盒的健康檢查：Docker、映像、容器裡看得到 GPU、有沒有 nvcc／ncu、真的沒有網路、/work 可寫入；<code>--profile</code> 再編一個小 kernel 跑 <code>ncu</code>，確認讀得到 GPU 效能計數器（見第 26b 章）。</td></tr>
+          <tr><td><code>exec run [--dir &lt;path&gt;] [--timeout &lt;秒&gt;] &lt;指令…&gt;</code></td><td>在沙盒裡跑一行指令（預設工作目錄 <code>&lt;資料目錄&gt;/exec/cli</code>），exit code 照實回傳。</td></tr>
           <tr><td><code>deploy --env &lt;name&gt; --repo &lt;path&gt; --base &lt;branch&gt;</code></td><td>建立並排入一個 <code>tool=deploy</code> 任務（見第 19 章）。</td></tr>
           <tr><td><code>deploy rollback &lt;env&gt;</code></td><td>把該環境回滾到上一次成功部署的 commit。</td></tr>
           <tr><td><code>pipeline list</code></td><td>列出 pipeline 模板（內建 <code>feature</code>／<code>fix</code>／<code>ship</code>，見第 20 章）與各自的 stage。</td></tr>
@@ -572,6 +575,23 @@ npm run loop -- list --status review</code></pre>
         </tbody>
       </table></div>
       <div class="note tip"><span class="ic">🤖</span><span><b>離開時的最佳設定：</b>開 <code>dep_done_on_merge</code>（全自主接力）＋把 backlog 加深，引擎就會「執行→併回→自我更新→放行下一棒」跨多個 reset 連續跑；預算三層保護仍在，weekly 上限會保留餘裕給你自己（見<a href="#budget">第 9 章</a>）。</span></div>
+
+      <h3>GPU 執行沙盒（見<a href="#sandbox">第 26b 章</a>）</h3>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>鍵</th><th>預設</th><th>說明</th></tr></thead>
+        <tbody>
+          <tr><td><code>exec_enabled</code></td><td>false</td><td>總開關。關＝對話頁沒有沙盒工具、任務不多 <code>loop-exec</code> server、<code>sandbox:</code> 驗證步驟直接失敗並說明——與改版前完全一樣。</td></tr>
+          <tr><td><code>exec_image</code></td><td>nvidia/cuda:13.0.3-devel-ubuntu24.04</td><td>容器映像；不會自動下載，先 <code>docker pull</code>。</td></tr>
+          <tr><td><code>exec_gpus</code></td><td>all</td><td><code>docker --gpus</code> 的值；空字串＝不給 GPU。</td></tr>
+          <tr><td><code>exec_memory</code>／<code>exec_cpus</code>／<code>exec_pids</code></td><td>16g／8／512</td><td>每個容器的資源上限。</td></tr>
+          <tr><td><code>exec_timeout_sec</code>／<code>exec_max_timeout_sec</code></td><td>120／900</td><td>每次執行的預設逾時與呼叫端可要求的上限（秒）。<code>sandbox:</code> 驗證步驟改用 verify 逾時。</td></tr>
+          <tr><td><code>exec_max_concurrency</code></td><td>2</td><td>同時執行的容器數（對話頁、任務、驗證合計）。</td></tr>
+          <tr><td><code>exec_output_chars</code></td><td>12000</td><td>每次保留的輸出字數（頭 2,000 字＋尾巴）。</td></tr>
+          <tr><td><code>exec_allowed_users</code></td><td>（空）</td><td>對話頁誰能執行程式（<code>ts:&lt;登入&gt;</code>、<code>name:&lt;名字&gt;</code>、<code>local</code>）。空＝沒人；不影響任務。</td></tr>
+          <tr><td><code>exec_profiling_cap</code></td><td>false</td><td>給容器 SYS_ADMIN 讓 <code>ncu</code> 讀效能計數器；隔離變弱，優先改用主機驅動參數。</td></tr>
+          <tr><td><code>exec_chat_max_rounds</code>／<code>exec_chat_wall_ms</code></td><td>10／900000</td><td>對話頁有沙盒時的回合數與總時間上限。</td></tr>
+        </tbody>
+      </table></div>
 
       <h3>環境變數（<code>~/.config/loop-engineering/env</code>）</h3>
       <div class="tbl-wrap">
@@ -1347,6 +1367,73 @@ loop bench list | loop bench show &lt;id&gt; | loop bench matrix | loop bench ju
         <li><b>啟用</b>：<code>loop config set terminal_enabled true</code>、<code>loop config set terminal_allowed_users ts:you@example.com</code>。</li>
       </ul>
       <p>API：<code>GET /api/terminal/access</code>、<code>GET /api/terminal/sessions</code>、<code>GET /api/terminal/ws</code>（WebSocket，token 走 <code>?token=</code>）。</p>
+    </section>
+
+    <section id="sandbox">
+      <h2><span class="num">26b</span>GPU 執行沙盒：自己跑、自己驗證</h2>
+      <p>沒有沙盒時，對話頁的模型只有唯讀工具，寫得出程式卻只能請你「跑完把輸出貼回來」；Claude 跑任務時 Bash 也只開 git／npm／node／ls／cat，不能編譯、不能執行。沙盒補上這一段：每次執行開一個<b>用完即丟的 Docker 容器</b>，可以用 GPU、其他什麼都不能碰，模型與 agent 就能自己寫檔、編譯、執行、量測，以真實輸出為準。</p>
+
+      <h3>隔離方式（每一次執行都一樣）</h3>
+      <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>項目</th><th>設定</th></tr></thead>
+        <tbody>
+          <tr><td>網路</td><td><code>--network none</code>：連不到外網、內網、Loop API 與這台機器上的任何服務。套件要先做進映像。</td></tr>
+          <tr><td>檔案</td><td>只掛一個資料夾到 <code>/work</code>：對話頁＝這個對話專屬的 <code>&lt;資料目錄&gt;/exec/chat/&lt;對話 id&gt;</code>；任務＝這個 run 的 worktree。根目錄唯讀（<code>--read-only</code>），<code>/tmp</code> 是 2 GB 的 tmpfs。</td></tr>
+          <tr><td>權限</td><td>以引擎的 uid 執行（不是 root）、<code>--cap-drop ALL</code>、<code>no-new-privileges</code>。</td></tr>
+          <tr><td>資源</td><td><code>exec_memory</code>（16g）、<code>exec_cpus</code>（8）、<code>exec_pids</code>（512）；同時最多 <code>exec_max_concurrency</code>（2）個容器。</td></tr>
+          <tr><td>時間</td><td>每次預設 <code>exec_timeout_sec</code>（120 秒），呼叫時可加長到 <code>exec_max_timeout_sec</code>（900 秒）；逾時用 <code>docker kill</code> 收掉容器。</td></tr>
+          <tr><td>映像</td><td><code>exec_image</code>（預設 <code>nvidia/cuda:13.0.3-devel-ubuntu24.04</code>，arm64 可用）。<b>不會自動下載</b>（<code>--pull never</code>）：沒有就直接報錯並告訴你要 <code>docker pull</code> 什麼。</td></tr>
+        </tbody>
+      </table>
+      </div>
+
+      <h3>啟用步驟</h3>
+      <ol>
+        <li>準備映像：<code>docker pull nvidia/cuda:13.0.3-devel-ubuntu24.04</code>。版本請對齊 <code>nvidia-smi</code> 顯示的 CUDA 版本（驅動要夠新）；要換就 <code>loop config set exec_image &lt;映像&gt;</code>。</li>
+        <li>健康檢查：<code>loop exec check --profile</code>。逐項列出 ✅／❌／⚠️；任何 ❌ 都附修法。</li>
+        <li>要用 <code>ncu</code>（Nsight Compute）量測：GPU 效能計數器預設只有系統管理員能讀，會出現 <code>ERR_NVGPUCTRPERM</code>。<b>建議</b>在主機設定驅動參數後重開機：<pre><code>echo 'options nvidia NVreg_RestrictProfilingToAdminUsers=0' | sudo tee /etc/modprobe.d/nvidia-profiling.conf
+sudo update-initramfs -u &amp;&amp; sudo reboot</code></pre>不想動主機的話可以 <code>loop config set exec_profiling_cap true</code>（容器多拿 SYS_ADMIN，隔離會變弱，不建議長期開）。映像裡沒有 <code>ncu</code> 時，<code>loop exec check</code> 會標 ⚠️，請自建含 <code>cuda-nsight-compute</code> 的映像。</li>
+        <li>打開：<code>loop config set exec_enabled true</code>。對話頁還要把允許的人加進 <code>exec_allowed_users</code>（格式同 <code>terminal_allowed_users</code>：<code>ts:&lt;登入&gt;</code>、<code>name:&lt;名字&gt;</code>、<code>local</code>；空白＝對話頁沒人能用）。</li>
+      </ol>
+
+      <h3>對話頁</h3>
+      <ul>
+        <li>勾「上網／工具」、<code>exec_enabled=true</code>、你的身分在 <code>exec_allowed_users</code>、而且是存下來的對話——四個條件都成立，這一題才會多四個工具：<code>sandbox_write_file</code>、<code>sandbox_run</code>、<code>sandbox_read_file</code>、<code>sandbox_list</code>。</li>
+        <li>模型會自己寫檔、編譯、執行、跑 <code>ncu</code>，再依實際輸出回答。這種題目的回合數與時間放寬為 <code>exec_chat_max_rounds</code>（10 輪）與 <code>exec_chat_wall_ms</code>（15 分鐘）；同一個指令改完檔再跑一次不算「重複呼叫」。</li>
+        <li>回答下方的「工具呼叫」卡片，每次執行都有「指令與輸出」可以展開，看到的是<b>原始輸出</b>，不是模型的轉述——驗證結果以這裡為準。</li>
+        <li>刪除對話時，它的沙盒資料夾一起刪；<code>loop chat prune</code> 也會清掉。</li>
+      </ul>
+
+      <h3>任務（Claude 與本地模型）</h3>
+      <ul>
+        <li><code>exec_enabled=true</code> 時，每個 run 會多一個 MCP server <code>loop-exec</code>，只有一個工具 <code>run</code>（Claude 下叫 <code>mcp__loop-exec__run</code>）。它本身不做任何事，只把呼叫連同 run id 轉給引擎的 <code>POST /api/exec/run</code>；引擎依自己的紀錄找出這個 run 的 worktree 掛成 <code>/work</code>，所以 agent 指定不了別的目錄，run 結束後也就不能再用。</li>
+        <li>LOOP_TASK.md 會多一段「GPU 沙盒（執行中可用）」，告訴 agent 寫完就自己編譯、執行、量測，並用 exit code 表達驗證結果。每次執行都會在任務的事件時間軸記一行（指令＋exit code），事後查得到 agent 跑過什麼。</li>
+        <li>Claude 等待 MCP 工具的時間會自動拉長到 <code>exec_max_timeout_sec</code> ＋ 2 分鐘（透過 <code>MCP_TOOL_TIMEOUT</code>），長時間的編譯不會被切斷。</li>
+      </ul>
+
+      <h3><code>sandbox:</code> 驗證步驟</h3>
+      <p>驗證步驟寫成 <code>sandbox: &lt;指令&gt;</code>，引擎就在同一種容器裡、以 worktree 為 <code>/work</code> 執行它——agent 試過的環境就是引擎驗收的環境。沒有前綴的步驟照舊在主機上跑。沙盒沒開時，這種步驟會<b>直接失敗並說明原因</b>，絕不偷偷改在主機上執行。</p>
+      <pre><code># 正確性：程式自己和 CPU 參考值比對，不符就 exit 1
+loop add --title "加減乘除 kernel" --goal "…" --plan ./plan.md --repo /path/to/repo --base main \
+  --verify "sandbox: nvcc -O3 -o build/arith arith.cu &amp;&amp; ./build/arith"</code></pre>
+      <p><b>讓驗證可以自動判斷</b>是重點：把「對不對」寫成程式裡的檢查、用 exit code 表達（例如誤差超過容許值就 <code>exit 1</code>）；效能也一樣，用 <code>ncu --csv --metrics …</code> 取出數字，再用一個小腳本檢查門檻。只把輸出印出來、靠人或模型看「看起來對」，不算驗證。注意 <code>--verify</code> 以逗號分隔步驟，指令本身不能含逗號（需要時寫成腳本檔再執行）。</p>
+
+      <h3>疑難排解</h3>
+      <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>看到</th><th>原因與處理</th></tr></thead>
+        <tbody>
+          <tr><td>沒有映像 …：先執行 docker pull</td><td>映像不在這台機器上（沙盒不會自動下載）。<code>docker pull</code> 後再 <code>loop exec check</code>。</td></tr>
+          <tr><td>Docker 無法使用 GPU</td><td>沒有 NVIDIA Container Toolkit，或 Docker 沒設 nvidia runtime。不需要 GPU 的工作可 <code>loop config set exec_gpus ""</code>。</td></tr>
+          <tr><td>ERR_NVGPUCTRPERM</td><td>讀不到 GPU 效能計數器：見上面「啟用步驟」第 3 點。</td></tr>
+          <tr><td>exit 137</td><td>被強制結束，多半是記憶體超過 <code>exec_memory</code>；GB10 是 CPU／GPU 共用記憶體，vLLM 已佔掉大部分，實驗規模要小，或在沒載大模型時跑。</td></tr>
+          <tr><td>執行沙盒忙碌中</td><td>同時執行數已達 <code>exec_max_concurrency</code>，等 2 分鐘仍排不到就放棄；稍後再試或調高上限。</td></tr>
+          <tr><td>對話頁沒有沙盒工具</td><td>四個條件缺一：晶片、<code>exec_enabled</code>、<code>exec_allowed_users</code>、存下來的對話（<code>chat_history_enabled</code>）。</td></tr>
+        </tbody>
+      </table>
+      </div>
+      <p>API：<code>GET /api/exec/status</code>（目前設定）、<code>POST /api/exec/run</code>（<code>{run_id, command, timeout_sec?}</code>，只給執行中的 run 使用）。</p>
     </section>
 
     <section id="appendix">
