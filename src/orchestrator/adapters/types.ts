@@ -22,6 +22,8 @@ export interface DispatchContext {
   /** 任務執行中查知識庫: --mcp-config file + the tool names to allow (see orchestrator/taskMcp.ts). */
   mcpConfigPath?: string | null;
   mcpTools?: string[];
+  /** extra environment for the spawned CLI (e.g. MCP_TOOL_TIMEOUT when the GPU 沙盒 is on); merged over process.env */
+  env?: Record<string, string>;
   onEvent?: (evt: any) => void; // live stream (SSE later)
 }
 

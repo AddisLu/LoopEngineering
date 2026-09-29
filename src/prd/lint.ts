@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { BENCH_DOMAINS } from '../benchmark/store.js';
 import { paths, type Complexity } from '../config.js';
+import { formatSpecs, parseAcceptance } from '../orchestrator/acceptance.js';
 
 /**
  * Deterministic PRD linter — the first half of the PRD gate (review.ts is the second). A PRD
@@ -19,6 +20,9 @@ export interface PrdDataset {
   recipe: string | null;
   /** free text, e.g. 誤判率 ≤ 1%；漏檢 = 0；GL_Mean 容差 0.5 */
   thresholds: string | null;
+  /** 主機: the exec host that holds the images (src/exec/hosts.ts); null/local = this machine.
+   * On a remote host the paths are that machine's, so they are not checked here. */
+  host: string | null;
 }
 
 export interface PrdFields {
@@ -44,6 +48,12 @@ export interface PrdFields {
   requires: string | null;
   /** 前置指令: build/install commands run before the agent starts (task.setup_cmd) */
   setup_steps: string[];
+  /** 驗收指標: machine-checked thresholds, normalised ("detection_rate >= 0.98; miss == 0") */
+  acceptance_metrics: string | null;
+  /** 保護路徑: globs the implementer must not change (evaluation scripts, golden data) */
+  protected_paths: string[];
+  /** 產出物: globs of files collected after verification (binaries, reports), never committed */
+  artifacts: string[];
 }
 
 export const VERIFY_MODES = ['command', 'llm', 'manual'] as const;
@@ -60,6 +70,9 @@ export interface LintDeps {
 }
 
 export type SectionKey =
+  | 'metrics'
+  | 'protected'
+  | 'artifacts'
   | 'non_goals'
   | 'manual'
   | 'verify_mode'
@@ -79,6 +92,10 @@ export type SectionKey =
 // alias must come first: '非範圍' ⊃ '範圍', 'non-goals' ⊃ 'goal', '人工驗收' ⊃ '驗收',
 // '驗證方式' ⊃ '驗證', 'verify mode' ⊃ 'verify'. A unit test pins every entry.
 const ALIASES: [SectionKey, string[]][] = [
+  // '驗收指標' ⊃ '驗收' (acceptance): must win first
+  ['metrics', ['驗收指標', 'acceptance metric', 'metric']],
+  ['protected', ['保護路徑', 'protected', '不得修改']],
+  ['artifacts', ['產出物', 'artifact', '交付物']],
   ['non_goals', ['非範圍', 'non-goal', 'non goal', 'out of scope', '不做']],
   ['manual', ['人工驗收', '人工檢查', 'manual check', 'manual verification']],
   ['verify_mode', ['驗證方式', 'verify mode', 'verify_mode']],
@@ -96,6 +113,9 @@ const ALIASES: [SectionKey, string[]][] = [
 ];
 
 const LABEL: Record<SectionKey, string> = {
+  metrics: '驗收指標',
+  protected: '保護路徑',
+  artifacts: '產出物',
   goal: '目標',
   scope: '範圍',
   non_goals: '非範圍',
@@ -218,18 +238,24 @@ export function lintPrd(markdown: string, deps: LintDeps = {}): PrdLint {
   let dataset: PrdDataset | null = null;
   if (sections.has('dataset')) {
     const ds = sec('dataset');
+    const hostRaw = labelled(ds, ['主機', 'host']);
+    const host = hostRaw ? hostRaw.replace(/（.*）$/, '').replace(/`/g, '').trim().toLowerCase() : null;
     dataset = {
       input: labelled(ds, ['輸入圖集', '圖集', 'input', 'images']),
       golden: labelled(ds, ['期望結果', 'golden', 'expected', '基準']),
       recipe: labelled(ds, ['配方', 'recipe']),
       thresholds: labelled(ds, ['門檻', 'threshold']),
+      host: host && host !== 'local' ? host : null,
     };
     if (dataset.input) dataset.input = expandHome(dataset.input.replace(/（.*）$/, '').trim());
     if (dataset.golden) dataset.golden = expandHome(dataset.golden.replace(/（.*）$/, '').trim());
+    if (dataset.host && !/^[a-z0-9][a-z0-9_-]*$/.test(dataset.host)) missing.push(`「圖集比對」的主機名稱不合法：${dataset.host}`);
     if (!dataset.input || PLACEHOLDER.test(dataset.input)) missing.push('「圖集比對」缺少「輸入圖集」的路徑');
-    else if (!exists(dataset.input)) missing.push(`圖集路徑不存在：${dataset.input}`);
+    else if (dataset.host) {
+      // the images live on that machine (usually a read-only mount inside its sandbox): not ours to stat
+    } else if (!exists(dataset.input)) missing.push(`圖集路徑不存在：${dataset.input}`);
     else if (dataset.input.startsWith(paths.dataDir)) warnings.push('圖集放在 Loop 資料目錄底下——圖集應留在原地、只以路徑引用');
-    if (dataset.golden && !PLACEHOLDER.test(dataset.golden) && !exists(dataset.golden)) missing.push(`期望結果路徑不存在：${dataset.golden}`);
+    if (!dataset.host && dataset.golden && !PLACEHOLDER.test(dataset.golden) && !exists(dataset.golden)) missing.push(`期望結果路徑不存在：${dataset.golden}`);
   }
 
   const setupSteps = verifyCommands(sec('setup'));
@@ -271,6 +297,39 @@ export function lintPrd(markdown: string, deps: LintDeps = {}): PrdLint {
 
   const constraints = bullets(sec('constraints')).filter((c) => !PLACEHOLDER.test(c));
 
+  // 驗收指標: what the engine itself will compare (src/orchestrator/acceptance.ts)
+  let acceptanceMetrics: string | null = null;
+  if (sections.has('metrics')) {
+    const lines = bullets(sec('metrics')).filter((l) => !PLACEHOLDER.test(l));
+    const text = (lines.length ? lines : sec('metrics').split('\n')).map((l) => l.replace(/`/g, '').trim()).filter(Boolean).join('; ');
+    try {
+      const specs = parseAcceptance(text);
+      if (specs.length) acceptanceMetrics = formatSpecs(specs);
+      else missing.push('「驗收指標」是空的：寫成「- detection_rate >= 0.98」這樣一行一條');
+    } catch (err) {
+      missing.push(`「驗收指標」${(err as Error).message}`);
+    }
+    if (acceptanceMetrics && verify.length === 0) missing.push('有「驗收指標」就要有一條會印出 LOOP_METRICS 的「驗證指令」');
+  }
+
+  const protectedPaths = sections.has('protected')
+    ? bullets(sec('protected')).map((b) => b.replace(/`/g, '').trim()).filter((b) => b && !PLACEHOLDER.test(b))
+    : [];
+  if (sections.has('protected') && protectedPaths.some((g) => g.startsWith('/') || g.includes('..'))) {
+    missing.push('「保護路徑」要寫 repo 內的相對路徑或 glob（例如 scripts/eval/**）');
+  }
+  const artifacts = sections.has('artifacts')
+    ? bullets(sec('artifacts')).map((b) => b.replace(/`/g, '').trim()).filter((b) => b && !PLACEHOLDER.test(b))
+    : [];
+  if (artifacts.some((g) => g.startsWith('/') || g.includes('..'))) {
+    missing.push('「產出物」要寫 repo 內的相對路徑或 glob（例如 build/app、reports/*.csv）');
+  }
+
+  // a dataset on another machine is only reachable through a sandbox step aimed at it
+  if (dataset?.host && !verify.some((v) => v.toLowerCase().startsWith(`sandbox@${dataset!.host}:`))) {
+    warnings.push(`圖集在主機 ${dataset.host} 上：「驗證指令」通常要有一條 sandbox@${dataset.host}: 開頭的評估指令`);
+  }
+
   return {
     ok: missing.length === 0,
     missing,
@@ -292,6 +351,9 @@ export function lintPrd(markdown: string, deps: LintDeps = {}): PrdLint {
       verify_mode: verifyMode,
       requires,
       setup_steps: setupSteps,
+      acceptance_metrics: acceptanceMetrics,
+      protected_paths: protectedPaths,
+      artifacts,
     },
   };
 }

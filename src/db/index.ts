@@ -188,6 +188,39 @@ function migrate(db: Database.Database): void {
   db.exec(
     'CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_conversations_share ON chat_conversations(share_token) WHERE share_token IS NOT NULL',
   );
+  // 驗收指標 / 保護路徑 (src/orchestrator/acceptance.ts): thresholds the engine checks against the
+  // metrics a verify step prints (LOOP_METRICS {...}), and globs the agent must not change.
+  // Nullable = neither check runs (zero behavior change).
+  add('tasks', [
+    ['acceptance_metrics', 'TEXT'],
+    ['protected_paths', 'TEXT'],
+  ]);
+  // what the last verification of a run found — steps (ok/exit/tail) and metrics vs thresholds —
+  // for the morning report and the PR body. Nullable = never verified.
+  add('task_runs', [
+    ['verify_json', 'TEXT'],
+    ['metrics_json', 'TEXT'],
+  ]);
+  // which code that verification looked at: HEAD, and the base it is measured against
+  // (merge-base with the base branch) — so "what did this task change" still answers after the
+  // branch has been fast-forwarded into base and the worktree reclaimed. Nullable = never verified.
+  add('task_runs', [
+    ['head_sha', 'TEXT'],
+    ['base_sha', 'TEXT'],
+  ]);
+  // 驗收／交付 (src/review/*, the 驗收頁): the 驗證方案 a task came from, the outputs it collects
+  // (CSV globs, kept out of commits), the person's manual checklist, the approval and the Gitea
+  // release. All nullable = the task behaves exactly as before.
+  add('tasks', [
+    ['verify_plan_id', 'TEXT'],
+    ['artifacts', 'TEXT'],
+    ['checklist_json', 'TEXT'],
+    ['approved_by', 'TEXT'],
+    ['approved_at', 'TEXT'],
+    ['release_url', 'TEXT'],
+  ]);
+  // what a run's verification collected: {dir, files:[{path,size,sha256}], ...} (null = nothing)
+  add('task_runs', [['artifacts_json', 'TEXT']]);
 }
 
 function seedSettings(db: Database.Database): void {

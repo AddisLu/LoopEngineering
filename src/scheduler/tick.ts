@@ -16,7 +16,7 @@ import { resolveModel } from '../orchestrator/run.js';
 import { isLocalModel, localId } from '../local/models.js';
 import type { ModelManager } from '../local/modelManager.js';
 import type { Task, UsageReading } from '../types.js';
-import { resolvePolicy, type Policy } from './policy.js';
+import { inTimeWindow, resolvePolicy, type Policy } from './policy.js';
 import { checkBreaker, checkWindowSwitch } from './breaker.js';
 import { checkWatchdog } from './watchdog.js';
 import { updatePower } from './power.js';
@@ -133,7 +133,7 @@ export function tick(db: Database.Database, deps: TickDeps): TickInfo {
   // no session/weekly/fit gates (zero Anthropic spend), but one GPU: only the LOADED model's
   // tasks dispatch (local_max_concurrency), and a switch waits until no local run is in flight.
   if (localEnabled) {
-    localReason = dispatchLocal(db, deps, buildCandidates(db, policy, now, ageStepMin), dispatched);
+    localReason = dispatchLocal(db, deps, buildCandidates(db, policy, now, ageStepMin), dispatched, now);
   }
   if (breakerTripped) return info(false, 'breaker tripped');
 
@@ -230,12 +230,17 @@ interface Candidate {
  * uses a local model. Stay on the loaded model while it still has work (a switch costs ~6 min);
  * otherwise move to the highest-priority model that isn't in an error cool-down — but only once
  * every local run has finished, because a switch restarts vLLM under them.
+ *
+ * `local_task_window` ("19:00-07:00"; empty = any time) keeps local work to the night, when the
+ * GPU box and the sandbox machines are free: outside it nothing new starts and no model is
+ * loaded for queued work. A run already going when the window closes is left to finish.
  */
 function dispatchLocal(
   db: Database.Database,
   deps: TickDeps,
   candidates: Candidate[],
   dispatched: TickInfo['dispatched'],
+  now: Date,
 ): string | null {
   const local: (Candidate & { localModel: string })[] = [];
   for (const c of candidates) {
@@ -243,6 +248,9 @@ function dispatchLocal(
     if (isLocalModel(m)) local.push({ ...c, localModel: localId(m) });
   }
   if (local.length === 0) return null;
+
+  const win = getSetting(db, 'local_task_window') ?? '';
+  if (win && !inTimeWindow(win, now)) return `${local.length} local task(s) wait for local_task_window ${win}`;
 
   const mm = deps.modelManager;
   if (!mm) return `${local.length} local task(s) held: no model manager`;

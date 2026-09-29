@@ -22,14 +22,17 @@ import { writeTaskFile, writeResumeContext, collectResumeContext } from './promp
 import { knowledgeContext, ragTaskContext } from '../knowledge/context.js';
 import type { EmbedExec } from '../knowledge/embed.js';
 import { writeSettingsLocal } from './settingsLocal.js';
-import { runVerification, type VerifyResult } from './verify.js';
+import { runVerification, type VerifyResult, type VerifyStepResult } from './verify.js';
 import { resolveShell, runShell } from '../util/shell.js';
 import { runLlmJudge, type JudgeExec } from './judge.js';
 import { parseSteps, parseVerifyMode } from '../types.js';
 import { unmetCapabilities } from '../capabilities.js';
 import { runGapReview } from '../review/gapReviewer.js';
 import { createPr } from '../git/pr.js';
-import { syncWithBase, pushBranch, stripLoopArtifacts, integrateIntoBase } from '../git/integrate.js';
+import { prBody } from './runSummary.js';
+import { syncWithBase, pushBranch, stripLoopArtifacts, integrateIntoBase, baseRefFor } from '../git/integrate.js';
+import { verifiedShas } from '../review/code.js';
+import { artifactGlobs, collectArtifacts, unstageArtifacts } from '../review/artifacts.js';
 import { createMergeTask } from './mergeTask.js';
 import { cleanupWorktree } from './cleanup.js';
 import { killRun } from './kill.js';
@@ -41,23 +44,31 @@ import { runDeployTask, type DeployExec } from './deployTask.js';
 import { getEnvironment } from '../deploy/store.js';
 import { isLocalModel, localId, getLocalModel } from '../local/models.js';
 import { parseMcpServers, runtimeEnvFor, type McpServerCfg } from '../mcp/config.js';
-import { cleanupTaskMcp, writeTaskMcp, type TaskMcp } from './taskMcp.js';
+import { cleanupTaskMcp, writeTaskMcp, execServerForTask, execToolTimeoutMs, EXEC_SERVER, type TaskMcp } from './taskMcp.js';
+import { sandboxSettings, verifySandboxRunner, type SandboxDeps } from '../exec/sandbox.js';
+import { describeExecHosts, resolveExecTarget } from '../exec/hosts.js';
+import { evaluateAcceptance, extractMetrics, formatAcceptance, formatSpecs, parseAcceptance, parseProtected, protectedViolations, type MetricSpec, type MetricsReport } from './acceptance.js';
 
 /**
  * MCP servers a local-model task may use (mcp_servers_json), with the runtime env the chat page
  * would inject — read-only fs roots, Loop's own API. A bad setting means no servers, not a
  * failed dispatch.
  */
-function mcpServersForTask(db: Database.Database): McpServerCfg[] {
+function mcpServersForTask(db: Database.Database, runId?: string): McpServerCfg[] {
+  let servers: McpServerCfg[];
   try {
     const apiUrl = `http://127.0.0.1:${process.env.LOOP_PORT || 4711}`;
-    return parseMcpServers(getSetting(db, 'mcp_servers_json') || '').map((s) => ({
+    servers = parseMcpServers(getSetting(db, 'mcp_servers_json') || '').map((s) => ({
       ...s,
       environment: { ...(s.environment ?? {}), ...runtimeEnvFor(s.name, db, { apiUrl, apiToken: process.env.LOOP_API_TOKEN ?? '', dataDir: paths.dataDir }) },
     }));
   } catch {
-    return [];
+    servers = [];
   }
+  // GPU 執行沙盒: only the engine's own per-run server may carry this name
+  servers = servers.filter((s) => s.name !== EXEC_SERVER);
+  const exec = runId ? execServerForTask(db, runId) : null;
+  return exec ? [...servers, exec] : servers;
 }
 
 /**
@@ -120,7 +131,7 @@ export function commitCheckpoint(
 ): boolean {
   try {
     if (!isDirty(worktreePath)) return false;
-    commitAll(worktreePath, `loop(${task.id}): checkpoint (interrupted: ${reason})`);
+    commitAll(worktreePath, `loop(${task.id}): checkpoint (interrupted: ${reason})`, (wt) => unstageArtifacts(wt, artifactGlobs(task)));
     return true;
   } catch (err) {
     logEvent(db, { task_id: task.id, run_id: runId, kind: 'note', detail: `checkpoint commit failed: ${String(err)}` });
@@ -166,8 +177,10 @@ export async function runTask(
   const isLocal = !isMock && isLocalModel(resolveModel(db, task));
   const hardLimit = getNum(db, 'hard_limit_pct', 95);
   // Bill the run against a fresh reading at both boundaries. A cached reading (TTL
-  // 180s) can make a short run look like ~0% delta and bias the estimator toward
+  // 240s) can make a short run look like ~0% delta and bias the estimator toward
   // zero. Mock runs stay on the cache (zero-token / deterministic tests).
+  // `force` skips the TTL, never a 429 cooldown: during one this is the cached reading,
+  // since a request made during the penalty restarts it for every tool on the account.
   const beforeReading = readUsage({ force: !isMock && !isLocal });
   const before = beforeReading.session.percent;
   const weeklyBefore = beforeReading.weekly.percent;
@@ -229,12 +242,15 @@ export async function runTask(
 
   // 任務執行中查知識庫: the read-only MCP servers this run may call (null when disabled).
   // Written outside the worktree so `git add -A` can never sweep it into the task branch.
-  const taskMcp: TaskMcp | null = isMock || isGeneric ? null : writeTaskMcp(db, run.id, mcpServersForTask(db));
+  const taskMcp: TaskMcp | null = isMock || isGeneric ? null : writeTaskMcp(db, run.id, mcpServersForTask(db, run.id));
+  const sandbox = sandboxSettings(db);
+  const withSandbox = !!taskMcp?.servers.includes(EXEC_SERVER);
   const taskFilePath = writeTaskFile(worktreePath, task, {
     knowledge: knowledgeContext(db, task),
     rag: await ragTaskContext(db, task, opts.ragEmbedExec),
     discipline: disciplineOn,
     mcpServers: taskMcp?.servers,
+    exec: withSandbox ? { image: sandbox.image, timeoutSec: sandbox.timeoutSec, maxTimeoutSec: sandbox.maxTimeoutSec, hosts: describeExecHosts(db) } : null,
   });
   if (!isMock && !isGeneric) {
     // Keep engine-written artifacts out of the task branch/PR: exclude them locally
@@ -303,9 +319,11 @@ export async function runTask(
       timeoutMs,
       local: isLocal ? (getLocalModel(db, localId(dispatchModel!)) ?? null) : null,
       localBaseUrl: getSetting(db, 'local_vllm_base_url') || undefined,
-      mcpServers: isLocal ? mcpServersForTask(db) : undefined,
+      mcpServers: isLocal ? mcpServersForTask(db, run.id) : undefined,
       mcpConfigPath: taskMcp?.configPath ?? null,
       mcpTools: taskMcp?.tools,
+      // a sandbox build can outlast Claude Code's default MCP tool timeout
+      env: withSandbox ? { MCP_TOOL_TIMEOUT: String(execToolTimeoutMs(sandbox)) } : undefined,
       resumeSessionId: resumeSid,
       resume: !!opts.resume,
       handoff,
@@ -423,7 +441,7 @@ export async function runTask(
   // auto-commit insurance (real repos only — generic has no git worktree to commit)
   if (!isMock && !isGeneric) {
     try {
-      if (isDirty(worktreePath)) commitAll(worktreePath, `loop(${task.id}): auto-commit`);
+      if (isDirty(worktreePath)) commitAll(worktreePath, `loop(${task.id}): auto-commit`, (wt) => unstageArtifacts(wt, artifactGlobs(task)));
     } catch (err) {
       logEvent(db, { task_id: task.id, run_id: run.id, kind: 'note', detail: `auto-commit failed: ${String(err)}` });
     }
@@ -435,6 +453,8 @@ export async function runTask(
   const verifyOutcome = await runVerifyPipeline(db, task, worktreePath, run.id, task.base_branch);
   if (verifyOutcome === 'fail') return; // already routed to blocked/attention inside the pipeline
   let manualVerify = verifyOutcome === 'manual';
+  // 產出物: take them now, before the close-out can reclaim the worktree
+  if (!isMock && !isGeneric) await collectTaskArtifacts(db, task, run.id, worktreePath);
 
   // A manual verify outcome always parks the task in review with merge_status='pending'
   // (reusing the existing pending/合併 button) — true for a mock/repo-less task too, so
@@ -479,6 +499,7 @@ export async function runTask(
         setStatus(db, task.id, 'verifying', { run_id: run.id });
         const reOutcome = await runVerifyPipeline(db, task, worktreePath, run.id, base);
         if (reOutcome === 'fail') return;
+        await collectTaskArtifacts(db, task, run.id, worktreePath); // what was re-verified is what ships
         if (reOutcome === 'manual') {
           manualVerify = true; // e.g. budget crossed the hard limit between the two passes
           reviewDetail = markManualPending(db, task.id);
@@ -497,14 +518,14 @@ export async function runTask(
           const mt = createMergeTask(db, task, sync.conflictFiles, sync.baseRef);
           db.prepare('UPDATE tasks SET merge_status = ? WHERE id = ?').run('conflict', task.id);
           // still attempt a backup PR for the branch, but skip integrate
-          tryCreatePr(db, task, run.id, worktreePath, branch);
+          await tryCreatePr(db, task, run.id, worktreePath, branch);
           setStatus(db, task.id, 'review', {
             run_id: run.id,
             detail: `verification passed; merge conflict vs ${sync.baseRef}; resolution task ${mt.id} queued`,
           });
         } else {
           db.prepare('UPDATE tasks SET merge_status = ? WHERE id = ?').run('conflict', task.id);
-          tryCreatePr(db, task, run.id, worktreePath, branch);
+          await tryCreatePr(db, task, run.id, worktreePath, branch);
           setStatus(db, task.id, 'review', {
             run_id: run.id,
             detail: `verification passed; merge conflict vs ${sync.baseRef} — awaiting manual merge`,
@@ -530,7 +551,7 @@ export async function runTask(
     }
 
     // 4. PR (its internal push is now a cheap re-push)
-    const prUrl = tryCreatePr(db, task, run.id, worktreePath, branch);
+    const prUrl = await tryCreatePr(db, task, run.id, worktreePath, branch);
 
     // 5. integrate into base (skipped entirely for a manual verify outcome)
     let mergeStatus: string | null = null;
@@ -596,6 +617,8 @@ export async function runVerifyPipeline(
   // Test-only injection point for the LLM judge exec (mirrors distill.ts's DistillExec
   // plumbing) — production call sites omit it and get the real `claude` CLI call.
   judgeExec?: JudgeExec,
+  // Test-only: stands in for `docker run` behind `sandbox:` verification steps.
+  sandboxDeps?: SandboxDeps,
 ): Promise<VerifyPipelineOutcome> {
   const modes = parseVerifyMode(task);
   const timeoutMs = (task.verify_timeout_min ?? getNum(db, 'verify_step_timeout_min', 10)) * 60_000;
@@ -621,12 +644,64 @@ export async function runVerifyPipeline(
     needsManual = true;
   }
 
+  // 保護路徑: the evaluation, golden data etc. must be exactly what the base has — checked before
+  // anything runs, whatever the verify mode, so a "fix" to the yardstick never gets measured
+  const protectedGlobs = parseProtected(task.protected_paths);
+  if (protectedGlobs.length && base) {
+    let touched: string[] = [];
+    try {
+      touched = protectedViolations(worktree, baseRefFor(worktree, base), protectedGlobs);
+    } catch (err) {
+      logEvent(db, { task_id: task.id, run_id: runId, kind: 'note', detail: `protected-path check skipped: ${String(err).slice(0, 200)}` });
+    }
+    if (touched.length) {
+      const out = `這些受保護的檔案被改動了，請還原（git checkout ${base} -- <檔案>）再完成任務：\n${touched.map((f) => `- ${f}`).join('\n')}\n受保護的範圍：${protectedGlobs.join(', ')}`;
+      recordVerification(db, runId, [{ step: '保護路徑', ok: false, exitCode: null, timedOut: false, output: out }], null, worktree, base);
+      handleVerifyFailure(db, task, runId, worktree, { ok: false, results: [{ step: '保護路徑', ok: false, exitCode: null, timedOut: false, output: out }], failedStep: '保護路徑' });
+      return 'fail';
+    }
+  }
+
+  let specs: MetricSpec[] = [];
+  try {
+    specs = parseAcceptance(task.acceptance_metrics);
+  } catch (err) {
+    logEvent(db, { task_id: task.id, run_id: runId, kind: 'note', detail: `acceptance_metrics ignored: ${(err as Error).message}` });
+  }
+
   if (modes.has('command') && parseSteps(task).length > 0) {
-    const vres = await runVerification(task, worktree, timeoutMs, { shellSetting: getSetting(db, 'shell') });
+    // `sandbox:` steps run in the same GPU 沙盒 the agent had — null when exec is off, so such
+    // a step fails with a clear message instead of silently running on the host
+    const sandbox = sandboxSettings(db);
+    const vres = await runVerification(
+      task,
+      worktree,
+      timeoutMs,
+      { shellSetting: getSetting(db, 'shell') },
+      // the task's remote workspace is shared with the agent's own runs (same key): incremental builds
+      sandbox.enabled ? verifySandboxRunner(sandbox, sandboxDeps, (name) => resolveExecTarget(db, name), `task-${task.id}`) : null,
+    );
+    // 驗收指標: whatever the steps reported, compared with the task's thresholds by the engine
+    const metrics = specs.length || vres.results.some((r) => r.output.includes('LOOP_METRICS'))
+      ? evaluateAcceptance(specs, extractMetrics(vres.results.map((r) => r.output)))
+      : null;
+    recordVerification(db, runId, vres.results, metrics, worktree, base);
     if (!vres.ok) {
       handleVerifyFailure(db, task, runId, worktree, vres);
       return 'fail';
     }
+    if (metrics && !metrics.pass) {
+      const out = `驗收指標未達標（門檻由任務設定，不在 repo 裡）：\n${formatAcceptance(metrics)}`;
+      handleVerifyFailure(db, task, runId, worktree, { ok: false, results: [...vres.results, { step: '驗收指標', ok: false, exitCode: null, timedOut: false, output: out }], failedStep: '驗收指標' });
+      return 'fail';
+    }
+    if (metrics?.checks.length) {
+      logEvent(db, { task_id: task.id, run_id: runId, kind: 'note', detail: `驗收指標通過：${metrics.checks.map((c) => `${c.name}=${c.actual}`).join('，')}` });
+    }
+  } else if (specs.length) {
+    // thresholds that could not be measured here are a human's to check, never a silent pass
+    logEvent(db, { task_id: task.id, run_id: runId, kind: 'note', detail: `驗收指標未檢查（沒有執行 command 驗證）：${formatSpecs(specs)} → 人工驗收` });
+    needsManual = true;
   }
 
   if (modes.has('llm')) {
@@ -644,6 +719,42 @@ export async function runVerifyPipeline(
   }
 
   return needsManual ? 'manual' : 'pass';
+}
+
+/**
+ * What the last verification of a run found, for the morning report, the PR body and the review
+ * page — and which code it looked at (HEAD and its merge-base with the base branch), so the
+ * task's diff can still be shown after the worktree is reclaimed.
+ */
+function recordVerification(
+  db: Database.Database,
+  runId: string,
+  results: VerifyStepResult[],
+  metrics: MetricsReport | null,
+  worktree: string,
+  base: string | null,
+): void {
+  try {
+    updateRun(db, runId, {
+      verify_json: JSON.stringify(
+        results.map((r) => ({ step: r.step, ok: r.ok, exitCode: r.exitCode, timedOut: r.timedOut, tail: r.output.replace(/\s+$/, '').slice(-600) })),
+      ),
+      metrics_json: metrics ? JSON.stringify(metrics) : null,
+      ...(base ? verifiedShas(worktree, base) : {}),
+    });
+  } catch {
+    /* reporting only — never fail a verification over it */
+  }
+}
+
+/** 產出物 of a passing run; never fails the task over it. */
+async function collectTaskArtifacts(db: Database.Database, task: Task, runId: string, worktree: string): Promise<void> {
+  if (!artifactGlobs(task).length) return;
+  try {
+    await collectArtifacts(db, task, getRun(db, runId)!, worktree);
+  } catch (err) {
+    logEvent(db, { task_id: task.id, run_id: runId, kind: 'note', detail: `產出物收集失敗：${String(err).slice(0, 200)}` });
+  }
 }
 
 /** Park a task's merge as pending for a manual verify outcome; returns the review detail. */
@@ -682,16 +793,23 @@ function handleVerifyFailure(
   setStatus(db, task.id, 'attention', { run_id: runId, detail: `verify failed at: ${failedStep}\n${tail}` });
 }
 
-/** Best-effort PR creation; records pr_url + a note on success. Returns the URL or null. */
-function tryCreatePr(
+/** Best-effort PR creation; records pr_url + a note on success. Returns the URL or null. On a local
+ * Gitea (gitea_url + GITEA_TOKEN) the description carries what was verified (runSummary.prBody). */
+async function tryCreatePr(
   db: Database.Database,
   task: Task,
   runId: string,
   worktreePath: string,
   branch: string,
-): string | null {
+): Promise<string | null> {
   try {
-    const prUrl = createPr(worktreePath, branch, task.title);
+    const giteaUrl = (getSetting(db, 'gitea_url') ?? '').trim();
+    const prUrl = await createPr(worktreePath, branch, task.title, {
+      base: task.base_branch,
+      body: giteaUrl ? prBody(task, getRun(db, runId), worktreePath) : undefined,
+      gitea: giteaUrl ? { url: giteaUrl, token: process.env.GITEA_TOKEN ?? '' } : null,
+      onError: (msg) => logEvent(db, { task_id: task.id, run_id: runId, kind: 'note', detail: msg }),
+    });
     if (prUrl) {
       db.prepare('UPDATE tasks SET pr_url = ? WHERE id = ?').run(prUrl, task.id);
       logEvent(db, { task_id: task.id, run_id: runId, kind: 'note', detail: `PR: ${prUrl}` });

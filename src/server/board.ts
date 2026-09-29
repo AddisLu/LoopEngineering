@@ -11,7 +11,10 @@ import { timeoutMinFor } from '../scheduler/timeout.js';
 import { paths } from '../config.js';
 import { listOutputFiles, type OutputFile } from '../orchestrator/outputFiles.js';
 import { environmentMap, latestDeploymentForTask } from '../deploy/store.js';
-import type { Task } from '../types.js';
+import type { Task, TaskRun } from '../types.js';
+import { readMetrics, readVerify, type VerifiedStep } from '../orchestrator/runSummary.js';
+import type { MetricsReport } from '../orchestrator/acceptance.js';
+import { changedFiles, codeRefFor, readSource, type ChangedFile } from '../review/code.js';
 
 export interface BoardCard {
   id: string;
@@ -132,8 +135,29 @@ function formatToolUse(b: any): string {
  * message's content blocks so tool activity (Edit/Write/Bash/…) surfaces on the board,
  * while still handling text/result/system and the mock adapter's flat-text shape.
  */
+/** opencode (本地模型) keeps what happened in `part`: the tool and its input, or the text. */
+function formatOpencodeTool(part: any): string {
+  const tool = typeof part?.tool === 'string' ? part.tool : 'tool';
+  const input = part?.state?.input ?? {};
+  const failed = part?.state?.status === 'error' ? ' ✖' : '';
+  if (tool === 'bash') {
+    const cmd = String(input.command ?? '').replace(/\s+/g, ' ').trim();
+    return `→ bash: ${cmd.slice(0, 80)}${failed}`;
+  }
+  const target = input.filePath ?? input.path ?? input.pattern ?? input.command ?? '';
+  return `→ ${tool}${target ? ` ${String(target).slice(0, 100)}` : ''}${failed}`;
+}
+
 export function formatEvent(e: any): string[] {
   if (!e || typeof e !== 'object') return [];
+  // opencode stream: step_start/step_finish are bookkeeping, the content lives in `part`
+  if (e.type === 'step_start' || e.type === 'step_finish') return [];
+  if (e.type === 'tool_use' && e.part) return [formatOpencodeTool(e.part)];
+  if (e.type === 'text' && e.part) {
+    const t = typeof e.part.text === 'string' ? e.part.text.trim() : '';
+    return t ? [t.slice(0, 120)] : [];
+  }
+  if (e.type === 'error') return [`✖ ${String(e.error?.data?.message ?? e.error?.message ?? e.error?.name ?? e.message ?? 'error').slice(0, 160)}`];
   if (e.type === 'result') return [`● result: ${e.subtype ?? 'done'}`];
   if (e.type === 'system') return [`○ ${e.subtype ?? 'system'}`];
   if (e.type === 'assistant') {
@@ -170,6 +194,16 @@ export interface TaskResult {
   deploy_status?: string | null; // coding_tool='deploy' only: latest deployments.status
   deploy_detail?: string | null; // coding_tool='deploy' only: latest deployments.detail (e.g. DEPLOY.md path)
   pushback_detail?: string | null; // ADO/GitHub bridge: latest pushback attempt outcome (see integrations/pushback.ts)
+  /** the last verification: each step with exit code and the tail of its output */
+  verify: VerifiedStep[];
+  verify_run: { id: string; attempt: number; finished_at: string | null } | null;
+  /** metrics the steps reported vs the task's thresholds (null = none) */
+  metrics: MetricsReport | null;
+  thresholds: string | null;
+  /** what the task changed (null = the code is not reachable any more) */
+  changed_files: ChangedFile[] | null;
+  /** the page where a person reads the code, re-runs it and signs it off */
+  review_url: string;
 }
 
 /** A generic task's persistent, non-git workspace — see runTask's isGeneric branch. */
@@ -485,6 +519,18 @@ export function taskResult(db: Database.Database, id: string): TaskResult | null
     pushback_detail = ev?.detail ?? null;
   }
 
+  // what verification found, and what the task changed — readable after the worktree is gone
+  const verified = db
+    .prepare('SELECT * FROM task_runs WHERE task_id = ? AND verify_json IS NOT NULL ORDER BY started_at DESC, rowid DESC LIMIT 1')
+    .get(id) as TaskRun | undefined;
+  let changed_files: ChangedFile[] | null = null;
+  const ref = t.coding_tool === 'generic' ? null : codeRefFor(db, t);
+  if (ref) {
+    changed_files = changedFiles(ref, 100);
+    if (verify_md === null) verify_md = readSource(ref, 'VERIFY.md')?.text ?? null;
+  }
+  const publicBase = (process.env.LOOP_PUBLIC_URL || '').replace(/\/$/, '');
+
   return {
     id: t.id,
     status: t.status,
@@ -499,5 +545,11 @@ export function taskResult(db: Database.Database, id: string): TaskResult | null
     ...(t.coding_tool === 'generic' ? { output_dir, output_files } : {}),
     ...deployExtra,
     ...(t.source_ref ? { pushback_detail } : {}),
+    verify: readVerify(verified),
+    verify_run: verified ? { id: verified.id, attempt: verified.attempt, finished_at: verified.finished_at } : null,
+    metrics: readMetrics(verified),
+    thresholds: t.acceptance_metrics ?? null,
+    changed_files,
+    review_url: `${publicBase}/task.html?id=${encodeURIComponent(t.id)}`,
   };
 }

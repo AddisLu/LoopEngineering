@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Task } from '../types.js';
 import { parseSteps, parseVerifyMode } from '../types.js';
+import { parseAcceptance, parseProtected } from './acceptance.js';
 
 /** Resolve the plan content to inline into LOOP_TASK.md (best effort). */
 function planContent(task: Task): string {
@@ -29,6 +30,17 @@ const DISCIPLINE_BLOCK = `
 - 這是無人值守執行，遇不確定一律自主決策後繼續，絕不停下反問。
 `;
 
+/** The sandbox hosts a run may pick, with their read-only data — only when there is a choice or data. */
+function execHostsBlock(hosts?: Array<{ name: string; description: string; data: Array<{ source: string; target: string }>; default: boolean }>): string {
+  if (!hosts || !hosts.length || (hosts.length === 1 && !hosts[0]!.data.length)) return '';
+  const rows = hosts.map((h) => {
+    const data = h.data.length ? `；唯讀資料：${h.data.map((d) => `\`${d.target}\``).join('、')}` : '';
+    return `  - \`${h.name}\`${h.default ? '（預設）' : ''}：${h.description}${data}`;
+  });
+  return `- 可用的沙盒主機（run 的 \`host\` 參數；不帶就是預設）：\n${rows.join('\n')}\n` +
+    `- 在遠端主機跑時，worktree 會先同步過去（.gitignore 的檔案不同步也不刪，增量編譯保留）；遠端產生的檔案不會同步回來，要看就在指令裡 \`cat\`。資料目錄是唯讀的，不要嘗試寫入或複製整個圖庫。\n`;
+}
+
 /**
  * Write LOOP_TASK.md into the worktree. The dispatch prompt only tells the agent to
  * read this file, so all task context lives here (goal, plan, verification, rules).
@@ -47,7 +59,20 @@ const DISCIPLINE_BLOCK = `
 export function writeTaskFile(
   cwd: string,
   task: Task,
-  extras?: { knowledge?: string | null; rag?: string | null; discipline?: boolean; mcpServers?: string[] },
+  extras?: {
+    knowledge?: string | null;
+    rag?: string | null;
+    discipline?: boolean;
+    mcpServers?: string[];
+    /** GPU 執行沙盒 details when the run has the loop-exec server (null/absent = no section) */
+    exec?: {
+      image: string;
+      timeoutSec: number;
+      maxTimeoutSec: number;
+      /** where `run` can go (src/exec/hosts.ts describeExecHosts); absent/local-only = no list */
+      hosts?: Array<{ name: string; description: string; data: Array<{ source: string; target: string }>; default: boolean }>;
+    } | null;
+  },
 ): string {
   const steps = parseSteps(task);
   const modes = parseVerifyMode(task);
@@ -61,13 +86,34 @@ export function writeTaskFile(
   const acceptanceBlock = task.verify_rubric?.trim()
     ? `\n## 驗收標準 (Acceptance)\n${task.verify_rubric.trim()}\n`
     : '';
+  // 驗收指標 / 保護路徑: the engine checks these itself — the agent has to know the target and the
+  // one line to print, and that the yardstick is off limits
+  let metricSpecs: ReturnType<typeof parseAcceptance> = [];
+  try {
+    metricSpecs = parseAcceptance(task.acceptance_metrics);
+  } catch {
+    metricSpecs = [];
+  }
+  const metricsBlock = metricSpecs.length
+    ? `\n## 驗收指標（引擎自動檢查，門檻不在 repo 裡）\n` +
+      metricSpecs.map((m) => `- \`${m.name} ${m.op} ${m.target}\``).join('\n') +
+      `\n驗證步驟（通常是圖庫評估）必須印出一行 \`LOOP_METRICS {"${metricSpecs[0]!.name}": 數值, …}\`（JSON，放在輸出最後）；引擎據此判定，未達標會把對照表交回給你繼續改。\n`
+    : '';
+  const protectedList = parseProtected(task.protected_paths);
+  const protectedBlock = protectedList.length
+    ? `\n## 保護路徑（不得修改）\n${protectedList.map((g) => `- \`${g}\``).join('\n')}\n這些是量尺（評估程式、標準答案、設定）：改到任何一個，驗證直接失敗。要改的是演算法，不是量尺。\n`
+    : '';
+  const artifactList = (task.artifacts ?? '').split(',').map((g) => g.trim()).filter(Boolean);
+  const artifactsBlock = artifactList.length
+    ? `\n## 產出物（不要 commit）\n${artifactList.map((g) => `- \`${g}\``).join('\n')}\n驗證通過後，引擎會把符合這些路徑的檔案（執行檔、報告）收走並附上 sha256，交給人下載或發佈。讓驗證步驟產生它們即可；不要把它們 commit 進 git（commit 時引擎也會自動排除）。\n`
+    : '';
   const manualRule = modes.has('manual')
     ? '\n- 你可能無法在此環境完整驗證（缺硬體/非目標 OS）。盡量自動驗證能驗的部分，並在 repo 根目錄寫一份 `VERIFY.md`：列出你做了什麼、還有哪些必須在目標環境（硬體/公司 Windows）手動驗證的具體步驟與預期結果。'
     : '';
   // The injected knowledge above is a packed excerpt chosen at dispatch time. When the task
   // also has the MCP tools, say so and say WHEN — an agent that does not know a tool exists
   // never calls it, and "look it up if you feel like it" is not a trigger anyone acts on.
-  const askBlock = extras?.mcpServers?.length
+  const askBlock = extras?.mcpServers?.some((s) => s !== 'loop-exec')
     ? `\n## 查知識庫（執行中隨時可用）\n` +
       `上面的 Knowledge 只是派工當下挑出來的摘要，不是全部。遇到下列情況請先查再動手：\n` +
       `- 要改設定檔、機台參數、網路或硬體相關的東西 → \`loop_recall\`（查已核可的限制與環境知識）\n` +
@@ -75,18 +121,30 @@ export function writeTaskFile(
       `- 要讀本 repo 以外、但已登錄的專案檔案 → \`list_dir\` / \`read_file\` / \`search_text\`（唯讀）\n` +
       `查到的限制與 Knowledge 段落同等有效；若與 Plan 衝突，以 Plan 為準，並在 HANDOFF.md 註明衝突。\n`
     : '';
+  // The GPU 沙盒 is the only way a Claude run can compile or execute anything (its Bash is limited
+  // to git/npm/node/ls/cat) — without this section the agent does not know the tool exists.
+  const execBlock = extras?.exec
+    ? `\n## GPU 沙盒（執行中可用）\n` +
+      `可以用 \`loop-exec\` 的 \`run\` 工具（Claude 下名稱為 \`mcp__loop-exec__run\`）在 Docker 沙盒裡執行 bash 指令：這個 worktree 掛在 /work 並是工作目錄，有 GPU、沒有網路，映像 ${extras.exec.image}，預設 ${extras.exec.timeoutSec} 秒逾時（最多 ${extras.exec.maxTimeoutSec} 秒）。\n` +
+      `- 寫完程式就自己編譯、執行、跑測試或量測，以實際輸出為準，不要只憑閱讀判斷。\n` +
+      `- 驗證要能自動判斷：讓程式自己檢查結果，以 exit code 表示成敗（例如和 CPU 參考值比對，不符就 exit 1）。\n` +
+      `- 編譯產物放在 \`build/\` 之類的目錄並加進 .gitignore，不要 commit 執行檔或量測報告。\n` +
+      `- Verification steps 裡以 \`sandbox:\` 開頭的步驟，引擎會在同一個沙盒裡執行；你自己跑時，去掉這個前綴交給 run 工具即可。` +
+      `\`sandbox@<主機>:\` 的步驟要在那台主機上跑：呼叫 run 時帶 \`host: "<主機>"\`。\n` +
+      execHostsBlock(extras.exec.hosts)
+    : '';
   const disciplineBlock = extras?.discipline ? DISCIPLINE_BLOCK : '';
   const body = `# Loop task: ${task.title}
 
 ## Goal
 ${task.goal}
-${knowledgeBlock}${ragBlock}${askBlock}
+${knowledgeBlock}${ragBlock}${askBlock}${execBlock}
 ## Plan
 ${planContent(task)}
 
 ## Verification steps (must all pass before you finish)
 ${steps.map((s) => `- \`${s}\``).join('\n') || '- (none)'}
-${acceptanceBlock}
+${acceptanceBlock}${metricsBlock}${protectedBlock}${artifactsBlock}
 ## Rules
 - Only modify files needed for this task; do not touch anything outside its scope.
 - Commit your work in small, conventional commits.

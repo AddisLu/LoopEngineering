@@ -65,6 +65,6 @@ export const claudeCodeAdapter: Adapter = {
   name: 'claude-code',
   dispatch(ctx: DispatchContext): DispatchHandle {
     // Never --bare (skips hooks) and never --dangerously-skip-permissions.
-    return spawnStreaming('claude', buildClaudeArgs(ctx), ctx, process.env);
+    return spawnStreaming('claude', buildClaudeArgs(ctx), ctx, ctx.env ? { ...process.env, ...ctx.env } : process.env);
   },
 };

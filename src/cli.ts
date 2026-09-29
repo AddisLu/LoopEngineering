@@ -19,6 +19,8 @@ import {
 import { validateTask } from './gate/validateTask.js';
 import { readUsage, setCachedUsage } from './token/usage.js';
 import { forecastBacklog } from './token/accounting.js';
+import { buildMorningReport, formatMorningText } from './report/morning.js';
+import { createPlan, deletePlan, getPlan, listDatasets, listPlans, PlanError, updatePlan, type VerifyPlan } from './plans/store.js';
 import { computeMetrics } from './server/metrics.js';
 import { killRun } from './orchestrator/kill.js';
 import { cleanupWorktree } from './orchestrator/cleanup.js';
@@ -61,6 +63,11 @@ import { activeLocalRunCount } from './tasks.js';
 import { BENCH_DOMAINS, BenchmarkInputError, benchmarkMatrix, createBenchmark, getBenchmark, listBenchmarks } from './benchmark/store.js';
 import { judgeBenchmark } from './benchmark/complete.js';
 import { checkPrd, submitPrd, PrdInputError, type PrdCheck } from './prd/intake.js';
+import { formatSandboxResult, runSandbox, sandboxSettings, settingsForHost } from './exec/sandbox.js';
+import { checkSandbox, formatCheck } from './exec/check.js';
+import { parseAcceptance } from './orchestrator/acceptance.js';
+import { ensureWorkspace, execRoot } from './exec/workspace.js';
+import { deleteExecHost, getExecHost, listExecHosts, LOCAL_HOST, realHostExec, resolveExecTarget, setHostIds, sshArgs, upsertExecHost, type ExecHost, type ExecTarget } from './exec/hosts.js';
 
 const program = new Command();
 program.name('loop').description('Loop Engineering — token-aware coding-task scheduler').version('0.1.0');
@@ -86,8 +93,18 @@ program
   .option('--verify-timeout <min>', 'per-task verify per-step timeout override (minutes)', (v) => parseInt(v, 10))
   .option('--requires <csv>', 'comma-separated capability tokens this task needs (e.g. gpu,camera,os:windows) — unmet ones defer command verification to manual')
   .option('--experiment <tag>', 'A/B cohort label for measurement (see `loop experiment`) — pure tag, does not affect scheduling')
+  .option('--metrics <expr>', '驗收指標 the engine checks against LOOP_METRICS lines, e.g. "detection_rate >= 0.98; miss == 0"')
+  .option('--protect <globs>', '保護路徑: CSV globs the agent must not change, e.g. "scripts/eval/**,data/golden/**"')
+  .option('--artifacts <globs>', '產出物: CSV globs collected after verification and never committed, e.g. "build/app,reports/*.csv"')
   .action((o) => {
     const db = getDb();
+    if (o.metrics) {
+      try {
+        parseAcceptance(String(o.metrics));
+      } catch (err) {
+        return fail((err as Error).message);
+      }
+    }
     const kind = o.plan
       ? /^https?:\/\//i.test(o.plan)
         ? 'url'
@@ -115,6 +132,9 @@ program
       verify_timeout_min: o.verifyTimeout ?? null,
       requires: o.requires ?? null,
       experiment: o.experiment ?? null,
+      acceptance_metrics: o.metrics ?? null,
+      artifacts: o.artifacts ?? null,
+      protected_paths: o.protect ?? null,
     });
     const gate = validateTask(getTask(db, t.id)!, getSetting(db, 'host_capabilities') ?? '', environmentMap(db));
     console.log(`created ${t.id} (${t.status})`);
@@ -178,6 +198,17 @@ program
       console.log('active runs:');
       for (const r of runs) console.log(`  ${r.id} task=${r.task_id} pid=${r.pid}`);
     }
+  });
+
+program
+  .command('morning')
+  .description('晨報: what ran overnight — acceptance results, PRs, what needs a person')
+  .option('--hours <n>', 'look back this many hours', '24')
+  .option('--json', 'print the report as JSON')
+  .action((o: { hours: string; json?: boolean }) => {
+    const db = getDb();
+    const r = buildMorningReport(db, { hours: Number(o.hours) || 24 });
+    console.log(o.json ? JSON.stringify(r, null, 2) : formatMorningText(r));
   });
 
 program
@@ -539,6 +570,245 @@ env
   .action((name: string) => {
     if (!deleteEnvironment(getDb(), name)) return fail(`no such environment: ${name}`);
     console.log(`removed ${name}`);
+  });
+
+const execCmd = program.command('exec').description('GPU 執行沙盒: check the Docker/GPU setup, or run one command in the sandbox (see exec_enabled)');
+
+execCmd
+  .command('check')
+  .description('is this machine (or --host) ready? docker, image, GPU, nvcc/ncu, no network, writable /work, read-only data')
+  .option('--host <name>', 'check a registered remote sandbox host instead (see `loop exec host`)')
+  .option('--profile', 'also build a tiny kernel and run ncu on it (checks GPU counter permissions)')
+  .action(async (o) => {
+    const db = getDb();
+    const s = sandboxSettings(db);
+    let remote: ExecHost | undefined;
+    if (o.host && o.host !== LOCAL_HOST) {
+      remote = getExecHost(db, String(o.host));
+      if (!remote) return fail(`no such exec host: ${o.host} (loop exec host list)`);
+    }
+    const shown = remote ? settingsForHost(s, remote) : s;
+    console.log(
+      `exec_enabled=${s.enabled}  host=${remote ? `${remote.name} (${remote.ssh_target})` : 'local'}  image=${shown.image}  gpus=${shown.gpus || '(none)'}  memory=${shown.memory}  cpus=${shown.cpus}`,
+    );
+    const lines = await checkSandbox(s, path.join(execRoot(), 'check'), {
+      profile: !!o.profile,
+      remote,
+      onRemoteIds: remote ? (uid, gid) => setHostIds(db, remote!.name, uid, gid) : undefined,
+    });
+    console.log(formatCheck(lines));
+    if (lines.some((l) => l.ok === false)) process.exitCode = 1;
+    else if (!s.enabled) console.log('\n一切就緒；要讓對話頁與任務使用，執行：loop config set exec_enabled true');
+  });
+
+execCmd
+  .command('run')
+  .description('run one bash command in the sandbox (default workspace: <data dir>/exec/cli)')
+  .argument('<command...>', 'the command (quote it, or put it after --)')
+  .option('--dir <path>', 'local directory to mount at /work (synced to the host first when --host is remote)')
+  .option('--host <name>', 'run on a registered remote sandbox host')
+  .option('--timeout <sec>', 'timeout in seconds (capped by exec_max_timeout_sec)')
+  .action(async (parts: string[], o) => {
+    const db = getDb();
+    const s = sandboxSettings(db);
+    if (!s.enabled) console.error('（注意：exec_enabled=false —— 對話頁與任務還不能用沙盒；這個指令照樣執行）');
+    let target: ExecTarget;
+    try {
+      target = resolveExecTarget(db, o.host ?? LOCAL_HOST);
+    } catch (err) {
+      return fail((err as Error).message);
+    }
+    const dir = o.dir ? path.resolve(String(o.dir)) : ensureWorkspace(path.join(execRoot(), 'cli'));
+    const remote = target.kind === 'remote' ? { host: target.host, key: 'cli' } : null;
+    const r = await runSandbox(s, { workdir: dir, command: parts.join(' '), timeoutSec: o.timeout, scope: 'cli', remote });
+    console.log(formatSandboxResult(r));
+    process.exitCode = r.exitCode === 0 && !r.infra ? 0 : r.exitCode && r.exitCode > 0 ? r.exitCode : 1;
+  });
+
+const execHost = execCmd.command('host').description('remote sandbox hosts: Linux + Docker + NVIDIA Container Toolkit, reached over SSH');
+
+execHost
+  .command('add <name>')
+  .description('register (or update) a remote sandbox host')
+  .requiredOption('--ssh <target>', 'user@host or an ~/.ssh/config alias (key login, no password)')
+  .requiredOption('--work-root <dir>', 'remote directory for synced workspaces, e.g. /srv/loop-exec')
+  .option('--port <n>', 'ssh port', (v) => parseInt(v, 10))
+  .option('--image <image>', 'docker image on that host (default: exec_image)')
+  .option('--gpus <value>', "docker --gpus value on that host ('' = none; default: exec_gpus)")
+  .option('--memory <size>', 'container memory limit (default: exec_memory)')
+  .option('--cpus <n>', 'container CPU limit (default: exec_cpus)')
+  .option('--data <csv>', 'read-only data mounts, CSV of /remote/path:/container/path, e.g. /mnt/aoi:/datasets')
+  .option('--desc <text>', 'what this host is for — shown to the model (e.g. "AOI 圖庫與 RTX 4090")')
+  .option('--disabled', 'register it switched off')
+  .action((name: string, o) => {
+    const db = getDb();
+    try {
+      const h = upsertExecHost(db, {
+        name,
+        ssh_target: String(o.ssh),
+        ssh_port: o.port ?? null,
+        work_root: String(o.workRoot),
+        image: o.image ?? null,
+        gpus: o.gpus ?? null,
+        memory: o.memory ?? null,
+        cpus: o.cpus ?? null,
+        data_mounts: o.data ?? '',
+        description: o.desc ?? null,
+        enabled: !o.disabled,
+      });
+      console.log(`${h.name}  ${h.ssh_target}${h.ssh_port ? `:${h.ssh_port}` : ''}  work_root=${h.work_root}  data=${h.data_mounts || '-'}`);
+      console.log(`下一步：loop exec check --host ${h.name} --profile`);
+    } catch (err) {
+      fail((err as Error).message);
+    }
+  });
+
+execHost
+  .command('list')
+  .description('registered remote sandbox hosts')
+  .action(() => {
+    const db = getDb();
+    const def = (getSetting(db, 'exec_default_host') ?? '').trim() || LOCAL_HOST;
+    console.log(`${def === LOCAL_HOST ? '*' : ' '} local  (this machine)`);
+    for (const h of listExecHosts(db)) {
+      console.log(
+        `${def === h.name ? '*' : ' '} ${h.name}  ${h.ssh_target}${h.ssh_port ? `:${h.ssh_port}` : ''}  work_root=${h.work_root}` +
+          `  image=${h.image ?? '(exec_image)'}  data=${h.data_mounts || '-'}${h.enabled ? '' : '  [disabled]'}${h.description ? `\n    ${h.description}` : ''}`,
+      );
+    }
+    console.log('(* = exec_default_host)');
+  });
+
+execHost
+  .command('rm <name>')
+  .description('forget a remote sandbox host (its synced workspaces stay; use prune first)')
+  .action((name: string) => {
+    if (!deleteExecHost(getDb(), name)) return fail(`no such exec host: ${name}`);
+    console.log(`removed ${name}`);
+  });
+
+execHost
+  .command('prune <name>')
+  .description('delete synced workspaces on that host not touched for N days')
+  .option('--days <n>', 'age in days', (v) => parseInt(v, 10), 7)
+  .action(async (name: string, o) => {
+    const db = getDb();
+    const h = getExecHost(db, name);
+    if (!h) return fail(`no such exec host: ${name}`);
+    const days = Math.max(1, Number(o.days) || 7);
+    const r = await realHostExec(
+      'ssh',
+      [...sshArgs(h), h.ssh_target, `find ${h.work_root} -mindepth 1 -maxdepth 1 -type d -mtime +${days} -print -exec rm -rf {} +`],
+      120_000,
+    );
+    if (r.code !== 0) return fail(`prune failed: ${r.out.slice(-300)}`);
+    console.log(r.out.trim() ? `removed:\n${r.out.trim()}` : 'nothing older than that');
+  });
+
+// ---- 驗證方案 (src/plans/store.ts): picked on the 新工作 page -------------------------------------
+const repeat = (v: string, prev: string[]): string[] => [...prev, v];
+const vplan = program
+  .command('verify-plan')
+  .description('驗證方案: how a change is proven good — which machine, commands, 圖資, thresholds (picked on /job.html)');
+
+function printPlan(p: VerifyPlan): void {
+  console.log(`${p.id}  ${p.name}${p.repo_path ? `  repo=${p.repo_path}` : '  (every repo)'}  host=${p.host ?? '(engine shell)'}`);
+  if (p.description) console.log(`  ${p.description}`);
+  for (const st of p.steps) console.log(`  step: ${st}`);
+  if (p.dataset_root) console.log(`  圖資: ${p.dataset_root}/<資料夾>${p.dataset_default ? `  (default ${p.dataset_default})` : ''}`);
+  if (p.metrics) console.log(`  門檻: ${p.metrics}`);
+  if (p.protected_paths.length) console.log(`  保護: ${p.protected_paths.join(', ')}`);
+  if (p.artifacts.length) console.log(`  產出物: ${p.artifacts.join(', ')}`);
+  for (const c of p.manual_checks) console.log(`  人工: ${c}`);
+}
+
+vplan
+  .command('list')
+  .description('verification plans (optionally only those offered for one repo)')
+  .option('--repo <path>', 'only plans for this repo (and those for every repo)')
+  .action((o: { repo?: string }) => {
+    const plans = listPlans(getDb(), o.repo ? path.resolve(o.repo) : null);
+    if (!plans.length) console.log('（還沒有驗證方案：loop verify-plan add --name … --step …）');
+    for (const p of plans) printPlan(p);
+  });
+
+vplan
+  .command('add')
+  .description('add a verification plan (or update one with --id)')
+  .requiredOption('--name <text>', 'what operators see, e.g. "亮缺陷判型 — 標準圖集"')
+  .option('--id <id>', 'update this plan instead of adding one')
+  .option('--repo <path>', 'the software it is for (omit = offered for every repo)')
+  .option('--host <name>', "where it runs: 'local' or a `loop exec host` name (omit = the engine's shell, no sandbox)")
+  .option('--step <cmd>', 'a verification command; repeat for several; {dataset} = the picked 圖資 folder', repeat, [])
+  .option('--dataset-root <path>', 'container path whose sub-folders are offered as 圖資, e.g. /datasets')
+  .option('--dataset-default <name>', 'the 圖資 folder preselected')
+  .option('--metrics <expr>', 'thresholds the engine checks, e.g. "detection_rate >= 0.98; miss == 0"')
+  .option('--protect <globs>', 'CSV globs the implementer must not change')
+  .option('--artifacts <globs>', 'CSV globs collected after verification (never committed)')
+  .option('--check <text>', 'a manual check a person ticks on the 驗收頁 (repeatable)', repeat, [])
+  .option('--domain <domain>', 'cuda | cv | cpp | csharp | typescript | python | other')
+  .option('--setup <cmd>', 'runs before the agent starts; failure stops the task before any token spend')
+  .option('--desc <text>', 'what it checks, in plain words')
+  .action((o) => {
+    const db = getDb();
+    const input = {
+      name: String(o.name),
+      repo_path: o.repo ? path.resolve(String(o.repo)) : null,
+      host: o.host ?? null,
+      steps: o.step as string[],
+      dataset_root: o.datasetRoot ?? null,
+      dataset_default: o.datasetDefault ?? null,
+      metrics: o.metrics ?? null,
+      protected_paths: o.protect ?? null,
+      artifacts: o.artifacts ?? null,
+      manual_checks: o.check as string[],
+      domain: o.domain ?? null,
+      setup_cmd: o.setup ?? null,
+      description: o.desc ?? null,
+    };
+    try {
+      const p = o.id ? updatePlan(db, String(o.id), input, 'cli') : createPlan(db, input, 'cli');
+      if (!p) return fail(`no such verification plan: ${o.id}`);
+      printPlan(p);
+      if (p.dataset_root) console.log(`下一步：loop verify-plan datasets ${p.id}`);
+    } catch (err) {
+      if (err instanceof PlanError) return fail(err.message);
+      throw err;
+    }
+  });
+
+vplan
+  .command('show <id>')
+  .description('one verification plan')
+  .action((id: string) => {
+    const p = getPlan(getDb(), id);
+    if (!p) return fail(`no such verification plan: ${id}`);
+    printPlan(p);
+  });
+
+vplan
+  .command('rm <id>')
+  .description('delete a verification plan (tasks already created from it keep their copy)')
+  .action((id: string) => {
+    if (!deletePlan(getDb(), id)) return fail(`no such verification plan: ${id}`);
+    console.log(`removed ${id}`);
+  });
+
+vplan
+  .command('datasets <id>')
+  .description('the 圖資 folders an operator can pick for this plan (lists its machine over ssh when remote)')
+  .action(async (id: string) => {
+    const db = getDb();
+    const p = getPlan(db, id);
+    if (!p) return fail(`no such verification plan: ${id}`);
+    try {
+      const ds = await listDatasets(db, p);
+      if (!ds.length) console.log(`（${p.dataset_root ?? '沒有設定圖資位置'} 裡沒有資料夾）`);
+      for (const d of ds) console.log(`${d.name === p.dataset_default ? '*' : ' '} ${d.path}  ${d.images ?? '?'} 張`);
+    } catch (err) {
+      if (err instanceof PlanError) return fail(err.message);
+      throw err;
+    }
   });
 
 const local = program.command('local').description('本地模型: list / load / stop / download / build / jobs (see local_models_enabled)');
