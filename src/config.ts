@@ -469,6 +469,17 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   local_model_loaded: '',
   local_model_status: 'idle',
   local_job_json: '', // engine STATE: the one download/build job in flight (src/local/jobs.ts)
+  // Night-only local work (src/scheduler/tick.ts dispatchLocal): "HH:MM-HH:MM" in the engine's
+  // local clock, may wrap midnight ("19:00-07:00"). Outside it no local task starts and no model
+  // is loaded for one; a run already going is left to finish. '' = any time (as before).
+  local_task_window: '',
+
+  // 晨報（src/report/morning.ts, /morning.html, `loop morning`）：what ran overnight, what passed its
+  // acceptance metrics and what needs a person. morning_report_time "HH:MM" pushes the summary to
+  // ntfy once a day (within 3h of that time); '' = no push, the page and CLI work regardless.
+  // morning_report_last is engine STATE (the local date of the last push), not a tunable.
+  morning_report_time: '',
+  morning_report_last: '',
 
   // Benchmark mode（src/benchmark/*.ts）：同一任務交給多個（本地）模型各做一次，全部結束後由外部高階
   // 模型評比排名，累積成 模型 × 領域 矩陣。off by default = routes 404, nothing is judged. The judge

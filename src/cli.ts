@@ -19,6 +19,7 @@ import {
 import { validateTask } from './gate/validateTask.js';
 import { readUsage, setCachedUsage } from './token/usage.js';
 import { forecastBacklog } from './token/accounting.js';
+import { buildMorningReport, formatMorningText } from './report/morning.js';
 import { computeMetrics } from './server/metrics.js';
 import { killRun } from './orchestrator/kill.js';
 import { cleanupWorktree } from './orchestrator/cleanup.js';
@@ -194,6 +195,17 @@ program
       console.log('active runs:');
       for (const r of runs) console.log(`  ${r.id} task=${r.task_id} pid=${r.pid}`);
     }
+  });
+
+program
+  .command('morning')
+  .description('晨報: what ran overnight — acceptance results, PRs, what needs a person')
+  .option('--hours <n>', 'look back this many hours', '24')
+  .option('--json', 'print the report as JSON')
+  .action((o: { hours: string; json?: boolean }) => {
+    const db = getDb();
+    const r = buildMorningReport(db, { hours: Number(o.hours) || 24 });
+    console.log(o.json ? JSON.stringify(r, null, 2) : formatMorningText(r));
   });
 
 program

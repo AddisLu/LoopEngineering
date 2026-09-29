@@ -49,6 +49,7 @@ import type { BenchJudgeExec } from '../benchmark/judge.js';
 import { registerPrdRoutes, type PrdRouteOptions } from './prdRoutes.js';
 import { registerChatRoutes, type ChatRouteOptions } from './chatRoutes.js';
 import { registerExecRoutes } from './execRoutes.js';
+import { buildMorningReport } from '../report/morning.js';
 import fastifyWebsocket from '@fastify/websocket';
 import { registerTerminalRoutes, type TerminalRouteOptions } from './terminalRoutes.js';
 import { McpPool } from '../mcp/client.js';
@@ -482,6 +483,12 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
     return out;
   };
   app.get('/api/settings', async () => ({ settings: readSettings() }));
+
+  // 晨報: what ran overnight and what needs a person (src/report/morning.ts; page: /morning.html)
+  app.get('/api/morning', async (req) => {
+    const h = Number((req.query as { hours?: string }).hours);
+    return buildMorningReport(db, { hours: Number.isFinite(h) && h > 0 ? h : 24 });
+  });
   app.post('/api/settings', async (req, reply) => {
     const b = (req.body ?? {}) as { settings?: Record<string, unknown>; key?: string; value?: unknown };
     const entries: [string, string][] = b.settings

@@ -89,6 +89,14 @@ export function routeStatusEvent(e: {
 }
 
 /**
+ * HTTP header values must be Latin-1 — fetch throws on anything else, so a Chinese title used to
+ * drop the whole push. ntfy decodes RFC 2047 encoded-words in its headers; ASCII passes as is.
+ */
+export function headerValue(v: string): string {
+  return /^[\x20-\x7e]*$/.test(v) ? v : `=?UTF-8?B?${Buffer.from(v, 'utf8').toString('base64')}?=`;
+}
+
+/**
  * Fire-and-forget ntfy push. warning/critical notifications carry a Pause action
  * button that POSTs /api/pause (with the bearer header) so you can stop the
  * scheduler from the phone notification shade — before the board even exists.
@@ -101,17 +109,21 @@ export async function notify(
     priority?: 'min' | 'low' | 'default' | 'high' | 'urgent';
     tags?: string[];
     withPauseAction?: boolean;
+    /** opened when the notification is tapped (e.g. the morning report page) */
+    click?: string;
   },
+  fetchImpl: typeof fetch = fetch,
 ): Promise<void> {
   const server = getSetting(db, 'ntfy_server') || process.env.NTFY_SERVER || '';
   const topic = getSetting(db, 'ntfy_topic') || process.env.NTFY_TOPIC || '';
   if (!server || !topic) return; // notifications disabled
 
   const headers: Record<string, string> = {
-    Title: opts.title,
+    Title: headerValue(opts.title),
     Priority: opts.priority ?? 'default',
   };
   if (opts.tags?.length) headers.Tags = opts.tags.join(',');
+  if (opts.click) headers.Click = headerValue(opts.click);
 
   if (opts.withPauseAction) {
     const base = process.env.LOOP_PUBLIC_URL || `http://127.0.0.1:${process.env.LOOP_PORT ?? '4711'}`;
@@ -120,7 +132,7 @@ export async function notify(
   }
 
   try {
-    await fetch(`${server.replace(/\/$/, '')}/${topic}`, {
+    await fetchImpl(`${server.replace(/\/$/, '')}/${topic}`, {
       method: 'POST',
       headers,
       body: opts.message,

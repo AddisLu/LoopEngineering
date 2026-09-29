@@ -115,7 +115,9 @@ export const TUNABLE_KEYS = [
   // mobile voice -> task intake
   'voice_intake_enabled',
   // 本地模型
-  'local_models_enabled', 'local_max_concurrency', 'local_spark_nodes',
+  'local_models_enabled', 'local_max_concurrency', 'local_spark_nodes', 'local_task_window',
+  // 晨報
+  'morning_report_time',
   // benchmark mode
   'benchmark_enabled', 'bench_judge_model',
   // PRD gate
@@ -149,6 +151,11 @@ export function validateSetting(key: string, value: string): string | null {
     if (!Number.isFinite(n) || n < 0 || n > 1) return `${key} must be a number between 0 and 1`;
   } else if (key === 'day_window') {
     if (!/^\d{2}:\d{2}-\d{2}:\d{2}$/.test(value)) return 'day_window must be HH:MM-HH:MM (e.g. 08:00-23:00)';
+  } else if (key === 'local_task_window') {
+    const m = value.match(/^((?:[01]\d|2[0-3]):[0-5]\d)-((?:[01]\d|2[0-3]):[0-5]\d|24:00)$/);
+    if (value !== '' && (!m || m[1] === m[2])) return 'local_task_window must be HH:MM-HH:MM (e.g. 19:00-07:00, may wrap midnight) or empty for any time';
+  } else if (key === 'morning_report_time') {
+    if (value !== '' && !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value)) return 'morning_report_time must be HH:MM (e.g. 08:00) or empty for no push';
   } else if (BOOL_KEYS.has(key)) {
     if (value !== 'true' && value !== 'false') return `${key} must be true or false`;
   } else if (key === 'default_model' || key === 'route_S' || key === 'route_M' || key === 'route_L') {

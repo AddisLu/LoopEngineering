@@ -610,7 +610,9 @@
     e.preventDefault();
     const settings = {};
     for (const [k, v] of new FormData(settingsForm).entries()) {
-      if (String(v).trim() !== '') settings[k] = String(v).trim();
+      // blank = leave unchanged, except fields where blank is a real value (data-clearable: "any time", "off")
+      const input = settingsForm.elements.namedItem(k);
+      if (String(v).trim() !== '' || (input && input.dataset && 'clearable' in input.dataset)) settings[k] = String(v).trim();
     }
     const saveBtn = $('settings-save');
     saveBtn.disabled = true;

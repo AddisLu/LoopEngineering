@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="zh-Hant" data-mode="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>晨報 · Loop Engineering</title>
+    <script>
+      // Set theme before first paint to avoid a flash of the wrong mode.
+      (function () {
+        try {
+          var m = localStorage.getItem('loop_mode');
+          if (m !== 'light' && m !== 'dark') {
+            m = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+          }
+          document.documentElement.setAttribute('data-mode', m);
+        } catch (e) {}
+      })();
+    </script>
+    <link rel="stylesheet" href="/styles.css" />
+    <style>
+      main.morning { width: 100%; max-width: 980px; margin: 0 auto; padding: 18px 16px 60px; display: grid; gap: 16px; align-content: start; overflow-y: auto; }
+      .morning .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+      .morning .grow { flex: 1 1 auto; }
+      .morning .headline { font-size: 17px; font-weight: 700; margin: 0; }
+      .morning .hint { font-size: 12.5px; color: var(--text-3, var(--text-2)); margin: 0; }
+      .morning .err { color: var(--danger); white-space: pre-wrap; }
+      .morning .counts { display: flex; flex-wrap: wrap; gap: 6px; }
+      .morning .chip { font-size: 12px; padding: 3px 10px; border-radius: 999px; background: var(--surface-2, rgba(0, 0, 0, 0.05)); white-space: nowrap; }
+      .morning .chip.attention, .morning .chip.failed { color: var(--danger); font-weight: 600; }
+      .morning .chip.pass { color: var(--ok); font-weight: 600; }
+      .morning .chip.manual, .morning .chip.blocked { color: var(--warn); }
+      .morning .card { background: var(--surface); border: 1px solid var(--line, var(--border, #ddd)); border-radius: 12px; padding: 14px 16px; display: grid; gap: 8px; min-width: 0; }
+      .morning .card.attention, .morning .card.failed { border-left: 4px solid var(--danger); }
+      .morning .card.pass { border-left: 4px solid var(--ok); }
+      .morning .card.manual, .morning .card.blocked { border-left: 4px solid var(--warn); }
+      .morning .title { font-size: 15px; font-weight: 650; margin: 0; overflow-wrap: anywhere; }
+      .morning .title a { color: inherit; }
+      .morning .meta { font-size: 12.5px; color: var(--text-2); overflow-wrap: anywhere; }
+      .morning .reason { font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
+      .morning ul.steps { margin: 0; padding-left: 0; list-style: none; display: grid; gap: 3px; font-size: 13px; }
+      .morning ul.steps li { overflow-wrap: anywhere; }
+      .morning code { font-size: 12.5px; }
+      .morning pre { margin: 0; padding: 8px 10px; background: var(--surface-2, rgba(0, 0, 0, 0.04)); border-radius: 8px; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 260px; overflow-y: auto; }
+      .morning .scroll { overflow-x: auto; }
+      .morning table { border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+      .morning th, .morning td { text-align: left; padding: 5px 10px 5px 0; border-bottom: 1px solid var(--line, var(--border, #e5e5e5)); }
+      .morning td.bad { color: var(--danger); font-weight: 600; }
+      .morning td.good { color: var(--ok); font-weight: 600; }
+      .morning details summary { cursor: pointer; font-size: 13px; }
+      .morning select { font: inherit; padding: 4px 6px; }
+      .morning .empty { text-align: center; padding: 28px 0; color: var(--text-2); }
+    </style>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span class="brand-text">
+          <strong class="brand-name">Loop Engineering</strong>
+          <span class="brand-sub">晨報 · 昨晚做了什麼</span>
+        </span>
+      </div>
+      <div class="controls">
+        <a class="btn" href="/">← 回到對話</a>
+        <a class="btn" href="/board.html">任務看板</a>
+        <button class="btn" id="theme-btn" type="button" title="切換深淺色">☾</button>
+      </div>
+    </header>
+
+    <main class="morning">
+      <div class="row">
+        <p class="headline grow" id="headline">載入中…</p>
+        <label class="hint">範圍
+          <select id="hours">
+            <option value="12">12 小時</option>
+            <option value="24" selected>24 小時</option>
+            <option value="72">3 天</option>
+            <option value="168">7 天</option>
+          </select>
+        </label>
+        <button class="btn sm" type="button" id="reload">重新整理</button>
+      </div>
+      <p class="hint" id="subline"></p>
+      <div class="counts" id="counts"></div>
+      <p class="err" id="page-err" hidden></p>
+      <div id="list" style="display: grid; gap: 12px"></div>
+    </main>
+
+    <script src="/morning.js"></script>
+  </body>
+</html>

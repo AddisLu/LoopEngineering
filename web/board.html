@@ -73,6 +73,7 @@
         <button id="theme-btn" class="btn icon-btn" type="button" title="切換佈景" aria-label="切換佈景"></button>
         <a class="btn" href="/">← 回到對話</a>
         <a class="btn" href="/brain.html">知識星圖</a>
+        <a class="btn" href="/morning.html">晨報</a>
         <button id="new-btn" class="btn primary" type="button">+ 新增 task</button>
       </div>
     </header>
@@ -193,6 +194,14 @@
           <select name="local_models_enabled"><option value="false">關</option><option value="true">開</option></select>
         </label>
         <label>本地模型同時執行數（同一時間 GPU 只載一個模型） <input name="local_max_concurrency" type="number" min="1" max="8" /></label>
+        <label>本地模型任務時段（HH:MM-HH:MM，可跨午夜，例如 19:00-07:00；留空＝任何時間。時段外不開新任務，跑到一半的會跑完）
+          <input name="local_task_window" placeholder="19:00-07:00" autocomplete="off" data-clearable />
+        </label>
+
+        <div class="settings-group">晨報</div>
+        <label>每天推送晨報的時間（HH:MM，經 ntfy；留空＝不推送，晨報頁照常可看）
+          <input name="morning_report_time" placeholder="08:00" autocomplete="off" data-clearable />
+        </label>
 
         <div class="settings-group">執行紀律（實驗性）</div>
         <label>派工時附加「執行紀律」提示區塊（TDD／系統化除錯／完成前驗證；預設關，效果見儀表板 A/B 表）
