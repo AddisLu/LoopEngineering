@@ -26,6 +26,8 @@ import { exportFilename, toMarkdown } from '../chat/export.js';
 import { ANSWER_PPTX_SCRIPT, answerToDeck, officePython } from '../chat/pptx.js';
 import { ENGINE_REPO_ROOT } from '../config.js';
 import { builtinTools, mcpTools, type ToolDef } from '../chat/tools.js';
+import { SANDBOX_PROMPT, execAllowedFor, sandboxTools, type SandboxRun } from '../chat/sandboxTools.js';
+import { chatWorkspaceDir, removeChatWorkspace } from '../exec/workspace.js';
 import type { McpPool } from '../mcp/client.js';
 import { runToolLoop } from '../chat/toolLoop.js';
 import type { Lookup } from '../chat/netGuard.js';
@@ -134,6 +136,8 @@ export interface ChatRouteOptions {
   tools?: (db: Database.Database) => ToolDef[];
   /** MCP servers bridged into the tool set (src/mcp/client.ts); absent = no MCP tools. */
   mcpPool?: McpPool | null;
+  /** Test injection for the GPU 沙盒 tools (defaults to a real `docker run`, src/exec/sandbox.ts). */
+  sandboxRun?: SandboxRun;
   /** Test injection: the in-flight answer registry (defaults to the process singleton). */
   generations?: GenerationRegistry;
 }
@@ -331,7 +335,8 @@ export function systemPromptWithTools(tools: ToolDef[]): string {
   ]
     .filter(Boolean)
     .join('');
-  return ['你是在網頁對話框裡直接回答問題的助理，預設使用繁體中文。', how, ...PROMPT_TAIL].join('\n');
+  const sandbox = names.includes('sandbox_run') ? SANDBOX_PROMPT : '';
+  return ['你是在網頁對話框裡直接回答問題的助理，預設使用繁體中文。', how, sandbox, ...PROMPT_TAIL].filter(Boolean).join('\n');
 }
 
 /**
@@ -749,6 +754,7 @@ export function registerChatRoutes(app: FastifyInstance, db: Database.Database, 
     if (!me) return reply;
     const { id } = req.params as { id: string };
     if (!deleteConversation(db, id, me.user_key)) return reply.code(404).send({ error: 'conversation not found' });
+    removeChatWorkspace(id); // its GPU 沙盒 scratch files (build outputs can be large)
     return { ok: true };
   });
 
@@ -1266,6 +1272,10 @@ export function registerChatRoutes(app: FastifyInstance, db: Database.Database, 
             tools = [...tools, ...m.tools];
             mcpSkipped = m.skipped;
           }
+          // GPU 沙盒: a saved conversation is the workspace, and only listed identities may run code
+          if (getBool(db, 'exec_enabled', false) && genMeta && execAllowedFor(db, genMeta.userKey)) {
+            tools = [...tools, ...sandboxTools(db, chatWorkspaceDir(genMeta.conversationId), { run: opts.sandboxRun })];
+          }
           if (!tools.length) toolsNote = '沒有可用的工具（chat_search_url 未設定、MCP 也沒有 server）';
         }
       }
@@ -1280,7 +1290,16 @@ export function registerChatRoutes(app: FastifyInstance, db: Database.Database, 
         : [{ role: 'system', content: `${basePrompt}${tuning}${grounding}` }, ...messages];
 
     const ac = new AbortController();
-    const timer = setTimeout(() => ac.abort(), 10 * 60_000);
+    // a sandbox answer compiles, runs and profiles over several rounds, each of which may take
+    // minutes — it gets its own round/time budget instead of the web-search one
+    const withSandbox = tools.some((t) => t.name === 'sandbox_run');
+    const loopRounds = withSandbox
+      ? Math.min(20, Math.max(1, getNum(db, 'chat_tool_max_rounds', 5), getNum(db, 'exec_chat_max_rounds', 10)))
+      : Math.min(10, Math.max(1, getNum(db, 'chat_tool_max_rounds', 5)));
+    const loopWallMs = withSandbox
+      ? Math.max(getNum(db, 'chat_tool_wall_ms', 120_000), getNum(db, 'exec_chat_wall_ms', 900_000))
+      : getNum(db, 'chat_tool_wall_ms', 120_000);
+    const timer = setTimeout(() => ac.abort(), withSandbox ? Math.max(10 * 60_000, loopWallMs + 5 * 60_000) : 10 * 60_000);
     const upstreamBody = {
       model: model.served_model_id,
       stream: true,
@@ -1324,8 +1343,8 @@ export function registerChatRoutes(app: FastifyInstance, db: Database.Database, 
           messages: upstreamMessages,
           tools,
           ctx: { db, fetch: opts.toolFetch ?? fetch, lookup: opts.toolLookup, signal: ac.signal },
-          maxRounds: Math.min(10, Math.max(1, getNum(db, 'chat_tool_max_rounds', 5))),
-          wallMs: getNum(db, 'chat_tool_wall_ms', 120_000),
+          maxRounds: loopRounds,
+          wallMs: loopWallMs,
           write: (line) => emit(res, line),
           signal: ac.signal,
           log: (m) => app.log.info({ chat_tools: m }),

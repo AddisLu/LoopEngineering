@@ -518,3 +518,50 @@ CREATE TABLE IF NOT EXISTS knowledge_bridge_edges (
   PRIMARY KEY (src, dst)
 );
 CREATE INDEX IF NOT EXISTS idx_knowledge_bridge_signature ON knowledge_bridge_edges(signature);
+
+-- GPU 執行沙盒 on other machines (src/exec/hosts.ts): each row is a Linux box the engine reaches
+-- over SSH and drives with `docker -H ssh://…` — same container policy as the local sandbox. The
+-- workspace is rsync'ed to <work_root>/<key> before each run; data_mounts are bind-mounted
+-- read-only (e.g. the AOI image library). remote_uid/gid are learned by `loop exec check --host`.
+CREATE TABLE IF NOT EXISTS exec_hosts (
+  name        TEXT PRIMARY KEY,
+  ssh_target  TEXT NOT NULL,            -- user@host, or an ~/.ssh/config alias
+  ssh_port    INTEGER,                  -- NULL = 22 / whatever ssh config says
+  work_root   TEXT NOT NULL,            -- remote dir that holds the synced workspaces
+  image       TEXT,                     -- NULL = exec_image
+  gpus        TEXT,                     -- NULL = exec_gpus ('' = no GPU)
+  memory      TEXT,                     -- NULL = exec_memory
+  cpus        TEXT,                     -- NULL = exec_cpus
+  data_mounts TEXT NOT NULL DEFAULT '', -- CSV of /remote/src:/container/dst, always read-only
+  description TEXT,                     -- told to the model: what this box is for / what data it has
+  remote_uid  INTEGER,
+  remote_gid  INTEGER,
+  enabled     INTEGER NOT NULL DEFAULT 1,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- 驗證方案 (src/plans/store.ts): a named, reusable answer to "how is a change to this software
+-- proven good" — which machine, which commands, which image folder, which thresholds, what may not
+-- be touched, what gets collected. Written once by an engineer; an operator only picks one on the
+-- 新工作 page. A task copies the plan's fields when it is created (a later edit of the plan never
+-- changes a task already queued), and keeps verify_plan_id for the record.
+CREATE TABLE IF NOT EXISTS verify_plans (
+  id              TEXT PRIMARY KEY,
+  name            TEXT NOT NULL,
+  repo_path       TEXT,                       -- NULL = offered for every repo
+  description     TEXT,                       -- what it checks, in plain words
+  host            TEXT,                       -- NULL = the engine's shell (no sandbox); 'local' or an exec_hosts name = the 沙盒
+  steps           TEXT NOT NULL DEFAULT '[]', -- JSON array of commands; {dataset} = the picked image folder
+  dataset_root    TEXT,                       -- container path whose sub-folders are offered as 圖資
+  dataset_default TEXT,                       -- the sub-folder preselected
+  metrics         TEXT,                       -- thresholds, e.g. "detection_rate >= 0.98; miss == 0"
+  protected_paths TEXT,                       -- CSV globs the implementer must not change
+  artifacts       TEXT,                       -- CSV globs collected after verification
+  manual_checks   TEXT NOT NULL DEFAULT '[]', -- JSON array: what a person checks by hand
+  domain          TEXT NOT NULL DEFAULT 'other',
+  setup_cmd       TEXT,                       -- runs before the agent starts (fail-fast)
+  created_by      TEXT,
+  updated_by      TEXT,
+  created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);

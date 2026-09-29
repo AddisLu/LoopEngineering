@@ -80,6 +80,8 @@ export interface SubmitOptions extends PrdOptions {
   benchmark_models?: string[];
   /** several cloud judges for the benchmark branch (defaults to bench_judge_model) */
   judge_models?: string[];
+  /** the 驗證方案 a 新工作 was composed from (kept on the task for the record) */
+  verify_plan_id?: string | null;
 }
 
 export type SubmitResult =
@@ -122,6 +124,7 @@ export async function submitPrd(db: Database.Database, markdown: string, opts: S
   // the human checklist rides along in the rubric so both the llm judge and VERIFY.md see it
   const rubric = [
     ...f.acceptance.map((a) => `- ${a}`),
+    ...(f.acceptance_metrics ? ['', `驗收指標（引擎自動檢查）：${f.acceptance_metrics}`] : []),
     ...(f.manual_checks.length ? ['', '人工驗收：', ...f.manual_checks.map((m) => `- ${m}`)] : []),
   ].join('\n');
   const common = {
@@ -143,6 +146,8 @@ export async function submitPrd(db: Database.Database, markdown: string, opts: S
       judge_models: opts.judge_models,
       setup_cmd: f.setup_steps?.length ? f.setup_steps.join(' && ') : null,
       source_kind: 'draft',
+      acceptance_metrics: f.acceptance_metrics,
+      protected_paths: f.protected_paths.length ? f.protected_paths.join(',') : null,
     });
     logEvent(db, { kind: 'note', detail: `PRD intake: benchmark ${benchmark.id} from ${path.basename(planRef)}` });
     return { ok: true, kind: 'benchmark', check, plan_ref: planRef, benchmark, arms };
@@ -162,9 +167,14 @@ export async function submitPrd(db: Database.Database, markdown: string, opts: S
     coding_tool: 'claude-code',
     model,
     verify_mode: [...modes].join(','),
-    requires: f.requires ?? (f.dataset ? 'gpu' : null),
+    // a local image set needs this machine's GPU; one on a sandbox host is measured over there
+    requires: f.requires ?? (f.dataset && !f.dataset.host ? 'gpu' : null),
     setup_cmd: f.setup_steps.length ? f.setup_steps.join(' && ') : null,
     created_by: 'prd',
+    acceptance_metrics: f.acceptance_metrics,
+    protected_paths: f.protected_paths.length ? f.protected_paths.join(',') : null,
+    artifacts: f.artifacts.length ? f.artifacts.join(',') : null,
+    verify_plan_id: opts.verify_plan_id ?? null,
   });
   const gate = validateTask(created, getSetting(db, 'host_capabilities') ?? '');
   if (gate.ok && opts.queue !== false) setStatus(db, created.id, 'queued', { detail: 'queued from PRD intake' });

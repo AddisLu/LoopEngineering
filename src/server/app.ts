@@ -48,6 +48,11 @@ import { registerBenchmarkRoutes, type BenchmarkRouteOptions } from './benchmark
 import type { BenchJudgeExec } from '../benchmark/judge.js';
 import { registerPrdRoutes, type PrdRouteOptions } from './prdRoutes.js';
 import { registerChatRoutes, type ChatRouteOptions } from './chatRoutes.js';
+import { registerExecRoutes } from './execRoutes.js';
+import { registerPlanRoutes, type PlanRouteOptions } from './planRoutes.js';
+import { registerReviewRoutes } from './reviewRoutes.js';
+import { removeTrialWorkspace } from '../review/review.js';
+import { buildMorningReport } from '../report/morning.js';
 import fastifyWebsocket from '@fastify/websocket';
 import { registerTerminalRoutes, type TerminalRouteOptions } from './terminalRoutes.js';
 import { McpPool } from '../mcp/client.js';
@@ -122,6 +127,15 @@ export interface AppOptions {
   prdGit?: PrdRouteOptions['git'];
   /** Test-only injection point for 模型對話 的使用者辨識 (see src/server/identity.ts). */
   chatIdentity?: ChatRouteOptions['identity'];
+  /** Test-only: stands in for `docker run` behind the chat's GPU 沙盒 tools and POST /api/exec/run. */
+  sandboxRun?: ChatRouteOptions['sandboxRun'];
+  /** test injection: ssh behind 驗證方案 圖資 listing */
+  planHostExec?: PlanRouteOptions['hostExec'];
+  /** test injection: the sandbox probe behind 檢查機台 */
+  planCheck?: PlanRouteOptions['check'];
+  /** test injection: Gitea behind the 驗收頁's 發佈 */
+  releaseFetch?: typeof fetch;
+  releaseToken?: string;
 }
 
 interface CreateTaskBody {
@@ -144,6 +158,9 @@ interface CreateTaskBody {
   verify_timeout_min?: number | null;
   requires?: string | null;
   experiment?: string | null;
+  acceptance_metrics?: string | null;
+  artifacts?: string | null;
+  protected_paths?: string | null;
 }
 
 export function buildApp(opts: AppOptions = {}): FastifyInstance {
@@ -248,6 +265,9 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
       verify_timeout_min: b.verify_timeout_min ?? null,
       requires: b.requires ?? null,
       experiment: b.experiment ?? null,
+      acceptance_metrics: b.acceptance_metrics ?? null,
+      artifacts: b.artifacts ?? null,
+      protected_paths: b.protected_paths ?? null,
     });
     return { task: t, gate: validateTask(t, getSetting(db, 'host_capabilities') ?? '', environmentMap(db)) };
   });
@@ -326,6 +346,7 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
     const material = collectDistillMaterial(db, t);
     setStatus(db, id, 'closed', { detail: 'closed via api' });
     cleanupWorktree(db, t); // work is done — reclaim the worktree's disk
+    removeTrialWorkspace(t); // and the 驗收頁's 試跑 checkout
     // fire-and-forget: never delays this response (see knowledge/distill.ts)
     void runDistiller(db, t, material, opts.distillExec).catch(() => {});
     return { ok: true };
@@ -475,6 +496,12 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
     return out;
   };
   app.get('/api/settings', async () => ({ settings: readSettings() }));
+
+  // 晨報: what ran overnight and what needs a person (src/report/morning.ts; page: /morning.html)
+  app.get('/api/morning', async (req) => {
+    const h = Number((req.query as { hours?: string }).hours);
+    return buildMorningReport(db, { hours: Number.isFinite(h) && h > 0 ? h : 24 });
+  });
   app.post('/api/settings', async (req, reply) => {
     const b = (req.body ?? {}) as { settings?: Record<string, unknown>; key?: string; value?: unknown };
     const entries: [string, string][] = b.settings
@@ -561,13 +588,22 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
               return [];
             }
           },
-          env: (name) => runtimeEnvFor(name, db, { apiUrl: `http://127.0.0.1:${process.env.LOOP_PORT || 4711}`, apiToken: apiToken ?? '', dataDir: paths.dataDir }),
+          env: (name) =>
+            runtimeEnvFor(name, db, {
+              apiUrl: `http://127.0.0.1:${process.env.LOOP_PORT || 4711}`,
+              apiToken: apiToken ?? '',
+              dataDir: paths.dataDir,
+              toolTimeoutMs: getNum(db, 'mcp_timeout_ms', 30_000),
+            }),
           timeoutMs: () => getNum(db, 'mcp_timeout_ms', 30_000),
         });
   app.addHook('onClose', async () => {
     await mcpPool?.close();
   });
-  registerChatRoutes(app, db, { identity: opts.chatIdentity, toolFetch: opts.chatToolFetch, toolLookup: opts.chatToolLookup, mcpPool });
+  registerChatRoutes(app, db, { identity: opts.chatIdentity, toolFetch: opts.chatToolFetch, toolLookup: opts.chatToolLookup, mcpPool, sandboxRun: opts.sandboxRun });
+  registerExecRoutes(app, db, { run: opts.sandboxRun });
+  registerPlanRoutes(app, db, { hostExec: opts.planHostExec, check: opts.planCheck, reviewExec: opts.prdReviewExec });
+  registerReviewRoutes(app, db, { sandboxRun: opts.sandboxRun, releaseFetch: opts.releaseFetch, releaseToken: opts.releaseToken, identity: opts.chatIdentity });
   // inside a child plugin so it loads after @fastify/websocket (a `websocket: true` route
   // declared in the root scope runs before the plugin has decorated the instance)
   app.register(async (inst) => {

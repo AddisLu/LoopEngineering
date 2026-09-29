@@ -571,9 +571,10 @@ function renderRefs(a, k) {
 
 // 上網／工具: one collapsible card per answer, kept under the citations. Everything shown is the
 // server's summary of each call (name, outcome, source URLs) — never page bodies.
-const TOOL_ICON = { web_search: '🔎', fetch_url: '📄' };
+const TOOL_ICON = { web_search: '🔎', fetch_url: '📄', sandbox_write_file: '📝', sandbox_read_file: '📄', sandbox_list: '📁', sandbox_run: '▶️' };
+const TOOL_LABEL = { sandbox_write_file: '沙盒寫檔', sandbox_read_file: '沙盒讀檔', sandbox_list: '沙盒目錄', sandbox_run: '沙盒執行' };
 const toolIcon = (name) => TOOL_ICON[name] || (name.startsWith('mcp__') ? '🧩' : '🛠');
-const toolLabel = (name) => (name.startsWith('mcp__') ? name.slice(5).replace('__', '.') : name);
+const toolLabel = (name) => TOOL_LABEL[name] || (name.startsWith('mcp__') ? name.slice(5).replace('__', '.') : name);
 function renderTools(a, rounds) {
   if (a.toolBox) a.toolBox.remove();
   if (!rounds || !rounds.length) return;
@@ -587,6 +588,13 @@ function renderTools(a, rounds) {
     const head = el('div', 'call');
     head.append(el('span', 'ic', toolIcon(c.name)), el('b', null, toolLabel(c.name)), el('span', 's', ` ${c.summary || ''} · ${((c.ms || 0) / 1000).toFixed(1)} s`));
     item.append(head);
+    // GPU 沙盒: what actually ran and what it printed, verbatim — so the answer can be checked
+    // against the real output instead of the model's retelling of it
+    if (c.detail) {
+      const d = el('details', 'run');
+      d.append(el('summary', null, c.name === 'sandbox_run' ? '指令與輸出' : '詳細'), el('pre', null, c.detail));
+      item.append(d);
+    }
     if (c.sources && c.sources.length) {
       const ul = el('ul');
       for (const src of c.sources) {

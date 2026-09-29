@@ -1,6 +1,7 @@
 import type { Task } from '../types.js';
 import { parseSteps } from '../types.js';
 import { resolveShell, runShell, type ResolveShellOptions } from '../util/shell.js';
+import type { SandboxStepRunner } from '../exec/sandbox.js';
 
 export interface VerifyStepResult {
   step: string;
@@ -16,22 +17,67 @@ export interface VerifyResult {
   failedStep: string | null;
 }
 
+/**
+ * A step written as `sandbox: <command>` runs inside the GPU 執行沙盒 (src/exec/sandbox.ts) with the
+ * worktree at /work, instead of on the host — the same environment the agent built and ran in.
+ * `sandbox@<host>: <command>` runs it on that registered machine (src/exec/hosts.ts) instead of
+ * the default one, e.g. the box that holds the image library.
+ */
+export const SANDBOX_STEP_PREFIX = 'sandbox:';
+const SANDBOX_STEP_RE = /^sandbox(?:@([a-z0-9][a-z0-9_-]*))?\s*:/i;
+
+export function parseSandboxStep(step: string): { host: string | null; command: string } | null {
+  const t = step.trimStart();
+  const m = SANDBOX_STEP_RE.exec(t);
+  return m ? { host: m[1]?.toLowerCase() ?? null, command: t.slice(m[0].length).trim() } : null;
+}
+
+/** The command of a `sandbox:` / `sandbox@host:` step, or null for a host step. */
+export function sandboxStepCommand(step: string): string | null {
+  return parseSandboxStep(step)?.command ?? null;
+}
+
 /** Run each verification step in the worktree, in order, each with its own timeout. */
 export async function runVerification(
   task: Task,
   cwd: string,
   perStepTimeoutMs = 10 * 60_000,
   shellOpts?: ResolveShellOptions,
+  // runs `sandbox:` steps; null/absent (exec_enabled off) makes such a step fail with a clear note
+  sandbox?: SandboxStepRunner | null,
 ): Promise<VerifyResult> {
   const steps = parseSteps(task);
   const shell = resolveShell(shellOpts);
   const results: VerifyStepResult[] = [];
   for (const step of steps) {
-    const r = await runStep(step, cwd, perStepTimeoutMs, shell);
+    const sb = parseSandboxStep(step);
+    const r = sb === null ? await runStep(step, cwd, perStepTimeoutMs, shell) : await runSandboxStep(step, sb.command, sb.host, cwd, perStepTimeoutMs, sandbox ?? null);
     results.push(r);
     if (!r.ok) return { ok: false, results, failedStep: step };
   }
   return { ok: true, results, failedStep: null };
+}
+
+async function runSandboxStep(
+  step: string,
+  command: string,
+  host: string | null,
+  cwd: string,
+  timeoutMs: number,
+  sandbox: SandboxStepRunner | null,
+): Promise<VerifyStepResult> {
+  if (!command) return { step, ok: false, exitCode: null, timedOut: false, output: '`sandbox:` 後面沒有指令' };
+  if (!sandbox) {
+    return {
+      step,
+      ok: false,
+      exitCode: null,
+      timedOut: false,
+      output: '這一步要在 GPU 執行沙盒裡跑，但沙盒沒有開（loop config set exec_enabled true）；或把它改成一般指令。',
+    };
+  }
+  const r = await sandbox(command, cwd, timeoutMs, host);
+  return { step, ...r };
 }
 
 async function runStep(
