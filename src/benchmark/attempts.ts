@@ -85,11 +85,24 @@ function sandboxRuns(db: Database.Database, runId: string): { n: number; profile
   return { n: rows.length, profiler };
 }
 
+/** why a run never reached verification, in the words the pages use */
+export function humanNote(detail: string): string {
+  const d = detail.trim();
+  if (/^aborted (by user|via api)/i.test(d)) return '被中止';
+  if (/^watchdog timeout/i.test(d)) return '逾時';
+  if (/^setup_cmd failed/i.test(d)) return `準備環境失敗（${d.replace(/^setup_cmd failed\s*/i, '').slice(0, 80)}）`;
+  const intr = /^interrupted: (\w+)/i.exec(d);
+  if (intr) return intr[1] === 'user' ? '被中止' : `被中斷（${intr[1] === 'breaker' ? '額度保護' : intr[1] === 'window' ? '時段' : intr[1] === 'pause' ? '暫停排程' : intr[1]}）`;
+  if (/^resume limit/i.test(d)) return '續跑次數用完';
+  if (/^exit=/i.test(d)) return `執行出錯（${d.slice(0, 80)}）`;
+  return d;
+}
+
 function lastStatus(db: Database.Database, runId: string): string | null {
   const row = db
     .prepare("SELECT detail FROM task_events WHERE run_id = ? AND kind = 'status' AND detail IS NOT NULL ORDER BY id DESC LIMIT 1")
     .get(runId) as { detail: string } | undefined;
-  return row?.detail ? row.detail.split('\n')[0]!.slice(0, 200) : null;
+  return row?.detail ? humanNote(row.detail.split('\n')[0]!).slice(0, 200) : null;
 }
 
 /** sqlite writes "YYYY-MM-DD HH:MM:SS" (UTC); finishRun writes ISO */

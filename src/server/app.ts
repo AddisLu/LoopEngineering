@@ -10,6 +10,7 @@ import { validateSetting, TUNABLE_KEYS } from '../settings.js';
 import { createTask, getTask, setStatus, activeRuns, deleteTask, countByStatus, tasksForPrune } from '../tasks.js';
 import { validateTask } from '../gate/validateTask.js';
 import { readUsage } from '../token/usage.js';
+import { resolvePolicy } from '../scheduler/policy.js';
 import { killRun } from '../orchestrator/kill.js';
 import { cleanupWorktree, resetTaskWorkspace } from '../orchestrator/cleanup.js';
 import { pruneTaskArtifacts } from '../git/worktree.js';
@@ -224,6 +225,21 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
   app.get('/api/token', async () => readUsage());
 
   app.get('/api/board', async () => boardState(db));
+
+  // the rail's usage ring on every page: the reading alone, without building the whole board
+  app.get('/api/usage', async () => {
+    const u = readUsage();
+    const p = resolvePolicy(db);
+    return {
+      session: Math.round(u.session.percent),
+      weekly: Math.round(u.weekly.percent),
+      sessionResetsInMin: u.session.resetsInMinutes,
+      weeklyResetsInMin: u.weekly.resetsInMinutes,
+      error: u.error ?? null,
+      policy: { window: p.window, sessionMax: p.sessionMax, weeklyMax: p.weeklyMax },
+      paused: getBool(db, 'scheduler_paused'),
+    };
+  });
 
   // Backlog usage forecast: "should I add more tasks?" — read-only over existing
   // per-task estimates (see forecastBacklog).

@@ -3,271 +3,343 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Benchmark · Loop Engineering</title>
-    <script>
-      // Set theme before first paint to avoid a flash of the wrong mode.
-      (function () {
-        try {
-          var m = localStorage.getItem('loop_mode');
-          if (m !== 'light' && m !== 'dark') {
-            m = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-          }
-          document.documentElement.setAttribute('data-mode', m);
-        } catch (e) {}
-      })();
-    </script>
+    <title>評比 · Loop Engineering</title>
+    <script src="/theme-boot.js"></script>
     <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/frame.css" />
     <style>
-      main.bench { width: 100%; max-width: 1180px; margin: 0 auto; padding: 18px 20px 60px; display: grid; gap: 22px; align-content: start; overflow-y: auto; }
-      .bench h2 { font-size: 16px; margin: 0 0 10px; }
-      .bench h3 { font-size: 13.5px; margin: 18px 0 8px; }
-      .bench section { background: var(--surface); border: 1px solid var(--line, var(--border, #ddd)); border-radius: 12px; padding: 16px 18px; }
-      .bench .off { color: var(--warn); }
-      .bench table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
-      .bench th, .bench td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line, var(--border, #e5e5e5)); vertical-align: top; }
-      .bench th { font-weight: 600; color: var(--text-2, inherit); }
-      .bench tr.clickable { cursor: pointer; }
-      .bench tr.clickable:hover, .bench tr.selected { background: var(--accent-soft, rgba(0, 0, 0, 0.04)); }
-      .bench .err { color: var(--danger); white-space: pre-wrap; }
-      .bench .summary { white-space: pre-wrap; margin: 8px 0 12px; }
-      .bench .heat { font-weight: 600; }
-      .bench .scroll { overflow-x: auto; }
-      .bench .hint { font-size: 12.5px; color: var(--text-3, var(--text-2)); margin: 2px 0 10px; }
-      .bench .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
-      .bench .grow { flex: 1 1 auto; }
-
-      /* step sections of the create view */
-      .step-head { display: flex; align-items: baseline; gap: 8px; }
-      .step-head .n { width: 22px; height: 22px; border-radius: 50%; background: var(--accent); color: var(--on-accent, #fff); display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex: 0 0 auto; }
-      .tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
-      .tabs .tab { font: inherit; font-size: 13px; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line, var(--border)); background: var(--surface-2, transparent); color: inherit; cursor: pointer; }
-      .tabs .tab.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 600; }
-      .src-pane[hidden] { display: none; }
-      .src-pane { display: grid; gap: 8px; }
-      .src-pane > label { display: grid; gap: 4px; font-size: 13px; }
-      .src-pane > label input, .src-pane > label select, .src-pane > label textarea { font: inherit; padding: 6px 8px; }
-      .picks { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 8px; }
-      .pick { display: flex; gap: 8px; align-items: flex-start; padding: 9px 11px; border: 1px solid var(--line, var(--border)); border-radius: 10px; cursor: pointer; }
-      .pick.on { border-color: var(--accent); background: var(--accent-soft); }
-      .pick.off { opacity: .55; cursor: not-allowed; }
-      .pick input { margin-top: 3px; }
-      .pick .b { font-size: 13px; font-weight: 600; }
-      .pick .s { font-size: 11.5px; opacity: .72; display: block; }
+      main.bench { width: 100%; }
+      .bench-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
+      .bcard { padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface-2); cursor: pointer; text-align: left; color: var(--text); }
+      .bcard:hover { border-color: var(--border-2); box-shadow: var(--shadow-2); }
+      .bcard .t { font-size: 14.5px; font-weight: 700; line-height: 1.45; }
+      .bcard .row-s { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12.5px; color: var(--text-2); }
+      .running-strip { padding: 14px 18px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; border: 1.5px solid var(--st-running); border-radius: 14px; background: var(--surface-2); cursor: pointer; }
+      .progress-flow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; color: var(--text-2); }
+      .progress-flow .st { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+      .progress-flow .st[data-s="ok"] { color: var(--ok); }
+      .progress-flow .st[data-s="active"] { color: var(--st-running); }
+      .progress-flow .st[data-s="fail"] { color: var(--danger); }
+      .progress-flow svg { width: 14px; height: 14px; color: var(--text-3); }
+      .winner { padding: 14px 20px; display: flex; align-items: center; gap: 18px; flex-wrap: wrap; border: 1px solid var(--border); border-radius: 14px; background: var(--surface-2); }
+      .winner .crown { width: 36px; height: 36px; border-radius: 10px; display: flex; align-items: center; justify-content: center; background: var(--accent-soft); color: var(--accent-2); }
+      .winner .crown svg { width: 22px; height: 22px; }
+      .winner .big { font-size: 18px; font-weight: 700; }
+      .winner .vsep { width: 1px; height: 36px; background: var(--border); }
+      .scores { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
+      .scorecard { padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface-2); }
+      .scorecard.top { border: 1.5px solid var(--accent); }
+      .scorecard .hd { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+      .scorecard .sw { width: 12px; height: 12px; border-radius: 3px; flex: 0 0 auto; }
+      .scorecard .nm { font-size: 15px; font-weight: 700; }
+      .scorecard .val { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+      .scorecard .val .n { font-size: 32px; line-height: 38px; font-weight: 700; font-variant-numeric: tabular-nums; }
+      .scorecard .val .n small { font-size: 15px; font-weight: 500; }
+      .scorecard .val .d { font-size: 13px; font-weight: 700; }
+      .scorecard .val .d.good { color: var(--ok); }
+      .scorecard .val .d.bad { color: var(--danger); }
+      .scorecard .iter { display: flex; align-items: center; gap: 8px; font-size: 12.5px; line-height: 1.5; }
+      .scorecard .foot { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12.5px; color: var(--text-2); border-top: 1px solid var(--surface-sunk); padding-top: 8px; }
+      .scorecard .foot b { color: var(--text); }
+      .two { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 16px; }
+      .two.even { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+      .notes-list { display: flex; flex-direction: column; gap: 10px; font-size: 14px; line-height: 1.7; }
+      .notes-list .who { font-weight: 700; font-size: 13px; }
+      details.more { border-top: 1px solid var(--surface-sunk); }
+      details.more summary { min-height: 44px; display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13.5px; list-style: none; }
+      details.more summary::-webkit-details-marker { display: none; }
+      details.more[open] summary svg { transform: rotate(90deg); }
+      details.more summary svg { width: 14px; height: 14px; transition: transform 140ms ease; }
+      .scroll-x { overflow-x: auto; }
+      table.plain { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+      table.plain th, table.plain td { text-align: left; padding: 8px; border-bottom: 1px solid var(--surface-sunk); vertical-align: top; }
+      table.plain th { font-size: 12px; font-weight: 600; color: var(--text-2); }
+      .recos { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 14px; }
+      .reco { padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; border: 1.5px solid var(--border-2); border-radius: 14px; background: var(--surface-2); font-size: 13px; line-height: 1.6; }
+      .reco[data-kind="cannot"] { border-color: var(--danger); }
+      .reco[data-kind="can"] { border-color: var(--ok); }
+      .reco[data-kind="weaker"] { border-color: var(--st-attention); }
+      .reco[data-kind="none"] { border-style: dashed; background: var(--surface); }
+      .reco .hd { display: flex; align-items: center; gap: 8px; }
+      .reco .hd b { font-size: 15px; }
+      .model-row { display: flex; align-items: center; gap: 12px; }
+      .model-row .nm { width: 150px; flex: 0 0 auto; font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .model-row .n { width: 48px; text-align: right; font-size: 12px; color: var(--text-2); }
+      /* 新評比 */
+      .newgrid { display: flex; flex-direction: column; gap: 22px; max-width: 900px; }
+      .step { display: flex; flex-direction: column; gap: 10px; }
+      .step-head { display: flex; align-items: center; gap: 10px; }
+      .step-head .n { width: 24px; height: 24px; border-radius: 50%; background: var(--text); color: var(--surface); font-size: 13px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; }
+      .step-head h2 { margin: 0; font-size: 16px; }
+      .tabs { display: inline-flex; gap: 2px; padding: 3px; border-radius: 10px; background: var(--surface-sunk); align-self: flex-start; flex-wrap: wrap; }
+      .tabs .tab { font: inherit; font-size: 13px; padding: 6px 14px; border-radius: 8px; border: 0; background: transparent; color: var(--text-2); cursor: pointer; }
+      .tabs .tab.on { background: var(--surface-2); color: var(--text); font-weight: 600; box-shadow: 0 1px 2px rgba(52, 44, 30, 0.08); }
+      .src-pane { display: grid; gap: 10px; }
+      .src-pane > label { display: grid; gap: 4px; font-size: 13px; font-weight: 600; }
+      .src-pane input, .src-pane select, .src-pane textarea { font: inherit; font-size: 13.5px; font-weight: 400; padding: 8px 10px; border: 1px solid var(--border-2); border-radius: 9px; background: var(--surface-2); color: var(--text); }
+      .hint { font-size: 12.5px; color: var(--text-2); line-height: 1.6; margin: 0; }
+      .picks { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 8px; }
+      .pick { display: flex; gap: 10px; align-items: center; min-height: 48px; padding: 8px 12px; border: 1px solid var(--border-2); border-radius: 10px; cursor: pointer; background: var(--surface-2); }
+      .pick.on { border: 1.5px solid var(--accent); background: var(--accent-soft); }
+      .pick.off { opacity: 0.55; cursor: not-allowed; }
+      .pick .b { font-size: 13.5px; font-weight: 600; display: block; }
+      .pick .s { font-size: 11.5px; color: var(--text-2); display: block; }
       .qcards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; }
-      .estimate { background: var(--surface-2, var(--sunk, rgba(0,0,0,.03))); border-radius: 10px; padding: 10px 12px; font-size: 13px; }
-      .chipline { display: flex; flex-wrap: wrap; gap: 6px; }
-      .chipline .chip { font-size: 11.5px; padding: 3px 9px; border-radius: 999px; background: var(--surface-2, rgba(0,0,0,.05)); }
-      .chip.ok { color: var(--ok); }
-      .chip.bad { color: var(--danger); }
-      .judge-card { border: 1px solid var(--line, var(--border)); border-radius: 10px; padding: 10px 12px; margin-top: 8px; }
-      .judge-card .who { font-weight: 600; font-size: 13px; margin-bottom: 4px; }
-      .judge-card .txt { white-space: pre-wrap; font-size: 13px; }
+      .estimate { background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; font-size: 13px; line-height: 1.7; }
+      .estimate .err { color: var(--danger); }
+      .err { color: var(--danger); white-space: pre-wrap; }
+      .off { color: var(--st-attention); }
+      @media (max-width: 1100px) { .two, .two.even { grid-template-columns: minmax(0, 1fr); } }
     </style>
   </head>
-  <body>
-    <header class="topbar">
-      <div class="brand">
-        <span class="brand-mark" aria-hidden="true"></span>
-        <span class="brand-text">
-          <strong class="brand-name">Loop Engineering</strong>
-          <span class="brand-sub">Benchmark · 模型評比</span>
-        </span>
+  <body class="app">
+    <nav id="rail"><a href="/">回到對話</a></nav>
+    <div class="app-main">
+      <header class="app-top">
+        <h1 id="page-title">評比</h1>
+        <div class="seg" role="tablist" aria-label="評比分頁" id="view-tabs">
+          <button type="button" role="tab" data-view="list" aria-selected="true">每一場</button>
+          <button type="button" role="tab" data-view="standings" aria-selected="false">戰績</button>
+        </div>
+        <span class="grow"></span>
+        <button class="btn primary" id="nav-new" type="button">＋ 新評比</button>
+      </header>
+
+      <div class="app-scroll">
+        <main class="bench app-body">
+          <p class="off" id="disabled-note" hidden>評比模式未啟用：<code>loop config set benchmark_enabled true</code></p>
+          <p class="err" id="page-err" hidden></p>
+
+          <!-- ============ list: every benchmark ============ -->
+          <div id="view-list" class="app-body" style="padding: 0">
+            <div class="running-strip" id="running-box" hidden>
+              <span class="dot" data-st="running"></span>
+              <div id="running-line" style="display: flex; flex-direction: column; gap: 2px"></div>
+              <span class="grow"></span>
+              <div class="progress-flow" id="running-flow"></div>
+            </div>
+            <div class="panel-h">
+              <h2>歷次評比</h2>
+              <div class="seg" role="group" aria-label="狀態" id="filter-status">
+                <button type="button" data-status="" aria-pressed="true">全部</button>
+                <button type="button" data-status="running" aria-pressed="false">進行中</button>
+                <button type="button" data-status="judged" aria-pressed="false">已評分</button>
+                <button type="button" data-status="judge_failed" aria-pressed="false">評分失敗</button>
+                <button type="button" data-status="cancelled" aria-pressed="false">已取消</button>
+              </div>
+              <span class="sub" id="list-count"></span>
+            </div>
+            <div class="bench-grid" id="bench-list"></div>
+            <p class="hint" id="list-empty" hidden>還沒有評比。按右上角「＋ 新評比」開始。</p>
+          </div>
+
+          <!-- ============ standings: which model fits which work ============ -->
+          <div id="view-standings" hidden class="app-body" style="padding: 0">
+            <div class="filters" style="padding: 0" id="st-filters">
+              <span class="flabel-s">領域</span>
+              <span id="st-domains" style="display: inline-flex; gap: 6px; flex-wrap: wrap"></span>
+              <span class="fsep"></span>
+              <span class="flabel-s">模型</span>
+              <button class="fchip" type="button" data-kind="" aria-pressed="true">全部</button>
+              <button class="fchip" type="button" data-kind="local" aria-pressed="false">本地</button>
+              <button class="fchip" type="button" data-kind="cloud" aria-pressed="false">雲端</button>
+              <span class="fsep"></span>
+              <span class="flabel-s">至少</span>
+              <button class="fchip" type="button" data-n="1" aria-pressed="true">1 場</button>
+              <button class="fchip" type="button" data-n="3" aria-pressed="false">3 場</button>
+              <button class="fchip" type="button" data-n="5" aria-pressed="false">5 場</button>
+            </div>
+            <section style="display: flex; flex-direction: column; gap: 10px">
+              <div class="panel-h"><h2>哪個本地模型適合哪種工作</h2><span class="sub">每種軟體類型裡通過率最高的本地模型，旁邊是最好的雲端模型；少於 3 場只能當參考</span></div>
+              <div class="recos" id="recommend"></div>
+              <p class="hint" id="recommend-empty" hidden>還沒有評分完成的評比。</p>
+            </section>
+            <div class="two even">
+              <section class="chart-card">
+                <div class="panel-h"><h2>通過率：模型 × 領域</h2><span class="sub">格子裡是「通過／場次」</span></div>
+                <div id="heatmap"></div>
+              </section>
+              <section class="chart-card">
+                <div class="panel-h"><h2>第幾次才過</h2><span class="sub">每個模型所有場次</span></div>
+                <div id="first-try" style="display: flex; flex-direction: column; gap: 14px"></div>
+                <div class="legend"><span><i style="background: var(--ok)"></i>第 1 次就過</span><span><i style="background: #8cc5a5"></i>被退回後才過</span><span><i style="background: var(--border)"></i>沒過</span></div>
+              </section>
+            </div>
+            <div class="two even">
+              <section class="chart-card">
+                <div class="panel-h"><h2>通過率 vs 平均花費時間</h2><span class="sub">左上角最划算</span></div>
+                <div id="st-scatter"></div>
+              </section>
+              <section class="chart-card">
+                <div class="panel-h"><h2>兩兩對戰</h2><span class="sub">同一場裡，列的模型排在欄的模型前面的比例</span></div>
+                <div id="h2h"></div>
+              </section>
+            </div>
+            <section class="chart-card">
+              <details class="more">
+                <summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>看完整表格（場次、通過率、第 1 次就過、平均第幾次、用 ncu 比例、平均 token、平均時間）</summary>
+                <div class="scroll-x"><table class="plain" id="matrix"></table></div>
+                <p class="hint" id="matrix-empty" hidden>沒有符合條件的評分結果。</p>
+                <h3 style="font-size: 14px">模型戰績（所有領域）</h3>
+                <div class="scroll-x"><table class="plain" id="records"></table></div>
+              </details>
+            </section>
+          </div>
+
+          <!-- ============ one benchmark: the dashboard ============ -->
+          <div id="view-detail" hidden class="app-body" style="padding: 0">
+            <div class="row" style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap">
+              <button class="btn sm" id="back-btn" type="button">← 回列表</button>
+              <span id="detail-chips" style="display: inline-flex; gap: 6px; flex-wrap: wrap"></span>
+              <span class="grow" style="flex: 1 1 auto"></span>
+              <a class="btn sm" id="report-link" href="#" hidden>下載報告</a>
+              <button class="btn sm" id="baseline-btn" type="button" hidden>量基準</button>
+              <button class="btn sm" id="rejudge-btn" type="button">重新評分</button>
+              <button class="btn sm danger-ghost" id="cancel-bench-btn" type="button" hidden>取消評比</button>
+              <button class="btn sm danger-ghost" id="delete-bench-btn" type="button" hidden>刪除這次評比</button>
+            </div>
+            <h2 id="detail-title" style="margin: 0; font-size: 20px">–</h2>
+            <p class="hint" id="detail-source"></p>
+            <p class="err" id="detail-error" hidden></p>
+            <div class="winner" id="detail-head"></div>
+            <div class="scores" id="detail-cards"></div>
+            <section class="chart-card" id="mask-card" hidden>
+              <div class="panel-h">
+                <h2 id="mask-title">各項量測</h2><span class="sub" id="mask-sub"></span>
+                <span class="grow" style="flex: 1 1 auto"></span>
+                <div class="legend" id="mask-legend"></div>
+                <div class="seg" role="group" aria-label="刻度" id="mask-scale">
+                  <button type="button" data-log="0" aria-pressed="true">線性</button>
+                  <button type="button" data-log="1" aria-pressed="false">對數</button>
+                </div>
+              </div>
+              <div id="mask-chart"></div>
+            </section>
+            <div class="two">
+              <section class="chart-card">
+                <div class="panel-h"><h2>迭代路徑</h2><span class="sub" id="swim-sub">每一次嘗試的起訖</span></div>
+                <div id="swimlane"></div>
+                <div class="legend">
+                  <span><svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="6" fill="var(--ok)" /></svg>通過</span>
+                  <span><svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="5" fill="none" stroke="var(--warn)" stroke-width="3" /></svg>功能對、指標未達</span>
+                  <span><svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><rect x="1" y="1" width="12" height="12" rx="2" fill="var(--danger)" /></svg>功能沒過</span>
+                  <span><svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><circle cx="5" cy="5" r="2.6" fill="var(--accent)" /></svg>自己在沙盒試跑</span>
+                  <span><svg width="18" height="6" viewBox="0 0 18 6" aria-hidden="true"><line x1="0" y1="3" x2="18" y2="3" stroke="var(--text-3)" stroke-width="2" stroke-dasharray="2 4" /></svg>等待（本地 GPU、額度）</span>
+                </div>
+              </section>
+              <section class="chart-card">
+                <div class="panel-h"><h2 id="conv-title">每次嘗試的量測</h2><span class="sub">有沒有越改越好</span></div>
+                <div id="convergence"></div>
+              </section>
+            </div>
+            <div class="two even">
+              <section class="chart-card">
+                <div class="panel-h"><h2>評審分數</h2><span class="sub" id="dots-sub">0–10</span></div>
+                <div id="dotplot"></div>
+                <div class="legend" id="dots-legend"></div>
+              </section>
+              <section class="chart-card">
+                <div class="panel-h"><h2>品質 vs 花費時間</h2><span class="sub">泡泡大小＝輸出 token</span></div>
+                <div id="quality"></div>
+              </section>
+            </div>
+            <section class="chart-card">
+              <div class="panel-h"><h2>評審怎麼說</h2></div>
+              <p class="notes-list" id="detail-summary" style="margin: 0"></p>
+              <div class="notes-list" id="detail-judges"></div>
+              <details class="more">
+                <summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>看表格（所有數字、每次嘗試）</summary>
+                <div class="scroll-x"><table class="plain" id="detail-arms"></table></div>
+              </details>
+              <details class="more">
+                <summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>量測方式</summary>
+                <p class="hint" id="measure-note"></p>
+              </details>
+            </section>
+          </div>
+
+          <!-- ============ new benchmark ============ -->
+          <div id="view-new" hidden class="newgrid">
+            <section class="step">
+              <div class="step-head"><span class="n">1</span><h2>比什麼</h2></div>
+              <div class="tabs" id="source-tabs" role="tablist" aria-label="題目來源">
+                <button class="tab" type="button" data-src="task">看板任務</button>
+                <button class="tab" type="button" data-src="draft">PRD 草稿</button>
+                <button class="tab" type="button" data-src="manual">驗證方案／自己出題</button>
+                <button class="tab" type="button" data-src="builtin">內建題庫</button>
+              </div>
+
+              <div class="src-pane" id="src-task">
+                <p class="hint">拿看板上的一張任務當題目（沿用它的 repo、計畫與驗證指令），每個模型各做一次。</p>
+                <label>任務 <select id="task-select"></select></label>
+              </div>
+
+              <div class="src-pane" id="src-draft" hidden>
+                <p class="hint">用工作流程裡寫好的草稿；送出前會先過 PRD 閘門（和一般建任務一樣）。</p>
+                <label>草稿 <select id="draft-select"></select></label>
+              </div>
+
+              <div class="src-pane" id="src-manual" hidden>
+                <p class="hint">選一個驗證方案，驗證指令、驗收指標、保護路徑、產出物就一次帶好，每一組用同一把尺；再寫一句題目說明。看板上沒有這張任務時也可以完全自己出題。</p>
+                <label>驗證方案
+                  <select id="m-plan"><option value="">不用方案</option></select>
+                </label>
+                <div id="m-plan-chips" style="display: flex; gap: 6px; flex-wrap: wrap"></div>
+                <label>題目名稱 <input id="m-title" type="text" placeholder="例：CF-AOI CCL 8192×5000：每張 ≤ 10 ms" /></label>
+                <label>題目說明 <textarea id="m-goal" rows="2" placeholder="要做出什麼、怎樣算完成"></textarea></label>
+                <details class="more">
+                  <summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>進階：repo、分支、驗證指令、領域（選了方案可以不填）</summary>
+                  <div class="src-pane" style="padding-bottom: 8px">
+                    <label>Repo 路徑（要是已存在的 git repo） <input id="m-repo" type="text" placeholder="/home/auo001/Addis/…" /></label>
+                    <label>Base branch <input id="m-branch" type="text" value="main" /></label>
+                    <label>驗證指令（一行一個） <textarea id="m-verify" rows="2" placeholder="npm test"></textarea></label>
+                    <label>領域
+                      <select id="m-domain">
+                        <option value="other" selected>其他</option>
+                        <option value="cuda">CUDA／GPU</option>
+                        <option value="cv">影像處理</option>
+                        <option value="cpp">C++</option>
+                        <option value="csharp">C#</option>
+                        <option value="typescript">TypeScript</option>
+                        <option value="python">Python</option>
+                      </select>
+                    </label>
+                  </div>
+                </details>
+              </div>
+
+              <div class="src-pane" id="src-builtin" hidden>
+                <p class="hint">練習用的中性小題目（字串處理、快取、CSV 解析…），各自附單元測試當驗收；每次評比開一個全新的 repo，不碰你的專案。</p>
+                <div class="qcards" id="builtin-list"></div>
+              </div>
+            </section>
+
+            <section class="step">
+              <div class="step-head"><span class="n">2</span><h2>誰來比</h2><span class="hint" id="pick-count">至少 2 個</span></div>
+              <p class="hint">本地模型不花額度，但一次只能載入一個，評比會自動輪流切換；全部跑完後再一組一組重新量測，不會互搶 GPU。雲端模型會花訂閱額度。</p>
+              <div class="picks" id="model-picks"></div>
+            </section>
+
+            <section class="step">
+              <div class="step-head"><span class="n">3</span><h2>誰來評</h2></div>
+              <p class="hint">雲端模型看每組的程式碼與量測結果，評 4 項分數（匿名比較）。選多位就各評一次，顯示是否一致。</p>
+              <div class="picks" id="judge-picks"></div>
+            </section>
+
+            <section class="step">
+              <div class="estimate" id="estimate">先選題目與模型。</div>
+              <p class="err" id="form-err" hidden></p>
+              <div style="display: flex; gap: 12px; align-items: center">
+                <button class="btn primary big" id="bench-submit" type="button">開始評比</button>
+                <button class="btn" id="cancel-new" type="button">取消</button>
+              </div>
+            </section>
+          </div>
+        </main>
       </div>
-      <div class="controls">
-        <a class="btn" href="/">← 回到對話</a>
-        <a class="btn" href="/board.html">任務看板</a>
-        <button class="btn" id="nav-new" type="button">＋ 新評比</button>
-        <button class="btn" id="theme-btn" type="button" title="切換深淺色">☾</button>
-      </div>
-    </header>
+    </div>
 
-    <main class="bench">
-      <p class="off" id="disabled-note" hidden>Benchmark 模式未啟用：<code>loop config set benchmark_enabled true</code></p>
-      <p class="err" id="page-err" hidden></p>
-
-      <!-- ============ list ============ -->
-      <div id="view-list">
-        <section id="running-box" hidden>
-          <h2>進行中</h2>
-          <p id="running-line"></p>
-          <p class="hint">評比會自己輪流把每個本地模型載入 vLLM（每次幾分鐘），全部跑完後自動評分，再切回原本的模型。</p>
-        </section>
-
-        <section>
-          <h2>模型戰績</h2>
-          <p class="hint">只統計已評分的評比：勝場＝該模型拿第一的次數；平均＝評審給的平均分（0–10）。</p>
-          <div class="scroll"><table id="records"></table></div>
-          <h3>各類工作建議的本地模型</h3>
-          <p class="hint">從所有已評分的評比算出：每種軟體類型裡通過率最高的本地模型（同分再看一次就過、評分），旁邊是最好的雲端模型當對照。場數少於 3 只能當參考。</p>
-          <div class="scroll"><table id="recommend"></table></div>
-          <p class="hint" id="recommend-empty" hidden>還沒有評分完成的評比。</p>
-          <h3>模型 × 領域</h3>
-          <div class="row">
-            <label class="hint">軟體類型
-              <select id="mx-domain">
-                <option value="">全部</option>
-                <option value="cuda">CUDA／GPU</option>
-                <option value="cv">影像處理</option>
-                <option value="cpp">C++</option>
-                <option value="csharp">C#</option>
-                <option value="typescript">TypeScript</option>
-                <option value="python">Python</option>
-                <option value="other">其他</option>
-              </select>
-            </label>
-            <label class="hint">模型
-              <select id="mx-kind">
-                <option value="">全部</option>
-                <option value="local">本地</option>
-                <option value="cloud">雲端</option>
-              </select>
-            </label>
-            <label class="hint">通過率
-              <select id="mx-pass">
-                <option value="">不限</option>
-                <option value="0.5">≥ 50%</option>
-                <option value="0.8">≥ 80%</option>
-                <option value="1">100%</option>
-              </select>
-            </label>
-            <label class="hint">場數
-              <select id="mx-n">
-                <option value="">不限</option>
-                <option value="2">≥ 2</option>
-                <option value="3">≥ 3</option>
-                <option value="5">≥ 5</option>
-              </select>
-            </label>
-          </div>
-          <div class="scroll"><table id="matrix"></table></div>
-          <p class="hint">通過率＝通過門檻的比例（有最終量測就看最終量測）；一次就過＝第一次驗證就通過；第幾次過＝通過的那幾場平均在第幾次；用 ncu＝工作時自己跑過 profiler 的比例。</p>
-          <p class="hint" id="matrix-empty" hidden>沒有符合條件的評分結果。</p>
-        </section>
-
-        <section>
-          <h2>歷次評比</h2>
-          <div class="row">
-            <label class="hint">狀態
-              <select id="filter-status">
-                <option value="">全部</option>
-                <option value="running">進行中</option>
-                <option value="judging">評分中</option>
-                <option value="judged">已評分</option>
-                <option value="judge_failed">評分失敗</option>
-                <option value="cancelled">已取消</option>
-              </select>
-            </label>
-            <span class="grow"></span>
-            <span class="hint" id="list-count"></span>
-          </div>
-          <div class="scroll"><table id="bench-list"></table></div>
-          <p class="hint" id="list-empty" hidden>還沒有評比。按右上角「＋ 新評比」開始。</p>
-        </section>
-      </div>
-
-      <!-- ============ detail ============ -->
-      <div id="view-detail" hidden>
-        <section>
-          <div class="row">
-            <button class="btn sm" id="back-btn" type="button">← 回列表</button>
-            <span class="grow"></span>
-            <span class="chipline" id="detail-chips"></span>
-          </div>
-          <h2 id="detail-title">–</h2>
-          <p class="hint" id="detail-source"></p>
-          <p class="summary" id="detail-summary"></p>
-          <p class="err" id="detail-error" hidden></p>
-
-          <h3>各組結果</h3>
-          <div class="scroll"><table id="detail-arms"></table></div>
-
-          <h3>評審意見</h3>
-          <div id="detail-judges"></div>
-
-          <div class="row" style="margin-top: 14px">
-            <a class="btn sm" id="report-link" href="#" hidden>下載報告</a>
-            <button class="btn sm" id="rejudge-btn" type="button">重新評分</button>
-            <button class="btn sm" id="cancel-bench-btn" type="button" hidden>取消評比</button>
-            <button class="btn sm" id="delete-bench-btn" type="button" hidden>刪除這次評比</button>
-            <span class="hint" id="detail-actions-hint">重新評分會再花一次雲端額度（每位評審一次）。</span>
-          </div>
-        </section>
-      </div>
-
-      <!-- ============ new ============ -->
-      <div id="view-new" hidden>
-        <section>
-          <div class="step-head"><span class="n">1</span><h2>要比什麼題目？</h2></div>
-          <div class="tabs" id="source-tabs">
-            <button class="tab" type="button" data-src="task">看板任務</button>
-            <button class="tab" type="button" data-src="draft">PRD 草稿</button>
-            <button class="tab" type="button" data-src="manual">自己出題</button>
-            <button class="tab" type="button" data-src="builtin">內建題庫</button>
-          </div>
-
-          <div class="src-pane" id="src-task">
-            <p class="hint">拿看板上的一張任務當題目（沿用它的 repo、計畫與驗證指令），每個模型各做一次。</p>
-            <label>任務 <select id="task-select"></select></label>
-          </div>
-
-          <div class="src-pane" id="src-draft" hidden>
-            <p class="hint">用 PRD 精靈寫好的草稿；送出前會先過 PRD 閘門（和一般建任務一樣）。</p>
-            <label>草稿 <select id="draft-select"></select></label>
-          </div>
-
-          <div class="src-pane" id="src-manual" hidden>
-            <p class="hint">臨時想比一題、但看板上沒有這張任務時用：自己填標題與目標，指定一個現有的 repo 與驗證指令，系統會照這份描述幫每個模型各開一張任務。</p>
-            <label>標題 <input id="m-title" type="text" placeholder="例：CSV 解析器" /></label>
-            <label>目標 <textarea id="m-goal" rows="3" placeholder="要做出什麼、怎樣算完成"></textarea></label>
-            <label>驗證方案（選填：驗證指令、驗收指標、保護路徑、產出物都照方案，每一組用同一把尺）
-              <select id="m-plan"><option value="">不用方案</option></select>
-            </label>
-            <label>Repo 路徑（要是已存在的 git repo；選了方案可以不填，用方案的） <input id="m-repo" type="text" placeholder="/home/auo001/Addis/…" /></label>
-            <label>Base branch <input id="m-branch" type="text" value="main" /></label>
-            <label>驗證指令（一行一個；選了方案可以不填） <textarea id="m-verify" rows="2" placeholder="npm test"></textarea></label>
-            <label>領域
-              <select id="m-domain">
-                <option value="other" selected>other</option>
-                <option value="cuda">cuda</option>
-                <option value="cv">cv</option>
-                <option value="cpp">cpp</option>
-                <option value="csharp">csharp</option>
-                <option value="typescript">typescript</option>
-                <option value="python">python</option>
-              </select>
-            </label>
-          </div>
-
-          <div class="src-pane" id="src-builtin" hidden>
-            <p class="hint">練習用的中性小題目（字串處理、快取、CSV 解析…），各自附單元測試當驗收；每次評比開一個全新的 repo，不碰你的專案。第一次試用評比、或想比「純寫程式能力」時才用。</p>
-            <div class="qcards" id="builtin-list"></div>
-          </div>
-        </section>
-
-        <section>
-          <div class="step-head"><span class="n">2</span><h2>誰來比？（至少 2 個）</h2></div>
-          <p class="hint">本地模型免費但一次只能載入一個——評比會自動輪流切換。雲端模型會花訂閱額度。</p>
-          <div class="picks" id="model-picks"></div>
-        </section>
-
-        <section>
-          <div class="step-head"><span class="n">3</span><h2>誰來評分？</h2></div>
-          <p class="hint">雲端模型看每組的 diff 與驗證結果打分（匿名比較）。選多位就各評一次，顯示是否一致。</p>
-          <div class="picks" id="judge-picks"></div>
-        </section>
-
-        <section>
-          <div class="step-head"><span class="n">4</span><h2>確認送出</h2></div>
-          <div class="estimate" id="estimate">先選題目與模型。</div>
-          <p class="err" id="form-err" hidden></p>
-          <div class="row" style="margin-top: 12px">
-            <button class="btn primary" id="bench-submit" type="button">建立評比並排入佇列</button>
-            <button class="btn sm" id="cancel-new" type="button">取消</button>
-          </div>
-        </section>
-      </div>
-    </main>
-
-    <script src="/benchmarks.js"></script>
+    <script src="/ops.js"></script>
+    <script type="module" src="/benchmarks.js"></script>
   </body>
 </html>
