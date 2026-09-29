@@ -11,6 +11,8 @@ import { createBenchmark, type Benchmark, type BenchmarkArmView } from '../bench
 import { lintPrd, type LintDeps, type PrdFields } from './lint.js';
 import { reviewPrd, type PrdReviewExec } from './review.js';
 import type { Task } from '../types.js';
+import { markSubmitted } from './drafts.js';
+import { linkDraftTask } from '../chat/store.js';
 
 /**
  * PRD intake: check = deterministic lint + local-model review; submit = check again, persist the
@@ -84,6 +86,12 @@ export interface SubmitOptions extends PrdOptions {
   verify_plan_id?: string | null;
   /** 'plan': an epic — the planner splits the PRD into a chain of subtasks instead of one task */
   coding_tool?: 'claude-code' | 'plan';
+  /** a check already made on exactly this markdown (the caller vouches for that): skips reviewing it twice */
+  precheck?: PrdCheck;
+  /** who asked for it (tasks.created_by / owner / source_ref); defaults to the PRD intake itself */
+  created_by?: string;
+  owner?: string | null;
+  source_ref?: string | null;
 }
 
 export type SubmitResult =
@@ -118,7 +126,7 @@ function writePlanFile(markdown: string, title: string): string {
 
 export async function submitPrd(db: Database.Database, markdown: string, opts: SubmitOptions = {}): Promise<SubmitResult> {
   const model = opts.benchmark_models?.length ? null : resolvePrdModel(db, opts.model); // validate before any write
-  const check = await checkPrd(db, markdown, opts);
+  const check = opts.precheck ?? (await checkPrd(db, markdown, opts));
   if (!check.ok) return { ok: false, check };
   const f = check.fields;
   const title = f.title!;
@@ -172,7 +180,9 @@ export async function submitPrd(db: Database.Database, markdown: string, opts: S
     // a local image set needs this machine's GPU; one on a sandbox host is measured over there
     requires: f.requires ?? (f.dataset && !f.dataset.host ? 'gpu' : null),
     setup_cmd: f.setup_steps.length ? f.setup_steps.join(' && ') : null,
-    created_by: 'prd',
+    created_by: opts.created_by ?? 'prd',
+    owner: opts.owner ?? null,
+    source_ref: opts.source_ref ?? null,
     acceptance_metrics: f.acceptance_metrics,
     protected_paths: f.protected_paths.length ? f.protected_paths.join(',') : null,
     artifacts: f.artifacts.length ? f.artifacts.join(',') : null,
@@ -181,4 +191,19 @@ export async function submitPrd(db: Database.Database, markdown: string, opts: S
   const gate = validateTask(created, getSetting(db, 'host_capabilities') ?? '');
   if (gate.ok && opts.queue !== false) setStatus(db, created.id, 'queued', { detail: 'queued from PRD intake' });
   return { ok: true, kind: 'task', check, plan_ref: planRef, task: getTask(db, created.id)!, gate };
+}
+
+/**
+ * A 工作流程 draft that was submitted remembers what it became, so the draft list shows 已送出 and
+ * the chat answer it came from shows 已建任務. Best-effort: a foreign draft changes nothing.
+ */
+export function linkSubmittedDraft(db: Database.Database, userKey: string, draftId: string, r: SubmitResult): void {
+  if (!r.ok) return;
+  if (r.kind === 'benchmark') {
+    db.prepare('UPDATE benchmarks SET source_ref = ? WHERE id = ?').run(draftId, r.benchmark.id);
+    markSubmitted(db, userKey, draftId, r.benchmark.id);
+    return;
+  }
+  markSubmitted(db, userKey, draftId, r.task.id);
+  linkDraftTask(db, draftId, r.task.id);
 }

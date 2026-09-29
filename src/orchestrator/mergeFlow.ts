@@ -24,6 +24,14 @@ export interface MergeResult {
 /** A second 合併 while the first is still re-verifying — the route answers 409. */
 export class MergeInProgressError extends Error {}
 
+/** Why a reviewed task can't be merged by hand (null = go): the same checks the /merge route makes. */
+export function mergeBlocker(t: Task): { error: string; extra: Record<string, unknown> } | null {
+  if (t.status !== 'review') return { error: 'task not in review', extra: { status: t.status } };
+  if (t.merge_status !== 'pending' && t.merge_status !== 'conflict') return { error: 'task not awaiting merge', extra: { merge_status: t.merge_status } };
+  if (!t.repo_path || !t.base_branch) return { error: 'task has no repo/base', extra: {} };
+  return null;
+}
+
 const inFlight = new Set<string>();
 
 /**

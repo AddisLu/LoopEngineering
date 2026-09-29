@@ -14,7 +14,7 @@ import { resolvePolicy } from '../scheduler/policy.js';
 import { killRun } from '../orchestrator/kill.js';
 import { pruneTaskArtifacts } from '../git/worktree.js';
 import { TaskActionError, abandonTask, abortTask, closeTask, deleteTaskSafe, holdTask, killTaskRuns, queueTask, restartTask, resumeTask } from '../taskActions.js';
-import { mergeReviewedTask, MergeInProgressError } from '../orchestrator/mergeFlow.js';
+import { mergeBlocker, mergeReviewedTask, MergeInProgressError } from '../orchestrator/mergeFlow.js';
 import { updateVerification, TaskEditError, type VerificationPatch } from '../taskEdit.js';
 import { identityOf, IdentityError } from './identity.js';
 import { boardState, taskResult } from './board.js';
@@ -360,12 +360,8 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
     const id = (req.params as any).id;
     const t = getTask(db, id);
     if (!t) return reply.code(404).send({ error: 'not found' });
-    if (t.status !== 'review')
-      return reply.code(409).send({ error: 'task not in review', status: t.status });
-    if (t.merge_status !== 'pending' && t.merge_status !== 'conflict')
-      return reply.code(409).send({ error: 'task not awaiting merge', merge_status: t.merge_status });
-    if (!t.repo_path || !t.base_branch)
-      return reply.code(409).send({ error: 'task has no repo/base' });
+    const blocked = mergeBlocker(t);
+    if (blocked) return reply.code(409).send({ error: blocked.error, ...blocked.extra });
     try {
       return await mergeReviewedTask(db, t);
     } catch (err) {

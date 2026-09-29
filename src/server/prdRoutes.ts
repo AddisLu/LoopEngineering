@@ -4,13 +4,12 @@ import { fileURLToPath } from 'node:url';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type Database from 'better-sqlite3';
 import { getBool } from '../db/index.js';
-import { checkPrd, submitPrd, PrdInputError } from '../prd/intake.js';
+import { checkPrd, linkSubmittedDraft, submitPrd, PrdInputError } from '../prd/intake.js';
 import { BenchmarkInputError } from '../benchmark/store.js';
 import type { PrdReviewExec } from '../prd/review.js';
 import { parsePrdToForm } from '../prd/compose.js';
 import { allowedRoots, probeRepo, resolveAllowed, statPath, type GitExec } from '../prd/repo.js';
-import { createDraft, deleteDraft, getDraft, listDrafts, markSubmitted, updateDraft, PrdDraftError } from '../prd/drafts.js';
-import { linkDraftTask } from '../chat/store.js';
+import { createDraft, deleteDraft, getDraft, listDrafts, updateDraft, PrdDraftError } from '../prd/drafts.js';
 import { draftAcceptance, suggestFiles, type AssistDeps } from '../prd/assist.js';
 import { IdentityError, identityOf, type ChatIdentity } from './identity.js';
 
@@ -99,20 +98,11 @@ export function registerPrdRoutes(app: FastifyInstance, db: Database.Database, o
       });
       if (!r.ok) return reply.code(422).send({ error: 'PRD blocked by the gate', check: r.check });
       // a wizard draft that became a task remembers it, so the dock can show 已建任務
-      if (typeof b.draft_id === 'string' && r.kind === 'benchmark') {
+      if (typeof b.draft_id === 'string') {
         try {
-          db.prepare('UPDATE benchmarks SET source_ref = ? WHERE id = ?').run(b.draft_id, r.benchmark.id);
-          markSubmitted(db, identity(req).user_key, b.draft_id, r.benchmark.id);
+          linkSubmittedDraft(db, identity(req).user_key, b.draft_id, r);
         } catch {
-          /* no identity or foreign draft — the benchmark exists either way */
-        }
-      }
-      if (typeof b.draft_id === 'string' && r.kind === 'task') {
-        try {
-          markSubmitted(db, identity(req).user_key, b.draft_id, r.task.id);
-          linkDraftTask(db, b.draft_id, r.task.id);
-        } catch {
-          /* no identity or foreign draft — the task exists either way */
+          /* no identity or foreign draft — the task/benchmark exists either way */
         }
       }
       return reply.code(201).send(r);

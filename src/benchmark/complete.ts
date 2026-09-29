@@ -6,7 +6,7 @@ import { getTask, latestRun, listRunsForTask, setStatus } from '../tasks.js';
 import { baseRefFor } from '../git/integrate.js';
 import { cleanupWorktree } from '../orchestrator/cleanup.js';
 import type { SandboxDeps } from '../exec/sandbox.js';
-import { armIterations, measureArm, measureBaseline, type FinalMeasurement } from './attempts.js';
+import { armIterations, measureArm, measureBaseline, type FinalMeasurement, type GitExec } from './attempts.js';
 import { notify } from '../notify.js';
 import { getBenchmark, judgeList, type Benchmark, type BenchmarkArmView } from './store.js';
 import { aggregateJudgements, runBenchJudge, type ArmEvidence, type BenchJudgeExec, type BenchJudgeResult } from './judge.js';
@@ -27,6 +27,53 @@ const judging = new Set<string>();
 /** Is this benchmark being judged by THIS process right now? (a DB row can outlive the process) */
 export function isJudging(id: string): boolean {
   return judging.has(id);
+}
+
+/**
+ * Why the benchmark can't be (re-)judged right now, in the user's words; null = go. Re-judging a
+ * finished benchmark is the point of the button; only a judge run in flight *in this process*
+ * blocks it (a 'judging' row can outlive a restart).
+ */
+export function rejudgeBlocker(detail: { benchmark: Benchmark; arms: BenchmarkArmView[] }): string | null {
+  const { status } = detail.benchmark;
+  if (status === 'judging' && isJudging(detail.benchmark.id)) return '這個評比正在評分中，等它跑完再試。';
+  if (status === 'cancelled') return '這個評比已取消。';
+  if (!detail.arms.every((a) => TERMINAL.has(a.task_status ?? 'failed'))) return '還有組別沒跑完。';
+  return null;
+}
+
+const measuringBaseline = new Set<string>();
+
+/** Why the baseline can't be measured now (null = go): the measurement needs the GPU to itself. */
+export function baselineBlocker(b: Pick<Benchmark, 'id' | 'status'>): string | null {
+  if (b.status === 'running' || b.status === 'judging') return '評比還在進行，等評完再量基準（量測要獨占 GPU）。';
+  if (measuringBaseline.has(b.id)) return '基準正在量測中。';
+  return null;
+}
+
+/**
+ * Measure (again) the code the arms started from, with the benchmark's own verification, and keep
+ * it on the benchmark — for one judged before baselines were kept, or after its yardstick changed.
+ */
+export async function remeasureBaseline(
+  db: Database.Database,
+  id: string,
+  sandboxDeps?: SandboxDeps,
+  git?: GitExec,
+): Promise<{ ok: true; benchmark: Benchmark } | { ok: false; code: number; error: string }> {
+  const detail = getBenchmark(db, id);
+  if (!detail) return { ok: false, code: 404, error: 'not found' };
+  const why = baselineBlocker(detail.benchmark);
+  if (why) return { ok: false, code: 409, error: why };
+  measuringBaseline.add(id);
+  try {
+    const baseline = await measureBaseline(db, detail.arms.map((a) => a.task_id), sandboxDeps, git);
+    if (!baseline) return { ok: false, code: 422, error: '量不到基準：參賽任務沒有記下起點（base commit），或 repo 讀不到。' };
+    db.prepare('UPDATE benchmarks SET baseline_json = ? WHERE id = ?').run(JSON.stringify(baseline), id);
+    return { ok: true, benchmark: getBenchmark(db, id)!.benchmark };
+  } finally {
+    measuringBaseline.delete(id);
+  }
 }
 
 /** Judge every running benchmark whose arms have all finished. Returns the ids judged this call. */

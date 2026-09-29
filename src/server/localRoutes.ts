@@ -9,6 +9,7 @@ import { getModelManager, type ModelManager } from '../local/modelManager.js';
 import { buildCatalog, type CatalogDeps, type CatalogEntry } from '../local/catalog.js';
 import { getJobRunner, JobBusyError, type JobKind, type LocalJobRunner } from '../local/jobs.js';
 import { activeLocalRunCount } from '../tasks.js';
+import { annotateLocalModel, localLoadGuard } from '../local/guard.js';
 
 export interface LocalRouteOptions {
   /** Test-only: a stub manager so route tests never touch docker/vLLM. */
@@ -23,22 +24,7 @@ export interface LocalRouteOptions {
   catalog?: Pick<CatalogDeps, 'fetch' | 'diskFree' | 'now'>;
 }
 
-/** What the switcher on the chat page needs to decide whether a model is offerable today. */
-export interface AnnotatedLocalModel extends LocalModel {
-  /** weights are in the HF cache — switching will not pull tens of GB first */
-  downloaded: boolean;
-  /** some blobs on disk but the pull did not finish (resumable) */
-  partial: boolean;
-  disk_bytes: number | null;
-  /** DGX Sparks this recipe needs (2 for a cluster_only recipe) */
-  nodes: number;
-  /** the recipe's container image is built — switching will not stop to ask */
-  image_ready: boolean;
-  /** enabled + downloaded + enough machines + image built */
-  runnable: boolean;
-  /** why not, in the user's words — null when runnable */
-  blocked_by: string | null;
-}
+export type { AnnotatedLocalModel } from '../local/guard.js';
 
 const MIN_FREE_BYTES = 50 * 1024 ** 3;
 
@@ -71,55 +57,11 @@ export function registerLocalRoutes(app: FastifyInstance, db: Database.Database,
    * two can never disagree about what is safe.
    */
   function loadGuard(model: LocalModel): { code: number; error: string } | null {
-    if (!model.enabled) return { code: 409, error: `local model ${model.id} is disabled` };
-    const info = recipeInfo(model.recipe, repo());
-    const nodes = info?.nodes ?? 1;
-    if (nodes > sparks()) {
-      // run-recipe.py would reject --solo anyway; failing here keeps vLLM up instead of
-      // tearing the running model down for a switch that cannot succeed
-      return { code: 409, error: `${model.display_name} 需要 ${nodes} 台 Spark（目前 ${sparks()} 台）` };
-    }
-    const weights = weightInfo(model.served_model_id, opts.hubDir);
-    if (!weights.downloaded) {
-      return { code: 409, error: `${model.display_name} 的權重${weights.partial ? '還沒下載完（可續傳）' : '還沒下載'}` };
-    }
-    // The incident this guards: run-recipe.sh stops the running model, then asks "Build now?",
-    // gets EOF, and the machine ends up serving nothing.
-    if (!imageExists(info?.container, opts.dockerProbe)) {
-      return {
-        code: 409,
-        error: `容器映像 ${info?.container} 還沒建置——請先在模型面板按「建置映像」（或在主機執行 run-recipe.sh ${model.recipe} --solo --build-only），否則切換會讓目前的模型停掉又起不來`,
-      };
-    }
-    const inflight = activeLocalRunCount(db);
-    if (inflight > 0 && mm().state().loaded !== model.id) {
-      return { code: 409, error: `${inflight} local run(s) in flight — switch after they finish` };
-    }
-    return null;
+    return localLoadGuard(db, model, { hubDir: opts.hubDir, dockerProbe: opts.dockerProbe, loaded: mm().state().loaded });
   }
 
   app.get('/api/local/models', async () => {
-    const models: AnnotatedLocalModel[] = listLocalModels(db).map((m) => {
-      const weights = weightInfo(m.served_model_id, opts.hubDir);
-      const info = recipeInfo(m.recipe, repo());
-      const nodes = info?.nodes ?? 1;
-      const imageReady = imageExists(info?.container, opts.dockerProbe);
-      // order matters: report the physical limit before the flag, since a model is usually
-      // disabled *because* it needs more machines than this deployment has
-      const blocked =
-        nodes > sparks()
-          ? `需要 ${nodes} 台 Spark（目前 ${sparks()} 台）`
-          : !weights.downloaded
-            ? weights.partial
-              ? '權重下載到一半（可續傳）'
-              : '尚未下載權重'
-            : !imageReady
-              ? `容器映像 ${info?.container} 還沒建置`
-              : !m.enabled
-                ? '未啟用'
-                : null;
-      return { ...m, ...weights, nodes, image_ready: imageReady, runnable: blocked === null, blocked_by: blocked };
-    });
+    const models = listLocalModels(db).map((m) => annotateLocalModel(db, m, { hubDir: opts.hubDir, dockerProbe: opts.dockerProbe }));
     return { enabled: enabled(), sparks: sparks(), models, state: mm().state(), inflight: activeLocalRunCount(db) };
   });
 

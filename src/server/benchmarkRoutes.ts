@@ -15,9 +15,9 @@ import {
   getBenchmark,
   listBenchmarks,
 } from '../benchmark/store.js';
-import { isJudging, judgeBenchmark } from '../benchmark/complete.js';
+import { judgeBenchmark, rejudgeBlocker, remeasureBaseline } from '../benchmark/complete.js';
 import { benchmarkReport } from '../benchmark/report.js';
-import { measureBaseline, type GitExec } from '../benchmark/attempts.js';
+import type { GitExec } from '../benchmark/attempts.js';
 import type { SandboxDeps } from '../exec/sandbox.js';
 import type { BenchJudgeExec } from '../benchmark/judge.js';
 import { listBuiltin, resolveSource, type ResolveDeps, type SourceKind } from '../benchmark/source.js';
@@ -189,16 +189,8 @@ export function registerBenchmarkRoutes(
     if (!enabled()) return off(reply);
     const detail = getBenchmark(db, (req.params as { id: string }).id);
     if (!detail) return reply.code(404).send({ error: 'not found' });
-    const { status } = detail.benchmark;
-    // Re-judging a finished benchmark is the whole point of the button; only a judge run that is
-    // actually in flight *in this process* blocks it (a 'judging' row can outlive a restart).
-    if (status === 'judging' && isJudging(detail.benchmark.id)) {
-      return reply.code(409).send({ error: '這個評比正在評分中，等它跑完再試。' });
-    }
-    if (status === 'cancelled') return reply.code(409).send({ error: '這個評比已取消。' });
-    if (!detail.arms.every((a) => TERMINAL.has(a.task_status ?? 'failed'))) {
-      return reply.code(409).send({ error: '還有組別沒跑完。' });
-    }
+    const why = rejudgeBlocker(detail);
+    if (why) return reply.code(409).send({ error: why });
     const judges = list((req.body as Record<string, unknown> | undefined)?.judge_models);
     const benchmark = await judgeBenchmark(db, detail.benchmark.id, opts.judgeExec, { judges: judges.length ? judges : undefined });
     return benchmark ? { benchmark } : reply.code(409).send({ error: '已經有一次評分在進行中。' });
@@ -209,25 +201,10 @@ export function registerBenchmarkRoutes(
    * benchmark judged before baselines were kept, or after the question's yardstick changed. It
    * needs the GPU to itself, so not while arms still run or are being judged.
    */
-  const measuringBaseline = new Set<string>();
   app.post('/api/benchmarks/:id/baseline', async (req, reply) => {
     if (!enabled()) return off(reply);
-    const id = (req.params as { id: string }).id;
-    const detail = getBenchmark(db, id);
-    if (!detail) return reply.code(404).send({ error: 'not found' });
-    if (detail.benchmark.status === 'running' || detail.benchmark.status === 'judging') {
-      return reply.code(409).send({ error: '評比還在進行，等評完再量基準（量測要獨占 GPU）。' });
-    }
-    if (measuringBaseline.has(id)) return reply.code(409).send({ error: '基準正在量測中。' });
-    measuringBaseline.add(id);
-    try {
-      const baseline = await measureBaseline(db, detail.arms.map((a) => a.task_id), opts.sandboxDeps, opts.baselineGit);
-      if (!baseline) return reply.code(422).send({ error: '量不到基準：參賽任務沒有記下起點（base commit），或 repo 讀不到。' });
-      db.prepare('UPDATE benchmarks SET baseline_json = ? WHERE id = ?').run(JSON.stringify(baseline), id);
-      return { benchmark: getBenchmark(db, id)!.benchmark };
-    } finally {
-      measuringBaseline.delete(id);
-    }
+    const r = await remeasureBaseline(db, (req.params as { id: string }).id, opts.sandboxDeps, opts.baselineGit);
+    return r.ok ? { benchmark: r.benchmark } : reply.code(r.code).send({ error: r.error });
   });
 
   /** Stop a benchmark that is still running: its unfinished arms are failed and the GPU freed. */
