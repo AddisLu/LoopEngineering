@@ -1068,6 +1068,7 @@ const NDV = {
 // =============================== run: what the task did =======================================
 let runTask = null;
 let hist = null;
+let bench = null; // an arm's benchmark (GET /api/benchmarks/:id), for its 最終量測 and 評審
 let runCanvas = null;
 let selected = null;
 let picked = false; // a step chosen by hand stays selected across refreshes
@@ -1121,6 +1122,7 @@ function runInfo() {
   put('merge', t.merge_status === 'merged' ? '已合併' : t.merge_status === 'conflict' ? '合併衝突' : t.merge_status === 'pending' ? '待合併' : t.base_branch || 'main');
   put('done', '');
   if (t.coding_tool === 'plan') Object.assign(info, epicInfo());
+  if (t.benchmark_id) Object.assign(info, armInfo());
   info.backHot = s.gate === 'fail' && t.status === 'blocked';
   const fails = atts.filter((a) => a.finished_at && !['pass', 'unverified'].includes(a.outcome)).length;
   const { used, max } = hist.retry;
@@ -1133,12 +1135,47 @@ function runInfo() {
   return info;
 }
 
+/** a stage's node: its words, its state and the badge that goes with it */
+const stageInfo = (state, sub) => ({ sub, state, badge: STATE_BADGE[state] ? { kind: STATE_BADGE[state] } : state === 'review' ? { kind: 'review' } : null });
+
+/** a benchmark arm never merges: after its own gate come the engine's re-measurement and the judge */
+function armInfo() {
+  const t = runTask;
+  const b = bench?.benchmark;
+  const arm = bench?.arms?.find((a) => a.task_id === t.id);
+  if (!b) return { final: stageInfo('idle', '等全部組做完'), judge: stageInfo('idle', '評審') };
+  let final = null;
+  try {
+    final = arm?.final_json ? JSON.parse(arm.final_json) : null;
+  } catch (e) {
+    final = null;
+  }
+  const others = bench.arms.filter((a) => a.task_status && !['review', 'attention', 'failed', 'closed'].includes(a.task_status)).length;
+  return {
+    final: final
+      ? stageInfo(final.outcome === 'pass' ? 'ok' : 'warn', final.outcome === 'pass' ? '重新量測通過' : `重新量測：${OUT_LABEL[final.outcome] || '沒過'}`)
+      : b.status === 'judging'
+        ? stageInfo('active', '一組一組量測中')
+        : b.status === 'judged'
+          ? stageInfo('ok', '已量完')
+          : stageInfo('idle', others ? `等其他 ${others} 組做完` : '等評審開始'),
+    judge:
+      b.status === 'judged'
+        ? stageInfo(arm?.judge_rank === 1 ? 'ok' : 'warn', arm?.judge_rank ? `第 ${arm.judge_rank} 名${arm.judge_score != null ? ` · ${arm.judge_score} 分` : ''}` : '已評分')
+        : b.status === 'judge_failed'
+          ? stageInfo('fail', '評審失敗')
+          : b.status === 'cancelled'
+            ? stageInfo('idle', '評比已取消')
+            : stageInfo('idle', `${modelName(String(b.judge_models || b.judge_model || 'opus').split(',')[0])} · 等待`),
+  };
+}
+
 /** an epic: the planner's pass, then the chain of subtasks it made */
 function epicInfo() {
   const t = runTask;
   const kids = hist.children || [];
   const doneN = kids.filter((k) => k.status === 'closed').length;
-  const st = (state, sub) => ({ sub, state, badge: STATE_BADGE[state] ? { kind: STATE_BADGE[state] } : state === 'review' ? { kind: 'review' } : null });
+  const st = stageInfo;
   const split =
     t.status === 'running'
       ? st('active', '拆解中…')
@@ -1184,6 +1221,7 @@ async function runView(id) {
     const [{ task }, h2] = await Promise.all([api(`/api/tasks/${encodeURIComponent(id)}`), api(`/api/tasks/${encodeURIComponent(id)}/runs`)]);
     runTask = task;
     hist = h2;
+    bench = await loadBench(task);
   } catch (e) {
     notice(e.status === 404 ? '找不到這張任務（可能已刪除）。' : `讀不到任務：${e.message}`);
     return;
@@ -1192,19 +1230,33 @@ async function runView(id) {
   paintRun();
   clearInterval(runTimer);
   // an epic is closed once it is split, but its subtasks keep going
-  const settled = () => ['closed', 'failed'].includes(runTask.status) && !(hist.children || []).some((k) => !['closed', 'failed'].includes(k.status));
+  const settled = () =>
+    ['closed', 'failed'].includes(runTask.status) &&
+    !(hist.children || []).some((k) => !['closed', 'failed'].includes(k.status)) &&
+    !(bench && ['running', 'judging'].includes(bench.benchmark.status));
   if (!settled()) {
     runTimer = setInterval(async () => {
       try {
         const [{ task }, h2] = await Promise.all([api(`/api/tasks/${encodeURIComponent(id)}`), api(`/api/tasks/${encodeURIComponent(id)}/runs`)]);
         runTask = task;
         hist = h2;
+        bench = await loadBench(task);
         paintRun();
         if (settled()) clearInterval(runTimer);
       } catch (e) {
         /* keep the last picture */
       }
     }, 4000);
+  }
+}
+
+/** the benchmark an arm belongs to; null for any other task, or when it cannot be read */
+async function loadBench(task) {
+  if (!task.benchmark_id) return null;
+  try {
+    return await api(`/api/benchmarks/${encodeURIComponent(task.benchmark_id)}`);
+  } catch (e) {
+    return null;
   }
 }
 
@@ -1244,12 +1296,17 @@ function paintRun() {
   if (t.coding_tool !== 'plan') acts.push(h(`a.btn${t.status === 'review' ? '.primary' : ''}`, { href: `/task.html?id=${encodeURIComponent(t.id)}` }, '驗收頁', icon('ext', { size: 14 })));
   fill($('top-actions'), ...acts);
 
-  const kind = t.coding_tool === 'plan' ? 'epic' : 'task';
+  const kind = t.coding_tool === 'plan' ? 'epic' : t.benchmark_id ? 'bench' : 'task';
   const manual = String(t.verify_mode || '').split(',').map((m) => m.trim()).includes('manual');
   const info = runInfo();
   const scene = stageScene(kind, manual, info, kind === 'epic' ? null : runSubs());
   runCanvas.render({ ...scene, lift: 60 });
-  const at = kind === 'epic' ? ((hist.children || []).length ? 'kids' : 'split') : { trigger: 'need', implement: 'ai' }[hist.focus] || hist.focus;
+  const at =
+    kind === 'epic'
+      ? (hist.children || []).length ? 'kids' : 'split'
+      : kind === 'bench' && ['approve', 'merge', 'done'].includes(hist.focus)
+        ? 'judge'
+        : { trigger: 'need', implement: 'ai' }[hist.focus] || hist.focus;
   runFocused = focusOnPhone(runCanvas, $('run-canvas'), scene.nodes.some((n) => n.id === at) ? at : 'need', runFocused);
   paintTree();
 }
