@@ -20,7 +20,53 @@ echo "== Building arith_kernel =="
 "$NVCC_BIN" -O3 -lineinfo -arch=sm_121 -o arith_kernel arith_kernel.cu
 
 echo "== Running correctness check =="
-./arith_kernel
+./arith_kernel | tee arith_run.log
+PASS_COUNT="$(grep -c ': PASS' arith_run.log || true)"
+FAIL_COUNT="$(grep -c ': FAIL' arith_run.log || true)"
+N_ELEMS="$(awk -F'[= ]' '/^N=/ { print $2; exit }' arith_run.log)"
+NCU_OK=0
+NCU_METRICS=""
+
+# Loop's 驗收指標 (src/orchestrator/acceptance.ts) read one `LOOP_METRICS {json}` line, so a task or
+# 驗證方案 can require e.g. "pass == 4; ncu == 1; min_occupancy >= 80". Printed last on every exit
+# from here on — the NCU SKIPPED paths included, with ncu:0.
+emit_metrics() {
+    echo "LOOP_METRICS {\"pass\":${PASS_COUNT:-0},\"fail\":${FAIL_COUNT:-0},\"ncu\":${NCU_OK}${NCU_METRICS:+,${NCU_METRICS}}}"
+}
+trap emit_metrics EXIT
+
+# Per-kernel Duration (in us) and Achieved Occupancy from the report, plus the DRAM traffic each
+# kernel implies (3 float arrays of N elements: 12*N bytes) — the number that shows whether an
+# elementwise kernel is at the memory's limit, which ncu's "Memory Throughput %" does not on GB10.
+ncu_metrics() {
+    { "$NCU_BIN" --import arith_report.ncu-rep --csv --page details 2>/dev/null || true; } | awk -F'","' -v n="${N_ELEMS:-0}" '
+        NR == 1 { gsub(/^"|"$/, ""); for (i = 1; i <= NF; i++) col[$i] = i; next }
+        {
+            sub(/^"/, "")
+            k = $col["Kernel Name"]; sub(/\(.*/, "", k); sub(/^vec_/, "", k)
+            m = $col["Metric Name"]; u = $col["Metric Unit"]; v = $col["Metric Value"]
+            sub(/".*$/, "", v); gsub(/,/, "", v)
+            if (m == "Duration") {
+                f = 1
+                if (u ~ /^n/) f = 0.001; else if (u ~ /^m/) f = 1000; else if (u == "s" || u == "second") f = 1000000
+                dur[k] = v * f
+            } else if (m == "Achieved Occupancy") occ[k] = v + 0
+        }
+        END {
+            out = ""; maxd = 0; mino = -1; minbw = -1
+            for (k in dur) {
+                out = out (out == "" ? "" : ",") sprintf("\"%s_us\":%.2f", k, dur[k])
+                if (dur[k] > maxd) maxd = dur[k]
+                if (n > 0 && dur[k] > 0) { bw = 12 * n / dur[k] / 1000; if (minbw < 0 || bw < minbw) minbw = bw }
+            }
+            for (k in occ) if (mino < 0 || occ[k] < mino) mino = occ[k]
+            if (out == "") exit
+            out = out sprintf(",\"max_duration_us\":%.2f", maxd)
+            if (mino >= 0) out = out sprintf(",\"min_occupancy\":%.2f", mino)
+            if (minbw >= 0) out = out sprintf(",\"min_bandwidth_gbs\":%.1f", minbw)
+            print out
+        }'
+}
 
 echo "== Correctness check passed, looking for Nsight Compute =="
 NCU_BIN="$(command -v ncu || true)"
@@ -84,6 +130,8 @@ if [ "${NCU_OK:-0}" -eq 1 ] && [ -f arith_report.ncu-rep ]; then
     { "$NCU_BIN" --import arith_report.ncu-rep --page details 2>&1 || true; } \
         | grep -E 'Duration|Compute \(SM\) Throughput|Memory Throughput|Achieved Occupancy' \
         | sed -n '1,80p' || true
+    NCU_METRICS="$(ncu_metrics)"
 else
+    NCU_OK=0
     echo "NCU SKIPPED: no report file produced despite a zero exit status"
 fi

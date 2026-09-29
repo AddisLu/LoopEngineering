@@ -91,3 +91,23 @@ If `ncu` isn't installed or the host denies GPU performance counter access
 `--cap-add=SYS_ADMIN` or without `NVreg_RestrictProfilingToAdminUsers=0`),
 `run_ncu.sh` prints `NCU SKIPPED: <reason>` and still exits 0: the
 arithmetic correctness check is the hard gate, profiling is best-effort.
+
+## Machine-readable result (`LOOP_METRICS`)
+
+The last line `run_ncu.sh` prints is one JSON object for Loop's 驗收指標, on every
+exit after the correctness check — the `NCU SKIPPED` paths included:
+
+```
+LOOP_METRICS {"pass":4,"fail":0,"ncu":1,"add_us":194.40,"sub_us":212.80,"mul_us":206.66,"div_us":192.16,"max_duration_us":212.80,"min_occupancy":90.82,"min_bandwidth_gbs":236.5}
+```
+
+- `pass` / `fail` — PASS / FAIL lines from the CPU cross-check.
+- `ncu` — 1 when Nsight Compute produced a report, 0 when it was skipped.
+- `<op>_us`, `max_duration_us`, `min_occupancy` — per-kernel Duration and the
+  worst Achieved Occupancy from the report (only when `ncu` is 1).
+- `min_bandwidth_gbs` — the slowest kernel's DRAM traffic, 12·N bytes (read a,
+  b, write c) over its Duration: the figure to hold against ≈273 GB/s. NCU's
+  own "Memory Throughput %" reads about 13 % here even when this is ~95 % of
+  the bus, so judge the kernels by this number, not by that percentage.
+
+A task or 驗證方案 can then gate on it, e.g. `pass == 4; fail == 0; ncu == 1`.
