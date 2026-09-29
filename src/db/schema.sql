@@ -565,3 +565,40 @@ CREATE TABLE IF NOT EXISTS verify_plans (
   created_at      TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- 對話操作 (src/chatops/*): something the chat's local model PREPARED (a work item, a benchmark,
+-- a task / benchmark / model / git action) that runs only once a person confirms it — typed in a
+-- LATER turn of the same conversation, or with the card's button. params_json is exactly what will
+-- run (template-completed by the engine); expect_json is the precondition fingerprint checked
+-- again right before running. The permanent audit trail is task_events ("對話操作（label）：…").
+CREATE TABLE IF NOT EXISTS ops_actions (
+  id               TEXT PRIMARY KEY,                -- oa_<nanoid(10)>
+  code             TEXT NOT NULL,                   -- e.g. 'K7Q' (unambiguous alphabet), shown on the card
+  conversation_id  TEXT NOT NULL REFERENCES chat_conversations(id) ON DELETE CASCADE,
+  user_key         TEXT NOT NULL,
+  user_label       TEXT,
+  kind             TEXT NOT NULL,                   -- work|benchmark|task|bench_op|model|git
+  op               TEXT NOT NULL,                   -- submit|rerun|queue|approve|switch_model|pull|...
+  target           TEXT,
+  params_json      TEXT NOT NULL DEFAULT '{}',
+  expect_json      TEXT,
+  summary          TEXT NOT NULL,                   -- engine-written; card and model show it verbatim
+  risk             TEXT NOT NULL DEFAULT 'normal',  -- normal|high (high: the confirming message must carry the code)
+  speed            TEXT NOT NULL DEFAULT 'fast',    -- fast|slow|deferred
+  draft_id         TEXT,
+  md_sha           TEXT,                            -- work: sha256 of the checked markdown (skip re-review when unchanged)
+  prepared_msg_id  TEXT NOT NULL,
+  presented_msg_id TEXT NOT NULL,
+  presented_ord    INTEGER NOT NULL,
+  confirmed_msg_id TEXT,
+  confirmed_by     TEXT,                            -- chat|button
+  status           TEXT NOT NULL DEFAULT 'pending', -- pending|running|done|failed|cancelled|superseded|expired|interrupted
+  result_json      TEXT,
+  error            TEXT,
+  expires_at       TEXT NOT NULL,
+  created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+  started_at       TEXT,
+  finished_at      TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_ops_actions_conv ON ops_actions(conversation_id, status, created_at);
+CREATE INDEX IF NOT EXISTS idx_ops_actions_status ON ops_actions(status);

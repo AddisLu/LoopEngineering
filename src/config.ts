@@ -239,6 +239,26 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // a chat answer that compiles/runs/profiles needs more rounds and time than a web lookup
   exec_chat_max_rounds: '10',
   exec_chat_wall_ms: '900000',
+
+  // 對話操作 (src/chatops/*): the chat's local model prepares tasks / benchmarks / model switches /
+  // git actions from templates; a person confirms in a LATER turn (or with the card's button). Off =
+  // the chat's tools and system prompt are exactly what they were.
+  ops_chat_enabled: 'false',
+  // CSV of identities (ts:<login>, name:<name>, local) who may run them; others get read-only tools
+  ops_allowed_users: '',
+  ops_confirm_ttl_min: '30',
+  // MCP servers hidden from the chat while ops tools are offered: `loop` queues and deletes without asking
+  ops_hide_mcp_servers: 'loop,loop-ops',
+  ops_chat_max_rounds: '8',
+  ops_chat_wall_ms: '300000',
+  // git from the chat: where clones land (then added to prd_repo_allowlist), and time limits
+  git_clone_root: path.join(os.homedir(), 'Addis', 'repos'),
+  ops_git_timeout_sec: '120',
+  ops_git_clone_timeout_sec: '900',
+  // pull / push / merge on the engine's own repo from the chat (its self-update would cut the answer off)
+  ops_git_engine_repo: 'false',
+  // the loop-ops MCP forwarder (external clients): off = read-only tools only
+  ops_external_enabled: 'false',
   // where a run goes when the caller does not name a host: '' / 'local' = this machine, else the
   // name of an exec host (`loop exec host add`, src/exec/hosts.ts)
   exec_default_host: '',

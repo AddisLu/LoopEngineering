@@ -35,6 +35,8 @@ export const NONNEG_KEYS = new Set([
   // GPU 執行沙盒 (src/exec/sandbox.ts)
   'exec_pids', 'exec_timeout_sec', 'exec_max_timeout_sec', 'exec_max_concurrency', 'exec_output_chars',
   'exec_chat_max_rounds', 'exec_chat_wall_ms',
+  // 對話操作 (src/chatops/*)
+  'ops_confirm_ttl_min', 'ops_chat_max_rounds', 'ops_chat_wall_ms', 'ops_git_timeout_sec', 'ops_git_clone_timeout_sec',
 ]);
 // values must be a number in [0, 1] (a fraction/weight, unlike the 0-100 PERCENT_KEYS)
 export const UNIT_INTERVAL_KEYS = new Set(['rag_hybrid_alpha']);
@@ -84,6 +86,8 @@ export const BOOL_KEYS = new Set([
   'prd_gate_enabled', 'prd_require_llm',
   // GPU 執行沙盒 (src/exec/sandbox.ts) — off = no sandbox tools, no loop-exec MCP server
   'exec_enabled', 'exec_profiling_cap',
+  // 對話操作 (src/chatops/*) — off = the chat's tools are exactly what they were
+  'ops_chat_enabled', 'ops_git_engine_repo', 'ops_external_enabled',
 ]);
 
 /** Accepted `integration_provider` values ('none' = the bridge is fully off). */
@@ -164,8 +168,11 @@ export function validateSetting(key: string, value: string): string | null {
   } else if (key === 'voice_structure_model' || key === 'report_model' || key === 'report_pptx_model') {
     // these call `claude -p` directly — cloud aliases only
     if (!MODEL_VALUES.has(value)) return `${key} must be one of: ${[...MODEL_VALUES].filter(Boolean).join(', ')} (or empty for CLI default)`;
-  } else if (key === 'spike_root') {
-    if (!value.startsWith('/') && !value.startsWith('~')) return 'spike_root must be an absolute path';
+  } else if (key === 'spike_root' || key === 'git_clone_root') {
+    if (!value.startsWith('/') && !value.startsWith('~')) return `${key} must be an absolute path`;
+  } else if (key === 'ops_hide_mcp_servers') {
+    const bad = value.split(',').map((s) => s.trim()).filter(Boolean).filter((s) => !/^[a-z0-9_-]+$/.test(s));
+    if (bad.length) return `ops_hide_mcp_servers must be a CSV of MCP server names (got: ${bad.join(', ')})`;
   } else if (key === 'mcp_servers_json') {
     try {
       parseMcpServers(value);
@@ -178,7 +185,7 @@ export function validateSetting(key: string, value: string): string | null {
     if (value !== '' && !value.startsWith('/')) return 'terminal_cwd must be an absolute path (or empty for the home directory)';
   } else if (key === 'terminal_worktree_root') {
     if (value !== '' && !value.startsWith('/')) return 'terminal_worktree_root must be an absolute path';
-  } else if (key === 'terminal_allowed_users' || key === 'exec_allowed_users') {
+  } else if (key === 'terminal_allowed_users' || key === 'exec_allowed_users' || key === 'ops_allowed_users') {
     const bad = value.split(',').map((s) => s.trim()).filter(Boolean).filter((s) => !/^(ts:\S+|name:\S+|local)$/i.test(s));
     if (bad.length) return `${key} entries must be ts:<login>, name:<name> or local (got: ${bad.join(', ')})`;
   } else if (key === 'gitea_url') {
