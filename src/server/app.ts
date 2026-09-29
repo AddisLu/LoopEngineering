@@ -1,4 +1,4 @@
-import Fastify, { type FastifyInstance } from 'fastify';
+import Fastify, { type FastifyInstance, type FastifyReply } from 'fastify';
 import fastifyStatic from '@fastify/static';
 import fastifyMultipart from '@fastify/multipart';
 import fastifyCors from '@fastify/cors';
@@ -7,17 +7,16 @@ import { fileURLToPath } from 'node:url';
 import type Database from 'better-sqlite3';
 import { getDb, getSetting, setSetting, getBool, getNum } from '../db/index.js';
 import { validateSetting, TUNABLE_KEYS } from '../settings.js';
-import { createTask, getTask, setStatus, activeRuns, deleteTask, countByStatus, tasksForPrune } from '../tasks.js';
+import { createTask, getTask, setStatus, activeRuns, deleteTask, tasksForPrune } from '../tasks.js';
 import { validateTask } from '../gate/validateTask.js';
 import { readUsage } from '../token/usage.js';
 import { resolvePolicy } from '../scheduler/policy.js';
 import { killRun } from '../orchestrator/kill.js';
-import { cleanupWorktree, resetTaskWorkspace } from '../orchestrator/cleanup.js';
 import { pruneTaskArtifacts } from '../git/worktree.js';
+import { TaskActionError, abandonTask, abortTask, closeTask, deleteTaskSafe, holdTask, killTaskRuns, queueTask, restartTask, resumeTask } from '../taskActions.js';
 import { mergeReviewedTask, MergeInProgressError } from '../orchestrator/mergeFlow.js';
 import { updateVerification, TaskEditError, type VerificationPatch } from '../taskEdit.js';
 import { identityOf, IdentityError } from './identity.js';
-import { latestRun } from '../tasks.js';
 import { boardState, taskResult } from './board.js';
 import { taskHistory } from '../orchestrator/history.js';
 import { forecastBacklog } from '../token/accounting.js';
@@ -34,7 +33,7 @@ import { registerVoiceRoutes } from './voiceRoutes.js';
 import { registerReportRoutes } from './reportRoutes.js';
 import { registerReportPptxRoutes } from './reportPptxRoutes.js';
 import { environmentMap } from '../deploy/store.js';
-import { collectDistillMaterial, runDistiller, type DistillExec } from '../knowledge/distill.js';
+import type { DistillExec } from '../knowledge/distill.js';
 import { selectKnowledge } from '../knowledge/context.js';
 import type { RelateExec } from '../knowledge/relate.js';
 import type { EmbedExec } from '../knowledge/embed.js';
@@ -54,7 +53,6 @@ import { registerChatRoutes, type ChatRouteOptions } from './chatRoutes.js';
 import { registerExecRoutes } from './execRoutes.js';
 import { registerPlanRoutes, type PlanRouteOptions } from './planRoutes.js';
 import { registerReviewRoutes } from './reviewRoutes.js';
-import { removeTrialWorkspace } from '../review/review.js';
 import { buildMorningReport } from '../report/morning.js';
 import fastifyWebsocket from '@fastify/websocket';
 import { registerTerminalRoutes, type TerminalRouteOptions } from './terminalRoutes.js';
@@ -64,6 +62,12 @@ import { paths } from '../config.js';
 import type { PrdReviewExec } from '../prd/review.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+/** A refused task transition (src/taskActions.ts) becomes the response the route always sent. */
+function actionError(reply: FastifyReply, err: unknown) {
+  if (err instanceof TaskActionError) return reply.code(err.status).send({ error: err.message, ...err.extra });
+  throw err;
+}
 const WEB_DIR = path.resolve(__dirname, '..', '..', 'web');
 const DOCS_DIR = path.resolve(__dirname, '..', '..', 'docs');
 
@@ -336,41 +340,17 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
   });
 
   app.post('/api/tasks/:id/queue', async (req, reply) => {
-    const id = (req.params as any).id;
-    const t = getTask(db, id);
-    if (!t) return reply.code(404).send({ error: 'not found' });
-    // Only drafts enter the queue here; a troubled task (attention/failed) must go
-    // through /restart so its stale branch/worktree is reset first.
-    if (t.status !== 'draft') {
-      return reply.code(409).send({
-        error: `task is ${t.status} — only a draft can be queued; use /restart to requeue it`,
-        status: t.status,
-      });
-    }
-    const gate = validateTask(t, getSetting(db, 'host_capabilities') ?? '', environmentMap(db));
-    if (!gate.ok) return reply.code(409).send({ error: 'gate not satisfied', gate });
-    // Controlled auto-queue path (used by the MCP, which queues by default): cap how many
-    // tasks may be auto-enqueued so a burst of MCP calls can't flood autonomous spend.
-    // Manual queueing (from the board/CLI, no `auto` flag) is intentionally uncapped.
+    // the MCP queues by default through this capped path (see queueTask); the board/CLI don't pass it
     const auto =
       (req.query as any)?.auto === '1' ||
       (req.query as any)?.auto === 'true' ||
       (req.body as any)?.auto === true;
-    if (auto) {
-      const max = getNum(db, 'max_autoqueue', 3);
-      const counts = countByStatus(db);
-      const active = (counts.queued ?? 0) + (counts.running ?? 0);
-      if (active >= max) {
-        return reply.code(429).send({
-          error: 'autoqueue limit reached',
-          limit: max,
-          active,
-          message: `Auto-queue limit reached (${active} queued+running ≥ max_autoqueue=${max}). Task left as draft — queue it from the board or raise max_autoqueue.`,
-        });
-      }
+    try {
+      queueTask(db, (req.params as any).id, { auto });
+      return { ok: true };
+    } catch (err) {
+      return actionError(reply, err);
     }
-    setStatus(db, id, 'queued', { detail: auto ? 'auto-queued via api' : 'queued via api' });
-    return { ok: true };
   });
 
   // Manual integrate for a task left at merge_status pending/conflict (e.g. no-gh host, a
@@ -395,17 +375,12 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
   });
 
   app.post('/api/tasks/:id/close', async (req, reply) => {
-    const id = (req.params as any).id;
-    const t = getTask(db, id);
-    if (!t) return reply.code(404).send({ error: 'not found' });
-    // collect BEFORE cleanupWorktree destroys the worktree HANDOFF.md lives in
-    const material = collectDistillMaterial(db, t);
-    setStatus(db, id, 'closed', { detail: 'closed via api' });
-    cleanupWorktree(db, t); // work is done — reclaim the worktree's disk
-    removeTrialWorkspace(t); // and the 驗收頁's 試跑 checkout
-    // fire-and-forget: never delays this response (see knowledge/distill.ts)
-    void runDistiller(db, t, material, opts.distillExec).catch(() => {});
-    return { ok: true };
+    try {
+      closeTask(db, (req.params as any).id, { distillExec: opts.distillExec });
+      return { ok: true };
+    } catch (err) {
+      return actionError(reply, err);
+    }
   });
 
   // Task result for editors/MCP: PR link, gap-review, failure reason, recent log —
@@ -436,91 +411,63 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
 
   // --- attention (待確認) triage actions ---
 
-  // 續跑: hand an attention task back to the auto-resume path. Clamping (not resetting)
-  // resume_count to max_resumes grants exactly ONE more tick-eligible attempt — the
-  // scheduler resumes blocked tasks while resume_count <= max_resumes.
+  // 續跑 / 重來 / 放棄 / 轉待確認 / 中止 / 刪除: the transitions live in src/taskActions.ts, shared
+  // with 對話操作 (src/chatops); these routes only map a refusal to its HTTP status.
   app.post('/api/tasks/:id/resume', async (req, reply) => {
-    const id = (req.params as any).id;
-    const t = getTask(db, id);
-    if (!t) return reply.code(404).send({ error: 'not found' });
-    if (t.status !== 'attention')
-      return reply.code(409).send({ error: 'task not in attention', status: t.status });
-    const run = latestRun(db, id);
-    if (!run?.session_id) return reply.code(400).send({ error: 'no session — use restart' });
-    const maxResumes = getNum(db, 'max_resumes', 2);
-    db.prepare('UPDATE tasks SET resume_count = ? WHERE id = ?').run(Math.min(t.resume_count, maxResumes), id);
-    setStatus(db, id, 'blocked', { detail: 'manual resume from attention' });
-    return { ok: true };
+    try {
+      resumeTask(db, (req.params as any).id);
+      return { ok: true };
+    } catch (err) {
+      return actionError(reply, err);
+    }
   });
 
-  // 重來: requeue from scratch. resetTaskWorkspace removes the run worktrees AND the
-  // loop/<id> branch, so the next dispatch re-cuts from (freshly fetched) base instead
-  // of silently reusing the stale branch/dir.
   app.post('/api/tasks/:id/restart', async (req, reply) => {
-    const id = (req.params as any).id;
-    const t = getTask(db, id);
-    if (!t) return reply.code(404).send({ error: 'not found' });
-    if (t.status !== 'attention' && t.status !== 'failed')
-      return reply.code(409).send({ error: 'restart only applies to attention/failed tasks', status: t.status });
-    resetTaskWorkspace(db, t);
-    db.prepare('UPDATE tasks SET resume_count = 0, pr_url = NULL, merge_status = NULL WHERE id = ?').run(id);
-    setStatus(db, id, 'queued', { detail: 'restart: fresh from base' });
-    return { ok: true };
+    try {
+      restartTask(db, (req.params as any).id);
+      return { ok: true };
+    } catch (err) {
+      return actionError(reply, err);
+    }
   });
 
-  // 放棄: close the triage as a terminal failure; ?cleanup=1 also reclaims the worktree.
+  // ?cleanup=1 also reclaims the worktree
   app.post('/api/tasks/:id/abandon', async (req, reply) => {
-    const id = (req.params as any).id;
-    const t = getTask(db, id);
-    if (!t) return reply.code(404).send({ error: 'not found' });
-    if (t.status !== 'attention')
-      return reply.code(409).send({ error: 'task not in attention', status: t.status });
-    setStatus(db, id, 'failed', { detail: 'abandoned by user' });
     const cleanup = (req.query as any)?.cleanup === '1' || (req.query as any)?.cleanup === 'true';
-    if (cleanup) cleanupWorktree(db, t);
-    return { ok: true };
+    try {
+      abandonTask(db, (req.params as any).id, { cleanup });
+      return { ok: true };
+    } catch (err) {
+      return actionError(reply, err);
+    }
   });
 
-  // 轉待確認: a blocked task auto-resumes on every eligible tick with no way to stop it —
-  // hand it to attention instead, since the tick only scans 'blocked'. Note: a hold
-  // racing an in-flight tick may still allow one more resume (one-poll window, acceptable).
   app.post('/api/tasks/:id/hold', async (req, reply) => {
-    const id = (req.params as any).id;
-    const t = getTask(db, id);
-    if (!t) return reply.code(404).send({ error: 'not found' });
-    if (t.status !== 'blocked')
-      return reply.code(409).send({ error: 'task not blocked', status: t.status });
-    setStatus(db, id, 'attention', { detail: 'held by user (auto-resume stopped)' });
-    return { ok: true };
+    try {
+      holdTask(db, (req.params as any).id);
+      return { ok: true };
+    } catch (err) {
+      return actionError(reply, err);
+    }
   });
 
   app.post('/api/tasks/:id/abort', async (req, reply) => {
-    const id = (req.params as any).id;
-    if (!getTask(db, id)) return reply.code(404).send({ error: 'not found' });
-    for (const r of activeRuns(db).filter((r) => r.task_id === id)) {
-      killRun(db, { id: r.id, pid: r.pid }, 'user');
+    try {
+      abortTask(db, (req.params as any).id);
+      return { ok: true };
+    } catch (err) {
+      return actionError(reply, err);
     }
-    setStatus(db, id, 'failed', { detail: 'aborted via api' });
-    return { ok: true };
   });
 
   app.delete('/api/tasks/:id', async (req, reply) => {
-    const id = (req.params as { id: string }).id;
     const q = req.query as { force?: string };
     const force = q?.force === '1' || q?.force === 'true';
-    const t = getTask(db, id);
-    if (!t) return reply.code(404).send({ error: 'not found' });
-    const active = t.status === 'running' || t.status === 'verifying' || t.status === 'queued';
-    if (active && !force) {
-      return reply
-        .code(409)
-        .send({ error: 'task is active — abort it first or pass ?force=1', status: t.status });
+    try {
+      return { ok: true, ...deleteTaskSafe(db, (req.params as { id: string }).id, { force }) };
+    } catch (err) {
+      return actionError(reply, err);
     }
-    // force on an active task: interrupt its run before we drop the rows.
-    if (active) for (const r of activeRuns(db).filter((r) => r.task_id === id)) killRun(db, { id: r.id, pid: r.pid }, 'user');
-    pruneTaskArtifacts(db, t); // remove worktrees/logs/plan (path-safe) before cascade-delete
-    deleteTask(db, id);
-    return { ok: true, deleted: id };
   });
 
   // Batch-prune terminal tasks + their disk artifacts. Never deletes active/blocked/review
@@ -636,7 +583,7 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
     prdReviewExec: opts.prdReviewExec,
     // cancelling a benchmark has to stop the arm that is running right now, not just mark it
     onArmCancel: (t) => {
-      for (const r of activeRuns(db).filter((r) => r.task_id === t.id)) killRun(db, { id: r.id, pid: r.pid }, 'user');
+      killTaskRuns(db, t.id, 'user');
     },
   });
   registerPrdRoutes(app, db, {
