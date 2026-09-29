@@ -10,9 +10,11 @@ the kernels with Nsight Compute (`ncu`).
 - `arith_kernel.cu` — the four kernels (grid-stride loop, 256 threads/block by
   default, configurable via `argv[1]`) plus a `main()` that allocates/copies
   the input, runs each kernel, copies the result back, and verifies it
-  against a CPU loop with `1e-5` tolerance. `vec_div` divides by `b[i] + 1.0f`
-  (via `fdividef`) so the random inputs can never produce a zero denominator
-  (no NaN/Inf).
+  against a CPU loop with `1e-5` tolerance. `a[i]` is uniform random in
+  `[-5, 5)`; `b[i] = fabsf(cosf(i * 0.013f)) + 1.0f` is deterministic and
+  always in `[1, 2]`. `vec_div` therefore divides by a denominator that is
+  `> 0.5` by construction — it can never reach zero, straddle zero, or produce
+  NaN/Inf or near-zero blow-ups.
 - `run_ncu.sh` — builds with `nvcc -O3 -lineinfo -arch=sm_121`, runs the
   correctness check, then profiles with `ncu --set full` (falling back to
   `--section SpeedOfLight --section LaunchStats` if `--set full` isn't
@@ -51,8 +53,12 @@ right one to compare memory-bound kernels against.
 
 ## Reading the Nsight Compute report
 
-`run_ncu.sh` exports `arith_report.ncu-rep` and prints the first 100 lines of
-`ncu --import arith_report.ncu-rep --page details`. To reopen it later:
+`run_ncu.sh` exports `arith_report.ncu-rep` and prints a SpeedOfLight /
+LaunchStats summary — the first 100 lines of
+`ncu --import arith_report.ncu-rep --page details` piped through
+`sed -n '1,100p'` (`head` would close the pipe early and kill `ncu` with
+SIGPIPE under `set -o pipefail`) — followed by the key metric lines.
+To reopen it later:
 
 ```bash
 ncu --import arith_ncu/arith_report.ncu-rep --page details | less

@@ -40,33 +40,50 @@ run_ncu() {
     return $status
 }
 
+show_ncu_log() {
+    # ncu captures the target app's stdout in its log; ./arith_kernel above is
+    # the single canonical printer of the PASS/FAIL lines, so strip them (and
+    # the "N=..." header) here to avoid printing them a second time.
+    grep -vE '^(vec_(add|sub|mul|div): |N=[0-9])' "$1" || true
+}
+
 echo "== Profiling with Nsight Compute (--set full) =="
 if run_ncu ncu_full.log --set full; then
     NCU_OK=1
 elif grep -qi "ERR_NVGPUCTRPERM" ncu_full.log; then
     echo "NCU SKIPPED: ERR_NVGPUCTRPERM — this host denies GPU performance counter access (needs elevated privileges / NVreg_RestrictProfilingToAdminUsers=0)"
-    cat ncu_full.log
+    show_ncu_log ncu_full.log
     exit 0
 else
     echo "-- --set full failed/unsupported, falling back to --section SpeedOfLight --section LaunchStats --"
-    cat ncu_full.log
+    show_ncu_log ncu_full.log
     if run_ncu ncu_fallback.log --section SpeedOfLight --section LaunchStats; then
         NCU_OK=1
     elif grep -qi "ERR_NVGPUCTRPERM" ncu_fallback.log; then
         echo "NCU SKIPPED: ERR_NVGPUCTRPERM — this host denies GPU performance counter access (needs elevated privileges / NVreg_RestrictProfilingToAdminUsers=0)"
-        cat ncu_fallback.log
+        show_ncu_log ncu_fallback.log
         exit 0
     else
         echo "NCU SKIPPED: ncu failed for an unexpected reason (see below); arithmetic correctness already passed"
-        cat ncu_fallback.log
+        show_ncu_log ncu_fallback.log
         exit 0
     fi
 fi
 
 if [ "${NCU_OK:-0}" -eq 1 ] && [ -f arith_report.ncu-rep ]; then
     echo "== Nsight Compute report written to arith_ncu/arith_report.ncu-rep =="
-    echo "== ncu --import arith_report.ncu-rep --page details | head -100 =="
-    "$NCU_BIN" --import arith_report.ncu-rep --page details | head -100
+    echo "== SpeedOfLight / LaunchStats summary =="
+    # NOTE: use `sed -n '1,Np'`, not `head`: head closes the pipe early and the
+    # ncu import process dies with SIGPIPE (141), which `set -o pipefail` would
+    # turn into a script failure. sed drains stdin to EOF. The import is only a
+    # summary display (the hard gates — correctness + report export — already
+    # passed), so its status is exempted; it must never flip the exit code.
+    { "$NCU_BIN" --import arith_report.ncu-rep --page details 2>&1 || true; } \
+        | sed -n '1,100p'
+    echo "== Key metrics (Compute (SM) Throughput / Memory Throughput / Achieved Occupancy / Duration) =="
+    { "$NCU_BIN" --import arith_report.ncu-rep --page details 2>&1 || true; } \
+        | grep -E 'Duration|Compute \(SM\) Throughput|Memory Throughput|Achieved Occupancy' \
+        | sed -n '1,80p' || true
 else
     echo "NCU SKIPPED: no report file produced despite a zero exit status"
 fi
