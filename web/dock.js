@@ -130,12 +130,22 @@ function taskCard(card) {
   return a;
 }
 
+// Why the usage numbers are not a live reading (null when they are) — same wording as the board.
+function usageNote(err) {
+  if (!err) return null;
+  if (/login expired|not logged in|auth-expired/i.test(err)) return '這台的 Claude 登入已過期，用量沿用舊讀數 — 請在主機執行 claude 重新登入';
+  if (/cooldown|rate-limited/i.test(err)) return '用量 API 冷卻中（429 退避），沿用上次讀數';
+  return '用量讀不到，沿用上次讀數';
+}
+
 function paintTasks(s) {
   $('task-counts').replaceChildren(countsStrip(s.counts || {}));
   const note = [];
   if (s.paused) note.push('排程已暫停');
   if (s.self_update_pending) note.push('引擎更新排隊中');
   if (s.usage) note.push(`session ${Math.round(s.usage.session)}% · weekly ${Math.round(s.usage.weekly)}%`);
+  const why = s.usage ? usageNote(s.usage.error) : null;
+  if (why) note.push(why);
   $('sched-note').textContent = note.join(' · ') || '排程執行中';
 
   const cards = Array.isArray(s.cards) ? s.cards : [];
@@ -161,6 +171,14 @@ function paintTopbarUsage(s) {
   };
   set('usage-session', 'session', u.session);
   set('usage-weekly', 'weekly', u.weekly);
+  // not a live reading: say why in the tooltip and keep the chips amber whatever the number
+  const why = usageNote(u.error);
+  for (const [id, base] of [['usage-session', '5 小時視窗用量'], ['usage-weekly', '每週視窗用量']]) {
+    const node = $(id);
+    if (!node) continue;
+    node.title = why ? `${base} — ${why}` : base;
+    if (why && node.dataset.state === 'ok') node.dataset.state = 'warn';
+  }
 }
 
 onBoard((s) => {

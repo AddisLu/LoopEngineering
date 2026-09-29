@@ -79,6 +79,8 @@ export interface RuntimeEnvOptions {
   /** the bearer, or '' when the API is open — only ever passed through the environment */
   apiToken: string;
   dataDir?: string;
+  /** the caller's per-call timeout, so long waits (loop_wait_task) answer before it */
+  toolTimeoutMs?: number;
 }
 
 /**
@@ -93,6 +95,7 @@ export function runtimeEnvFor(name: string, db: Database.Database, o: RuntimeEnv
     env.LOOP_API_URL = o.apiUrl;
     if (o.apiToken) env.LOOP_API_TOKEN = o.apiToken;
     if (o.dataDir) env.LOOP_DATA_DIR = o.dataDir;
+    if (o.toolTimeoutMs) env.LOOP_MCP_TIMEOUT_MS = String(o.toolTimeoutMs);
   }
   return env;
 }

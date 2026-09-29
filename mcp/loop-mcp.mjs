@@ -141,6 +141,9 @@ server.registerTool('loop_add_task', {
     verify_timeout_min: z.number().int().optional().describe('Per-task verify per-step timeout override, in minutes (default: the verify_step_timeout_min setting, 10).'),
     requires: z.string().optional().describe('CSV of capability tokens this task needs this HOST to have (e.g. "gpu", "camera", "network", "os:windows"). If the host\'s `host_capabilities` setting is missing one, command verification is skipped and the task auto-defers to manual review instead of failing — use this when a task needs hardware/OS this machine may not have.'),
     experiment: z.string().optional().describe('A/B cohort label for measurement (e.g. "ab_A"/"ab_B"). Pure tag — never affects scheduling/gate; compare cohorts later with the `loop experiment` CLI or metrics.experiment_ab.'),
+    acceptance_metrics: z.string().optional().describe('Thresholds the ENGINE checks, e.g. "kernels_pass == 4; ncu_ok == 1; mem_throughput_pct >= 60". A verification step must print one line `LOOP_METRICS {"name": number, ...}`; a metric that is missing or misses its threshold fails verification. Use this whenever "done" is measurable — never let a skipped measurement count as a pass.'),
+    protected_paths: z.string().optional().describe('CSV of repo-relative globs the implementer must not change (the checker, golden data), e.g. "tests/eval/**,scripts/check.sh". Changing one fails verification.'),
+    artifacts: z.string().optional().describe('CSV of repo-relative globs of files people take away (a built binary, an .ncu-rep report). Never committed; collected with sha256 after verification passes, downloadable from the review page.'),
   },
 }, async (a) => {
   const isMock = a.coding_tool === 'mock';
@@ -178,6 +181,9 @@ server.registerTool('loop_add_task', {
       verify_timeout_min: a.verify_timeout_min ?? null,
       requires: a.requires ?? null,
       experiment: a.experiment ?? null,
+      acceptance_metrics: a.acceptance_metrics ?? null,
+      protected_paths: a.protected_paths ?? null,
+      artifacts: a.artifacts ?? null,
     },
   });
   const id = created.task?.id;
@@ -360,14 +366,36 @@ server.registerTool('loop_status', {
 });
 
 // ---- inspect a task's outcome without opening the board ----
+function fmtVerify(r) {
+  const steps = Array.isArray(r.verify) ? r.verify : [];
+  if (!steps.length) return null;
+  const out = [`\n--- verification (run ${r.verify_run?.id ?? '?'}, attempt ${r.verify_run?.attempt ?? '?'}) — the engine's own record, not the agent's claim ---`];
+  for (const s of steps) {
+    out.push(`${s.ok ? 'PASS' : 'FAIL'}  ${s.step}  (${s.timedOut ? 'timed out' : `exit ${s.exitCode ?? '?'}`})`);
+    if (s.tail && (!s.ok || steps.length === 1)) out.push(String(s.tail).split('\n').slice(-15).map((l) => `    | ${l}`).join('\n'));
+  }
+  const m = r.metrics;
+  if (m && Array.isArray(m.checks) && m.checks.length) {
+    out.push(`metrics vs thresholds (${m.pass ? 'all met' : 'NOT met'}):`);
+    for (const c of m.checks) out.push(`  ${c.pass ? 'ok ' : 'MISS'} ${c.name} = ${c.actual ?? '(not reported)'}  (need ${c.op} ${c.target})`);
+  } else if (r.thresholds) {
+    out.push(`metrics: none measured (thresholds ${r.thresholds})`);
+  }
+  return out.join('\n');
+}
+
 function fmtResult(r) {
+  const files = Array.isArray(r.changed_files) ? r.changed_files : null;
   const lines = [
     `Task ${r.id} — status: ${r.status}`,
     r.branch ? `branch: ${r.branch}` : null,
     r.elapsedMin != null ? `elapsed: ${r.elapsedMin}m` : null,
     r.pr_url ? `PR: ${r.pr_url}` : null,
+    r.review_url ? `review page (code, re-run, checklist): ${r.review_url}` : null,
     r.output_dir ? `output dir: ${r.output_dir} (${(r.output_files || []).length} file(s))` : null,
     r.fail_detail ? `failure:\n${r.fail_detail}` : null,
+    fmtVerify(r),
+    files && files.length ? `\n--- changed files (${files.length}) ---\n${files.slice(0, 40).map((f) => `${f.status} ${f.path}`).join('\n')}` : null,
     r.review_md ? `\n--- gap review ---\n${String(r.review_md).slice(0, 2000)}` : null,
     r.verify_md ? `\n--- VERIFY.md (manual verification checklist) ---\n${String(r.verify_md).slice(0, 2000)}` : null,
     Array.isArray(r.log_tail) && r.log_tail.length ? `\n--- log tail ---\n${r.log_tail.join('\n')}` : null,
@@ -403,7 +431,11 @@ server.registerTool('loop_wait_task', {
     timeout_sec: z.number().int().optional().describe('max seconds to wait (default 900).'),
   },
 }, async ({ id, timeout_sec }) => {
-  const budget = timeout_sec ?? 900;
+  // a caller with its own tool timeout (the chat page: mcp_timeout_ms) gets an answer before it,
+  // saying the task is still running, instead of a timeout error with nothing in it
+  const clientMs = Number(process.env.LOOP_MCP_TIMEOUT_MS) || 0;
+  const cap = clientMs > 0 ? Math.max(2, Math.floor(clientMs / 1000) - 5) : Infinity;
+  const budget = Math.min(timeout_sec ?? 900, cap);
   const deadline = Date.now() + budget * 1000;
   let r;
   for (;;) {
@@ -413,9 +445,11 @@ server.registerTool('loop_wait_task', {
       return { content: [{ type: 'text', text: `Could not wait on ${id}: ${e.message}` }] };
     }
     if (WAIT_TERMINAL.has(r.status) || Date.now() >= deadline) break;
-    await new Promise((res) => setTimeout(res, 5000));
+    await new Promise((res) => setTimeout(res, Math.max(0, Math.min(5000, deadline - Date.now()))));
   }
-  const head = WAIT_TERMINAL.has(r.status) ? '' : `(timed out after ${budget}s; still ${r.status})\n`;
+  const head = WAIT_TERMINAL.has(r.status)
+    ? ''
+    : `(still ${r.status} after ${budget}s — not finished yet; call loop_wait_task or loop_task_result again later)\n`;
   return { content: [{ type: 'text', text: head + fmtResult(r) }] };
 });
 
@@ -558,7 +592,10 @@ const prdReport = (c) => [
 
 server.registerTool('loop_prd_template', {
   title: 'Get the Loop PRD template',
-  description: 'The section skeleton the PRD gate expects (目標/範圍/非範圍/驗收標準/驗證指令/Repo/領域/複雜度). Write PRDs in this shape so a local model can implement them unattended.',
+  description:
+    'The section skeleton the PRD gate expects (目標/範圍/非範圍/驗收標準/驗證指令/Repo/領域/複雜度). Write PRDs in this shape so a local model can implement them unattended. ' +
+    'Optional sections worth using for overnight runs: 驗收指標 (machine-checked thresholds like "detection_rate >= 0.98" that the engine compares against a LOOP_METRICS {json} line a verify command prints), ' +
+    '保護路徑 (globs such as scripts/eval/** the implementer must not change), 圖集比對 with 主機 (an exec host holding the image library; its verify command then starts with sandbox@<host>:).',
   inputSchema: {},
 }, async () => {
   try {
@@ -609,9 +646,31 @@ server.registerTool('loop_prd_submit', {
 
 // ---- environments + deploy (在家開發帶去公司部署) ----
 
+server.registerTool('loop_list_exec_hosts', {
+  title: 'List the machines verification can run on',
+  description:
+    'The GPU 執行沙盒 machines: "local" (the Loop engine machine) and any registered remote hosts, with their image, GPU, read-only datasets and what each is for. ' +
+    'A verification step "sandbox@<host>: <command>" runs on that host ("sandbox: <command>" on the default one). Use this before choosing where a task is verified.',
+  inputSchema: {},
+}, async () => {
+  try {
+    const st = await api('/api/exec/status');
+    if (!st.enabled) return { content: [{ type: 'text', text: 'The 執行沙盒 is off (exec_enabled=false): verification steps run on the engine machine\'s own shell.' }] };
+    const rows = (st.hosts || []).map((h) =>
+      `${h.default ? '* ' : '  '}${h.name}${h.name === 'local' ? ' (the Loop engine machine)' : ''}${h.description ? ` — ${h.description}` : ''}` +
+      `${Array.isArray(h.data) && h.data.length ? `\n    datasets (read-only, container paths): ${h.data.map((d) => d.target).join(', ')}` : ''}`);
+    return { content: [{ type: 'text', text: `${rows.join('\n')}\n(* = default for "sandbox:" steps)` }] };
+  } catch (e) {
+    return { content: [{ type: 'text', text: `Could not list verification hosts: ${e.message}` }] };
+  }
+});
+
 server.registerTool('loop_list_environments', {
   title: 'List Loop deploy environments',
-  description: 'List deploy environments (e.g. home/company): kind, host, capabilities, deploy_cmd, auto_deploy.',
+  description:
+    'List deploy environments (e.g. home/company): kind, host, capabilities, deploy_cmd, auto_deploy. ' +
+    'NOTE: an environment\'s "host" is only a descriptive label — a task always runs and verifies on the Loop engine machine. ' +
+    'To build or verify on another machine, use a verification host (loop_list_exec_hosts) through a "sandbox@<host>: <command>" verification step.',
   inputSchema: {},
 }, async () => {
   try {

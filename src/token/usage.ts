@@ -31,39 +31,80 @@ interface CacheEnvelope {
 const COOLDOWN_MIN_MS = 60_000;
 const COOLDOWN_MAX_MS = 3_900_000;
 const COOLDOWN_DEFAULT_MS = 300_000;
+/**
+ * How long past a published deadline this process keeps waiting before it asks again. The board
+ * reads usage every second, so without a margin the retry lands within a second of the deadline —
+ * inside the penalty whenever the server rounded Retry-After down or the clocks differ by a
+ * second — and restarts the hour for every tool on the account.
+ */
+export const COOLDOWN_GRACE_MS = 30_000;
 const clampCooldown = (ms: number) => Math.min(COOLDOWN_MAX_MS, Math.max(COOLDOWN_MIN_MS, ms));
-/** Remaining cooldown, clamped so a peer's skewed clock can't park us for a week. */
-const waitFor = (until?: number) => (typeof until === 'number' && until > Date.now() ? Math.min(until - Date.now(), COOLDOWN_MAX_MS) : 0);
+/** Remaining wait (deadline + grace), clamped so a peer's skewed clock can't park us for a week. */
+const waitFor = (until?: number) => {
+  if (typeof until !== 'number') return 0;
+  const left = until + COOLDOWN_GRACE_MS - Date.now();
+  return left > 0 ? Math.min(left, COOLDOWN_MAX_MS) : 0;
+};
 
-/** A failed live read, carrying the server's Retry-After when it gave one. */
+/**
+ * usage-core (SHARED_TTL there) answers from its caches *instead of* a request only while the
+ * newest reading is younger than this. It also falls back to that same reading, unflagged, when
+ * a request it did make fails (network, expired token, HTTP error) — so an older reading coming
+ * back from it means a failed read, not a fresh one.
+ */
+const TOKENBAR_SHARED_TTL_MS = 240_000;
+
+const AUTH_EXPIRED = 'Claude Code login expired on this host — run `claude` here once (or `claude setup-token`) to refresh it';
+
+/** A reading plus the time it was really taken from oauth/usage (not when we last looked at it). */
+interface Served {
+  reading: UsageReading;
+  ts: number;
+}
+
+/**
+ * A failed live read, carrying the server's Retry-After when it gave one, and the reading TokenBar
+ * served alongside the failure — which can be newer than ours (a peer machine's).
+ */
 class UsageFetchError extends Error {
   constructor(
     message: string,
     readonly cooldownMs?: number,
+    readonly served?: Served,
   ) {
     super(message);
   }
 }
 
-/** Park every consumer without disturbing the last good reading either tool draws from. */
-function publishCooldown(cache: CacheEnvelope | null, ms: number): void {
-  try {
-    fs.mkdirSync(path.dirname(CACHE_FILE), { recursive: true });
-    const base: Record<string, unknown> = cache ? { ...cache } : { ts: 0 };
-    fs.writeFileSync(CACHE_FILE, JSON.stringify({ ...base, blockedUntil: Date.now() + clampCooldown(ms) }));
-  } catch {
-    /* best effort */
-  }
+/**
+ * Park every consumer without disturbing the last good reading either tool draws from. `base` is
+ * the file as it stands after the failed read — a peer may have written a newer reading or a longer
+ * deadline meanwhile — with TokenBar's reading laid over it when that one is newer. A deadline is
+ * only ever pushed out, never pulled in: our 60s network pause must not cut short the hour a 429
+ * asked for. (Bounded, so a bogus value never parks anyone for good.) Returns the deadline.
+ */
+function publishCooldown(base: Partial<CacheEnvelope> | null, ms: number): number {
+  const now = Date.now();
+  const standing = typeof base?.blockedUntil === 'number' ? base.blockedUntil : 0;
+  const blockedUntil = Math.min(Math.max(standing, now + clampCooldown(ms)), now + COOLDOWN_MAX_MS);
+  writeEnvelope({ ...(base ?? { ts: 0 }), blockedUntil });
+  return blockedUntil;
 }
 
 /**
  * Read current Claude usage (session 5h + weekly), mirroring TokenBar's usage-core
  * contract exactly. Precedence:
  *   1. LOOP_MOCK_USAGE env (JSON)      — tests / mock adapter, zero network.
- *   2. shared cache file if fresh      — respects the 180s TokenBar cadence AND lets
- *                                         a manual edit (breaker drill) take effect.
- *   3. live fetch of oauth/usage       — writes cache on success.
- *   4. stale cache / degraded reading  — on network failure.
+ *   2. shared cache file if fresh      — TokenBar's 240s window; lets a manual edit
+ *                                         (breaker drill) take effect. `force` skips it.
+ *   3. 429 cooldown in the file        — cached reading, NO request, until the deadline
+ *                                         plus a grace. `force` included: a request during
+ *                                         the penalty restarts it.
+ *   4. live read of oauth/usage        — direct, or via TokenBar's usage-core when
+ *                                         TOKENBAR_MCP_DIR is set; stored with the time
+ *                                         it was really taken. Never with a session token
+ *                                         known to be expired.
+ *   5. stale cache / degraded reading  — on failure, with a cooldown published.
  *
  * This is the single source the scheduler and breaker consult, so a manual write to
  * the cache file is honored on the next read (see writeCache / the M1 breaker test).
@@ -81,29 +122,42 @@ export function readUsage(opts: { force?: boolean; refreshMs?: number } = {}): U
   }
 
   const cache = readCache();
-  const fresh = cache && Date.now() - cache.ts < refreshMs;
+  const fresh = cache?.reading && Date.now() - cache.ts < refreshMs;
   if (cache && fresh && !opts.force) {
     return { ...cache.reading, source: 'cache' };
   }
 
-  // A cooldown published by TokenBar (or by our own last failure) means: make no request.
+  // A cooldown published by TokenBar (or by our own last failure) means: make no request — and
+  // `force` does not override it. The run boundaries force a read before and after every Claude
+  // task; letting those through a cooldown is what kept the account's usage endpoint locked.
   const wait = waitFor(cache?.blockedUntil);
-  if (wait > 0 && !opts.force) {
-    const msg = `cooldown ${Math.ceil(wait / 1000)}s (shared 429 backoff)`;
+  if (wait > 0) {
+    const msg = `cooldown ${Math.ceil(wait / 1000)}s (shared backoff)`;
     return cache?.reading ? { ...cache.reading, source: 'cache', error: msg } : degraded(msg);
   }
 
   try {
-    const reading = fetchLive();
-    writeCache(reading);
-    return reading;
-  } catch (err) {
-    const cooldownMs = err instanceof UsageFetchError && err.cooldownMs ? err.cooldownMs : COOLDOWN_MIN_MS;
-    publishCooldown(cache, cooldownMs);
-    if (cache?.reading) {
-      return { ...cache.reading, source: 'cache', error: `stale: ${String((err as Error).message)}` };
+    const live = fetchLive();
+    storeReading(live);
+    // say so in the journal when this ends an outage, not on every routine refresh
+    if (live.reading.source === 'api' && (!cache || Date.now() - cache.ts > refreshMs * 2)) {
+      console.log(`[usage] live reading: session ${live.reading.session.percent}% weekly ${live.reading.weekly.percent}% (first in ${cache ? Math.round((Date.now() - cache.ts) / 60000) : 0} min)`);
     }
-    return degraded(String((err as Error).message));
+    return live.reading;
+  } catch (err) {
+    const message = String((err as Error).message);
+    const cooldownMs = err instanceof UsageFetchError && err.cooldownMs ? err.cooldownMs : COOLDOWN_MIN_MS;
+    // Re-read: TokenBar's usage-core may have just written this file itself. Draw from whichever
+    // reading is newer — ours, or the one TokenBar served alongside the failure — at its real age.
+    const onDisk = readCache() ?? cache;
+    const served = err instanceof UsageFetchError ? err.served : undefined;
+    const base = served && (!onDisk?.reading || served.ts > onDisk.ts) ? { ...onDisk, ...served } : onDisk;
+    const until = publishCooldown(base, cooldownMs);
+    console.warn(`[usage] live read failed: ${message.slice(0, 200)} — pausing ${Math.ceil((until - Date.now()) / 1000)}s (shared cooldown)`);
+    if (base?.reading) {
+      return { ...base.reading, source: 'cache', error: `stale: ${message}` };
+    }
+    return degraded(message);
   }
 }
 
@@ -116,30 +170,71 @@ function tokenbarCore(): string | null {
   return fs.existsSync(file) ? file : null;
 }
 
+interface TokenBarAnswer extends LooseReading {
+  hint?: string;
+  retryAfterSeconds?: number;
+  /** the reading is a copy from a shared cache (a peer's, or this file's), not a fetch of its own */
+  fromSharedCache?: boolean;
+  cacheAgeSeconds?: number;
+  /** a 429 cooldown is in force; the reading is the last good one, frozen */
+  rateLimited?: boolean;
+}
+
 /**
  * Delegate to TokenBar instead of re-implementing it: one token-resolution order, one shared
  * cache, one 429 cooldown across every tool on the account. Falls back to the port below when
  * TOKENBAR_MCP_DIR isn't configured.
+ *
+ * usage-core never throws for a failed fetch when it has a cached copy to answer with: it returns
+ * that copy with `fromSharedCache` (and `rateLimited` under a 429). Such an answer is not a live
+ * reading and must not be recorded as one.
  */
-function fetchViaTokenBar(core: string): UsageReading {
+function fetchViaTokenBar(core: string): Served {
   const script = `import { fetchUsage } from ${JSON.stringify(pathToFileURL(core).href)};
     const u = await fetchUsage();
     process.stdout.write(JSON.stringify(u));`;
   const out = execFileSync(process.execPath, ['--input-type=module', '-e', script], { encoding: 'utf8', timeout: 20000 });
-  const u = JSON.parse(out) as LooseReading & { ok?: boolean; error?: string; retryAfterSeconds?: number; fromSharedCache?: boolean };
+  const u = JSON.parse(out) as TokenBarAnswer;
+  const retryMs = u.retryAfterSeconds ? u.retryAfterSeconds * 1000 : undefined;
   if (u.ok === false) {
-    throw new UsageFetchError(`tokenbar: ${u.error ?? 'unknown'}`, u.retryAfterSeconds ? u.retryAfterSeconds * 1000 : undefined);
+    // a login problem will not fix itself within a minute: park for the default pause
+    const authProblem = u.error === 'auth-expired' || u.error === 'not-logged-in';
+    throw new UsageFetchError(`tokenbar: ${u.error ?? 'unknown'}${u.hint ? ` — ${u.hint}` : ''}`, retryMs ?? (authProblem ? COOLDOWN_DEFAULT_MS : undefined));
   }
-  return normalize(u, u.fromSharedCache ? 'cache' : 'api');
+  // Date the reading by when it was taken, never by when we asked: stamping a cached reading
+  // "now" made week-old numbers look fresh to every tool sharing the file and wiped the cooldown.
+  // A peer's clock can run ahead of ours, so never date it into the future either.
+  const now = Date.now();
+  const taken = Date.parse(u.fetchedAt ?? '');
+  let ts: number;
+  if (Number.isFinite(taken)) ts = Math.min(taken, now);
+  else if (typeof u.cacheAgeSeconds === 'number') ts = now - u.cacheAgeSeconds * 1000;
+  else ts = u.fromSharedCache ? 0 : now; // a cached copy of unknown age is never passed off as fresh
+  const served: Served = { reading: normalize(u, u.fromSharedCache ? 'cache' : 'api'), ts };
+  // usage-core answers a cooldown (its own 429, or one a peer published) with ok:true and its last
+  // good reading. That is a failed read: take the cooldown it reports.
+  if (u.rateLimited) {
+    const ms = retryMs ?? COOLDOWN_DEFAULT_MS;
+    throw new UsageFetchError(`tokenbar: rate-limited (cooldown ${Math.ceil(ms / 1000)}s)`, ms, served);
+  }
+  // Past its TTL, a cached answer is usage-core's fallback after a request it made failed.
+  if (u.fromSharedCache && now - served.ts >= TOKENBAR_SHARED_TTL_MS) {
+    throw new UsageFetchError('tokenbar: live read failed', undefined, served);
+  }
+  return served;
 }
 
-/** Live fetch + parse of oauth/usage. Throws on any failure. */
-function fetchLive(): UsageReading {
+/** Live read of oauth/usage, with the time the reading was taken. Throws on any failure. */
+function fetchLive(): Served {
+  // Credentials first, whichever path fetches: a token known to be expired must not be sent —
+  // every 401 it earns is a request against the same limiter, and one a minute is how a five-day
+  // outage was kept alive. The board says what to do instead.
+  const token = pickToken();
+  if (!token) throw new UsageFetchError('no oauth token (not logged in to Claude Code)', COOLDOWN_DEFAULT_MS);
+  if (token.kind === 'session-stale') throw new UsageFetchError(AUTH_EXPIRED, COOLDOWN_DEFAULT_MS);
+
   const core = tokenbarCore();
   if (core) return fetchViaTokenBar(core);
-
-  const token = pickToken();
-  if (!token) throw new Error('no oauth token (not logged in to Claude Code)');
 
   // Node >=18 has global fetch; use a sync-ish wrapper via deasync-free approach is not
   // possible, so callers of fetchLive run it inside readUsage which is sync by contract.
@@ -164,28 +259,34 @@ function fetchLive(): UsageReading {
     process.stdout.write(JSON.stringify(d));
   `;
   const out = execFileSync(process.execPath, ['--input-type=module', '-e', script], {
-    env: { ...process.env, __TOK: token },
+    env: { ...process.env, __TOK: token.tok },
     encoding: 'utf8',
     timeout: 20000,
   });
   const d = JSON.parse(out);
   if (typeof d.__status === 'number') {
+    const status: number = d.__status;
+    if (status === 401 || status === 403) throw new UsageFetchError(`HTTP ${status}: ${AUTH_EXPIRED}`, COOLDOWN_DEFAULT_MS);
     const retry = Number(d.retryAfter);
-    throw new UsageFetchError(`HTTP ${d.__status}`, d.__status === 429 ? (Number.isFinite(retry) ? retry * 1000 : COOLDOWN_DEFAULT_MS) : undefined);
+    throw new UsageFetchError(`HTTP ${status}`, status === 429 ? (Number.isFinite(retry) ? retry * 1000 : COOLDOWN_DEFAULT_MS) : undefined);
   }
   const limits: any[] = Array.isArray(d.limits) ? d.limits : [];
   const s = limits.find((l) => l.kind === 'session');
   const w = limits.find((l) => l.kind === 'weekly_all');
-  return normalize(
-    {
-      ok: true,
-      subscription: d.subscription ?? d.subscriptionType ?? null,
-      fetchedAt: new Date().toISOString(),
-      session: fromLimit(s),
-      weekly: fromLimit(w),
-    },
-    'api',
-  );
+  const ts = Date.now();
+  return {
+    reading: normalize(
+      {
+        ok: true,
+        subscription: d.subscription ?? d.subscriptionType ?? null,
+        fetchedAt: new Date(ts).toISOString(),
+        session: fromLimit(s),
+        weekly: fromLimit(w),
+      },
+      'api',
+    ),
+    ts,
+  };
 }
 
 function fromLimit(l: any): UsageLimit {
@@ -199,30 +300,67 @@ function fromLimit(l: any): UsageLimit {
   };
 }
 
-/** Credential resolution matching TokenBar's usage-core order. */
-function pickToken(): string | null {
-  if (process.env.CLAUDE_CODE_OAUTH_TOKEN) return process.env.CLAUDE_CODE_OAUTH_TOKEN;
+// ---- credentials (TokenBar's resolution order) ----
+
+interface OauthCreds {
+  accessToken?: string;
+  expiresAt?: number;
+}
+
+function defaultReadCreds(): OauthCreds | null {
   try {
-    const raw = fs.readFileSync(paths.credentials, 'utf8');
-    const tok = JSON.parse(raw)?.claudeAiOauth?.accessToken;
-    if (tok) return tok;
+    const c = JSON.parse(fs.readFileSync(paths.credentials, 'utf8'))?.claudeAiOauth;
+    if (c && typeof c === 'object') return c as OauthCreds;
   } catch {
     /* not present (e.g. Linux host not logged in, or Mac uses keychain) */
   }
   // macOS keychain fallback (Mac client only)
   if (process.platform === 'darwin') {
     try {
-      const raw = execFileSync(
-        'security',
-        ['find-generic-password', '-s', 'Claude Code-credentials', '-w'],
-        { encoding: 'utf8' },
-      ).trim();
-      const tok = JSON.parse(raw)?.claudeAiOauth?.accessToken ?? raw;
-      if (tok) return tok;
+      const raw = execFileSync('security', ['find-generic-password', '-s', 'Claude Code-credentials', '-w'], { encoding: 'utf8' }).trim();
+      const c = JSON.parse(raw)?.claudeAiOauth;
+      if (c && typeof c === 'object') return c as OauthCreds;
+      if (raw) return { accessToken: raw };
     } catch {
       /* ignore */
     }
   }
+  return null;
+}
+
+/** The long-lived token from `claude setup-token`, where TokenBar keeps it (TOKENBAR_TOKEN_CACHE). */
+function defaultReadLongLived(): string | null {
+  try {
+    const t = fs.readFileSync(paths.tokenCache, 'utf8').trim();
+    return t || null;
+  } catch {
+    return null;
+  }
+}
+
+/** Injection points for tests, which must never read this host's real credentials. */
+export const _deps = { readCreds: defaultReadCreds, readLongLived: defaultReadLongLived };
+
+interface Token {
+  tok: string;
+  /** 'session-stale' = the only token we have is a session token that has already expired */
+  kind: 'env' | 'session' | 'longlived' | 'session-stale';
+}
+
+/**
+ * Credential resolution matching TokenBar's usage-core: an explicit env token, else the session
+ * token while it is still valid, else the long-lived setup-token, else the expired session token
+ * — flagged, so the caller can decline to send it.
+ */
+function pickToken(): Token | null {
+  const env = (process.env.CLAUDE_CODE_OAUTH_TOKEN ?? '').trim();
+  if (env) return { tok: env, kind: 'env' };
+  const c = _deps.readCreds() ?? {};
+  const valid = !!c.accessToken && (typeof c.expiresAt !== 'number' || Date.now() < c.expiresAt - 60_000);
+  if (c.accessToken && valid) return { tok: c.accessToken, kind: 'session' };
+  const longTok = _deps.readLongLived();
+  if (longTok) return { tok: longTok, kind: 'longlived' };
+  if (c.accessToken) return { tok: c.accessToken, kind: 'session-stale' };
   return null;
 }
 
@@ -282,11 +420,35 @@ export function readCache(): CacheEnvelope | null {
 }
 
 export function writeCache(reading: UsageReading): void {
+  writeEnvelope({ reading, ts: Date.now() });
+}
+
+/**
+ * Record a reading at the time it was really taken. TokenBar writes this file too (usage-core and
+ * its status bars), and every tool sharing it judges freshness by `ts` — so an older reading never
+ * replaces a newer one, and a cached reading is never re-dated. A live reading clears any cooldown
+ * (the budget is evidently back); a cached one leaves it standing.
+ */
+function storeReading({ reading, ts }: Served): void {
+  const cur = readCache();
+  if (cur?.reading && cur.ts >= ts) return;
+  const blockedUntil = reading.source === 'cache' ? cur?.blockedUntil : undefined;
+  writeEnvelope(blockedUntil ? { reading, ts, blockedUntil } : { reading, ts });
+}
+
+/** Swap the file in whole, so the budget-guard hook and TokenBar never read a half-written one. */
+function writeEnvelope(envelope: Record<string, unknown>): void {
+  const tmp = `${CACHE_FILE}.tmp${process.pid}`;
   try {
     fs.mkdirSync(path.dirname(CACHE_FILE), { recursive: true });
-    fs.writeFileSync(CACHE_FILE, JSON.stringify({ reading, ts: Date.now() }));
+    fs.writeFileSync(tmp, JSON.stringify(envelope));
+    fs.renameSync(tmp, CACHE_FILE);
   } catch {
-    /* best effort */
+    try {
+      fs.rmSync(tmp, { force: true });
+    } catch {
+      /* best effort */
+    }
   }
 }
 

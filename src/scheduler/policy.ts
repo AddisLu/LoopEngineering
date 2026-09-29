@@ -8,9 +8,21 @@ export interface Policy {
 }
 
 /** Minutes since local midnight for an "HH:MM" string. */
-function hhmm(s: string): number {
+export function hhmm(s: string): number {
   const [h, m] = s.split(':').map((x) => Number(x));
   return (h ?? 0) * 60 + (m ?? 0);
+}
+
+/**
+ * Is `now` (local clock) inside an "HH:MM-HH:MM" window? Inclusive of start, exclusive of end;
+ * a window whose end is earlier than its start wraps past midnight ("19:00-07:00").
+ */
+export function inTimeWindow(win: string, now: Date): boolean {
+  const [start, end] = win.split('-');
+  const cur = now.getHours() * 60 + now.getMinutes();
+  const s = hhmm(start ?? '00:00');
+  const e = hhmm(end ?? '00:00');
+  return s <= e ? cur >= s && cur < e : cur >= s || cur < e;
 }
 
 /**
@@ -21,10 +33,7 @@ function hhmm(s: string): number {
 export function resolvePolicy(db: Database.Database, now: Date = new Date()): Policy {
   const win = getSetting(db, 'day_window') ?? '08:00-23:00';
   const [start, end] = win.split('-');
-  const cur = now.getHours() * 60 + now.getMinutes();
-  const s = hhmm(start ?? '08:00');
-  const e = hhmm(end ?? '23:00');
-  const isDay = s <= e ? cur >= s && cur < e : cur >= s || cur < e;
+  const isDay = inTimeWindow(`${start ?? '08:00'}-${end ?? '23:00'}`, now);
 
   if (isDay) {
     return {

@@ -31,6 +31,8 @@ export interface ToolResult {
   /** one line for the card under the answer */
   summary: string;
   sources?: ToolSource[];
+  /** a short excerpt the card may show verbatim (e.g. a sandbox run's output tail) */
+  detail?: string;
 }
 
 export interface ToolDef {
@@ -38,6 +40,12 @@ export interface ToolDef {
   description: string;
   parameters: Record<string, unknown>;
   run(args: Record<string, unknown>, ctx: ToolCtx): Promise<ToolResult>;
+  /** the same call can legitimately be repeated (re-running a build after editing a file) */
+  repeatable?: boolean;
+  /** replaces UNTRUSTED_PREFIX in front of this tool's results */
+  resultPrefix?: string;
+  /** what is recorded/shown for the call's arguments (e.g. drop a whole file's content) */
+  recordArgs?(args: Record<string, unknown>): Record<string, unknown>;
 }
 
 /** What the page stores per assistant message (chat_messages.tools_json). */
@@ -49,6 +57,7 @@ export interface ToolCall {
   ok: boolean;
   summary: string;
   sources?: ToolSource[];
+  detail?: string;
 }
 export interface ToolRound {
   round: number;

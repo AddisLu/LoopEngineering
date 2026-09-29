@@ -12,6 +12,7 @@ import { getTranscribeWarmWorkerSingleton } from './voice/transcribe.js';
 import { getEmbedWarmWorkerSingleton } from './knowledge/embed.js';
 import { checkBenchmarks } from './benchmark/complete.js';
 import { bridgeEdgesCached } from './knowledge/bridge.js';
+import { pumpMorningReport } from './report/morning.js';
 
 /** Production entry: runs the scheduling loop AND serves the API/board. systemd runs this. */
 export async function main(): Promise<void> {
@@ -55,6 +56,8 @@ export async function main(): Promise<void> {
     void pumpPushback(db, lastPushbackId).then((id) => {
       lastPushbackId = id;
     });
+    // 晨報: once a day at morning_report_time, push what ran overnight (src/report/morning.ts)
+    void pumpMorningReport(db, new Date(), (p) => notify(db, p)).catch((err) => console.error('[morning] error:', err));
     // benchmark mode: judge benchmarks whose arms are all terminal, fire-and-forget (src/benchmark/complete.ts)
     void checkBenchmarks(db).catch((err) => console.error('[bench] error:', err));
     // SSoT Phase 4: periodic incremental re-ingest, fire-and-forget (see knowledge/ingest/pump.ts)

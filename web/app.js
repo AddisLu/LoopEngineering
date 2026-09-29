@@ -98,9 +98,26 @@
     $(pctId).textContent = `${Math.round(pct)}%`;
   }
 
+  // The rings show the last reading either way; this says when it is not a live one, and why.
+  function usageNote(err) {
+    if (!err) return null;
+    if (/login expired|not logged in|auth-expired/i.test(err)) return '這台的 Claude 登入已過期，用量沿用舊讀數 — 請在主機執行 claude 重新登入';
+    if (/cooldown|rate-limited/i.test(err)) return '用量 API 冷卻中（429 退避），沿用上次讀數';
+    return '用量讀不到，沿用上次讀數';
+  }
+
   function renderTop(s) {
     setRing('ring-session', 'session-pct', s.usage.session);
     setRing('ring-weekly', 'weekly-pct', s.usage.weekly);
+
+    const note = $('usage-note');
+    if (note) {
+      const msg = usageNote(s.usage.error);
+      note.hidden = !msg;
+      note.textContent = msg || '–';
+      note.title = s.usage.error || '用量讀取狀態';
+      note.setAttribute('data-state', /登入/.test(msg || '') ? 'danger' : 'warn');
+    }
 
     $('resets').querySelector('.tick-v').textContent = fmtDur(s.usage.sessionResetsInMin);
     $('policy').querySelector('.tick-v').textContent =
@@ -275,20 +292,35 @@
     };
     if (c.status === 'draft' && c.gate.ok)
       actions.appendChild(btn('加入排程', 'primary', () => act(`/api/tasks/${c.id}/queue`)));
+    // a draft that can never pass the gate (e.g. a chat 待辦 with no repo or verification) cannot be
+    // edited here: carry its words over to the 新工作 page, where repo + 驗證方案 are picked
+    if (c.status === 'draft' && !c.gate.ok)
+      actions.appendChild(btn('用新工作重寫', '', () => {
+        location.href = `/job.html?title=${encodeURIComponent(c.title || '')}&expected=${encodeURIComponent(c.goal || '')}`;
+      }));
     if (c.status === 'running' || c.status === 'verifying')
       actions.appendChild(btn('中止', 'danger-ghost', () => act(`/api/tasks/${c.id}/abort`)));
     // blocked auto-resumes on every eligible tick with no other stop button — let the
     // user pull it into 待確認 (attention) triage instead of burning resume budget.
     if (c.status === 'blocked')
       actions.appendChild(btn('轉待確認', '', () => act(`/api/tasks/${c.id}/hold`)));
+    // 驗收頁 (task.html): code, results, 試跑, checklist, 核可 / 發佈 — for every finished task
+    if (c.status === 'review' || c.status === 'attention' || c.status === 'failed' || c.status === 'closed')
+      actions.appendChild(btn('驗收', c.status === 'review' ? 'primary' : '', () => { location.href = `/task.html?id=${encodeURIComponent(c.id)}`; }));
     if (c.status === 'review') {
       if (c.pr_url) actions.appendChild(btn('看 PR', '', () => window.open(c.pr_url, '_blank', 'noopener')));
       if (c.merge_status === 'pending' || c.merge_status === 'conflict')
         actions.appendChild(btn('合併', '', () => act(`/api/tasks/${c.id}/merge`)));
-      actions.appendChild(btn('結案', 'primary', () => act(`/api/tasks/${c.id}/close`)));
-    }
-    if (c.status === 'failed')
       actions.appendChild(btn('結案', '', () => act(`/api/tasks/${c.id}/close`)));
+    }
+    if (c.status === 'failed') {
+      // the API has always taken 重來 for failed tasks; the board just never offered it
+      actions.appendChild(btn('重來', '', () => {
+        if (confirm(`確定重來「${c.title}」？將刪除現有 worktree／branch，從最新 base 重新開始。`))
+          act(`/api/tasks/${c.id}/restart`);
+      }));
+      actions.appendChild(btn('結案', '', () => act(`/api/tasks/${c.id}/close`)));
+    }
     // attention triage: 續跑 (resume the session) / 重來 (fresh from base) / 放棄
     if (c.status === 'attention') {
       actions.appendChild(btn('續跑', 'primary', () => act(`/api/tasks/${c.id}/resume`)));
@@ -610,7 +642,9 @@
     e.preventDefault();
     const settings = {};
     for (const [k, v] of new FormData(settingsForm).entries()) {
-      if (String(v).trim() !== '') settings[k] = String(v).trim();
+      // blank = leave unchanged, except fields where blank is a real value (data-clearable: "any time", "off")
+      const input = settingsForm.elements.namedItem(k);
+      if (String(v).trim() !== '' || (input && input.dataset && 'clearable' in input.dataset)) settings[k] = String(v).trim();
     }
     const saveBtn = $('settings-save');
     saveBtn.disabled = true;
@@ -762,6 +796,11 @@
     }
     if (t.source_ref) list.appendChild(dRow('來源', t.source_ref));
     list.appendChild(dRow('建立 / 更新', `${t.created_at || '–'}  /  ${t.updated_at || '–'}`));
+    {
+      const a = el('a', null, '開啟驗收頁（結果、程式碼、試跑、人工驗收、交付）');
+      a.href = `/task.html?id=${encodeURIComponent(t.id)}`;
+      list.appendChild(dRow('驗收', a));
+    }
     detailBody.appendChild(list);
 
     // 知識注入預覽: what this task will actually be given at dispatch. The usual failure is

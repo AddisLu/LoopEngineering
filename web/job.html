@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="zh-Hant" data-mode="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>新工作 · Loop Engineering</title>
+    <script src="/theme-boot.js"></script>
+    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/ops.css" />
+  </head>
+  <body class="ops">
+    <header class="ops-top">
+      <a class="ops-brand" href="/"><span class="mark" aria-hidden="true"></span>Loop Engineering</a>
+      <nav class="ops-nav" aria-label="頁面">
+        <a href="/job.html" aria-current="page">新工作</a>
+        <a href="/morning.html">晨報</a>
+        <a href="/board.html">任務看板</a>
+        <a href="/plans.html">驗證方案</a>
+      </nav>
+      <span class="grow"></span>
+      <span class="ops-who" id="ops-who"></span>
+      <button class="icon-btn" id="theme-btn" type="button"></button>
+    </header>
+
+    <main class="ops-main">
+      <p class="err" id="page-err" hidden></p>
+      <div class="job-layout">
+        <ol class="stepper" id="stepper" aria-label="步驟">
+          <li><button type="button" data-step="1"><span class="dot">1</span><span>軟體</span></button></li>
+          <li><button type="button" data-step="2"><span class="dot">2</span><span>要改什麼</span></button></li>
+          <li><button type="button" data-step="3"><span class="dot">3</span><span>怎麼驗證</span></button></li>
+          <li><button type="button" data-step="4"><span class="dot">4</span><span>確認送出</span></button></li>
+        </ol>
+
+        <div class="stack" style="gap: 22px; min-width: 0">
+          <!-- 1 軟體 -->
+          <section class="stack" data-pane="1" style="gap: 20px">
+            <div class="page-head">
+              <span class="kicker">步驟 1／4</span>
+              <h1>要改哪一套軟體？</h1>
+              <p>清單裡是 Loop 可以動的程式庫。分支是改好後要放回去的地方，通常是專案的整合分支，不是 main。</p>
+            </div>
+            <div class="choices" id="repos"></div>
+            <label class="field" id="branch-field" hidden>分支
+              <select id="branch"></select>
+            </label>
+          </section>
+
+          <!-- 2 要改什麼 -->
+          <section class="stack" data-pane="2" style="gap: 18px" hidden>
+            <div class="page-head">
+              <span class="kicker">步驟 2／4</span>
+              <h1>要改什麼？</h1>
+              <p>用自己的話寫就好。寫得越具體（哪個畫面、哪種缺陷、哪批圖），做出來越準。</p>
+            </div>
+            <label class="field">一句話說明這次工作 <span class="sub">會當成任務標題</span>
+              <input id="title" maxlength="80" autocomplete="off" placeholder="例如：修正 X 區亮缺陷判型" />
+            </label>
+            <label class="field">現在哪裡不對
+              <textarea id="symptom" rows="4" placeholder="例如：X 區的亮缺陷被判成髒污，20260615 那批圖最明顯"></textarea>
+            </label>
+            <label class="field">改好後應該怎樣
+              <textarea id="expected" rows="4" placeholder="例如：判成亮缺陷；其他判型與速度不變"></textarea>
+            </label>
+            <details>
+              <summary class="hint" style="cursor: pointer">進階：知道要改哪些檔案、或有其他限制</summary>
+              <div class="stack" style="margin-top: 12px">
+                <label class="field">相關檔案 <span class="sub">一行一個，repo 裡的相對路徑；不知道就留空</span>
+                  <textarea id="files" class="mono" rows="3" placeholder="src/detect/bright.cu"></textarea>
+                </label>
+                <label class="field">其他限制 <span class="sub">一行一條</span>
+                  <textarea id="notes" rows="3" placeholder="例如：不能改 VB 介面"></textarea>
+                </label>
+              </div>
+            </details>
+          </section>
+
+          <!-- 3 怎麼驗證 -->
+          <section class="stack" data-pane="3" style="gap: 20px" hidden>
+            <div class="page-head">
+              <span class="kicker">步驟 3／4</span>
+              <h1>怎麼證明改好了？</h1>
+              <p>挑一個驗證方案。方案已經寫好在哪台機台跑、用什麼圖資、門檻多少；你只要確認圖資。</p>
+            </div>
+            <section class="stack">
+              <div class="row"><strong>驗證方案</strong><a class="hint" href="/plans.html">管理驗證方案</a></div>
+              <div class="choices" id="plans"></div>
+            </section>
+            <div class="grid2" id="plan-detail" hidden>
+              <section class="panel">
+                <h3>驗證機台</h3>
+                <div id="plan-host"></div>
+              </section>
+              <section class="panel">
+                <h3>驗收門檻 <span class="sub">方案設定，引擎自動比對</span></h3>
+                <div id="plan-metrics"></div>
+              </section>
+            </div>
+            <section class="stack" id="dataset-section" hidden>
+              <div class="row"><strong>圖資</strong><span class="hint" id="dataset-where"></span></div>
+              <div class="radio-list" id="datasets"></div>
+            </section>
+            <section class="panel" id="manual-section" hidden>
+              <h3>早上要人工確認的事</h3>
+              <ul id="plan-manual" style="margin: 0; padding-left: 20px"></ul>
+            </section>
+          </section>
+
+          <!-- 4 確認送出 -->
+          <section class="stack" data-pane="4" style="gap: 18px" hidden>
+            <div class="page-head">
+              <span class="kicker">步驟 4／4</span>
+              <h1>確認送出</h1>
+              <p>送出前會先由本地模型讀一次需求；沒寫清楚的地方會列在下面，補好再送。</p>
+            </div>
+            <div class="grid2">
+              <label class="field">誰來做
+                <select id="model"></select>
+              </label>
+              <div class="field">工作大小
+                <div class="seg" role="group" aria-label="工作大小" id="complexity">
+                  <button type="button" data-cx="S" aria-pressed="false">小改</button>
+                  <button type="button" data-cx="M" aria-pressed="true">一般</button>
+                  <button type="button" data-cx="L" aria-pressed="false">大改</button>
+                </div>
+              </div>
+            </div>
+            <div class="row">
+              <button class="btn" type="button" id="check-btn">檢查需求</button>
+              <button class="btn primary" type="button" id="submit-btn" disabled>送出</button>
+              <span class="hint" id="check-state"></span>
+            </div>
+            <div id="problems"></div>
+            <details id="prd-box" hidden>
+              <summary class="hint" style="cursor: pointer">工程師檢視：這份工作會變成的 PRD</summary>
+              <pre class="console" id="prd" style="margin-top: 10px"></pre>
+            </details>
+          </section>
+
+          <div class="row">
+            <button class="btn" type="button" id="prev-btn">上一步</button>
+            <button class="btn primary" type="button" id="next-btn">下一步</button>
+          </div>
+        </div>
+
+        <aside class="panel summary" aria-label="這次工作">
+          <h3>這次工作</h3>
+          <dl id="summary"></dl>
+          <p class="hint" id="when"></p>
+        </aside>
+      </div>
+    </main>
+
+    <script src="/ops.js"></script>
+    <script src="/job.js"></script>
+  </body>
+</html>

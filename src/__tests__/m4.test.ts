@@ -87,9 +87,9 @@ describe('estimate calibration', () => {
 });
 
 describe('PR + gap-review guards (host-only, must no-op safely)', () => {
-  it('createPr returns null with no remote', () => {
+  it('createPr returns null with no remote', async () => {
     // a temp dir that is not a git repo with a remote
-    expect(createPr('/tmp', 'loop/x', 'title')).toBeNull();
+    expect(await createPr('/tmp', 'loop/x', 'title')).toBeNull();
   });
 
   it('hasRemote is false for a non-repo path', () => {

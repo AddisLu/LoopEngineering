@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="zh-Hant" data-mode="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>驗收 · Loop Engineering</title>
+    <script src="/theme-boot.js"></script>
+    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/ops.css" />
+  </head>
+  <body class="ops">
+    <header class="ops-top">
+      <a class="ops-brand" href="/"><span class="mark" aria-hidden="true"></span>Loop Engineering</a>
+      <nav class="ops-nav" aria-label="頁面">
+        <a href="/job.html">新工作</a>
+        <a href="/morning.html">晨報</a>
+        <a href="/board.html">任務看板</a>
+        <a href="/plans.html">驗證方案</a>
+      </nav>
+      <span class="grow"></span>
+      <span class="ops-who" id="ops-who"></span>
+      <button class="icon-btn" id="theme-btn" type="button"></button>
+    </header>
+
+    <main class="ops-main" id="main">
+      <p class="err" id="page-err" hidden></p>
+      <div class="meta" id="meta"></div>
+      <div class="row">
+        <h1 id="title" style="margin: 0; font-size: 28px; line-height: 1.25">載入中…</h1>
+        <span id="status-pill"></span>
+      </div>
+      <div class="verdict" id="verdict" hidden></div>
+
+      <div class="tabs" role="tablist" aria-label="驗收">
+        <button type="button" role="tab" id="tab-result" aria-controls="pane-result" aria-selected="true">結果</button>
+        <button type="button" role="tab" id="tab-code" aria-controls="pane-code" aria-selected="false">程式碼</button>
+        <button type="button" role="tab" id="tab-trial" aria-controls="pane-trial" aria-selected="false">試跑</button>
+        <button type="button" role="tab" id="tab-ask" aria-controls="pane-ask" aria-selected="false">需求</button>
+      </div>
+
+      <!-- 結果 -->
+      <section class="tab-pane" id="pane-result" role="tabpanel" aria-labelledby="tab-result">
+        <div class="cols">
+          <div class="stack">
+            <section class="panel" id="metrics-card" hidden>
+              <h2>驗收指標 <span class="sub">由引擎量測，不是模型自己說的</span></h2>
+              <div class="scroll-x"><table class="mtable" id="metrics-table"></table></div>
+              <p class="hint" id="metrics-extra" hidden></p>
+            </section>
+            <section class="panel">
+              <h2>驗證步驟 <span class="sub" id="steps-sub"></span></h2>
+              <div class="steps" id="steps"></div>
+            </section>
+            <section class="panel" id="log-card" hidden>
+              <h2>正在做什麼 <span class="sub">最近的動作，每 5 秒更新</span></h2>
+              <pre class="console" id="log"></pre>
+            </section>
+            <section class="panel" id="artifacts-card">
+              <div class="row">
+                <h2 class="grow" style="margin: 0; font-size: 16px">產出物 <span class="sub" id="artifacts-sub"></span></h2>
+                <a class="btn" id="zip-btn" hidden>全部下載（zip）</a>
+              </div>
+              <div class="artifacts" id="artifacts"></div>
+            </section>
+          </div>
+
+          <aside class="stack" id="deliver">
+            <section class="panel">
+              <h2>人工驗收清單</h2>
+              <div class="checks" id="checks"></div>
+            </section>
+            <section class="panel">
+              <h2>交付</h2>
+              <div class="stack" id="deliver-body"></div>
+            </section>
+          </aside>
+        </div>
+      </section>
+
+      <!-- 程式碼 -->
+      <section class="tab-pane" id="pane-code" role="tabpanel" aria-labelledby="tab-code" hidden>
+        <div class="code-layout">
+          <nav class="stack" aria-label="改動的檔案">
+            <div class="hint" id="files-sub">這次改了哪些檔案</div>
+            <div class="files" id="files"></div>
+          </nav>
+          <section class="panel viewer">
+            <div class="viewer-head">
+              <span class="path" id="viewer-path">選左邊的檔案</span>
+              <div class="seg" role="group" aria-label="顯示方式">
+                <button type="button" id="view-diff" aria-pressed="true">只看差異</button>
+                <button type="button" id="view-full" aria-pressed="false">完整檔案</button>
+              </div>
+            </div>
+            <div class="code" id="code"></div>
+          </section>
+        </div>
+      </section>
+
+      <!-- 試跑 -->
+      <section class="tab-pane" id="pane-trial" role="tabpanel" aria-labelledby="tab-trial" hidden>
+        <section class="panel">
+          <h2>試跑 <span class="sub" id="trial-sub"></span></h2>
+          <p class="err" id="trial-denied" hidden></p>
+          <div class="row">
+            <button class="btn primary" type="button" id="trial-verify">重跑全部驗證</button>
+            <span class="row" id="dataset-box" hidden>
+              <label class="hint" for="dataset-select">換一批圖資</label>
+              <select id="dataset-select" style="font: inherit; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--border-2); background: var(--surface-2); color: var(--text)"></select>
+              <button class="btn" type="button" id="trial-dataset">用這批圖資重跑</button>
+            </span>
+          </div>
+          <form class="row" id="trial-form">
+            <label class="field grow" style="margin: 0">
+              <span>執行一個指令 <span class="sub">在這個任務的沙盒裡（沒有網路，只看得到這個任務的程式與唯讀圖資）</span></span>
+              <input class="mono" id="trial-command" autocomplete="off" placeholder="./build/app --help" />
+            </label>
+            <button class="btn" type="submit" id="trial-run" style="align-self: flex-end">執行</button>
+          </form>
+        </section>
+        <div class="stack" id="trials"></div>
+      </section>
+
+      <!-- 需求 -->
+      <section class="tab-pane" id="pane-ask" role="tabpanel" aria-labelledby="tab-ask" hidden>
+        <section class="panel">
+          <h2>當初要求的</h2>
+          <div id="goal" style="white-space: pre-wrap; line-height: 1.7"></div>
+        </section>
+        <section class="panel">
+          <h2>怎麼驗證</h2>
+          <dl class="stack" id="ask-meta" style="margin: 0"></dl>
+        </section>
+      </section>
+    </main>
+
+    <dialog class="ops-dialog" id="changes-dialog">
+      <form method="dialog" id="changes-form" class="stack">
+        <h3>退回修改</h3>
+        <p class="hint">寫下哪裡不對、要怎麼改。任務會回到佇列，在同一個分支上接著改，改完再請你驗收。</p>
+        <label class="field">意見<textarea id="changes-text" rows="5" required></textarea></label>
+        <div class="row">
+          <span class="grow"></span>
+          <button class="btn" value="cancel" type="submit" formnovalidate>取消</button>
+          <button class="btn primary" value="send" type="submit">退回</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog class="ops-dialog" id="release-dialog">
+      <form method="dialog" id="release-form" class="stack">
+        <h3>發佈到 Gitea</h3>
+        <p class="hint">在 Gitea 建一個 release（打在驗證過的那個 commit 上），附上產出物 zip（執行檔、報告、manifest、SHA256SUMS）。</p>
+        <label class="field">版本標籤 <span class="sub">例如 v1.4.0；留空會用日期與任務編號</span><input id="release-tag" class="mono" autocomplete="off" /></label>
+        <div class="row">
+          <span class="grow"></span>
+          <button class="btn" value="cancel" type="submit" formnovalidate>取消</button>
+          <button class="btn primary" value="send" type="submit">發佈</button>
+        </div>
+      </form>
+    </dialog>
+
+    <script src="/ops.js"></script>
+    <script src="/task.js"></script>
+  </body>
+</html>

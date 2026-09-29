@@ -1,6 +1,7 @@
 // Shared settings metadata + validation, used by the CLI (`loop config`) and the
 // board settings panel (GET/POST /api/settings). One source of truth so both agree.
 import { parseMcpServers } from './mcp/config.js';
+import { parseDataMounts } from './exec/hosts.js';
 
 export const PERCENT_KEYS = new Set([
   'day_session_max', 'day_weekly_max', 'night_session_max', 'night_weekly_max',
@@ -8,7 +9,7 @@ export const PERCENT_KEYS = new Set([
   'est_weekly_pct_S', 'est_weekly_pct_M', 'est_weekly_pct_L',
 ]);
 export const NONNEG_KEYS = new Set([
-  'max_concurrency', 'poll_interval_sec', 'min_runway_min', 'max_resumes', 'max_autoqueue',
+  'max_concurrency', 'poll_interval_sec', 'min_runway_min', 'max_resumes', 'max_autoqueue', 'artifacts_max_mb',
   'timeout_S', 'timeout_M', 'timeout_L', 'usage_refresh_sec', 'ledger_fallback_after_min',
   'chat_context_turns', 'chat_retention_days', 'chat_escalate_timeout_ms', 'local_spark_nodes',
   'chat_tool_max_rounds', 'chat_tool_timeout_ms', 'chat_tool_wall_ms', 'chat_tool_result_chars', 'chat_fetch_max_bytes',
@@ -31,6 +32,9 @@ export const NONNEG_KEYS = new Set([
   'bench_diff_cap_chars', 'bench_judge_timeout_ms',
   // PRD gate
   'local_chat_timeout_ms',
+  // GPU 執行沙盒 (src/exec/sandbox.ts)
+  'exec_pids', 'exec_timeout_sec', 'exec_max_timeout_sec', 'exec_max_concurrency', 'exec_output_chars',
+  'exec_chat_max_rounds', 'exec_chat_wall_ms',
 ]);
 // values must be a number in [0, 1] (a fraction/weight, unlike the 0-100 PERCENT_KEYS)
 export const UNIT_INTERVAL_KEYS = new Set(['rag_hybrid_alpha']);
@@ -78,6 +82,8 @@ export const BOOL_KEYS = new Set([
   'benchmark_enabled',
   // PRD gate (src/prd/*.ts)
   'prd_gate_enabled', 'prd_require_llm',
+  // GPU 執行沙盒 (src/exec/sandbox.ts) — off = no sandbox tools, no loop-exec MCP server
+  'exec_enabled', 'exec_profiling_cap',
 ]);
 
 /** Accepted `integration_provider` values ('none' = the bridge is fully off). */
@@ -109,7 +115,9 @@ export const TUNABLE_KEYS = [
   // mobile voice -> task intake
   'voice_intake_enabled',
   // 本地模型
-  'local_models_enabled', 'local_max_concurrency', 'local_spark_nodes',
+  'local_models_enabled', 'local_max_concurrency', 'local_spark_nodes', 'local_task_window',
+  // 晨報
+  'morning_report_time',
   // benchmark mode
   'benchmark_enabled', 'bench_judge_model',
   // PRD gate
@@ -143,6 +151,11 @@ export function validateSetting(key: string, value: string): string | null {
     if (!Number.isFinite(n) || n < 0 || n > 1) return `${key} must be a number between 0 and 1`;
   } else if (key === 'day_window') {
     if (!/^\d{2}:\d{2}-\d{2}:\d{2}$/.test(value)) return 'day_window must be HH:MM-HH:MM (e.g. 08:00-23:00)';
+  } else if (key === 'local_task_window') {
+    const m = value.match(/^((?:[01]\d|2[0-3]):[0-5]\d)-((?:[01]\d|2[0-3]):[0-5]\d|24:00)$/);
+    if (value !== '' && (!m || m[1] === m[2])) return 'local_task_window must be HH:MM-HH:MM (e.g. 19:00-07:00, may wrap midnight) or empty for any time';
+  } else if (key === 'morning_report_time') {
+    if (value !== '' && !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value)) return 'morning_report_time must be HH:MM (e.g. 08:00) or empty for no push';
   } else if (BOOL_KEYS.has(key)) {
     if (value !== 'true' && value !== 'false') return `${key} must be true or false`;
   } else if (key === 'default_model' || key === 'route_S' || key === 'route_M' || key === 'route_L') {
@@ -165,9 +178,28 @@ export function validateSetting(key: string, value: string): string | null {
     if (value !== '' && !value.startsWith('/')) return 'terminal_cwd must be an absolute path (or empty for the home directory)';
   } else if (key === 'terminal_worktree_root') {
     if (value !== '' && !value.startsWith('/')) return 'terminal_worktree_root must be an absolute path';
-  } else if (key === 'terminal_allowed_users') {
+  } else if (key === 'terminal_allowed_users' || key === 'exec_allowed_users') {
     const bad = value.split(',').map((s) => s.trim()).filter(Boolean).filter((s) => !/^(ts:\S+|name:\S+|local)$/i.test(s));
-    if (bad.length) return `terminal_allowed_users entries must be ts:<login>, name:<name> or local (got: ${bad.join(', ')})`;
+    if (bad.length) return `${key} entries must be ts:<login>, name:<name> or local (got: ${bad.join(', ')})`;
+  } else if (key === 'gitea_url') {
+    if (value !== '' && !/^https?:\/\/[^\s/]+(\/\S*)?$/.test(value)) return 'gitea_url must be an http(s) URL (e.g. http://gitea.corp:3000) or empty';
+  } else if (key === 'exec_default_host') {
+    if (value !== '' && !/^[a-z0-9][a-z0-9_-]{0,39}$/.test(value)) return 'exec_default_host must be empty, local, or an exec host name';
+  } else if (key === 'exec_data_mounts') {
+    try {
+      parseDataMounts(value);
+    } catch (err) {
+      return `exec_data_mounts: ${(err as Error).message}`;
+    }
+  } else if (key === 'exec_image') {
+    if (!/^[\w][\w./:@-]*$/.test(value)) return 'exec_image must be a docker image reference, e.g. nvidia/cuda:13.0.3-devel-ubuntu24.04';
+  } else if (key === 'exec_gpus') {
+    if (value !== '' && !/^[\w=,:"-]+$/.test(value)) return "exec_gpus must be a docker --gpus value (all, 1, device=0, ...) or empty for no GPU";
+  } else if (key === 'exec_memory') {
+    if (!/^\d+(\.\d+)?[bkmg]?$/i.test(value)) return 'exec_memory must be a docker memory size, e.g. 16g or 8192m';
+  } else if (key === 'exec_cpus') {
+    const n = Number(value);
+    if (!Number.isFinite(n) || n <= 0) return 'exec_cpus must be a positive number';
   } else if (key === 'chat_search_url') {
     if (value !== '' && !/^https?:\/\/[^\s/]+(\/\S*)?$/.test(value)) return 'chat_search_url must be an http(s) URL or empty';
   } else if (key === 'prd_repo_allowlist') {

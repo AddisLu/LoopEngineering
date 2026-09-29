@@ -180,7 +180,7 @@ export async function runToolLoop(o: ToolLoopOptions): Promise<ToolLoopResult> {
           parseError = `參數不是合法 JSON：${c.args.slice(0, 120)}`;
         }
         const def = byName.get(c.name);
-        let r: { ok: boolean; text: string; summary: string; sources?: ToolCall['sources'] };
+        let r: { ok: boolean; text: string; summary: string; sources?: ToolCall['sources']; detail?: string };
         if (parseError) r = { ok: false, text: parseError, summary: parseError };
         else if (!def) r = { ok: false, text: `沒有這個工具：${c.name}`, summary: `未知工具 ${c.name}` };
         else {
@@ -190,8 +190,28 @@ export async function runToolLoop(o: ToolLoopOptions): Promise<ToolLoopResult> {
             r = { ok: false, text: `工具執行失敗：${(err as Error).message.slice(0, 200)}`, summary: '執行失敗' };
           }
         }
-        log(`tool ${c.name} ${JSON.stringify(args).slice(0, 200)} → ${r.ok ? 'ok' : 'error'} ${now() - t0} ms`);
-        const done: Executed = { id: c.id, name: c.name, args, ms: now() - t0, ok: r.ok, summary: r.summary, ...(r.sources ? { sources: r.sources } : {}), _text: r.text };
+        // what gets recorded/shown for the call: a tool may slim it down (a whole source file
+        // written to the sandbox is not something the page or chat_messages.tools_json should carry)
+        let recorded = args;
+        if (def?.recordArgs && !parseError) {
+          try {
+            recorded = def.recordArgs(args);
+          } catch {
+            recorded = {};
+          }
+        }
+        log(`tool ${c.name} ${JSON.stringify(recorded).slice(0, 200)} → ${r.ok ? 'ok' : 'error'} ${now() - t0} ms`);
+        const done: Executed = {
+          id: c.id,
+          name: c.name,
+          args: recorded,
+          ms: now() - t0,
+          ok: r.ok,
+          summary: r.summary,
+          ...(r.sources ? { sources: r.sources } : {}),
+          ...(r.detail ? { detail: r.detail } : {}),
+          _text: r.text,
+        };
         return done;
       }),
     );
@@ -205,12 +225,14 @@ export async function runToolLoop(o: ToolLoopOptions): Promise<ToolLoopResult> {
       tool_calls: calls.map((c) => ({ id: c.id, type: 'function', function: { name: c.name, arguments: c.args || '{}' } })),
     });
     for (const r of results) {
-      messages.push({ role: 'tool', tool_call_id: r.id, content: `${UNTRUSTED_PREFIX}${r._text}` });
+      messages.push({ role: 'tool', tool_call_id: r.id, content: `${byName.get(r.name)?.resultPrefix ?? UNTRUSTED_PREFIX}${r._text}` });
     }
 
     // ---- decide whether the model may call tools again ------------------------------------
     let stop: string | null = null;
     for (const c of calls) {
+      // re-running the same build after changing a file is progress, not a loop
+      if (byName.get(c.name)?.repeatable) continue;
       const sig = `${c.name}:${c.args}`;
       if (seen.has(sig)) stop = '重複相同的工具呼叫';
       seen.add(sig);

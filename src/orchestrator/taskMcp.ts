@@ -2,8 +2,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type Database from 'better-sqlite3';
 import { getBool } from '../db/index.js';
-import { paths } from '../config.js';
+import { ENGINE_REPO_ROOT, paths } from '../config.js';
 import type { McpServerCfg } from '../mcp/config.js';
+import { sandboxSettings, type SandboxSettings } from '../exec/sandbox.js';
+import { describeExecHosts } from '../exec/hosts.js';
 
 /**
  * 任務執行中查知識庫: the MCP config a dispatched Claude Code run is given.
@@ -22,8 +24,9 @@ import type { McpServerCfg } from '../mcp/config.js';
  *   sweep it into the task's branch.
  */
 
-/** Servers a task may use, in the order they appear in the generated config. */
-export const TASK_MCP_SERVERS = ['loop', 'loop-fs'] as const;
+/** Servers a task may use, in the order they appear in the generated config. `loop-exec` (the GPU
+ * 沙盒) is never in mcp_servers_json: the engine adds it per run when exec_enabled (execServerForTask). */
+export const TASK_MCP_SERVERS = ['loop', 'loop-fs', 'loop-exec'] as const;
 
 /** Tools from those servers, as Claude Code's --allowed-tools spells them. */
 export const TASK_MCP_TOOLS = [
@@ -32,7 +35,43 @@ export const TASK_MCP_TOOLS = [
   'mcp__loop-fs__list_dir',
   'mcp__loop-fs__read_file',
   'mcp__loop-fs__search_text',
+  'mcp__loop-exec__run',
 ] as const;
+
+export const EXEC_SERVER = 'loop-exec';
+
+/**
+ * GPU 執行沙盒 for one task run: mcp/loop-exec-mcp.mjs, told which run it belongs to. It holds no
+ * sandbox logic — it forwards to POST /api/exec/run, where the engine resolves the run's worktree
+ * itself. null when exec_enabled is off, which leaves every generated config exactly as before.
+ */
+export function execServerForTask(db: Database.Database, runId: string): McpServerCfg | null {
+  const s = sandboxSettings(db);
+  if (!s.enabled) return null;
+  const token = process.env.LOOP_API_TOKEN ?? '';
+  return {
+    name: EXEC_SERVER,
+    type: 'local',
+    command: ['node', path.join(ENGINE_REPO_ROOT, 'mcp', 'loop-exec-mcp.mjs')],
+    environment: {
+      LOOP_API_URL: `http://127.0.0.1:${process.env.LOOP_PORT || 4711}`,
+      ...(token ? { LOOP_API_TOKEN: token } : {}),
+      LOOP_EXEC_RUN_ID: runId,
+      LOOP_EXEC_TIMEOUT_SEC: String(s.timeoutSec),
+      LOOP_EXEC_MAX_TIMEOUT_SEC: String(s.maxTimeoutSec),
+      // names + what they hold, for the tool description; the engine re-resolves every call
+      LOOP_EXEC_HOSTS: JSON.stringify(describeExecHosts(db).map((h) => ({ name: h.name, description: h.description, data: h.data.map((d) => ({ target: d.target })), default: h.default }))),
+    },
+    enabled: true,
+    // a build may take the full sandbox timeout; opencode reads this per server
+    timeout: execToolTimeoutMs(s),
+  };
+}
+
+/** How long a client should wait for one sandbox tool call: the longest run plus slack. */
+export function execToolTimeoutMs(s: Pick<SandboxSettings, 'maxTimeoutSec'>): number {
+  return (s.maxTimeoutSec + 120) * 1000;
+}
 
 export interface TaskMcp {
   /** absolute path of the generated config, for --mcp-config */
