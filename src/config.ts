@@ -215,6 +215,30 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   mcp_timeout_ms: '30000',
   chat_mcp_enabled: 'true',
   chat_tool_schema_chars: '16000',
+  // GPU 執行沙盒 (src/exec/sandbox.ts): a throwaway Docker container — GPU yes, network no, only one
+  // workspace mounted at /work — where the chat page's model and task agents compile, run and
+  // measure what they wrote. Off by default: nothing is offered, no MCP server is added, and a
+  // `sandbox:` verification step fails with a note.
+  exec_enabled: 'false',
+  // never pulled on demand (--pull never): `docker pull` it first, then `loop exec check`
+  exec_image: 'nvidia/cuda:13.0.3-devel-ubuntu24.04',
+  exec_gpus: 'all', // docker --gpus value; '' = no GPU
+  exec_memory: '16g',
+  exec_cpus: '8',
+  exec_pids: '512',
+  exec_timeout_sec: '120', // default per run
+  exec_max_timeout_sec: '900', // the most a caller may ask for
+  exec_max_concurrency: '2', // containers at once, across chat, tasks and verification
+  exec_output_chars: '12000', // stdout+stderr kept per run (head + tail)
+  // the chat page only: who may run code there (ts:<login> / name:<name> / local — the
+  // terminal_allowed_users format). Empty = nobody; task runs are not affected by this list.
+  exec_allowed_users: '',
+  // adds --cap-add SYS_ADMIN so Nsight Compute can read GPU counters. Weakens isolation — prefer the
+  // host driver option NVreg_RestrictProfilingToAdminUsers=0 and leave this off.
+  exec_profiling_cap: 'false',
+  // a chat answer that compiles/runs/profiles needs more rounds and time than a web lookup
+  exec_chat_max_rounds: '10',
+  exec_chat_wall_ms: '900000',
   // 轉成任務 → 驗證新技術: where spike repos (and their bare origins under .origins/) are created
   spike_root: path.join(os.homedir(), 'Addis', 'spikes'),
   // PRD 精靈: directories the repo picker / image-set checker may look at, on top of the enabled

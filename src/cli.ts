@@ -61,6 +61,9 @@ import { activeLocalRunCount } from './tasks.js';
 import { BENCH_DOMAINS, BenchmarkInputError, benchmarkMatrix, createBenchmark, getBenchmark, listBenchmarks } from './benchmark/store.js';
 import { judgeBenchmark } from './benchmark/complete.js';
 import { checkPrd, submitPrd, PrdInputError, type PrdCheck } from './prd/intake.js';
+import { formatSandboxResult, runSandbox, sandboxSettings } from './exec/sandbox.js';
+import { checkSandbox, formatCheck } from './exec/check.js';
+import { ensureWorkspace, execRoot } from './exec/workspace.js';
 
 const program = new Command();
 program.name('loop').description('Loop Engineering — token-aware coding-task scheduler').version('0.1.0');
@@ -539,6 +542,38 @@ env
   .action((name: string) => {
     if (!deleteEnvironment(getDb(), name)) return fail(`no such environment: ${name}`);
     console.log(`removed ${name}`);
+  });
+
+const execCmd = program.command('exec').description('GPU 執行沙盒: check the Docker/GPU setup, or run one command in the sandbox (see exec_enabled)');
+
+execCmd
+  .command('check')
+  .description('is this machine ready? docker, image, GPU, nvcc/ncu, no network, writable /work')
+  .option('--profile', 'also build a tiny kernel and run ncu on it (checks GPU counter permissions)')
+  .action(async (o) => {
+    const db = getDb();
+    const s = sandboxSettings(db);
+    console.log(`exec_enabled=${s.enabled}  image=${s.image}  gpus=${s.gpus || '(none)'}  memory=${s.memory}  cpus=${s.cpus}`);
+    const lines = await checkSandbox(s, path.join(execRoot(), 'check'), { profile: !!o.profile });
+    console.log(formatCheck(lines));
+    if (lines.some((l) => l.ok === false)) process.exitCode = 1;
+    else if (!s.enabled) console.log('\n一切就緒；要讓對話頁與任務使用，執行：loop config set exec_enabled true');
+  });
+
+execCmd
+  .command('run')
+  .description('run one bash command in the sandbox (default workspace: <data dir>/exec/cli)')
+  .argument('<command...>', 'the command (quote it, or put it after --)')
+  .option('--dir <path>', 'host directory to mount at /work')
+  .option('--timeout <sec>', 'timeout in seconds (capped by exec_max_timeout_sec)')
+  .action(async (parts: string[], o) => {
+    const db = getDb();
+    const s = sandboxSettings(db);
+    if (!s.enabled) console.error('（注意：exec_enabled=false —— 對話頁與任務還不能用沙盒；這個指令照樣執行）');
+    const dir = o.dir ? path.resolve(String(o.dir)) : ensureWorkspace(path.join(execRoot(), 'cli'));
+    const r = await runSandbox(s, { workdir: dir, command: parts.join(' '), timeoutSec: o.timeout, scope: 'cli' });
+    console.log(formatSandboxResult(r));
+    process.exitCode = r.exitCode === 0 && !r.infra ? 0 : r.exitCode && r.exitCode > 0 ? r.exitCode : 1;
   });
 
 const local = program.command('local').description('本地模型: list / load / stop / download / build / jobs (see local_models_enabled)');

@@ -31,6 +31,9 @@ export const NONNEG_KEYS = new Set([
   'bench_diff_cap_chars', 'bench_judge_timeout_ms',
   // PRD gate
   'local_chat_timeout_ms',
+  // GPU 執行沙盒 (src/exec/sandbox.ts)
+  'exec_pids', 'exec_timeout_sec', 'exec_max_timeout_sec', 'exec_max_concurrency', 'exec_output_chars',
+  'exec_chat_max_rounds', 'exec_chat_wall_ms',
 ]);
 // values must be a number in [0, 1] (a fraction/weight, unlike the 0-100 PERCENT_KEYS)
 export const UNIT_INTERVAL_KEYS = new Set(['rag_hybrid_alpha']);
@@ -78,6 +81,8 @@ export const BOOL_KEYS = new Set([
   'benchmark_enabled',
   // PRD gate (src/prd/*.ts)
   'prd_gate_enabled', 'prd_require_llm',
+  // GPU 執行沙盒 (src/exec/sandbox.ts) — off = no sandbox tools, no loop-exec MCP server
+  'exec_enabled', 'exec_profiling_cap',
 ]);
 
 /** Accepted `integration_provider` values ('none' = the bridge is fully off). */
@@ -165,9 +170,18 @@ export function validateSetting(key: string, value: string): string | null {
     if (value !== '' && !value.startsWith('/')) return 'terminal_cwd must be an absolute path (or empty for the home directory)';
   } else if (key === 'terminal_worktree_root') {
     if (value !== '' && !value.startsWith('/')) return 'terminal_worktree_root must be an absolute path';
-  } else if (key === 'terminal_allowed_users') {
+  } else if (key === 'terminal_allowed_users' || key === 'exec_allowed_users') {
     const bad = value.split(',').map((s) => s.trim()).filter(Boolean).filter((s) => !/^(ts:\S+|name:\S+|local)$/i.test(s));
-    if (bad.length) return `terminal_allowed_users entries must be ts:<login>, name:<name> or local (got: ${bad.join(', ')})`;
+    if (bad.length) return `${key} entries must be ts:<login>, name:<name> or local (got: ${bad.join(', ')})`;
+  } else if (key === 'exec_image') {
+    if (!/^[\w][\w./:@-]*$/.test(value)) return 'exec_image must be a docker image reference, e.g. nvidia/cuda:13.0.3-devel-ubuntu24.04';
+  } else if (key === 'exec_gpus') {
+    if (value !== '' && !/^[\w=,:"-]+$/.test(value)) return "exec_gpus must be a docker --gpus value (all, 1, device=0, ...) or empty for no GPU";
+  } else if (key === 'exec_memory') {
+    if (!/^\d+(\.\d+)?[bkmg]?$/i.test(value)) return 'exec_memory must be a docker memory size, e.g. 16g or 8192m';
+  } else if (key === 'exec_cpus') {
+    const n = Number(value);
+    if (!Number.isFinite(n) || n <= 0) return 'exec_cpus must be a positive number';
   } else if (key === 'chat_search_url') {
     if (value !== '' && !/^https?:\/\/[^\s/]+(\/\S*)?$/.test(value)) return 'chat_search_url must be an http(s) URL or empty';
   } else if (key === 'prd_repo_allowlist') {
