@@ -182,6 +182,7 @@
     <a href="#local-models">26 · 本地模型（vLLM）、對話工作台與 Benchmark</a>
     <a href="#tools">26a · 上網／工具、MCP 與終端機</a>
     <a href="#sandbox">26b · GPU 執行沙盒：自己跑、自己驗證</a>
+    <a href="#overnight">26c · 夜間無人開發：遠端沙盒、驗收指標、晨報</a>
     <a href="#appendix">27 · 附錄（API / 檔案位置）</a>
   </nav>
 
@@ -414,7 +415,7 @@
       <table>
         <thead><tr><th>指令</th><th>作用</th></tr></thead>
         <tbody>
-          <tr><td><code>add</code></td><td>建立任務（起始 draft）。旗標：<code>--title*</code> <code>--goal*</code> <code>--plan</code> <code>--tool</code> <code>--verify</code> <code>--setup</code> <code>--repo</code> <code>--base</code> <code>--complexity</code> <code>--priority</code> <code>--model</code> <code>--depends-on &lt;taskId&gt;</code>（串行鏈：押住直到該任務結案）</td></tr>
+          <tr><td><code>add</code></td><td>建立任務（起始 draft）。旗標：<code>--title*</code> <code>--goal*</code> <code>--plan</code> <code>--tool</code> <code>--verify</code> <code>--setup</code> <code>--repo</code> <code>--base</code> <code>--complexity</code> <code>--priority</code> <code>--model</code> <code>--depends-on &lt;taskId&gt;</code>（串行鏈：押住直到該任務結案）<code>--metrics &lt;門檻&gt;</code>（驗收指標，例如 <code>"detection_rate &gt;= 0.98; miss == 0"</code>）<code>--protect &lt;glob,…&gt;</code>（保護路徑，見第 26c 章）</td></tr>
           <tr><td><code>gate &lt;id&gt;</code></td><td>顯示該任務的入場檢查清單。</td></tr>
           <tr><td><code>chat prune [--days n] [--yes]</code></td><td>刪除超過保留天數的對話（含圖片檔）。不加 <code>--yes</code> 只列出要刪什麼。</td></tr>
           <tr><td><code>chat export &lt;id&gt;</code></td><td>把一段對話輸出成 Markdown 到 stdout（<code>--reasoning</code> 連思考過程一起）。</td></tr>
@@ -432,8 +433,11 @@
           <tr><td><code>forecast</code></td><td>Backlog 用量預估（見第 17 章）；若有可比較資料，尾端再附一行執行紀律 A/B 摘要（見第 18 章）。</td></tr>
           <tr><td><code>experiment [tag] [--days &lt;n&gt;]</code></td><td>A/B cohort 比較：把用 <code>--experiment &lt;名&gt;</code> 標記過的終態任務（closed／attention／failed）依標籤分組，列出 pass 率、平均 session%、attention 率、平均 resume。給 <code>tag</code> 只看前綴符合的 cohort。用來驗證「精準規格＋便宜模型」是否真的贏過基線（見第 18 章）。</td></tr>
           <tr><td><code>env list｜add &lt;name&gt;｜remove &lt;name&gt;</code></td><td>管理部署環境（見第 19 章）。<code>add</code> 旗標：<code>--kind</code> <code>--host</code> <code>--capabilities</code> <code>--deploy-cmd</code> <code>--auto-deploy</code>。</td></tr>
-          <tr><td><code>exec check [--profile]</code></td><td>GPU 執行沙盒的健康檢查：Docker、映像、容器裡看得到 GPU、有沒有 nvcc／ncu、真的沒有網路、/work 可寫入；<code>--profile</code> 再編一個小 kernel 跑 <code>ncu</code>，確認讀得到 GPU 效能計數器（見第 26b 章）。</td></tr>
-          <tr><td><code>exec run [--dir &lt;path&gt;] [--timeout &lt;秒&gt;] &lt;指令…&gt;</code></td><td>在沙盒裡跑一行指令（預設工作目錄 <code>&lt;資料目錄&gt;/exec/cli</code>），exit code 照實回傳。</td></tr>
+          <tr><td><code>exec check [--host &lt;名&gt;] [--profile]</code></td><td>GPU 執行沙盒的健康檢查：Docker、映像、容器裡看得到 GPU、有沒有 nvcc／ncu、真的沒有網路、/work 可寫入；<code>--profile</code> 再編一個小 kernel 跑 <code>ncu</code>，確認讀得到 GPU 效能計數器（見第 26b 章）。<code>--host</code> 改檢查遠端主機：ssh 登入、rsync、遠端 Docker、圖庫是否唯讀掛載（見第 26c 章）。</td></tr>
+          <tr><td><code>exec run [--host &lt;名&gt;] [--dir &lt;path&gt;] [--timeout &lt;秒&gt;] &lt;指令…&gt;</code></td><td>在沙盒裡跑一行指令（預設工作目錄 <code>&lt;資料目錄&gt;/exec/cli</code>），exit code 照實回傳。<code>--host</code> 時先把目錄同步到那台再執行。</td></tr>
+          <tr><td><code>exec host add &lt;名&gt; --ssh &lt;user@host&gt; --work-root &lt;dir&gt;</code></td><td>登記（或更新）遠端沙盒主機。選填：<code>--port</code> <code>--image</code> <code>--gpus</code> <code>--memory</code> <code>--cpus</code> <code>--data &lt;那台路徑:容器路徑,…&gt;</code>（唯讀）<code>--desc</code> <code>--disabled</code>。</td></tr>
+          <tr><td><code>exec host list｜rm &lt;名&gt;｜prune &lt;名&gt; [--days 7]</code></td><td>列出主機（* ＝ <code>exec_default_host</code>）、移除登記、刪掉那台上超過 N 天沒動的工作區。</td></tr>
+          <tr><td><code>morning [--hours 24] [--json]</code></td><td>晨報：這段時間跑過的任務、驗證步驟、指標與門檻、PR、要人處理的原因（見第 26c 章）。</td></tr>
           <tr><td><code>deploy --env &lt;name&gt; --repo &lt;path&gt; --base &lt;branch&gt;</code></td><td>建立並排入一個 <code>tool=deploy</code> 任務（見第 19 章）。</td></tr>
           <tr><td><code>deploy rollback &lt;env&gt;</code></td><td>把該環境回滾到上一次成功部署的 commit。</td></tr>
           <tr><td><code>pipeline list</code></td><td>列出 pipeline 模板（內建 <code>feature</code>／<code>fix</code>／<code>ship</code>，見第 20 章）與各自的 stage。</td></tr>
@@ -590,6 +594,18 @@ npm run loop -- list --status review</code></pre>
           <tr><td><code>exec_allowed_users</code></td><td>（空）</td><td>對話頁誰能執行程式（<code>ts:&lt;登入&gt;</code>、<code>name:&lt;名字&gt;</code>、<code>local</code>）。空＝沒人；不影響任務。</td></tr>
           <tr><td><code>exec_profiling_cap</code></td><td>false</td><td>給容器 SYS_ADMIN 讓 <code>ncu</code> 讀效能計數器；隔離變弱，優先改用主機驅動參數。</td></tr>
           <tr><td><code>exec_chat_max_rounds</code>／<code>exec_chat_wall_ms</code></td><td>10／900000</td><td>對話頁有沙盒時的回合數與總時間上限。</td></tr>
+          <tr><td><code>exec_default_host</code></td><td>（空）</td><td>沒指定主機時用哪台：空或 <code>local</code>＝這台；否則是 <code>loop exec host</code> 登記的名稱（見第 26c 章）。</td></tr>
+          <tr><td><code>exec_data_mounts</code></td><td>（空）</td><td>本機沙盒唯讀掛進容器的資料，<code>/主機路徑:/容器路徑</code>，逗號分隔（遠端主機用 <code>--data</code>）。</td></tr>
+        </tbody>
+      </table></div>
+
+      <h3>夜間無人開發（見<a href="#overnight">第 26c 章</a>）</h3>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>鍵</th><th>預設</th><th>說明</th></tr></thead>
+        <tbody>
+          <tr><td><code>local_task_window</code></td><td>（空）</td><td>本地模型任務只在這段時間開始，<code>HH:MM-HH:MM</code>，可跨午夜（例如 <code>19:00-07:00</code>）。空＝任何時間。</td></tr>
+          <tr><td><code>morning_report_time</code></td><td>（空）</td><td>每天經 ntfy 推播晨報的時間 <code>HH:MM</code>；空＝不推播（晨報頁與 <code>loop morning</code> 照常可用）。</td></tr>
+          <tr><td><code>gitea_url</code></td><td>（空）</td><td>公司內部 Gitea 的網址。任務 repo 的 origin 在這台時，PR 經 Gitea API 開，描述附上驗證結果。token 放 <code>GITEA_TOKEN</code>。</td></tr>
         </tbody>
       </table></div>
 
@@ -604,7 +620,8 @@ npm run loop -- list --status review</code></pre>
           <tr><td><code>TOKENBAR_MCP_DIR</code></td><td>TokenBar 的 <code>mcp/</code> 安裝目錄，重用 usage-core 與共享快取。</td></tr>
           <tr><td><code>TOKENBAR_TOKEN_CACHE</code> / <code>TOKENBAR_HISTORY</code></td><td>共享 token 快取 / 歷史 ledger 路徑。</td></tr>
           <tr><td><code>NTFY_SERVER</code> / <code>NTFY_TOPIC</code></td><td>ntfy 推播（含一鍵暫停動作）。</td></tr>
-          <tr><td><code>LOOP_PUBLIC_URL</code></td><td>ntfy 暫停動作用的公開網址。</td></tr>
+          <tr><td><code>LOOP_PUBLIC_URL</code></td><td>ntfy 暫停動作與晨報推播連結用的公開網址（例如 Tailscale 網址）。</td></tr>
+          <tr><td><code>GITEA_TOKEN</code></td><td>公司內部 Gitea 的 access token（repository 讀寫），搭配 <code>gitea_url</code> 開 PR（見第 26c 章）。</td></tr>
           <tr><td><code>GITHUB_TOKEN</code> / <code>GITHUB_API_URL</code></td><td>GitHub PAT；<code>GITHUB_API_URL</code> 選填，指向 GHES 時覆寫預設的 <code>api.github.com</code>（見第 21 章）。</td></tr>
           <tr><td><code>ADO_PAT</code> / <code>ADO_ORG</code> / <code>ADO_PROJECT</code></td><td>Azure DevOps PAT ＋ 組織／專案；三者需同時存在才會啟用 <code>ado</code> provider（見第 21 章）。</td></tr>
           <tr><td><code>LOOP_VOICE_PYTHON</code></td><td>faster-whisper venv 的 python 執行檔路徑；預設 <code>~/.local/share/loop-engineering/voice-venv/bin/python</code>（見第 22 章）。</td></tr>
@@ -1433,7 +1450,228 @@ loop add --title "加減乘除 kernel" --goal "…" --plan ./plan.md --repo /pat
         </tbody>
       </table>
       </div>
-      <p>API：<code>GET /api/exec/status</code>（目前設定）、<code>POST /api/exec/run</code>（<code>{run_id, command, timeout_sec?}</code>，只給執行中的 run 使用）。</p>
+      <p>API：<code>GET /api/exec/status</code>（目前設定與主機）、<code>POST /api/exec/run</code>（<code>{run_id, command, timeout_sec?, host?}</code>，只給執行中的 run 使用）。要在另一台 GPU 電腦上跑、掛圖庫、比對驗收指標，見<a href="#overnight">第 26c 章</a>。</p>
+    </section>
+
+    <section id="overnight">
+      <h2><span class="num">26c</span>夜間無人開發：遠端沙盒、驗收指標、晨報</h2>
+      <p>分工：</p>
+      <ul>
+        <li><b>白天</b>：人和高階模型把需求寫成 PRD，寫清楚可以自動判定的驗收標準。</li>
+        <li><b>晚上</b>：本地模型實作。每一版都送到另一台 GPU 電腦的沙盒編譯，用圖庫量檢出率，由引擎照門檻判定。</li>
+        <li><b>早上</b>：人看晨報，決定合併或退回。</li>
+      </ul>
+      <p>整條路上沒有一步是靠模型「自己說通過」。</p>
+
+      <h3>整條流程</h3>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>時段</th><th>誰</th><th>做什麼</th></tr></thead>
+        <tbody>
+          <tr><td>白天</td><td>人＋高階模型（Opus／Fable，在 Claude Code 裡接 Loop MCP）</td><td>
+            <ol>
+              <li>用 <code>loop_prd_template</code> 取得範本。</li>
+              <li>照範本寫 PRD，包含「驗收指標」「保護路徑」「圖集比對（主機）」三段。</li>
+              <li>用 <code>loop_prd_check</code> 請本地模型先審（不花 token）。</li>
+              <li>用 <code>loop_prd_submit</code> 送出（<code>model: local:&lt;id&gt;</code>），任務就進佇列。</li>
+            </ol>
+          </td></tr>
+          <tr><td>晚上（<code>local_task_window</code>）</td><td>引擎＋本地模型</td><td>引擎從 Gitea 拉最新的 base 開 worktree，本地模型開始實作。執行中它可以用 <code>run</code> 工具（<code>host</code> 指定主機）自己到遠端沙盒編譯、試跑。</td></tr>
+          <tr><td>晚上</td><td>引擎（驗證）</td><td>
+            <ol>
+              <li>檢查「保護路徑」有沒有被改。</li>
+              <li>依序跑驗證步驟。<code>sandbox@&lt;主機&gt;:</code> 開頭的步驟會把 worktree 同步到那台，在容器裡執行。</li>
+              <li>評估程式印出 <code>LOOP_METRICS {…}</code>，引擎拿任務上的門檻來比。</li>
+            </ol>
+            沒過就把失敗輸出交回模型續跑修正，最多 <code>max_resumes</code> 次。還是不過就停在「要你處理」，現場保留。
+          </td></tr>
+          <tr><td>晚上</td><td>引擎（收尾）</td><td>
+            <ul>
+              <li>把 <code>loop/&lt;id&gt;</code> 推到 Gitea 並開 PR。PR 描述就是驗證結果、指標表和 VERIFY.md。</li>
+              <li>依 <code>auto_merge</code> 設定併進 base 分支。</li>
+            </ul>
+          </td></tr>
+          <tr><td>早上</td><td>人</td><td>ntfy 推播晨報（<code>morning_report_time</code>），點開就是 <code>/morning.html</code>。先處理「要你處理」，再看「驗收通過」的 PR 和人工驗收清單。</td></tr>
+        </tbody>
+      </table></div>
+
+      <h3>要找什麼樣的電腦（遠端沙盒主機）</h3>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>項目</th><th>需求</th><th>為什麼</th></tr></thead>
+        <tbody>
+          <tr><td>作業系統</td><td>Linux x86_64，建議 Ubuntu 22.04／24.04 LTS。</td><td>沙盒是 Docker＋NVIDIA Container Toolkit，不支援 Windows 主機（見下方「目前的限制」）。</td></tr>
+          <tr><td>GPU</td><td>NVIDIA，<b>和產線同一代，最好同型號</b>；顯示記憶體不少於產線。</td><td>CUDA kernel 的行為、速度和記憶體上限都要和機台一樣，量到的檢出率與 fps 才有意義。</td></tr>
+          <tr><td>驅動</td><td>要支援映像的 CUDA 版本（CUDA 13 需要 580 以上）。</td><td>容器裡的 CUDA 不能比主機驅動新。</td></tr>
+          <tr><td>軟體</td><td>Docker Engine、NVIDIA Container Toolkit、rsync、OpenSSH server。</td><td>引擎用 rsync over ssh 同步程式碼，用 <code>docker -H ssh://</code> 開容器。</td></tr>
+          <tr><td>帳號</td><td>專用帳號（例如 <code>loop</code>），用金鑰登入，加進 <code>docker</code> 群組。</td><td>引擎以 BatchMode 登入，不能問密碼。docker 群組等同那台的 root，所以要用<b>專用機</b>，不要用別人的工作站。</td></tr>
+          <tr><td>圖庫</td><td>放在那台的 SSD，或掛 NAS（唯讀即可）。</td><td>用 <code>--data</code> 以唯讀方式掛進容器。容器沒有網路，讀不到別的地方。</td></tr>
+          <tr><td>硬碟</td><td>圖庫之外，再留 200 GB 以上給工作區和映像。</td><td>每個任務有一個同步過去的工作區（含 build 目錄），用 <code>loop exec host prune</code> 清理。</td></tr>
+          <tr><td>記憶體／CPU</td><td>32 GB 以上（圖庫大建議 64 GB）、8 核以上。</td><td>編譯和整批跑圖都在這台。</td></tr>
+          <tr><td>網路</td><td>Spark 要連得到它的 ssh（同一個內網，或 Tailscale）。</td><td>容器本身是 <code>--network none</code>，需要的套件要先做進映像。</td></tr>
+          <tr><td>其他</td><td>晚上不休眠、不關機；夜間沒有別人用這張 GPU。</td><td>量效能時不會被干擾。</td></tr>
+        </tbody>
+      </table></div>
+
+      <h3>設定步驟</h3>
+      <p><b>在那台電腦上</b>（只要做一次）：</p>
+      <pre><code>sudo adduser --disabled-password loop &amp;&amp; sudo usermod -aG docker loop
+sudo mkdir -p /srv/loop-exec &amp;&amp; sudo chown loop: /srv/loop-exec
+# 確認容器用得到 GPU
+docker run --rm --gpus all nvidia/cuda:12.8.1-devel-ubuntu22.04 nvidia-smi
+# 專案映像：編譯和評估要用的東西都做進去（容器沒有網路）
+docker build -t aoi-sandbox:1 .</code></pre>
+      <p>Dockerfile 範例（依專案調整）：</p>
+      <pre><code>FROM nvidia/cuda:12.8.1-devel-ubuntu22.04
+RUN apt-get update &amp;&amp; apt-get install -y --no-install-recommends \
+      cmake g++ python3 python3-numpy python3-opencv \
+    &amp;&amp; rm -rf /var/lib/apt/lists/*</code></pre>
+      <p><b>在 Spark 上</b>：</p>
+      <pre><code>ssh-copy-id loop@aoi-gpu          # 之後 ssh loop@aoi-gpu 不能再問密碼
+ssh loop@aoi-gpu true             # 第一次連線，接受 host key
+loop exec host add aoi-gpu --ssh loop@aoi-gpu --work-root /srv/loop-exec \
+  --image aoi-sandbox:1 --data /mnt/aoi-gallery:/datasets --desc "AOI 圖庫與 RTX 4090"
+loop exec check --host aoi-gpu --profile   # 逐項 ✅／❌，包含圖庫是不是唯讀掛載
+loop config set exec_enabled true
+loop config set exec_default_host aoi-gpu  # 選用：沒寫主機的 sandbox: 步驟也送去這台</code></pre>
+      <p><code>--data</code> 的格式是「那台上的路徑:容器裡的路徑」，多組用逗號分隔，一律唯讀。<code>--ssh</code> 也可以寫 <code>~/.ssh/config</code> 裡的別名；主機的 image、GPU、記憶體、CPU 沒指定時沿用 <code>exec_*</code> 設定。同一個任務在同一台主機上的工作區會共用，agent 自己跑過的 build 目錄，驗證時可以增量編譯。</p>
+
+      <h3>Gitea（公司內部 git）</h3>
+      <ol>
+        <li>在 Spark 上 clone 一份<b>專給引擎用</b>的 repo，不要用有人在改的工作目錄：<code>git clone http://gitea.corp:3000/aoi/cf-aoi.git /srv/repos/cf-aoi</code>。push 要能免互動（用 credential helper 存 token，或用 ssh key）。每個任務開始前，引擎會自己 fetch 最新的 base。</li>
+        <li>在 Gitea 建一個 token（至少要 repository 讀寫權限），寫進 <code>~/.config/loop-engineering/env</code>：<code>GITEA_TOKEN=…</code>，然後重啟服務。</li>
+        <li>設定 <code>loop config set gitea_url http://gitea.corp:3000</code>。任務 repo 的 origin 在這台 Gitea 上時，PR 會透過 Gitea API 開；其他 repo 照舊用 <code>gh</code>。</li>
+        <li>base 分支建議用<b>整合分支</b>（例如 <code>feature/bright-defect</code> 或 <code>nightly</code>），不要直接用 main。
+          <ul>
+            <li>驗證通過後，引擎會把結果快轉併進 base 並推上去（<code>auto_merge</code>），晚上一連串任務就能一棒接一棒。</li>
+            <li>main 保持受保護，早上由人看完晨報，再從整合分支開 PR 併進 main。</li>
+            <li>想讓每個任務都等人按合併，可以 <code>loop config set auto_merge false</code>。注意這是<b>全域</b>設定，所有 repo 都會改成只推分支、開 PR。</li>
+          </ul>
+        </li>
+      </ol>
+
+      <h3>評估程式：讓引擎自己判斷過不過</h3>
+      <p>驗收門檻寫在 PRD 的「驗收指標」段，存在任務上，<b>不在 repo 裡</b>。評估程式只負責量，在輸出印一行 <code>LOOP_METRICS</code> 加一個 JSON 物件；引擎拿這些數字比門檻，缺少的指標算不通過。評估程式和標準答案要列進「保護路徑」，被改到就直接判驗證失敗。</p>
+      <pre><code># scripts/eval/run.py（範例）
+import json, sys
+# …逐張跑演算法，和標準答案比對，算出 hit／fp／total…
+print('LOOP_METRICS ' + json.dumps({
+    'detection_rate': hit / total_defects,
+    'false_positive_rate': fp / total_images,
+    'miss': total_defects - hit,
+    'fps': total_images / elapsed,   # 沒有門檻的指標也會顯示在晨報
+}))
+sys.exit(0)  # 門檻由引擎比對；程式當掉或讀不到圖才回非 0</code></pre>
+      <p>可用的比較運算：<code>&gt;=</code> <code>&lt;=</code> <code>&gt;</code> <code>&lt;</code> <code>==</code> <code>!=</code>，也接受 ≥ ≤ =；數字後面的 % 會被忽略。好幾個步驟都有印時，以後面的值為準。不用 PRD 建任務時，可以改用 <code>loop add --metrics "detection_rate &gt;= 0.98; miss == 0" --protect "scripts/eval/**"</code>。</p>
+
+      <h3>PRD 範例</h3>
+      <pre><code># 修正 X 區亮缺陷判型
+
+## 目標 (Goal)
+X 區的亮缺陷被判成髒污。修改 classify_bright() 的判斷，讓 20260615 圖集的亮缺陷都判對，而且不增加誤判。
+
+## 範圍 (Scope)
+- src/detect/bright.cu 的 classify_bright() 和它的參數結構
+
+## 非範圍 (Non-goals)
+- 不改 VB UI、不改 MIL 取像流程
+
+## 驗收標準 (Acceptance)
+- [ ] Given 20260615 圖集 When 跑 scripts/eval/run.py Then 檢出率 ≥ 98%、漏檢 0
+
+## 驗證指令 (Verify)
+```bash
+sandbox@aoi-gpu: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release &amp;&amp; cmake --build build -j
+sandbox@aoi-gpu: python3 scripts/eval/run.py --gallery /datasets/20260615 --golden /datasets/golden/20260615
+```
+
+## Repo
+- path: /srv/repos/cf-aoi
+- branch: feature/bright-defect
+
+## 領域 (Domain)
+cuda
+
+## 複雜度 (Complexity)
+M
+
+## 圖集比對 (Dataset)
+- 主機: aoi-gpu
+- 輸入圖集: /datasets/20260615
+- 期望結果: /datasets/golden/20260615
+
+## 驗收指標 (Metrics)
+- detection_rate &gt;= 0.98
+- false_positive_rate &lt;= 0.01
+- miss == 0
+
+## 保護路徑 (Protected)
+- scripts/eval/**
+- config/judge/**</code></pre>
+      <p>「驗證指令」區塊裡的每一行是一個步驟。圖集在遠端主機上時，路徑寫<b>容器裡</b>看到的路徑（<code>--data</code> 的右邊），PRD 閘門不會在 Spark 上檢查它存不存在。</p>
+
+      <h3>夜間時段與晨報</h3>
+      <pre><code>loop config set local_task_window 19:00-07:00   # 本地模型任務只在這段時間開始
+loop config set morning_report_time 08:00        # 每天 08:00 經 ntfy 推播晨報（要先設 ntfy_server／ntfy_topic）
+loop morning                                    # 在終端機看同一份晨報（--hours 12、--json）</code></pre>
+      <ul>
+        <li>時段外不會開始新的本地模型任務，也不會為它們載入模型；已經在跑的會跑完。雲端模型的任務不受影響。看板的「排程設定」也可以改，留空＝任何時間。</li>
+        <li>晨報頁 <code>/morning.html</code> 在對話頁左欄和看板頂欄都有連結，把任務分成：要你處理、失敗、驗收通過、待人工驗收、中斷會自動續跑、執行中、還沒輪到。
+          <p>每個任務會列出：</p>
+          <ul>
+            <li>驗證步驟與失敗時的輸出</li>
+            <li>指標與門檻</li>
+            <li>合併狀態與 PR 連結</li>
+            <li>VERIFY.md</li>
+          </ul>
+        </li>
+        <li>推播網址用 <code>LOOP_PUBLIC_URL</code>（例如 Tailscale 網址），手機點了才打得開。08:00 時引擎沒在跑的話，3 小時內開機會補送，超過就不補（晨報頁照樣可以看）。</li>
+      </ul>
+
+      <h3>早上怎麼看</h3>
+      <ol>
+        <li><b>要你處理</b>：先看「原因」和失敗輸出。worktree 還保留著，可以開終端機進去看。需求寫錯就改 PRD 重新送；可以補救的就在看板上續跑。</li>
+        <li><b>驗收通過</b>：打開 PR 看 diff。指標表是引擎量的，不是模型說的。VERIFY.md 裡有要上機台確認的項目就照做，確認後再合併或結案。</li>
+        <li><b>中斷、還沒輪到</b>：今晚會繼續跑。如果一直輪不到，檢查 <code>local_task_window</code> 和 <code>local_max_concurrency</code>。</li>
+      </ol>
+
+      <h3>目前的限制</h3>
+      <ul>
+        <li><b>Windows 程式（VB6／MIL 8.0）</b>：遠端沙盒只支援 Linux＋Docker。
+          <ul>
+            <li>演算法（C++／CUDA）能在 Linux 上編成「讀圖檔、輸出結果」的程式：可以直接用這套流程量檢出率。</li>
+            <li>判定一定要經過 MIL 8.0 或 VB：需要一台 Windows 電腦，用「不經 Docker 的 SSH 模式」編譯和執行。這個模式<b>還沒做</b>。</li>
+          </ul>
+        </li>
+        <li><b>PRD 精靈頁面</b>還不會產生「驗收指標」「保護路徑」「主機」這三段。請手寫，或讓高階模型照 <code>loop_prd_template</code> 寫；<code>loop prd check</code> 和 <code>loop_prd_check</code> 都認得這三段。</li>
+        <li><b>量什麼、量得準不準，是人的責任</b>：圖集要能代表產線；評估程式和標準答案要事先驗證過，並列在保護路徑裡。</li>
+      </ul>
+
+      <h3>疑難排解</h3>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>看到</th><th>原因與處理</th></tr></thead>
+        <tbody>
+          <tr><td>Permission denied (publickey)／Host key verification failed</td><td>Spark 還不能免密碼登入那台。執行 <code>ssh-copy-id</code>，再手動 <code>ssh loop@aoi-gpu</code> 一次，接受 host key。</td></tr>
+          <tr><td>rsync: command not found</td><td>那台或 Spark 沒裝 rsync：<code>sudo apt install rsync</code>。</td></tr>
+          <tr><td>沒有映像 …</td><td>映像要在<b>那台</b>上 build 或 pull（沙盒不會自動下載）。</td></tr>
+          <tr><td>檢查結果裡圖庫是 missing</td><td><code>--data</code> 的左邊是那台上的路徑；用 NAS 的話，要先在那台掛好。</td></tr>
+          <tr><td>指標顯示「沒回報」</td><td>評估程式沒印出這個名稱的 <code>LOOP_METRICS</code>，或在印之前就當掉了。看失敗步驟的輸出。</td></tr>
+          <tr><td>驗證失敗：保護路徑</td><td>模型改到了評估程式或標準答案；引擎會要它還原後重做。</td></tr>
+          <tr><td>沒有開 PR</td><td>看任務事件，可能是：
+            <ul>
+              <li><code>GITEA_TOKEN</code> 沒設，或權限不足（401／403）</li>
+              <li>Gitea 連不上</li>
+              <li>origin 的主機名稱和 <code>gitea_url</code> 不一樣</li>
+            </ul>
+          </td></tr>
+          <tr><td>本地任務一直沒開始</td><td>現在不在 <code>local_task_window</code> 內，排程狀態會顯示 <code>wait for local_task_window</code>。</td></tr>
+          <tr><td>收不到晨報推播</td><td>先確認 <code>ntfy_server</code>／<code>ntfy_topic</code>。改版前，標題含中文的推播都會被丟掉，這次一併修好了。</td></tr>
+        </tbody>
+      </table></div>
+      <p>API：</p>
+      <ul>
+        <li><code>GET /api/morning?hours=24</code>：晨報 JSON。</li>
+        <li><code>POST /api/exec/run</code>：可以帶 <code>host</code>。</li>
+        <li><code>GET /api/exec/status</code>：會列出主機。</li>
+      </ul>
     </section>
 
     <section id="appendix">
