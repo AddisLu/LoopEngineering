@@ -24,7 +24,9 @@ import { createPlan, deletePlan, getPlan, listDatasets, listPlans, PlanError, up
 import { computeMetrics } from './server/metrics.js';
 import { killRun } from './orchestrator/kill.js';
 import { cleanupWorktree } from './orchestrator/cleanup.js';
+import { mergeReviewedTask } from './orchestrator/mergeFlow.js';
 import { updateVerification, TaskEditError, type VerificationPatch } from './taskEdit.js';
+import { reverifyTask, ReviewError } from './review/review.js';
 import { pruneTaskArtifacts, type ArtifactCleanup } from './git/worktree.js';
 import { DEFAULT_SETTINGS, ENGINE_REPO_ROOT, type Complexity } from './config.js';
 import { validateSetting } from './settings.js';
@@ -346,6 +348,37 @@ program
     } catch (err) {
       fail(err instanceof TaskEditError ? err.message : String(err));
     }
+  });
+
+program
+  .command('verify <id>')
+  .description("run a finished task's command verification again and record it (結果 / 產出物); status and merge state stay")
+  .action(async (id) => {
+    const db = getDb();
+    const t = getTask(db, id);
+    if (!t) return fail(`no such task: ${id}`);
+    try {
+      const r = await reverifyTask(db, t);
+      console.log(`${id}: ${r.detail}  (${r.workspace})`);
+      if (!r.ok) process.exitCode = 1;
+    } catch (err) {
+      fail(err instanceof ReviewError ? err.message : String(err));
+    }
+  });
+
+program
+  .command('merge <id>')
+  .description('the board\'s 合併 for a task in review: bring the latest base in, re-verify, fast-forward')
+  .action(async (id) => {
+    const db = getDb();
+    const t = getTask(db, id);
+    if (!t) return fail(`no such task: ${id}`);
+    if (t.status !== 'review' || (t.merge_status !== 'pending' && t.merge_status !== 'conflict')) {
+      return fail(`${id} is not waiting to be merged (status ${t.status}, merge ${t.merge_status ?? '-'})`);
+    }
+    const r = await mergeReviewedTask(db, t, { by: 'cli' });
+    console.log(`${id}: ${r.outcome} — ${r.detail}`);
+    if (r.outcome !== 'merged') process.exitCode = 1;
   });
 
 program

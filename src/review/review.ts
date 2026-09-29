@@ -7,12 +7,13 @@ import { getNum, getSetting, logEvent } from '../db/index.js';
 import { paths } from '../config.js';
 import { getTask, latestRun, setStatus } from '../tasks.js';
 import { tailLog } from '../server/board.js';
-import { integrateIntoBase } from '../git/integrate.js';
 import { giteaRepoFor, publishGiteaRelease } from '../git/gitea.js';
+import { mergeReviewedTask, MergeInProgressError, type MergeResult } from '../orchestrator/mergeFlow.js';
+import { runVerifyGate, collectTaskArtifacts } from '../orchestrator/run.js';
 import { runVerification, type VerifyStepResult } from '../orchestrator/verify.js';
 import { evaluateAcceptance, extractMetrics, parseAcceptance, type MetricsReport } from '../orchestrator/acceptance.js';
 import { prBody, readMetrics, readVerify, type VerifiedStep } from '../orchestrator/runSummary.js';
-import { formatSandboxResult, runSandbox, sandboxSettings, type SandboxStepRunner } from '../exec/sandbox.js';
+import { formatSandboxResult, runSandbox, sandboxSettings, type SandboxDeps, type SandboxStepRunner } from '../exec/sandbox.js';
 import type { SandboxRun } from '../chat/sandboxTools.js';
 import { resolveExecTarget, LOCAL_HOST } from '../exec/hosts.js';
 import { datasetPath, getPlan, planSteps } from '../plans/store.js';
@@ -136,6 +137,8 @@ export interface ReviewBundle {
   artifacts: { run_id: string; files: ArtifactManifest['files']; skipped: string[]; head_sha: string | null } | null;
   plan: { id: string; name: string; host: string | null; has_datasets: boolean; dataset_default: string | null } | null;
   can: { trial: boolean; trial_reason: string | null; approve: boolean; approve_reason: string | null; release: boolean; release_reason: string | null; request_changes: boolean };
+  /** gitea_url is set: PRs and releases go through a local Gitea (the page words 交付 by it) */
+  gitea: boolean;
   log_tail: string[];
 }
 
@@ -268,13 +271,19 @@ export function reviewBundle(
       release_reason: releaseReason,
       request_changes: ['review', 'attention', 'failed'].includes(task.status),
     },
+    gitea: !!(getSetting(db, 'gitea_url') ?? '').trim(),
     log_tail: run && verdict === 'in_progress' ? tailLog(run.log_path, 20) : [],
   };
 }
 
 // ---- 核可 / 退回修改 -------------------------------------------------------------------------------
 
-export function approveTask(db: Database.Database, task: Task, by: string): { merged: boolean; detail: string } {
+export async function approveTask(
+  db: Database.Database,
+  task: Task,
+  by: string,
+  deps: { sandboxDeps?: SandboxDeps } = {},
+): Promise<{ merged: boolean; detail: string }> {
   if (task.approved_at) throw new ReviewError(`已由 ${task.approved_by} 核可`);
   if (task.status !== 'review') throw new ReviewError('要等任務進到「待驗收」（看板上的「待結案」）才能核可');
   const unchecked = checklistFor(db, task).filter((c) => !c.checked);
@@ -282,14 +291,17 @@ export function approveTask(db: Database.Database, task: Task, by: string): { me
   let merged = false;
   let detail = task.merge_status === 'merged' ? `已在 ${task.base_branch}` : '沒有要合併的（由 Gitea PR 合併）';
   if ((task.merge_status === 'pending' || task.merge_status === 'conflict') && task.repo_path && task.base_branch) {
-    const run = latestRun(db, task.id);
-    const gitDir = run?.worktree_path && fs.existsSync(run.worktree_path) ? run.worktree_path : task.repo_path;
-    const r = integrateIntoBase(task.repo_path, gitDir, `loop/${task.id}`, task.base_branch);
-    db.prepare('UPDATE tasks SET merge_status = ? WHERE id = ?').run(r.outcome, task.id);
-    logEvent(db, { task_id: task.id, kind: 'merge', detail: `核可時合併（${by}）：${r.detail}` });
+    // the same merge as the board's 合併: latest base in, re-verified, then fast-forwarded
+    let r: MergeResult;
+    try {
+      r = await mergeReviewedTask(db, task, { by: `核可：${by}`, sandboxDeps: deps.sandboxDeps });
+    } catch (err) {
+      if (err instanceof MergeInProgressError) throw new ReviewError(err.message);
+      throw err;
+    }
     if (r.outcome !== 'merged') throw new ReviewError(`合併沒有成功：${r.detail}`);
     merged = true;
-    detail = `已合併到 ${task.base_branch}`;
+    detail = r.detail;
   }
   db.prepare("UPDATE tasks SET approved_by = ?, approved_at = datetime('now') WHERE id = ?").run(by, task.id);
   logEvent(db, { task_id: task.id, kind: 'note', detail: `核可（${by}）：${detail}` });
@@ -355,6 +367,29 @@ export function removeTrialWorkspace(task: Task): void {
   } catch {
     /* best effort */
   }
+}
+
+/**
+ * `loop verify <task>`: run a finished task's command verification again, now, on its code — its
+ * worktree, or the 試跑 checkout of the commit it was verified at — and record it on the latest
+ * run, so 結果 shows it and a pass collects the 產出物. Status and merge state stay as they are.
+ * For work verified before the engine kept these records, or worth checking again after the
+ * environment changed (e.g. Nsight Compute counters were enabled on the host).
+ */
+export async function reverifyTask(
+  db: Database.Database,
+  task: Task,
+  deps: { sandboxDeps?: SandboxDeps } = {},
+): Promise<{ ok: boolean; ran: boolean; detail: string; workspace: string }> {
+  if (['running', 'verifying', 'queued'].includes(task.status)) throw new ReviewError('任務執行中，結束後才能重新驗證');
+  const run = latestRun(db, task.id);
+  if (!run) throw new ReviewError('這個任務還沒有執行紀錄');
+  const dir = run.worktree_path && fs.existsSync(run.worktree_path) ? run.worktree_path : trialWorkspace(db, task);
+  const gate = await runVerifyGate(db, task, dir, run.id, task.base_branch, deps.sandboxDeps);
+  if (!gate.failure && gate.ran) await collectTaskArtifacts(db, task, run.id, dir);
+  const detail = gate.failure ? `沒有通過：${gate.failure.failedStep ?? '驗證'}` : gate.ran ? '驗證步驟都通過' : '沒有可以自動執行的驗證步驟';
+  logEvent(db, { task_id: task.id, run_id: run.id, kind: 'note', detail: `重新驗證（loop verify）：${detail}` });
+  return { ok: !gate.failure, ran: gate.ran, detail, workspace: dir };
 }
 
 export interface Trial {

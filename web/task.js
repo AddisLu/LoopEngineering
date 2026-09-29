@@ -231,7 +231,7 @@
       const base = t.base_branch || 'base';
       const label = t.merge_status === 'pending' || t.merge_status === 'conflict' ? `核可並合併到 ${base}` : '核可';
       box.appendChild(actionButton(label, 'primary', approve, b.can.approve ? null : b.can.approve_reason));
-      box.appendChild(el('div', 'hint', b.can.approve ? '核可後原始碼進 Gitea 的分支，才能發佈或下載交付包。' : b.can.approve_reason || ''));
+      box.appendChild(el('div', 'hint', b.can.approve ? approveHint(b) : b.can.approve_reason || ''));
     } else {
       box.appendChild(el('div', 'pill ok', `已由 ${t.approved_by} 核可 · ${localTime(t.approved_at)}`));
       const grid = el('div', 'grid2');
@@ -264,7 +264,27 @@
     if (links.childNodes.length) box.appendChild(links);
   }
 
+  /** What 核可 does on this host: where the code goes, and what delivery needs afterwards. */
+  function approveHint(b) {
+    const t = b.task;
+    const base = t.base_branch || 'main';
+    const merge =
+      t.merge_status === 'pending' || t.merge_status === 'conflict'
+        ? `核可時會先把最新的 ${base} 併進任務分支並重新驗證，通過才合併。`
+        : t.merge_status === 'merged'
+          ? `程式碼已經在 ${base}。`
+          : b.gitea
+            ? '程式碼由 Gitea 的 PR 合併。'
+            : '';
+    const deliver = b.gitea ? '核可後才能發佈到 Gitea 或下載交付包。' : '核可後可以下載交付包（有收集到產出物時）。';
+    return merge + deliver;
+  }
+
   async function approve() {
+    const b = bundle;
+    if (b && (b.task.merge_status === 'pending' || b.task.merge_status === 'conflict')) {
+      toast('合併前重新驗證中，會花一點時間…');
+    }
     try {
       const r = await api(`/api/tasks/${encodeURIComponent(id)}/approve`, 'POST', {});
       toast(`已核可：${r.detail}`);

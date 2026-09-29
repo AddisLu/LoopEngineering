@@ -58,6 +58,19 @@
     try { await api(path); }
     catch (e) { alert('操作失敗: ' + e); }
   }
+  // 合併 first brings the latest base into the task branch and re-verifies it, so it can take a
+  // while and can decline: say so instead of letting the card silently stay where it was.
+  async function mergeTask(id, button) {
+    if (button) { button.disabled = true; button.textContent = '合併中…'; }
+    try {
+      const r = await api(`/api/tasks/${id}/merge`);
+      if (r && r.outcome && r.outcome !== 'merged') alert(`沒有合併：${r.detail}`);
+    } catch (e) {
+      alert('合併失敗: ' + e);
+    } finally {
+      if (button && button.isConnected) { button.disabled = false; button.textContent = '合併'; }
+    }
+  }
   // Permanent delete with a confirm gate. The SSE stream drops the card on the next tick.
   // Returns true if the task was actually deleted.
   async function delTask(id, title) {
@@ -310,7 +323,7 @@
     if (c.status === 'review') {
       if (c.pr_url) actions.appendChild(btn('看 PR', '', () => window.open(c.pr_url, '_blank', 'noopener')));
       if (c.merge_status === 'pending' || c.merge_status === 'conflict')
-        actions.appendChild(btn('合併', '', () => act(`/api/tasks/${c.id}/merge`)));
+        actions.appendChild(btn('合併', '', (ev) => mergeTask(c.id, ev.currentTarget)));
       actions.appendChild(btn('結案', '', () => act(`/api/tasks/${c.id}/close`)));
     }
     if (c.status === 'failed') {

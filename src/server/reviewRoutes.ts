@@ -103,7 +103,7 @@ export function registerReviewRoutes(app: FastifyInstance, db: Database.Database
     const c = ctx(req, reply);
     if (!c) return;
     try {
-      return approveTask(db, c.task, c.who.label);
+      return await approveTask(db, c.task, c.who.label);
     } catch (err) {
       return fail(reply, err);
     }

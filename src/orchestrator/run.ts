@@ -621,88 +621,14 @@ export async function runVerifyPipeline(
   sandboxDeps?: SandboxDeps,
 ): Promise<VerifyPipelineOutcome> {
   const modes = parseVerifyMode(task);
-  const timeoutMs = (task.verify_timeout_min ?? getNum(db, 'verify_step_timeout_min', 10)) * 60_000;
   let needsManual = modes.has('manual');
 
-  // hardware/environment awareness: this host may lack a capability the task requires
-  // (e.g. camera for AOI) — command verification can't meaningfully run here, so skip it
-  // and defer to manual instead of failing. Zero-impact when requires is null/all-met.
-  // A task's `environment` (e.g. 'company') additionally contributes that environments
-  // row's `capabilities` (e.g. os:windows) into the same check — promoting environment
-  // from a knowledge label to something the verify pipeline actually understands.
-  const envCaps = task.environment ? (getEnvironment(db, task.environment)?.capabilities ?? '') : '';
-  const extraRequires = envCaps.split(',').map((s) => s.trim()).filter(Boolean);
-  const unmet = unmetCapabilities(task, getSetting(db, 'host_capabilities') ?? '', extraRequires);
-  if (unmet.length > 0) {
-    logEvent(db, {
-      task_id: task.id,
-      run_id: runId,
-      kind: 'note',
-      detail: `capability(s) unavailable here: ${unmet.join(',')} → command verification skipped, deferred to manual`,
-    });
-    modes.delete('command');
-    needsManual = true;
+  const gate = await runVerifyGate(db, task, worktree, runId, base, sandboxDeps);
+  if (gate.failure) {
+    handleVerifyFailure(db, task, runId, worktree, gate.failure);
+    return 'fail';
   }
-
-  // 保護路徑: the evaluation, golden data etc. must be exactly what the base has — checked before
-  // anything runs, whatever the verify mode, so a "fix" to the yardstick never gets measured
-  const protectedGlobs = parseProtected(task.protected_paths);
-  if (protectedGlobs.length && base) {
-    let touched: string[] = [];
-    try {
-      touched = protectedViolations(worktree, baseRefFor(worktree, base), protectedGlobs);
-    } catch (err) {
-      logEvent(db, { task_id: task.id, run_id: runId, kind: 'note', detail: `protected-path check skipped: ${String(err).slice(0, 200)}` });
-    }
-    if (touched.length) {
-      const out = `這些受保護的檔案被改動了，請還原（git checkout ${base} -- <檔案>）再完成任務：\n${touched.map((f) => `- ${f}`).join('\n')}\n受保護的範圍：${protectedGlobs.join(', ')}`;
-      recordVerification(db, runId, [{ step: '保護路徑', ok: false, exitCode: null, timedOut: false, output: out }], null, worktree, base);
-      handleVerifyFailure(db, task, runId, worktree, { ok: false, results: [{ step: '保護路徑', ok: false, exitCode: null, timedOut: false, output: out }], failedStep: '保護路徑' });
-      return 'fail';
-    }
-  }
-
-  let specs: MetricSpec[] = [];
-  try {
-    specs = parseAcceptance(task.acceptance_metrics);
-  } catch (err) {
-    logEvent(db, { task_id: task.id, run_id: runId, kind: 'note', detail: `acceptance_metrics ignored: ${(err as Error).message}` });
-  }
-
-  if (modes.has('command') && parseSteps(task).length > 0) {
-    // `sandbox:` steps run in the same GPU 沙盒 the agent had — null when exec is off, so such
-    // a step fails with a clear message instead of silently running on the host
-    const sandbox = sandboxSettings(db);
-    const vres = await runVerification(
-      task,
-      worktree,
-      timeoutMs,
-      { shellSetting: getSetting(db, 'shell') },
-      // the task's remote workspace is shared with the agent's own runs (same key): incremental builds
-      sandbox.enabled ? verifySandboxRunner(sandbox, sandboxDeps, (name) => resolveExecTarget(db, name), `task-${task.id}`) : null,
-    );
-    // 驗收指標: whatever the steps reported, compared with the task's thresholds by the engine
-    const metrics = specs.length || vres.results.some((r) => r.output.includes('LOOP_METRICS'))
-      ? evaluateAcceptance(specs, extractMetrics(vres.results.map((r) => r.output)))
-      : null;
-    recordVerification(db, runId, vres.results, metrics, worktree, base);
-    if (!vres.ok) {
-      handleVerifyFailure(db, task, runId, worktree, vres);
-      return 'fail';
-    }
-    if (metrics && !metrics.pass) {
-      const out = `驗收指標未達標（門檻由任務設定，不在 repo 裡）：\n${formatAcceptance(metrics)}`;
-      handleVerifyFailure(db, task, runId, worktree, { ok: false, results: [...vres.results, { step: '驗收指標', ok: false, exitCode: null, timedOut: false, output: out }], failedStep: '驗收指標' });
-      return 'fail';
-    }
-    if (metrics?.checks.length) {
-      logEvent(db, { task_id: task.id, run_id: runId, kind: 'note', detail: `驗收指標通過：${metrics.checks.map((c) => `${c.name}=${c.actual}`).join('，')}` });
-    }
-  } else if (specs.length) {
-    // thresholds that could not be measured here are a human's to check, never a silent pass
-    logEvent(db, { task_id: task.id, run_id: runId, kind: 'note', detail: `驗收指標未檢查（沒有執行 command 驗證）：${formatSpecs(specs)} → 人工驗收` });
-    needsManual = true;
-  }
+  if (gate.manual) needsManual = true;
 
   if (modes.has('llm')) {
     const judged = await runLlmJudge(db, task, worktree, base, judgeExec);
@@ -721,6 +647,117 @@ export async function runVerifyPipeline(
   return needsManual ? 'manual' : 'pass';
 }
 
+export interface VerifyGateResult {
+  /** what failed, shaped for handleVerifyFailure — null when nothing did */
+  failure: VerifyResult | null;
+  /** something could not be checked here (a missing capability, thresholds with no steps): a human's call */
+  manual: boolean;
+  /** the command steps actually ran, so their results are on the run */
+  ran: boolean;
+}
+
+/**
+ * The deterministic half of verification — host capabilities, 保護路徑, the command steps (on the
+ * host or in the GPU 沙盒) and 驗收指標 — recorded on the run (verify_json, metrics_json, verified
+ * SHAs). It routes nothing: runVerifyPipeline turns a failure into blocked/attention, while the
+ * review page's 合併/核可 and `loop verify` re-verify with it and leave the task where it is.
+ */
+export async function runVerifyGate(
+  db: Database.Database,
+  task: Task,
+  worktree: string,
+  runId: string,
+  base: string | null,
+  sandboxDeps?: SandboxDeps,
+): Promise<VerifyGateResult> {
+  const timeoutMs = (task.verify_timeout_min ?? getNum(db, 'verify_step_timeout_min', 10)) * 60_000;
+  let runCommands = parseVerifyMode(task).has('command');
+  let manual = false;
+
+  // hardware/environment awareness: this host may lack a capability the task requires
+  // (e.g. camera for AOI) — command verification can't meaningfully run here, so skip it
+  // and defer to manual instead of failing. Zero-impact when requires is null/all-met.
+  // A task's `environment` (e.g. 'company') additionally contributes that environments
+  // row's `capabilities` (e.g. os:windows) into the same check — promoting environment
+  // from a knowledge label to something the verify pipeline actually understands.
+  const envCaps = task.environment ? (getEnvironment(db, task.environment)?.capabilities ?? '') : '';
+  const extraRequires = envCaps.split(',').map((s) => s.trim()).filter(Boolean);
+  const unmet = unmetCapabilities(task, getSetting(db, 'host_capabilities') ?? '', extraRequires);
+  if (unmet.length > 0) {
+    logEvent(db, {
+      task_id: task.id,
+      run_id: runId,
+      kind: 'note',
+      detail: `capability(s) unavailable here: ${unmet.join(',')} → command verification skipped, deferred to manual`,
+    });
+    runCommands = false;
+    manual = true;
+  }
+
+  // 保護路徑: the evaluation, golden data etc. must be exactly what the base has — checked before
+  // anything runs, whatever the verify mode, so a "fix" to the yardstick never gets measured
+  const protectedGlobs = parseProtected(task.protected_paths);
+  if (protectedGlobs.length && base) {
+    let touched: string[] = [];
+    try {
+      touched = protectedViolations(worktree, baseRefFor(worktree, base), protectedGlobs);
+    } catch (err) {
+      logEvent(db, { task_id: task.id, run_id: runId, kind: 'note', detail: `protected-path check skipped: ${String(err).slice(0, 200)}` });
+    }
+    if (touched.length) {
+      const out = `這些受保護的檔案被改動了，請還原（git checkout ${base} -- <檔案>）再完成任務：\n${touched.map((f) => `- ${f}`).join('\n')}\n受保護的範圍：${protectedGlobs.join(', ')}`;
+      const step = { step: '保護路徑', ok: false, exitCode: null, timedOut: false, output: out };
+      recordVerification(db, runId, [step], null, worktree, base);
+      return { failure: { ok: false, results: [step], failedStep: '保護路徑' }, manual, ran: false };
+    }
+  }
+
+  let specs: MetricSpec[] = [];
+  try {
+    specs = parseAcceptance(task.acceptance_metrics);
+  } catch (err) {
+    logEvent(db, { task_id: task.id, run_id: runId, kind: 'note', detail: `acceptance_metrics ignored: ${(err as Error).message}` });
+  }
+
+  if (runCommands && parseSteps(task).length > 0) {
+    // `sandbox:` steps run in the same GPU 沙盒 the agent had — null when exec is off, so such
+    // a step fails with a clear message instead of silently running on the host
+    const sandbox = sandboxSettings(db);
+    const vres = await runVerification(
+      task,
+      worktree,
+      timeoutMs,
+      { shellSetting: getSetting(db, 'shell') },
+      // the task's remote workspace is shared with the agent's own runs (same key): incremental builds
+      sandbox.enabled ? verifySandboxRunner(sandbox, sandboxDeps, (name) => resolveExecTarget(db, name), `task-${task.id}`) : null,
+    );
+    // 驗收指標: whatever the steps reported, compared with the task's thresholds by the engine
+    const metrics = specs.length || vres.results.some((r) => r.output.includes('LOOP_METRICS'))
+      ? evaluateAcceptance(specs, extractMetrics(vres.results.map((r) => r.output)))
+      : null;
+    recordVerification(db, runId, vres.results, metrics, worktree, base);
+    if (!vres.ok) return { failure: vres, manual, ran: true };
+    if (metrics && !metrics.pass) {
+      const out = `驗收指標未達標（門檻由任務設定，不在 repo 裡）：\n${formatAcceptance(metrics)}`;
+      return {
+        failure: { ok: false, results: [...vres.results, { step: '驗收指標', ok: false, exitCode: null, timedOut: false, output: out }], failedStep: '驗收指標' },
+        manual,
+        ran: true,
+      };
+    }
+    if (metrics?.checks.length) {
+      logEvent(db, { task_id: task.id, run_id: runId, kind: 'note', detail: `驗收指標通過：${metrics.checks.map((c) => `${c.name}=${c.actual}`).join('，')}` });
+    }
+    return { failure: null, manual, ran: true };
+  }
+  if (specs.length) {
+    // thresholds that could not be measured here are a human's to check, never a silent pass
+    logEvent(db, { task_id: task.id, run_id: runId, kind: 'note', detail: `驗收指標未檢查（沒有執行 command 驗證）：${formatSpecs(specs)} → 人工驗收` });
+    manual = true;
+  }
+  return { failure: null, manual, ran: false };
+}
+
 /**
  * What the last verification of a run found, for the morning report, the PR body and the review
  * page — and which code it looked at (HEAD and its merge-base with the base branch), so the
@@ -735,12 +772,20 @@ function recordVerification(
   base: string | null,
 ): void {
   try {
+    let shas: { head_sha?: string | null; base_sha?: string | null } = base ? verifiedShas(worktree, base) : {};
+    // Checking work that is already in base again (`loop verify` on a merged task) measures a diff of
+    // nothing — HEAD is its own merge-base. Keep the commits an earlier verification recorded, so the
+    // review page still shows what the task changed.
+    if (shas.head_sha && shas.head_sha === shas.base_sha) {
+      const prev = getRun(db, runId);
+      if (prev?.head_sha && prev.base_sha) shas = {};
+    }
     updateRun(db, runId, {
       verify_json: JSON.stringify(
         results.map((r) => ({ step: r.step, ok: r.ok, exitCode: r.exitCode, timedOut: r.timedOut, tail: r.output.replace(/\s+$/, '').slice(-600) })),
       ),
       metrics_json: metrics ? JSON.stringify(metrics) : null,
-      ...(base ? verifiedShas(worktree, base) : {}),
+      ...shas,
     });
   } catch {
     /* reporting only — never fail a verification over it */
@@ -748,7 +793,7 @@ function recordVerification(
 }
 
 /** 產出物 of a passing run; never fails the task over it. */
-async function collectTaskArtifacts(db: Database.Database, task: Task, runId: string, worktree: string): Promise<void> {
+export async function collectTaskArtifacts(db: Database.Database, task: Task, runId: string, worktree: string): Promise<void> {
   if (!artifactGlobs(task).length) return;
   try {
     await collectArtifacts(db, task, getRun(db, runId)!, worktree);

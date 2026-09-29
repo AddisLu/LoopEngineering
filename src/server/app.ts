@@ -13,11 +13,10 @@ import { readUsage } from '../token/usage.js';
 import { killRun } from '../orchestrator/kill.js';
 import { cleanupWorktree, resetTaskWorkspace } from '../orchestrator/cleanup.js';
 import { pruneTaskArtifacts } from '../git/worktree.js';
-import { integrateIntoBase } from '../git/integrate.js';
+import { mergeReviewedTask, MergeInProgressError } from '../orchestrator/mergeFlow.js';
 import { updateVerification, TaskEditError, type VerificationPatch } from '../taskEdit.js';
 import { identityOf, IdentityError } from './identity.js';
 import { latestRun } from '../tasks.js';
-import fs from 'node:fs';
 import { boardState, taskResult } from './board.js';
 import { forecastBacklog } from '../token/accounting.js';
 import { computeMetrics } from './metrics.js';
@@ -357,9 +356,9 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
     return { ok: true };
   });
 
-  // Manual integrate for a task left at merge_status pending/conflict (e.g. no-gh host,
-  // or a conflict that has since been resolved on base). Resolves gitDir to the run
-  // worktree if it still exists, else the repo, so it works after worktree cleanup.
+  // Manual integrate for a task left at merge_status pending/conflict (e.g. no-gh host, a
+  // manual verify outcome, or a base that moved on after the task finished): brings the latest
+  // base in, re-verifies when that changed the branch, then fast-forwards (orchestrator/mergeFlow).
   app.post('/api/tasks/:id/merge', async (req, reply) => {
     const id = (req.params as any).id;
     const t = getTask(db, id);
@@ -370,13 +369,12 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
       return reply.code(409).send({ error: 'task not awaiting merge', merge_status: t.merge_status });
     if (!t.repo_path || !t.base_branch)
       return reply.code(409).send({ error: 'task has no repo/base' });
-    const branch = `loop/${t.id}`;
-    const run = latestRun(db, id);
-    const gitDir = run?.worktree_path && fs.existsSync(run.worktree_path) ? run.worktree_path : t.repo_path;
-    const r = integrateIntoBase(t.repo_path, gitDir, branch, t.base_branch);
-    db.prepare('UPDATE tasks SET merge_status = ? WHERE id = ?').run(r.outcome, id);
-    if (r.outcome === 'merged') cleanupWorktree(db, t);
-    return { outcome: r.outcome, detail: r.detail };
+    try {
+      return await mergeReviewedTask(db, t);
+    } catch (err) {
+      if (err instanceof MergeInProgressError) return reply.code(409).send({ error: err.message });
+      throw err;
+    }
   });
 
   app.post('/api/tasks/:id/close', async (req, reply) => {
