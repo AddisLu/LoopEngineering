@@ -41,12 +41,13 @@ __global__ void vec_mul(const float *a, const float *b, float *c, int n) {
     }
 }
 
-// b is shifted by +1.0f before dividing so the denominator can never land on
-// (or straddle) zero for the random inputs generated below, avoiding NaN/Inf.
+// b[] is generated as fabsf(cosf(i * 0.013f)) + 1.0f, i.e. always in [1, 2],
+// so the denominator stays > 0.5 by construction and division can never hit
+// (or straddle) zero — no NaN/Inf, no near-zero blow-ups.
 __global__ void vec_div(const float *a, const float *b, float *c, int n) {
     for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < n;
          i += blockDim.x * gridDim.x) {
-        c[i] = fdividef(a[i], b[i] + 1.0f);
+        c[i] = fdividef(a[i], b[i]);
     }
 }
 
@@ -60,7 +61,7 @@ static bool verify(const char *name, const float *c_gpu, const float *a,
             case '+': ref = a[i] + b[i]; break;
             case '-': ref = a[i] - b[i]; break;
             case '*': ref = a[i] * b[i]; break;
-            case '/': ref = a[i] / (b[i] + 1.0f); break;
+            case '/': ref = a[i] / b[i]; break;
             default:  ref = 0.0f; break;
         }
         double err = fabs((double)c_gpu[i] - (double)ref);
@@ -97,7 +98,8 @@ int main(int argc, char **argv) {
     srand(42);
     for (int i = 0; i < n; ++i) {
         h_a[i] = (float)rand() / (float)RAND_MAX * 10.0f - 5.0f;
-        h_b[i] = (float)rand() / (float)RAND_MAX * 10.0f - 5.0f;
+        // Deterministic, strictly positive: [1, 2] — safe vec_div denominator.
+        h_b[i] = fabsf(cosf((float)i * 0.013f)) + 1.0f;
     }
 
     float *d_a, *d_b, *d_c;
