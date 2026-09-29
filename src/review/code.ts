@@ -72,6 +72,17 @@ export function codeRefFor(db: Database.Database, task: Task): CodeRef | null {
       mb = null;
     }
     const verified = runs.find((r) => r.base_sha);
+    // once 核可 fast-forwarded base onto this branch the merge-base is HEAD itself and the diff
+    // would be empty: measure from the base the verification ran on instead
+    if (mb && verified?.base_sha && verified.base_sha !== mb && exists(wt, verified.base_sha)) {
+      let head: string | null = null;
+      try {
+        head = git(wt, ['rev-parse', 'HEAD']).trim();
+      } catch {
+        head = null;
+      }
+      if (head === mb) mb = verified.base_sha;
+    }
     return { gitDir: wt, head: 'HEAD', base: mb ?? verified?.base_sha ?? baseRefFor(wt, base), worktree: wt };
   }
   if (!fs.existsSync(task.repo_path)) return null;

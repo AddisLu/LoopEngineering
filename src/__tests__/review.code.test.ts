@@ -100,6 +100,15 @@ describe('reading a task\'s code', () => {
     expect(fileDiff(ref)).toContain('+__global__ void sub() {}');
   });
 
+  it('after 核可 fast-forwarded base while the worktree is still there (approved, not yet closed)', () => {
+    const { repo, wt, task } = fixture();
+    git(repo, 'merge', '-q', '--ff-only', `loop/${task.id}`);
+    const ref = codeRefFor(db, task)!;
+    expect(ref.worktree).toBe(wt);
+    expect(changedFiles(ref).map((f) => `${f.status} ${f.path}`)).toEqual(['M kernel.cu', 'D old.txt', 'A run.sh', 'A VERIFY.md']);
+    expect(fileDiff(ref, 'kernel.cu')).toContain('+__global__ void sub() {}');
+  });
+
   it('refuses paths outside the repo and flags binary files', () => {
     const { wt, task } = fixture();
     fs.writeFileSync(path.join(wt, 'blob.bin'), Buffer.from([0, 1, 2, 3]));
