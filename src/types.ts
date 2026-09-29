@@ -36,6 +36,8 @@ export interface Task {
   created_by: string | null; // team-prep: unused passthrough, reserves the multi-user path
   experiment: string | null; // A/B cohort label (SDD Phase 1); write-only from intake, read only by metrics.experiment_ab
   benchmark_id: string | null; // benchmark mode: this task is one arm of benchmarks.id (never integrates; judged)
+  acceptance_metrics?: string | null; // 驗收指標: e.g. "detection_rate >= 0.98; miss == 0" (src/orchestrator/acceptance.ts)
+  protected_paths?: string | null; // 保護路徑: CSV globs the agent must not change (e.g. scripts/eval/**)
   created_at: string;
   updated_at: string;
 }
@@ -64,6 +66,8 @@ export interface TaskRun {
   tokens_in: number | null; // 本地模型: tokens parsed from the adapter stream (null = not reported)
   tokens_out: number | null;
   backend: string | null; // adapter that ran it: claude-code | opencode | mock
+  verify_json?: string | null; // last verification: [{step, ok, exitCode, timedOut, tail}] (+ skipped note)
+  metrics_json?: string | null; // last metrics: {values, checks[{name, op, target, actual, pass}], pass}
   started_at: string;
   finished_at: string | null;
 }

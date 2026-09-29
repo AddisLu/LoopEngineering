@@ -32,6 +32,8 @@ export interface NewTaskInput {
   source_ref?: string | null;
   experiment?: string | null;
   benchmark_id?: string | null;
+  acceptance_metrics?: string | null;
+  protected_paths?: string | null;
 }
 
 export function createTask(db: Database.Database, input: NewTaskInput): Task {
@@ -40,11 +42,11 @@ export function createTask(db: Database.Database, input: NewTaskInput): Task {
     `INSERT INTO tasks (id, title, goal, plan_ref, plan_kind, coding_tool, verification_steps,
        setup_cmd, repo_path, base_branch, complexity, priority, model, timeout_min, depends_on, environment,
        verify_mode, verify_rubric, verify_timeout_min, requires, owner, created_by, parent_id,
-       pipeline_id, stage_name, source_ref, experiment, benchmark_id, status)
+       pipeline_id, stage_name, source_ref, experiment, benchmark_id, acceptance_metrics, protected_paths, status)
      VALUES (@id, @title, @goal, @plan_ref, @plan_kind, @coding_tool, @verification_steps,
        @setup_cmd, @repo_path, @base_branch, @complexity, @priority, @model, @timeout_min, @depends_on, @environment,
        @verify_mode, @verify_rubric, @verify_timeout_min, @requires, @owner, @created_by, @parent_id,
-       @pipeline_id, @stage_name, @source_ref, @experiment, @benchmark_id, 'draft')`,
+       @pipeline_id, @stage_name, @source_ref, @experiment, @benchmark_id, @acceptance_metrics, @protected_paths, 'draft')`,
   ).run({
     id,
     title: input.title,
@@ -74,6 +76,8 @@ export function createTask(db: Database.Database, input: NewTaskInput): Task {
     source_ref: input.source_ref ?? null,
     experiment: input.experiment ?? null,
     benchmark_id: input.benchmark_id ?? null,
+    acceptance_metrics: input.acceptance_metrics?.trim() || null,
+    protected_paths: input.protected_paths?.trim() || null,
   });
   logEvent(db, { task_id: id, kind: 'status', to_status: 'draft', detail: 'created' });
   return getTask(db, id)!;

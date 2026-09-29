@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import type { Task } from '../types.js';
 import { parseSteps, parseVerifyMode } from '../types.js';
 import { unmetCapabilities } from '../capabilities.js';
+import { parseAcceptance } from '../orchestrator/acceptance.js';
 import type { EnvironmentRow } from '../deploy/store.js';
 
 export interface GateResult {
@@ -69,6 +70,17 @@ export function validateTask(task: Task, hostCaps = '', envs?: Map<string, Envir
   }
   if (modes.has('llm') && (!task.verify_rubric || !task.verify_rubric.trim())) {
     missing.push('verify_rubric');
+  }
+  // 驗收指標 are measured by a command step that prints LOOP_METRICS — without one, nothing can
+  // ever be compared (a manual mode still gets them as a human checklist, see run.ts)
+  if (task.acceptance_metrics?.trim()) {
+    try {
+      if (parseAcceptance(task.acceptance_metrics).length && modes.has('command') && parseSteps(task).length === 0) {
+        missing.push('verification_steps (驗收指標需要一個會印出 LOOP_METRICS 的驗證步驟)');
+      }
+    } catch (err) {
+      missing.push(`acceptance_metrics (${(err as Error).message})`);
+    }
   }
 
   // repo checks are skipped for the mock and generic tools (mock runs in a scratch dir,

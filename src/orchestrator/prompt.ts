@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Task } from '../types.js';
 import { parseSteps, parseVerifyMode } from '../types.js';
+import { parseAcceptance, parseProtected } from './acceptance.js';
 
 /** Resolve the plan content to inline into LOOP_TASK.md (best effort). */
 function planContent(task: Task): string {
@@ -85,6 +86,23 @@ export function writeTaskFile(
   const acceptanceBlock = task.verify_rubric?.trim()
     ? `\n## 驗收標準 (Acceptance)\n${task.verify_rubric.trim()}\n`
     : '';
+  // 驗收指標 / 保護路徑: the engine checks these itself — the agent has to know the target and the
+  // one line to print, and that the yardstick is off limits
+  let metricSpecs: ReturnType<typeof parseAcceptance> = [];
+  try {
+    metricSpecs = parseAcceptance(task.acceptance_metrics);
+  } catch {
+    metricSpecs = [];
+  }
+  const metricsBlock = metricSpecs.length
+    ? `\n## 驗收指標（引擎自動檢查，門檻不在 repo 裡）\n` +
+      metricSpecs.map((m) => `- \`${m.name} ${m.op} ${m.target}\``).join('\n') +
+      `\n驗證步驟（通常是圖庫評估）必須印出一行 \`LOOP_METRICS {"${metricSpecs[0]!.name}": 數值, …}\`（JSON，放在輸出最後）；引擎據此判定，未達標會把對照表交回給你繼續改。\n`
+    : '';
+  const protectedList = parseProtected(task.protected_paths);
+  const protectedBlock = protectedList.length
+    ? `\n## 保護路徑（不得修改）\n${protectedList.map((g) => `- \`${g}\``).join('\n')}\n這些是量尺（評估程式、標準答案、設定）：改到任何一個，驗證直接失敗。要改的是演算法，不是量尺。\n`
+    : '';
   const manualRule = modes.has('manual')
     ? '\n- 你可能無法在此環境完整驗證（缺硬體/非目標 OS）。盡量自動驗證能驗的部分，並在 repo 根目錄寫一份 `VERIFY.md`：列出你做了什麼、還有哪些必須在目標環境（硬體/公司 Windows）手動驗證的具體步驟與預期結果。'
     : '';
@@ -122,7 +140,7 @@ ${planContent(task)}
 
 ## Verification steps (must all pass before you finish)
 ${steps.map((s) => `- \`${s}\``).join('\n') || '- (none)'}
-${acceptanceBlock}
+${acceptanceBlock}${metricsBlock}${protectedBlock}
 ## Rules
 - Only modify files needed for this task; do not touch anything outside its scope.
 - Commit your work in small, conventional commits.

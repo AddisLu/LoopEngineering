@@ -147,6 +147,8 @@ interface CreateTaskBody {
   verify_timeout_min?: number | null;
   requires?: string | null;
   experiment?: string | null;
+  acceptance_metrics?: string | null;
+  protected_paths?: string | null;
 }
 
 export function buildApp(opts: AppOptions = {}): FastifyInstance {
@@ -251,6 +253,8 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
       verify_timeout_min: b.verify_timeout_min ?? null,
       requires: b.requires ?? null,
       experiment: b.experiment ?? null,
+      acceptance_metrics: b.acceptance_metrics ?? null,
+      protected_paths: b.protected_paths ?? null,
     });
     return { task: t, gate: validateTask(t, getSetting(db, 'host_capabilities') ?? '', environmentMap(db)) };
   });

@@ -22,14 +22,14 @@ import { writeTaskFile, writeResumeContext, collectResumeContext } from './promp
 import { knowledgeContext, ragTaskContext } from '../knowledge/context.js';
 import type { EmbedExec } from '../knowledge/embed.js';
 import { writeSettingsLocal } from './settingsLocal.js';
-import { runVerification, type VerifyResult } from './verify.js';
+import { runVerification, type VerifyResult, type VerifyStepResult } from './verify.js';
 import { resolveShell, runShell } from '../util/shell.js';
 import { runLlmJudge, type JudgeExec } from './judge.js';
 import { parseSteps, parseVerifyMode } from '../types.js';
 import { unmetCapabilities } from '../capabilities.js';
 import { runGapReview } from '../review/gapReviewer.js';
 import { createPr } from '../git/pr.js';
-import { syncWithBase, pushBranch, stripLoopArtifacts, integrateIntoBase } from '../git/integrate.js';
+import { syncWithBase, pushBranch, stripLoopArtifacts, integrateIntoBase, baseRefFor } from '../git/integrate.js';
 import { createMergeTask } from './mergeTask.js';
 import { cleanupWorktree } from './cleanup.js';
 import { killRun } from './kill.js';
@@ -44,6 +44,7 @@ import { parseMcpServers, runtimeEnvFor, type McpServerCfg } from '../mcp/config
 import { cleanupTaskMcp, writeTaskMcp, execServerForTask, execToolTimeoutMs, EXEC_SERVER, type TaskMcp } from './taskMcp.js';
 import { sandboxSettings, verifySandboxRunner, type SandboxDeps } from '../exec/sandbox.js';
 import { describeExecHosts, resolveExecTarget } from '../exec/hosts.js';
+import { evaluateAcceptance, extractMetrics, formatAcceptance, formatSpecs, parseAcceptance, parseProtected, protectedViolations, type MetricSpec, type MetricsReport } from './acceptance.js';
 
 /**
  * MCP servers a local-model task may use (mcp_servers_json), with the runtime env the chat page
@@ -635,6 +636,31 @@ export async function runVerifyPipeline(
     needsManual = true;
   }
 
+  // 保護路徑: the evaluation, golden data etc. must be exactly what the base has — checked before
+  // anything runs, whatever the verify mode, so a "fix" to the yardstick never gets measured
+  const protectedGlobs = parseProtected(task.protected_paths);
+  if (protectedGlobs.length && base) {
+    let touched: string[] = [];
+    try {
+      touched = protectedViolations(worktree, baseRefFor(worktree, base), protectedGlobs);
+    } catch (err) {
+      logEvent(db, { task_id: task.id, run_id: runId, kind: 'note', detail: `protected-path check skipped: ${String(err).slice(0, 200)}` });
+    }
+    if (touched.length) {
+      const out = `這些受保護的檔案被改動了，請還原（git checkout ${base} -- <檔案>）再完成任務：\n${touched.map((f) => `- ${f}`).join('\n')}\n受保護的範圍：${protectedGlobs.join(', ')}`;
+      recordVerification(db, runId, [{ step: '保護路徑', ok: false, exitCode: null, timedOut: false, output: out }], null);
+      handleVerifyFailure(db, task, runId, worktree, { ok: false, results: [{ step: '保護路徑', ok: false, exitCode: null, timedOut: false, output: out }], failedStep: '保護路徑' });
+      return 'fail';
+    }
+  }
+
+  let specs: MetricSpec[] = [];
+  try {
+    specs = parseAcceptance(task.acceptance_metrics);
+  } catch (err) {
+    logEvent(db, { task_id: task.id, run_id: runId, kind: 'note', detail: `acceptance_metrics ignored: ${(err as Error).message}` });
+  }
+
   if (modes.has('command') && parseSteps(task).length > 0) {
     // `sandbox:` steps run in the same GPU 沙盒 the agent had — null when exec is off, so such
     // a step fails with a clear message instead of silently running on the host
@@ -647,10 +673,27 @@ export async function runVerifyPipeline(
       // the task's remote workspace is shared with the agent's own runs (same key): incremental builds
       sandbox.enabled ? verifySandboxRunner(sandbox, sandboxDeps, (name) => resolveExecTarget(db, name), `task-${task.id}`) : null,
     );
+    // 驗收指標: whatever the steps reported, compared with the task's thresholds by the engine
+    const metrics = specs.length || vres.results.some((r) => r.output.includes('LOOP_METRICS'))
+      ? evaluateAcceptance(specs, extractMetrics(vres.results.map((r) => r.output)))
+      : null;
+    recordVerification(db, runId, vres.results, metrics);
     if (!vres.ok) {
       handleVerifyFailure(db, task, runId, worktree, vres);
       return 'fail';
     }
+    if (metrics && !metrics.pass) {
+      const out = `驗收指標未達標（門檻由任務設定，不在 repo 裡）：\n${formatAcceptance(metrics)}`;
+      handleVerifyFailure(db, task, runId, worktree, { ok: false, results: [...vres.results, { step: '驗收指標', ok: false, exitCode: null, timedOut: false, output: out }], failedStep: '驗收指標' });
+      return 'fail';
+    }
+    if (metrics?.checks.length) {
+      logEvent(db, { task_id: task.id, run_id: runId, kind: 'note', detail: `驗收指標通過：${metrics.checks.map((c) => `${c.name}=${c.actual}`).join('，')}` });
+    }
+  } else if (specs.length) {
+    // thresholds that could not be measured here are a human's to check, never a silent pass
+    logEvent(db, { task_id: task.id, run_id: runId, kind: 'note', detail: `驗收指標未檢查（沒有執行 command 驗證）：${formatSpecs(specs)} → 人工驗收` });
+    needsManual = true;
   }
 
   if (modes.has('llm')) {
@@ -668,6 +711,20 @@ export async function runVerifyPipeline(
   }
 
   return needsManual ? 'manual' : 'pass';
+}
+
+/** What the last verification of a run found, for the morning report and the PR body. */
+function recordVerification(db: Database.Database, runId: string, results: VerifyStepResult[], metrics: MetricsReport | null): void {
+  try {
+    updateRun(db, runId, {
+      verify_json: JSON.stringify(
+        results.map((r) => ({ step: r.step, ok: r.ok, exitCode: r.exitCode, timedOut: r.timedOut, tail: r.output.replace(/\s+$/, '').slice(-600) })),
+      ),
+      metrics_json: metrics ? JSON.stringify(metrics) : null,
+    });
+  } catch {
+    /* reporting only — never fail a verification over it */
+  }
 }
 
 /** Park a task's merge as pending for a manual verify outcome; returns the review detail. */

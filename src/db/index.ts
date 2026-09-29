@@ -188,6 +188,19 @@ function migrate(db: Database.Database): void {
   db.exec(
     'CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_conversations_share ON chat_conversations(share_token) WHERE share_token IS NOT NULL',
   );
+  // 驗收指標 / 保護路徑 (src/orchestrator/acceptance.ts): thresholds the engine checks against the
+  // metrics a verify step prints (LOOP_METRICS {...}), and globs the agent must not change.
+  // Nullable = neither check runs (zero behavior change).
+  add('tasks', [
+    ['acceptance_metrics', 'TEXT'],
+    ['protected_paths', 'TEXT'],
+  ]);
+  // what the last verification of a run found — steps (ok/exit/tail) and metrics vs thresholds —
+  // for the morning report and the PR body. Nullable = never verified.
+  add('task_runs', [
+    ['verify_json', 'TEXT'],
+    ['metrics_json', 'TEXT'],
+  ]);
 }
 
 function seedSettings(db: Database.Database): void {

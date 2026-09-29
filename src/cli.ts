@@ -63,6 +63,7 @@ import { judgeBenchmark } from './benchmark/complete.js';
 import { checkPrd, submitPrd, PrdInputError, type PrdCheck } from './prd/intake.js';
 import { formatSandboxResult, runSandbox, sandboxSettings, settingsForHost } from './exec/sandbox.js';
 import { checkSandbox, formatCheck } from './exec/check.js';
+import { parseAcceptance } from './orchestrator/acceptance.js';
 import { ensureWorkspace, execRoot } from './exec/workspace.js';
 import { deleteExecHost, getExecHost, listExecHosts, LOCAL_HOST, realHostExec, resolveExecTarget, setHostIds, sshArgs, upsertExecHost, type ExecHost, type ExecTarget } from './exec/hosts.js';
 
@@ -90,8 +91,17 @@ program
   .option('--verify-timeout <min>', 'per-task verify per-step timeout override (minutes)', (v) => parseInt(v, 10))
   .option('--requires <csv>', 'comma-separated capability tokens this task needs (e.g. gpu,camera,os:windows) — unmet ones defer command verification to manual')
   .option('--experiment <tag>', 'A/B cohort label for measurement (see `loop experiment`) — pure tag, does not affect scheduling')
+  .option('--metrics <expr>', '驗收指標 the engine checks against LOOP_METRICS lines, e.g. "detection_rate >= 0.98; miss == 0"')
+  .option('--protect <globs>', '保護路徑: CSV globs the agent must not change, e.g. "scripts/eval/**,data/golden/**"')
   .action((o) => {
     const db = getDb();
+    if (o.metrics) {
+      try {
+        parseAcceptance(String(o.metrics));
+      } catch (err) {
+        return fail((err as Error).message);
+      }
+    }
     const kind = o.plan
       ? /^https?:\/\//i.test(o.plan)
         ? 'url'
@@ -119,6 +129,8 @@ program
       verify_timeout_min: o.verifyTimeout ?? null,
       requires: o.requires ?? null,
       experiment: o.experiment ?? null,
+      acceptance_metrics: o.metrics ?? null,
+      protected_paths: o.protect ?? null,
     });
     const gate = validateTask(getTask(db, t.id)!, getSetting(db, 'host_capabilities') ?? '', environmentMap(db));
     console.log(`created ${t.id} (${t.status})`);
