@@ -51,6 +51,7 @@ import { registerChatRoutes, type ChatRouteOptions } from './chatRoutes.js';
 import { registerExecRoutes } from './execRoutes.js';
 import { registerPlanRoutes, type PlanRouteOptions } from './planRoutes.js';
 import { registerReviewRoutes } from './reviewRoutes.js';
+import { removeTrialWorkspace } from '../review/review.js';
 import { buildMorningReport } from '../report/morning.js';
 import fastifyWebsocket from '@fastify/websocket';
 import { registerTerminalRoutes, type TerminalRouteOptions } from './terminalRoutes.js';
@@ -345,6 +346,7 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
     const material = collectDistillMaterial(db, t);
     setStatus(db, id, 'closed', { detail: 'closed via api' });
     cleanupWorktree(db, t); // work is done — reclaim the worktree's disk
+    removeTrialWorkspace(t); // and the 驗收頁's 試跑 checkout
     // fire-and-forget: never delays this response (see knowledge/distill.ts)
     void runDistiller(db, t, material, opts.distillExec).catch(() => {});
     return { ok: true };

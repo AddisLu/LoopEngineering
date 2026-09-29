@@ -81,12 +81,9 @@ describe('reading a task\'s code', () => {
     const ref = codeRefFor(db, task)!;
     expect(ref.worktree).toBe(wt);
     const files = changedFiles(ref);
-    expect(files).toEqual(expect.arrayContaining([
-      { status: 'M', path: 'kernel.cu' },
-      { status: 'A', path: 'run.sh' },
-      { status: 'D', path: 'old.txt' },
-      { status: 'A', path: 'scratch.txt' },
-    ]));
+    expect(files.map((f) => `${f.status} ${f.path}`)).toEqual(['M kernel.cu', 'D old.txt', 'A run.sh', 'A VERIFY.md']);
+    // what is still untracked after a run is what verification built, not a code change
+    expect(files.some((f) => f.path === 'scratch.txt')).toBe(false);
     expect(readSource(ref, 'kernel.cu')!.text).toContain('sub()');
     expect(readSource(ref, 'kernel.cu', 'base')!.text).not.toContain('sub()');
     expect(fileDiff(ref, 'kernel.cu')).toContain('+__global__ void sub() {}');
@@ -98,7 +95,7 @@ describe('reading a task\'s code', () => {
     git(repo, 'worktree', 'remove', '--force', wt);
     const ref = codeRefFor(db, task)!;
     expect(ref.worktree).toBeNull();
-    expect(changedFiles(ref).map((f) => `${f.status} ${f.path}`).sort()).toEqual(['A VERIFY.md', 'A run.sh', 'D old.txt', 'M kernel.cu']);
+    expect(changedFiles(ref).map((f) => `${f.status} ${f.path}`)).toEqual(['M kernel.cu', 'D old.txt', 'A run.sh', 'A VERIFY.md']);
     expect(readSource(ref, 'kernel.cu')!.from).toMatch(/^[0-9a-f]{40}$/);
     expect(fileDiff(ref)).toContain('+__global__ void sub() {}');
   });

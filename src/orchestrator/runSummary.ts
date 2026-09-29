@@ -75,6 +75,8 @@ export function prBody(task: Task, run: TaskRun | null | undefined, worktree: st
   }
   const manual = readVerifyMd(worktree);
   if (manual) out.push('## 人工驗收（VERIFY.md）', '', manual, '');
+  const publicUrl = (process.env.LOOP_PUBLIC_URL || '').replace(/\/$/, '');
+  if (publicUrl) out.push(`**驗收頁**（程式碼、試跑、人工驗收、交付）：${publicUrl}/task.html?id=${encodeURIComponent(task.id)}`, '');
   out.push('---', `Loop 任務 \`${task.id}\` · 模型 ${task.model ?? '（預設）'}${run ? ` · run \`${run.id}\`（第 ${run.attempt} 次）` : ''}`);
   return out.join('\n');
 }

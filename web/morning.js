@@ -73,7 +73,7 @@
     const title = el('p', 'title');
     title.append(el('span', `chip ${t.outcome}`, `${icon} ${label}`), ' ');
     const a = el('a', null, t.title);
-    a.href = `/board.html#task=${encodeURIComponent(t.id)}`;
+    a.href = `/task.html?id=${encodeURIComponent(t.id)}`;
     title.append(a);
     box.append(title);
 
@@ -119,6 +119,12 @@
       pa.target = '_blank';
       pa.rel = 'noopener';
       links.append(pa);
+    }
+    if (t.outcome !== 'queued' && t.outcome !== 'running') {
+      if (links.childNodes.length) links.append(' · ');
+      const rv = el('a', null, t.outcome === 'attention' || t.outcome === 'failed' ? '看原因、退回修改 →' : '驗收：看程式碼、試跑、勾清單 →');
+      rv.href = `/task.html?id=${encodeURIComponent(t.id)}`;
+      links.append(rv);
     }
     if (links.childNodes.length) box.append(links);
 

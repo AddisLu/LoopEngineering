@@ -88,7 +88,7 @@ export function codeRefFor(db: Database.Database, task: Task): CodeRef | null {
   return mb ? { gitDir: task.repo_path, head: branch, base: mb, worktree: null } : null;
 }
 
-/** Changed files, base..head (plus uncommitted edits while the worktree is live). */
+/** Changed files, base..head (plus uncommitted edits to tracked files while the worktree is live). */
 export function changedFiles(ref: CodeRef, limit = 300): ChangedFile[] {
   const args = ref.worktree ? ['diff', '--name-status', '-M', ref.base] : ['diff', '--name-status', '-M', `${ref.base}..${ref.head}`];
   let out = '';
@@ -106,17 +106,10 @@ export function changedFiles(ref: CodeRef, limit = 300): ChangedFile[] {
     else if (parts[1]) files.push({ status: code, path: parts[1] });
     if (files.length >= limit) break;
   }
-  if (ref.worktree) {
-    // new files the agent has not committed yet (auto-commit happens when the run ends)
-    try {
-      for (const p of git(ref.gitDir, ['ls-files', '--others', '--exclude-standard']).split('\n')) {
-        if (p.trim() && files.length < limit && !files.some((f) => f.path === p)) files.push({ status: 'A', path: p });
-      }
-    } catch {
-      /* listing only */
-    }
-  }
-  return files;
+  // untracked files are left out: once a run ends everything it wrote is committed, so what is
+  // still untracked is what verification built (binaries, reports), not a change to the code
+  // the agent's checklist reads last; the code first
+  return files.sort((a, b) => Number(a.path === 'VERIFY.md') - Number(b.path === 'VERIFY.md') || a.path.toLowerCase().localeCompare(b.path.toLowerCase()));
 }
 
 /** A repo-relative path a caller may ask for: no absolute paths, no .., no backslashes. */
