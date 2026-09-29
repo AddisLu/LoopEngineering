@@ -146,7 +146,7 @@ describe('轉成任務', () => {
     expect(res.statusCode).toBe(201);
     const body = res.json();
     expect(body.kind).toBe('draft');
-    expect(body.url).toBe(`/prd.html?draft=${body.draft.id}`);
+    expect(body.url).toBe(`/flow.html?draft=${body.draft.id}`);
     const draft = getDraft(db, 'ts:addis@example.com', body.draft.id)!;
     const form = JSON.parse(draft.form_json);
     expect(draft.step).toBe(2);

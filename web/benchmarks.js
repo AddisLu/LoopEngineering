@@ -1,6 +1,6 @@
 // 評比 page: every benchmark as a card, one benchmark as a chart dashboard (the design canvas
 // "Loop 介面改版" ⑦–⑨), and 戰績 — which model fits which kind of work. textContent-only.
-import { $, h, icon, api, withToken, mountRail, dur, tokens, tsMs, shortTime } from './frame.js';
+import { $, fill, h, icon, api, withToken, mountRail, dur, tokens, tsMs, shortTime } from './frame.js';
 import { groupedBars, lineChart, dotPlot, scatter, swimlane, outcomeDots, bullet, heatColor, fmtNum, hbars } from './charts.js';
 
 mountRail('bench');
@@ -100,7 +100,7 @@ function pageError(msg) {
 }
 
 function fillTable(table, headers, rows) {
-  table.replaceChildren();
+  fill(table, );
   const thead = h('thead', null, h('tr', null, headers.map((x) => h('th', null, x))));
   const tbody = h('tbody', null, rows);
   table.append(thead, tbody);
@@ -128,12 +128,12 @@ async function paintRunning() {
   const run = summary.running;
   $('running-box').hidden = !run;
   if (!run) return;
-  $('running-line').replaceChildren(
+  fill($('running-line'), 
     h('b', null, run.title),
     h('span.hint', null, `${STATUS[run.status] || run.status} · ${run.arms_done}/${run.arm_count} 組完成 · ${run.models.map(modelName).join('、')}`),
   );
   $('running-box').onclick = () => go(`#b=${run.id}`);
-  $('running-flow').replaceChildren(...progressFlow(run, null));
+  fill($('running-flow'), ...progressFlow(run, null));
 }
 
 /** 題目 → 實作 n/N → 最終量測 → 評審, each step coloured by where the benchmark stands */
@@ -160,7 +160,7 @@ function paintBenchList() {
   const rows = allBenchmarks.filter((b) => !statusFilter || b.status === statusFilter || (statusFilter === 'running' && b.status === 'judging'));
   $('list-empty').hidden = rows.length > 0;
   $('list-count').textContent = `${rows.length} / ${allBenchmarks.length} 場`;
-  $('bench-list').replaceChildren(
+  fill($('bench-list'), 
     ...rows.map((b) => {
       const st = b.status === 'judged' ? 'ok' : b.status === 'judge_failed' ? 'bad' : b.status === 'cancelled' ? '' : 'info';
       const card = h(
@@ -225,7 +225,7 @@ function paintDomains(matrix) {
         loadStandings().catch((e) => pageError(e.message));
       },
     }, label);
-  box.replaceChildren(mk('', '全部'), ...[...seenDomains].sort().map((d) => mk(d, domainLabel(d))));
+  fill(box, mk('', '全部'), ...[...seenDomains].sort().map((d) => mk(d, domainLabel(d))));
 }
 for (const b of $('st-filters').querySelectorAll('[data-kind]')) {
   b.onclick = () => {
@@ -247,7 +247,7 @@ const RECO_PILL = { cannot: ['本地模型還做不來', 'bad'], can: ['可以�
 function paintRecommend(recommendations) {
   const recs = stFilter.domain ? recommendations.filter((r) => r.domain === stFilter.domain) : recommendations;
   $('recommend-empty').hidden = recs.length > 0;
-  $('recommend').replaceChildren(
+  fill($('recommend'), 
     ...recs.map((r) => {
       const [pill, cls] = RECO_PILL[r.kind] || RECO_PILL.none;
       const who = (m) => (m ? `${modelName(m.model)}（${m.n} 場 · 通過 ${pct(m.verify_pass_rate)}${m.first_try_rate != null ? ` · 一次就過 ${pct(m.first_try_rate)}` : ''}）` : '—');
@@ -269,7 +269,7 @@ function paintHeatmap(matrix) {
   const models = [...new Set(matrix.map((m) => m.model))].sort((a, b) => Number(isLocalId(a)) - Number(isLocalId(b)) || a.localeCompare(b));
   const domains = [...new Set(matrix.map((m) => m.domain))].sort();
   if (!models.length) {
-    box.replaceChildren(h('p.empty-s', null, '還沒有評分完成的評比。'));
+    fill(box, h('p.empty-s', null, '還沒有評分完成的評比。'));
     return;
   }
   const grid = h('div.hm', { style: { gridTemplateColumns: `150px repeat(${domains.length}, minmax(64px, 1fr))` } });
@@ -289,7 +289,7 @@ function paintHeatmap(matrix) {
       );
     }
   }
-  box.replaceChildren(grid, h('div.legend', null, h('span', null, '0%'), h('i', { style: { width: '160px', background: `linear-gradient(90deg, ${heatColor(0)}, ${heatColor(0.5)}, ${heatColor(1)})` } }), h('span', null, '100%'), h('span', null, '虛線格＝還沒比過')));
+  fill(box, grid, h('div.legend', null, h('span', null, '0%'), h('i', { style: { width: '160px', background: `linear-gradient(90deg, ${heatColor(0)}, ${heatColor(0.5)}, ${heatColor(1)})` } }), h('span', null, '100%'), h('span', null, '虛線格＝還沒比過')));
 }
 
 /** per model across the selected domains: first try / after being sent back / not passed */
@@ -321,10 +321,10 @@ function paintFirstTry(matrix) {
   const rows = modelTotals(matrix).sort((a, b) => b.passRate - a.passRate);
   const box = $('first-try');
   if (!rows.length) {
-    box.replaceChildren(h('p.empty-s', null, '還沒有資料。'));
+    fill(box, h('p.empty-s', null, '還沒有資料。'));
     return;
   }
-  box.replaceChildren(
+  fill(box, 
     ...rows.map((t) => {
       const first = t.firstRate == null ? null : Math.min(t.passRate, t.firstRate);
       const later = first == null ? t.passRate : Math.max(0, t.passRate - first);
@@ -345,12 +345,12 @@ function paintStScatter(matrix) {
   const rows = modelTotals(matrix).filter((t) => t.avgMin != null);
   const box = $('st-scatter');
   if (!rows.length) {
-    box.replaceChildren(h('p.empty-s', null, '還沒有資料。'));
+    fill(box, h('p.empty-s', null, '還沒有資料。'));
     return;
   }
   const colors = colorMap(rows.map((r) => r.model));
   const xMax = Math.max(10, ...rows.map((r) => r.avgMin)) * 1.2;
-  box.replaceChildren(
+  fill(box, 
     scatter({
       label: '通過率 vs 平均花費時間',
       points: rows.map((r) => ({ label: modelName(r.model), x: r.avgMin, y: r.passRate * 100, r: 7 + Math.min(8, r.n), color: colors.get(r.model) })),
@@ -367,7 +367,7 @@ function paintH2H(data) {
   const box = $('h2h');
   const models = data.models.filter((m) => !stFilter.kind || (stFilter.kind === 'local') === m.local);
   if (models.length < 2) {
-    box.replaceChildren(h('p.empty-s', null, '至少要有兩個模型在同一場比過。'));
+    fill(box, h('p.empty-s', null, '至少要有兩個模型在同一場比過。'));
     return;
   }
   const grid = h('div.hm', { style: { gridTemplateColumns: `140px repeat(${models.length}, minmax(56px, 1fr))` } });
@@ -388,7 +388,7 @@ function paintH2H(data) {
       );
     }
   }
-  box.replaceChildren(grid);
+  fill(box, grid);
 }
 
 function paintMatrixTable(matrix) {
@@ -426,7 +426,7 @@ function paintDetail({ benchmark: b, arms, judgements, histories }) {
   const chips = [chip(STATUS[b.status] || b.status, b.status === 'judged' ? 'ok' : b.status === 'judge_failed' ? 'bad' : live ? 'info' : '')];
   if (b.consensus && b.status === 'judged') chips.push(chip(CONSENSUS[b.consensus] || b.consensus));
   chips.push(chip(domainLabel(b.domain)), chip(`${arms.length} 組`), chip(`評審 ${(b.judge_models || b.judge_model || '').split(',').map(modelName).join('、')}`), chip(localTime(b.created_at)));
-  $('detail-chips').replaceChildren(...chips);
+  fill($('detail-chips'), ...chips);
   const src = [SOURCE[b.source_kind] || '–', b.source_ref, b.repo_path].filter(Boolean).join(' · ');
   $('detail-source').textContent = `題目來源：${src}`;
   $('detail-error').hidden = !b.error;
@@ -497,7 +497,7 @@ function paintHead(b, views, head, baseline, live) {
   }
   kids.push(h('span.vsep'), h('div.progress-flow', null, ...progressFlow(b, views.map((v) => v.a))));
   if (b.acceptance_metrics) kids.push(h('span.grow', { style: { flex: '1 1 auto' } }), h('span.hint', null, `門檻：${parseSpecs(b.acceptance_metrics).map(specText).join('、') || b.acceptance_metrics}`));
-  box.replaceChildren(...kids);
+  fill(box, ...kids);
 }
 
 /** how the arm compares with where it started */
@@ -512,7 +512,7 @@ const OUTCOME_PILL = { pass: ['通過', 'ok'], metrics: ['指標未達', 'warn']
 
 function paintCards(views, head, baseline, colors, live) {
   const baseVal = head && baseline?.metrics ? Number(baseline.metrics[head.name]) : null;
-  $('detail-cards').replaceChildren(
+  fill($('detail-cards'), 
     ...views.map((v) => {
       const a = v.a;
       const running = a.task_status && !['review', 'attention', 'failed', 'closed'].includes(a.task_status);
@@ -566,9 +566,9 @@ function paintMasks(views, head, baseline, colors, specs) {
   card.hidden = false;
   $('mask-title').textContent = cats.length > 1 ? '各遮罩／各項的量測' : `${head.name} 各組比較`;
   $('mask-sub').textContent = `${title}，${lowerBetter(head) ? '越低越好' : '越高越好'}${views.some((v) => v.provisional) ? '；還沒最終量測的組別用最近一次嘗試' : ''}`;
-  $('mask-legend').replaceChildren(...series.map((s) => h('span', null, h('i', { style: { background: s.color } }), s.label)));
+  fill($('mask-legend'), ...series.map((s) => h('span', null, h('i', { style: { background: s.color } }), s.label)));
   const draw = () =>
-    $('mask-chart').replaceChildren(
+    fill($('mask-chart'), 
       groupedBars({
         label: title,
         categories: cats.map((k) => (cats.length > 1 ? k.replace(suf, '') : k)),
@@ -592,7 +592,7 @@ function paintSwimlane(views, colors, b) {
   const box = $('swimlane');
   const starts = views.flatMap((v) => v.attempts.map((x) => tsMs(x.started_at))).filter(Number.isFinite);
   if (!starts.length) {
-    box.replaceChildren(h('p.empty-s', null, '還沒有任何一組開始。'));
+    fill(box, h('p.empty-s', null, '還沒有任何一組開始。'));
     return;
   }
   const t0 = Math.min(tsMs(b.created_at) || Infinity, ...starts);
@@ -632,7 +632,7 @@ function paintSwimlane(views, colors, b) {
     return { label: modelName(v.a.model), segs, marks };
   });
   $('swim-sub').textContent = `從 ${shortTime(new Date(t0).toISOString())} 開始，每一次嘗試的起訖（分鐘）`;
-  box.replaceChildren(swimlane({ label: '迭代路徑', rows, max: Math.ceil(max * 1.08) }));
+  fill(box, swimlane({ label: '迭代路徑', rows, max: Math.ceil(max * 1.08) }));
 }
 
 function paintConvergence(views, head, colors) {
@@ -640,7 +640,7 @@ function paintConvergence(views, head, colors) {
   if (!head) {
     $('conv-title').textContent = '每次嘗試的結果';
     const rows = views.map((v) => ({ label: modelName(v.a.model), value: v.attempts.length, color: colors.get(v.a.model) }));
-    box.replaceChildren(hbars({ label: '嘗試次數', rows, unit: '次' }));
+    fill(box, hbars({ label: '嘗試次數', rows, unit: '次' }));
     return;
   }
   $('conv-title').textContent = `每次嘗試的 ${head.name}`;
@@ -655,7 +655,7 @@ function paintConvergence(views, head, colors) {
     }),
     fails: v.attempts.map((x, i) => (x.outcome === 'functional' || x.outcome === 'protected' ? i : -1)).filter((i) => i >= 0),
   }));
-  box.replaceChildren(
+  fill(box, 
     lineChart({
       label: `每次嘗試的 ${head.name}`,
       xLabels: Array.from({ length: n }, (_, i) => `第 ${i + 1} 次`),
@@ -669,15 +669,15 @@ function paintDots(views, colors, b) {
   const box = $('dotplot');
   const withScores = views.filter((v) => v.mean);
   if (!withScores.length) {
-    box.replaceChildren(h('p.empty-s', null, b.status === 'judged' ? '這一場沒有分項分數。' : '評完才有分數。'));
-    $('dots-legend').replaceChildren();
+    fill(box, h('p.empty-s', null, b.status === 'judged' ? '這一場沒有分項分數。' : '評完才有分數。'));
+    fill($('dots-legend'), );
     return;
   }
   $('dots-sub').textContent = `${(b.judge_models || b.judge_model || '').split(',').map(modelName).join('、')} 看程式碼與量測結果，0–10`;
   const rows = CRITERIA.map(([k, label]) => ({ label, values: withScores.map((v) => ({ label: modelName(v.a.model), color: colors.get(v.a.model), v: Number(v.mean[k]) })) }));
   rows.push({ label: '平均', strong: true, values: withScores.map((v) => ({ label: modelName(v.a.model), color: colors.get(v.a.model), v: Number(v.mean.total ?? v.a.judge_score) })) });
-  box.replaceChildren(dotPlot({ label: '評審分數', rows, min: 0, max: 10 }));
-  $('dots-legend').replaceChildren(...withScores.map((v) => h('span', null, h('i', { style: { background: colors.get(v.a.model), borderRadius: '50%' } }), `${modelName(v.a.model)} ${fmt(v.mean.total ?? v.a.judge_score)}`)));
+  fill(box, dotPlot({ label: '評審分數', rows, min: 0, max: 10 }));
+  fill($('dots-legend'), ...withScores.map((v) => h('span', null, h('i', { style: { background: colors.get(v.a.model), borderRadius: '50%' } }), `${modelName(v.a.model)} ${fmt(v.mean.total ?? v.a.judge_score)}`)));
 }
 
 function paintQuality(views, colors) {
@@ -691,12 +691,12 @@ function paintQuality(views, colors) {
     })
     .filter(Boolean);
   if (!pts.length) {
-    box.replaceChildren(h('p.empty-s', null, '評完才有這張圖。'));
+    fill(box, h('p.empty-s', null, '評完才有這張圖。'));
     return;
   }
   const maxTok = Math.max(1, ...pts.map((p) => p.tok || 0));
   const xMax = Math.max(10, ...pts.map((p) => p.x)) * 1.2;
-  box.replaceChildren(
+  fill(box, 
     scatter({
       label: '品質 vs 花費時間',
       points: pts.map((p) => ({ ...p, r: 8 + 10 * Math.sqrt((p.tok || 0) / maxTok) })),
@@ -717,7 +717,7 @@ function paintNotes(b, judgements, views) {
   for (const v of views) {
     if (v.a.notes) items.push(h('div', null, h('div.who', null, `對 ${modelName(v.a.model)} 的評語`), h('div', { style: { whiteSpace: 'pre-wrap' } }, v.a.notes)));
   }
-  $('detail-judges').replaceChildren(...items);
+  fill($('detail-judges'), ...items);
 }
 
 function paintArmTable(ranked, views, b) {
@@ -832,7 +832,7 @@ async function loadBuiltin() {
   const box = $('builtin-list');
   try {
     const { questions } = await api('/api/benchmarks/builtin');
-    box.replaceChildren(
+    fill(box, 
       ...questions.map((q) =>
         pickCard({
           id: q.key,
@@ -847,7 +847,7 @@ async function loadBuiltin() {
       ),
     );
   } catch (e) {
-    box.replaceChildren(h('p.err', null, e.message));
+    fill(box, h('p.err', null, e.message));
   }
 }
 
@@ -858,7 +858,7 @@ const gateLabel = (m) => GATE_FIELD[String(m).split(/[ (]/)[0]] || String(m).spl
 
 async function loadTasks() {
   const sel = $('task-select');
-  sel.replaceChildren(h('option', null, '（選一張任務）'));
+  fill(sel, h('option', null, '（選一張任務）'));
   try {
     // the board snapshot is the task list this deployment already serves — show all of it, so
     // "what is on my board" and "what can I benchmark" are the same list
@@ -877,7 +877,7 @@ async function loadTasks() {
     }
     if (!cards.length) sel.appendChild(h('option', null, '總覽上還沒有任務'));
   } catch (e) {
-    sel.replaceChildren(h('option', null, `讀不到總覽：${e.message}`));
+    fill(sel, h('option', null, `讀不到總覽：${e.message}`));
   }
   sel.onchange = () => {
     draftState.ref = sel.value || null;
@@ -887,7 +887,7 @@ async function loadTasks() {
 
 async function loadDrafts() {
   const sel = $('draft-select');
-  sel.replaceChildren(h('option', null, '（選一份草稿）'));
+  fill(sel, h('option', null, '（選一份草稿）'));
   try {
     const { drafts } = await api('/api/prd/drafts?limit=50');
     for (const d of drafts) {
@@ -899,7 +899,7 @@ async function loadDrafts() {
     }
     if (!drafts.length) sel.appendChild(h('option', null, '還沒有草稿'));
   } catch (e) {
-    sel.replaceChildren(h('option', null, '工作流程（PRD）未啟用'));
+    fill(sel, h('option', null, '工作流程（PRD）未啟用'));
   }
   sel.onchange = () => {
     draftState.ref = sel.value || null;
@@ -911,7 +911,7 @@ async function loadDrafts() {
 let plans = [];
 async function loadPlans() {
   const sel = $('m-plan');
-  sel.replaceChildren(h('option', { value: '' }, '不用方案'));
+  fill(sel, h('option', { value: '' }, '不用方案'));
   try {
     ({ plans } = await api('/api/verify-plans'));
     for (const p of plans) {
@@ -932,7 +932,7 @@ async function loadPlans() {
       if (!$('m-title').value.trim() && p) $('m-title').value = p.name;
     }
     const chipsBox = $('m-plan-chips');
-    chipsBox.replaceChildren();
+    fill(chipsBox, );
     if (p) {
       if (p.domain) chipsBox.appendChild(chip(domainLabel(p.domain)));
       for (const s of p.steps || []) chipsBox.appendChild(chip(s, 'mono'));
@@ -951,8 +951,8 @@ function paintPicks() {
   const toggle = (id) => (on) => (on ? draftState.models.add(id) : draftState.models.delete(id));
   const cards = localPicks.map((p) => pickCard({ ...p, checked: draftState.models.has(p.id), onToggle: toggle(p.id) }));
   for (const [id, name, sub] of CLOUD) cards.push(pickCard({ id, title: name, sub, checked: draftState.models.has(id), onToggle: toggle(id) }));
-  $('model-picks').replaceChildren(...cards);
-  $('judge-picks').replaceChildren(
+  fill($('model-picks'), ...cards);
+  fill($('judge-picks'), 
     ...JUDGES.map(([id, name, sub]) =>
       pickCard({ id, title: name, sub, checked: draftState.judges.has(id), onToggle: (on) => (on ? draftState.judges.add(id) : draftState.judges.delete(id)) }),
     ),
@@ -1021,7 +1021,7 @@ function paintEstimate() {
 
   const switches = Math.max(0, locals.length);
   const minutes = switches * draftState.switchMin + models.length * 12 + draftState.judges.size * 3;
-  box.replaceChildren();
+  fill(box, );
   box.append(h('div', null, `題目：${label || '—'}`));
   box.append(h('div', null, `參賽：${models.length ? models.map(modelName).join('、') : '—'}`));
   box.append(h('div', null, `評審：${[...draftState.judges].map(modelName).join('、') || '—'}`));

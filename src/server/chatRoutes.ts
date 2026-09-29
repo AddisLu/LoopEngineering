@@ -1006,7 +1006,7 @@ export function registerChatRoutes(app: FastifyInstance, db: Database.Database, 
       }
     }
     if (found.message.draft_id && getDraft(db, me.user_key, found.message.draft_id)) {
-      return { kind: 'draft', draft: { id: found.message.draft_id }, url: `/prd.html?draft=${found.message.draft_id}`, existing: true };
+      return { kind: 'draft', draft: { id: found.message.draft_id }, url: `/flow.html?draft=${found.message.draft_id}`, existing: true };
     }
 
     const b = (req.body ?? {}) as {
@@ -1049,7 +1049,7 @@ export function registerChatRoutes(app: FastifyInstance, db: Database.Database, 
         });
         const draft = createDraft(db, me.user_key, { title, form, markdown: '', step: 2 });
         markMessage(db, id, me.user_key, { draft_id: draft.id });
-        return reply.code(201).send({ kind: 'draft', draft: { id: draft.id, title: draft.title }, url: `/prd.html?draft=${draft.id}`, existing: false });
+        return reply.code(201).send({ kind: 'draft', draft: { id: draft.id, title: draft.title }, url: `/flow.html?draft=${draft.id}`, existing: false });
       }
       if (intent === 'spike') {
         const sp = b.spike ?? {};

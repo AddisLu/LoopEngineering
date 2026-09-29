@@ -17,9 +17,11 @@ export function emptyForm() {
     kind: null,
     repo: { path: '', branch: 'main', module: null },
     change: { title: '', symptom: '', expected: '', files: [], extra: [] },
-    verify: { commands: [], dataset: null, manual: [], llm: false },
-    scope: { non_goals: [], constraints: [], domain: 'other', complexity: 'M', setup: [] },
+    verify: { commands: [], dataset: null, manual: [], llm: false, metrics: [], artifacts: [] },
+    scope: { non_goals: [], constraints: [], domain: 'other', complexity: 'M', setup: [], protected: [] },
     acceptance: [],
+    // the 驗證方案 the verification came from (a template); rides along to the task, never into the text
+    plan_id: null,
     markdown_override: null,
   };
 }
@@ -110,6 +112,14 @@ export function composePrd(form) {
   }
   out.push('');
 
+  // 驗收指標: what the engine compares itself, from the LOOP_METRICS line a verify step prints
+  const metrics = nonEmpty(verify.metrics);
+  if (metrics.length) {
+    out.push('## 驗收指標 (Metrics)');
+    for (const m of metrics) out.push(bullet(m));
+    out.push('');
+  }
+
   out.push('## 驗證指令 (Verify)', '```bash');
   const cmds = nonEmpty(verify.commands);
   if (cmds.length) {
@@ -162,6 +172,19 @@ export function composePrd(form) {
   if (constraints.length) for (const c of constraints) out.push(bullet(c));
   else out.push('- （無）');
   out.push('');
+
+  const prot = nonEmpty(scope.protected);
+  if (prot.length) {
+    out.push('## 保護路徑 (Protected)');
+    for (const g of prot) out.push(`- \`${g.replace(/`/g, '')}\``);
+    out.push('');
+  }
+  const arts = nonEmpty(verify.artifacts);
+  if (arts.length) {
+    out.push('## 產出物 (Artifacts)');
+    for (const g of arts) out.push(`- \`${g.replace(/`/g, '')}\``);
+    out.push('');
+  }
 
   return out.join('\n');
 }

@@ -86,7 +86,7 @@ function linkDraft(btn, draftId) {
   btn.textContent = 'PRD 草稿 ↗';
   btn.classList.add('done');
   btn.disabled = false;
-  btn.onclick = () => window.open(`/prd.html?draft=${encodeURIComponent(draftId)}`, '_blank', 'noopener');
+  btn.onclick = () => window.open(`/flow.html?draft=${encodeURIComponent(draftId)}`, '_blank', 'noopener');
 }
 
 function field(labelText, input) {

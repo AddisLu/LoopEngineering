@@ -70,6 +70,7 @@ export function heatColor(rate) {
 export function fmtNum(v, digits = 2) {
   if (v == null || !Number.isFinite(Number(v))) return '–';
   const n = Number(v);
+  if (Number.isInteger(n)) return String(n);
   return Math.abs(n) >= 100 ? String(Math.round(n)) : n.toFixed(digits);
 }
 

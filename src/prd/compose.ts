@@ -30,9 +30,11 @@ export interface PrdForm {
   kind: 'algo' | 'feature' | 'bugfix' | 'perf' | null;
   repo: { path: string; branch: string; module: string | null };
   change: { title: string; symptom: string; expected: string; files: PrdFormFile[]; extra: string[] };
-  verify: { commands: string[]; dataset: PrdFormDataset | null; manual: PrdFormManual[]; llm: boolean };
-  scope: { non_goals: string[]; constraints: string[]; domain: string; complexity: 'S' | 'M' | 'L'; setup: string[] };
+  verify: { commands: string[]; dataset: PrdFormDataset | null; manual: PrdFormManual[]; llm: boolean; metrics?: string[]; artifacts?: string[] };
+  scope: { non_goals: string[]; constraints: string[]; domain: string; complexity: 'S' | 'M' | 'L'; setup: string[]; protected?: string[] };
   acceptance: string[];
+  /** the 驗證方案 a form started from (the 工作流程 page keeps it; the Markdown never carries it) */
+  plan_id?: string | null;
   markdown_override: string | null;
 }
 
@@ -128,13 +130,21 @@ export function parsePrdToForm(markdown: string, deps: LintDeps = {}): { form: P
       files,
       extra,
     },
-    verify: { commands: tests, dataset, manual: f.manual_checks.map(gwtRow), llm: modes.includes('llm') },
+    verify: {
+      commands: tests,
+      dataset,
+      manual: f.manual_checks.map(gwtRow),
+      llm: modes.includes('llm'),
+      metrics: f.acceptance_metrics ? f.acceptance_metrics.split(/\s*;\s*/).filter(Boolean) : [],
+      artifacts: f.artifacts,
+    },
     scope: {
       non_goals: f.non_goals.filter((c) => !NONE_RE.test(c)),
       constraints: f.constraints.filter((c) => !DATASET_NOTICE_RE.test(c) && !NONE_RE.test(c)),
       domain: f.domain ?? 'other',
       complexity: f.complexity ?? 'M',
       setup: f.setup_steps,
+      protected: f.protected_paths,
     },
     acceptance,
     markdown_override: null,

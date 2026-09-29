@@ -82,7 +82,8 @@ describe('benchmarks page + local model board wiring: static assets', () => {
     expect(dock).toContain('mini-del');
     expect(dock).not.toMatch(/innerHTML/);
     expect(fs.readFileSync(path.join(WEB_DIR, 'shell.css'), 'utf8')).toContain('.mini-row');
-    const html = fs.readFileSync(path.join(WEB_DIR, 'prd.html'), 'utf8');
+    // the five-step wizard lives on as /prd-classic.html (/prd.html now opens 工作流程)
+    const html = fs.readFileSync(path.join(WEB_DIR, 'prd-classic.html'), 'utf8');
     expect(html).toContain('id="draft-delete"');
     const js = fs.readFileSync(path.join(WEB_DIR, 'prd.js'), 'utf8');
     expect(js).toContain("method: 'DELETE'");
@@ -129,7 +130,7 @@ describe('benchmarks page + local model board wiring: static assets', () => {
   });
 
   it('the PRD wizard can send a PRD to a benchmark instead of one task', () => {
-    const html = fs.readFileSync(path.join(WEB_DIR, 'prd.html'), 'utf8');
+    const html = fs.readFileSync(path.join(WEB_DIR, 'prd-classic.html'), 'utf8');
     expect(html).toContain('id="bench-pick"');
     expect(html).toContain('id="bench-models"');
     expect(html).toContain('id="bench-judges"');
@@ -139,6 +140,10 @@ describe('benchmarks page + local model board wiring: static assets', () => {
     // the old code read r.task.id unconditionally and threw on a benchmark response
     expect(js).toContain('if (r.benchmark)');
     expect(js).not.toMatch(/innerHTML/);
+    // and 工作流程: two or more models on the AI 實作 node make the same benchmark
+    const flow = fs.readFileSync(path.join(WEB_DIR, 'flow.js'), 'utf8');
+    expect(flow).toContain('benchmark_models: models');
+    expect(flow).toContain("r.kind === 'benchmark'");
   });
 
   it('the board offers local models and the local chip', () => {

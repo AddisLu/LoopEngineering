@@ -143,7 +143,7 @@
       if (!data.tasks || !data.tasks.length) {
         const p = el('p', 'empty', '這段時間沒有任務執行。');
         const a = el('a', null, '開一個新工作');
-        a.href = '/job.html';
+        a.href = '/flow.html#new';
         p.appendChild(document.createTextNode(' '));
         p.appendChild(a);
         list.appendChild(p);

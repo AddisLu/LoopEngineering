@@ -28,7 +28,7 @@ function algoForm(): PrdForm {
     manual: [{ given: '一片有邊緣紋路的板', when: '跑完整 pipeline', then: '不出現刮傷判定' }],
     llm: false,
   };
-  f.scope = { non_goals: ['不改 recipe 格式'], constraints: ['GL_Mean 容差 0.5 內視為相同'], domain: 'cuda', complexity: 'M', setup: ['cmake --build ip/build -j8'] };
+  f.scope = { non_goals: ['不改 recipe 格式'], constraints: ['GL_Mean 容差 0.5 內視為相同'], domain: 'cuda', complexity: 'M', setup: ['cmake --build ip/build -j8'], protected: [] };
   f.acceptance = ['Given 20260615 圖集 When 重跑 Then 邊緣誤判為 0'];
   return f;
 }
@@ -39,7 +39,7 @@ function manualOnlyForm(): PrdForm {
   f.repo = { path: '/home/x/cf-aoi', branch: 'develop', module: 'control' };
   f.change = { title: '缺陷清單加排序', symptom: '清單只能照時間排', expected: '可依大小與類型排序', files: [], extra: ['control/src/Views/DefectList.axaml'] };
   f.verify = { commands: [], dataset: null, manual: [{ given: '一個有 50 筆缺陷的結果', when: '點「大小」欄', then: '由大到小排列' }], llm: false };
-  f.scope = { non_goals: ['不改資料格式'], constraints: [], domain: 'csharp', complexity: 'S', setup: [] };
+  f.scope = { non_goals: ['不改資料格式'], constraints: [], domain: 'csharp', complexity: 'S', setup: [], protected: [] };
   f.acceptance = ['排序後第一筆是最大的缺陷'];
   return f;
 }
@@ -96,6 +96,27 @@ describe('composePrd → lintPrd', () => {
       // and composing the parsed form is a fixed point
       expect(composePrd(form)).toBe(composePrd(f));
     }
+  });
+
+  it('carries a measured bar: 驗收指標, 保護路徑 and 產出物 reach the gate and come back', () => {
+    const f = algoForm();
+    f.verify.dataset = null;
+    f.verify.commands = ['sandbox: bash run_bench.sh'];
+    f.verify.metrics = ['correct == 1', 'max_ms <= 10'];
+    f.verify.artifacts = ['build/check.log', 'build/ncu_*.csv'];
+    f.scope.protected = ['run_bench.sh', 'bench/**'];
+    const md = composePrd(f);
+    const lint = lintPrd(md, { exists });
+    expect(lint.ok).toBe(true);
+    expect(lint.fields.acceptance_metrics).toBe('correct == 1; max_ms <= 10');
+    expect(lint.fields.protected_paths).toEqual(['run_bench.sh', 'bench/**']);
+    expect(lint.fields.artifacts).toEqual(['build/check.log', 'build/ncu_*.csv']);
+    const back = parsePrdToForm(md, { exists }).form;
+    expect(back.verify.metrics).toEqual(['correct == 1', 'max_ms <= 10']);
+    expect(back.verify.artifacts).toEqual(['build/check.log', 'build/ncu_*.csv']);
+    expect(back.scope.protected).toEqual(['run_bench.sh', 'bench/**']);
+    // an empty bar writes no section at all
+    expect(composePrd(algoForm())).not.toContain('驗收指標');
   });
 
   it('opens a hand-written PRD too, keeping the whole goal as the symptom', () => {

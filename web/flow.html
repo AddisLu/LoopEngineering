@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="zh-Hant" data-mode="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>工作流程 · Loop Engineering</title>
+    <script src="/theme-boot.js"></script>
+    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/frame.css" />
+    <style>
+      .start { width: 100%; max-width: 940px; margin: 0 auto; padding: 36px 20px 48px; display: flex; flex-direction: column; gap: 26px; }
+      .start h2 { margin: 0; font-size: 28px; font-weight: 700; letter-spacing: 0.5px; }
+      .start h3 { margin: 0; font-size: 16px; font-weight: 700; }
+      .ask { border: 1.5px solid var(--accent); border-radius: 16px; background: var(--surface-2); box-shadow: 0 0 0 4px var(--accent-soft); display: flex; flex-direction: column; }
+      .ask textarea { border: 0; background: transparent; resize: vertical; min-height: 84px; padding: 16px 18px 6px; font: inherit; font-size: 16px; line-height: 1.65; color: var(--text); outline: none; }
+      .ask .bar { padding: 10px 12px 12px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+      .ask label.sel { height: 40px; padding: 0 10px; display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--border-2); border-radius: 10px; background: var(--surface); font-size: 13px; color: var(--text-2); }
+      .ask label.sel select { border: 0; background: transparent; font: inherit; font-size: 13px; font-weight: 600; color: var(--text); max-width: 260px; }
+      .types { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+      .types .lbl { font-size: 13px; color: var(--text-2); margin-right: 4px; }
+      .type { height: 34px; padding: 0 14px; border: 1px solid var(--border-2); border-radius: 999px; background: var(--surface-2); color: var(--text); font-size: 13px; cursor: pointer; }
+      .type[aria-checked="true"] { border: 1.5px solid var(--accent); background: var(--accent-soft); color: var(--accent-2); font-weight: 600; }
+      .tgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+      .tgrid.k { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
+      .tcard { padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface-2); color: var(--text); text-align: left; cursor: pointer; font: inherit; }
+      .tcard:hover { border-color: var(--border-2); box-shadow: var(--shadow-2); }
+      .tcard[aria-pressed="true"] { border: 1.5px solid var(--accent); background: var(--accent-soft); }
+      .tcard b { font-size: 14.5px; font-weight: 600; }
+      .tcard .d { font-size: 12.5px; line-height: 1.55; color: var(--text-2); }
+      .tcard .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+      .tcard.dashed { border-style: dashed; background: transparent; }
+      .drafts { border: 1px solid var(--border); border-radius: 14px; background: var(--surface-2); display: flex; flex-direction: column; }
+      .drafts a { min-height: 48px; padding: 0 16px; display: flex; align-items: center; gap: 12px; color: var(--text); text-decoration: none; border-top: 1px solid var(--surface-sunk); }
+      .drafts a:first-child { border-top: 0; }
+      .drafts a:hover { background: var(--surface-sunk); }
+      .drafts .t { flex: 1 1 auto; font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .drafts .w { width: 110px; text-align: right; font-size: 12.5px; color: var(--text-2); }
+      .sec-h { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+      .sec-h .sub { font-size: 12.5px; color: var(--text-2); }
+      .sec-h .grow { flex: 1 1 auto; }
+      .editor { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+      .editor .canvas { flex: 1 1 auto; }
+      .issues-pop { position: absolute; right: 16px; top: 62px; z-index: 25; width: 360px; padding: 12px; display: flex; flex-direction: column; gap: 8px; background: var(--surface-2); border: 1px solid var(--border-2); border-radius: 12px; box-shadow: var(--shadow-pop); }
+      .issues-pop .it { display: flex; align-items: flex-start; gap: 10px; padding: 8px 10px; border-radius: 8px; background: var(--surface); font-size: 12.5px; line-height: 1.55; }
+      .issues-pop .it span { flex: 1 1 auto; }
+      .issues-pop .it.warnonly { background: transparent; color: var(--text-2); }
+      .docview { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 20px 24px; display: flex; flex-direction: column; gap: 12px; }
+      .docview pre { margin: 0; padding: 16px 18px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); font-family: var(--mono); font-size: 12.5px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+      .docview textarea { min-height: 60vh; padding: 16px 18px; border: 1px solid var(--border-2); border-radius: 12px; background: var(--surface-2); font-family: var(--mono); font-size: 12.5px; line-height: 1.6; color: var(--text); }
+      .notice { margin: 16px 20px 0; padding: 12px 16px; border-radius: 12px; background: var(--warn-soft); color: var(--st-attention); font-size: 13.5px; line-height: 1.6; }
+      .notice.info { background: var(--accent-soft); color: var(--accent-2); }
+      .ndv .li { display: flex; gap: 8px; align-items: center; }
+      .ndv .li input, .ndv .li textarea { flex: 1 1 auto; }
+      .ndv .addbtn { align-self: flex-start; }
+      .ndv .row2 { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+      .ndv .ro { padding: 8px 10px; border-radius: 8px; background: var(--surface-sunk); font-size: 13px; line-height: 1.55; overflow-wrap: anywhere; white-space: pre-wrap; }
+      .ndv .ro.mono { font-family: var(--mono); font-size: 12px; }
+      .ndv .suggest { display: flex; flex-direction: column; gap: 6px; }
+      .ndv .suggest label { display: flex; gap: 8px; align-items: flex-start; font-size: 12.5px; font-weight: 400; }
+      .runbar { display: flex; align-items: center; gap: 8px; }
+      @media (max-width: 820px) {
+        .issues-pop { left: 12px; right: 12px; width: auto; }
+      }
+    </style>
+  </head>
+  <body class="app">
+    <nav id="rail"><a href="/">回到對話</a></nav>
+    <div class="app-main" style="position: relative">
+      <header class="app-top" id="top">
+        <a class="crumb" href="/flow.html">工作流程</a>
+        <svg class="crumb-sep" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
+        <h1 class="sm" id="flow-title">新工作流程</h1>
+        <span id="top-chips" style="display: inline-flex; gap: 6px"></span>
+        <span class="grow"></span>
+        <div class="seg" role="tablist" aria-label="工作流程分頁" id="tabs" hidden></div>
+        <span class="grow"></span>
+        <div id="top-actions" class="runbar"></div>
+      </header>
+      <p class="notice" id="notice" hidden></p>
+
+      <!-- start: say what you want, pick a template -->
+      <div class="app-scroll" id="view-start" hidden>
+        <div class="start">
+          <section style="display: flex; flex-direction: column; gap: 14px">
+            <h2>要做什麼？</h2>
+            <div class="ask">
+              <label for="goal" style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">描述要做的事</label>
+              <textarea id="goal" rows="3" placeholder="例：CF-AOI 的 CCL 在 8192×5000 每張遮罩都要壓到 10 ms 內（Nsight Compute 量 kernel 時間），標記結果要和 CPU 參考完全一致。"></textarea>
+              <div class="bar">
+                <label class="sel">Repo <select id="repo"></select></label>
+                <label class="sel">分支 <select id="branch"></select></label>
+                <span style="flex: 1 1 auto"></span>
+                <button class="btn primary big" type="button" id="create">產生流程</button>
+              </div>
+            </div>
+            <div class="types" role="radiogroup" aria-label="流程類型" id="types">
+              <span class="lbl">流程類型</span>
+              <button class="type" type="button" role="radio" data-type="task" aria-checked="true">程式任務</button>
+              <button class="type" type="button" role="radio" data-type="bench" aria-checked="false">評比（多模型）</button>
+              <button class="type" type="button" role="radio" data-type="epic" aria-checked="false">拆成多個任務</button>
+              <a class="type" href="/board.html#new" style="display: inline-flex; align-items: center; text-decoration: none">產出檔案／部署（進階）</a>
+            </div>
+            <p class="err-line" id="start-err" hidden></p>
+          </section>
+
+          <section style="display: flex; flex-direction: column; gap: 12px">
+            <div class="sec-h"><h3>從驗證方案開始</h3><span class="sub">驗證、門檻、保護路徑、人工清單一次帶好</span><span class="grow"></span><a href="/plans.html">管理驗證方案</a></div>
+            <div class="tgrid" id="plans"></div>
+          </section>
+
+          <section style="display: flex; flex-direction: column; gap: 12px">
+            <div class="sec-h"><h3>或從變更類型開始</h3><span class="sub">只填空白的地方，不會蓋掉你寫的</span></div>
+            <div class="tgrid k" id="kinds"></div>
+          </section>
+
+          <section style="display: flex; flex-direction: column; gap: 8px">
+            <h3>最近的草稿</h3>
+            <div class="drafts" id="drafts"></div>
+          </section>
+        </div>
+      </div>
+
+      <!-- editor: the stage canvas of one draft -->
+      <div class="editor" id="view-editor" hidden>
+        <div id="canvas" style="flex: 1 1 auto; display: flex; min-height: 0"></div>
+        <div class="docview" id="docview" hidden></div>
+        <div class="logbar">
+          <span id="save-state">草稿已自動儲存</span>
+          <span class="grow" style="flex: 1 1 auto"></span>
+          <span id="mode-hint"></span>
+        </div>
+      </div>
+
+      <!-- run: the same stages lit by what the task did -->
+      <div class="editor" id="view-run" hidden>
+        <div id="run-canvas" style="flex: 1 1 auto; display: flex; min-height: 0"></div>
+        <section class="logpanel" id="logpanel" aria-label="紀錄">
+          <div class="logpanel-head"><h2>紀錄</h2><span class="sub" id="log-sub" style="font-size: 12.5px; color: var(--text-2)"></span><span class="grow" style="flex: 1 1 auto"></span><button class="btn sm" type="button" id="log-collapse" aria-expanded="true">收起</button></div>
+          <div class="logpanel-body"><ul class="tree" role="tree" aria-label="執行樹" id="tree"></ul><div class="logdetail" id="logdetail"></div></div>
+        </section>
+      </div>
+
+      <div class="issues-pop" id="issues-pop" role="dialog" aria-label="問題清單" hidden></div>
+    </div>
+
+    <dialog class="ndv" id="ndv"></dialog>
+    <dialog class="ndv" id="paste-dialog" style="height: auto; width: min(760px, 94vw)">
+      <div class="ndv-head"><h2 style="flex: 1 1 auto">貼上 PRD（Markdown）</h2><button class="btn icon" type="button" id="paste-close" aria-label="關閉">×</button></div>
+      <div style="padding: 16px 20px; display: flex; flex-direction: column; gap: 10px">
+        <p class="sub" style="margin: 0; font-size: 12.5px; color: var(--text-2)">貼上一份 PRD，會拆成工作流程的各個節點；認不得的部分放進「範圍」，不會丟掉。</p>
+        <textarea id="paste-md" rows="14" style="font-family: var(--mono); font-size: 12.5px; padding: 10px; border: 1px solid var(--border-2); border-radius: 10px; background: var(--surface-2); color: var(--text)"></textarea>
+        <p class="err-line" id="paste-err" hidden></p>
+        <div style="display: flex; gap: 10px; justify-content: flex-end"><button class="btn" type="button" id="paste-cancel">取消</button><button class="btn primary" type="button" id="paste-go">轉成工作流程</button></div>
+      </div>
+    </dialog>
+
+    <script src="/ops.js"></script>
+    <script type="module" src="/flow.js"></script>
+  </body>
+</html>

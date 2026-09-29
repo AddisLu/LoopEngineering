@@ -112,7 +112,7 @@ const saveDraft = debounce(async () => {
     else {
       const d = await api('/api/prd/drafts', { method: 'POST', body: JSON.stringify(body) });
       draftId = d.id;
-      history.replaceState(null, '', `/prd.html?draft=${encodeURIComponent(draftId)}`);
+      history.replaceState(null, '', `/prd-classic.html?draft=${encodeURIComponent(draftId)}`);
       $('draft-delete').hidden = false;
     }
     setText('draft-state', `已儲存 ${when(new Date().toISOString().replace('T', ' ').slice(0, 19))}`);
@@ -865,7 +865,7 @@ async function boot() {
     } catch (e) {
       toast('找不到那份草稿，從頭開始', 'warn');
       draftId = null;
-      history.replaceState(null, '', '/prd.html');
+      history.replaceState(null, '', '/prd-classic.html');
     }
   }
   const local = stored('loop_prd_wizard');

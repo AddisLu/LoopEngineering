@@ -79,7 +79,7 @@
     catch (e) { alert('刪除失敗：' + e); return false; }
   }
 
-  // ---- theme -----------------------------------------------------------
+  // ---- theme (the 總覽 frame's rail owns the toggle; a page with its own button still works) ----
   const themeBtn = $('theme-btn');
   function currentMode() {
     return document.documentElement.getAttribute('data-mode') === 'dark' ? 'dark' : 'light';
@@ -90,13 +90,15 @@
     themeBtn.textContent = dark ? '☀' : '☾';
     themeBtn.setAttribute('aria-label', dark ? '切換至淺色佈景' : '切換至深色佈景');
   }
-  themeBtn.onclick = () => {
-    const next = currentMode() === 'dark' ? 'light' : 'dark';
-    document.documentElement.setAttribute('data-mode', next);
-    try { localStorage.setItem('loop_mode', next); } catch (e) {}
+  if (themeBtn) {
+    themeBtn.onclick = () => {
+      const next = currentMode() === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-mode', next);
+      try { localStorage.setItem('loop_mode', next); } catch (e) {}
+      paintThemeBtn();
+    };
     paintThemeBtn();
-  };
-  paintThemeBtn();
+  }
 
   // ---- usage / topbar --------------------------------------------------
   function usageState(pct) {
@@ -104,6 +106,7 @@
   }
   function setRing(id, pctId, pct) {
     const wrap = $(id);
+    if (!wrap) return; // 總覽 shows usage in its KPI strip and the rail instead
     const p = Math.max(0, Math.min(100, Number(pct) || 0));
     const fill = wrap.querySelector('.fill');
     fill.style.strokeDasharray = `${(p / 100) * RING_C} ${RING_C}`;
@@ -132,19 +135,21 @@
       note.setAttribute('data-state', /登入/.test(msg || '') ? 'danger' : 'warn');
     }
 
-    $('resets').querySelector('.tick-v').textContent = fmtDur(s.usage.sessionResetsInMin);
-    $('policy').querySelector('.tick-v').textContent =
+    if ($('resets')) $('resets').querySelector('.tick-v').textContent = fmtDur(s.usage.sessionResetsInMin);
+    if ($('policy')) $('policy').querySelector('.tick-v').textContent =
       `${s.policy.window === 'night' ? '夜間' : '日間'} · ${s.policy.sessionMax}%`;
 
     const state = $('sched-state');
-    state.classList.toggle('paused', !!s.paused);
-    state.querySelector('.s-text').textContent = s.paused ? '已暫停' : '排程執行中';
-    $('pause-btn').textContent = s.paused ? '恢復排程' : '暫停排程';
+    if (state) {
+      state.classList.toggle('paused', !!s.paused);
+      state.querySelector('.s-text').textContent = s.paused ? '已暫停' : '排程執行中';
+    }
+    if ($('pause-btn')) $('pause-btn').textContent = s.paused ? '恢復排程' : '暫停排程';
 
-    $('self-update-badge').hidden = !s.self_update_pending;
+    if ($('self-update-badge')) $('self-update-badge').hidden = !s.self_update_pending;
 
     const fc = s.forecast;
-    if (fc) {
+    if (fc && $('forecast-chip')) {
       const verdictState = { plenty: 'ok', some: 'warn', tight: 'danger', full: 'danger' };
       const chip = $('forecast-chip');
       chip.setAttribute('data-state', verdictState[fc.verdict] || 'ok');
@@ -306,13 +311,16 @@
     if (c.status === 'draft' && c.gate.ok)
       actions.appendChild(btn('加入排程', 'primary', () => act(`/api/tasks/${c.id}/queue`)));
     // a draft that can never pass the gate (e.g. a chat 待辦 with no repo or verification) cannot be
-    // edited here: carry its words over to the 新工作 page, where repo + 驗證方案 are picked
+    // edited here: carry its words over to 工作流程, where repo + 驗證方案 are picked
     if (c.status === 'draft' && !c.gate.ok)
-      actions.appendChild(btn('用新工作重寫', '', () => {
-        location.href = `/job.html?title=${encodeURIComponent(c.title || '')}&expected=${encodeURIComponent(c.goal || '')}`;
+      actions.appendChild(btn('用工作流程重寫', '', () => {
+        location.href = `/flow.html#new?title=${encodeURIComponent(c.title || '')}&expected=${encodeURIComponent(c.goal || '')}`;
       }));
+    // 中止 is final (the run is killed, the task marked failed): never one stray click away
     if (c.status === 'running' || c.status === 'verifying')
-      actions.appendChild(btn('中止', 'danger-ghost', () => act(`/api/tasks/${c.id}/abort`)));
+      actions.appendChild(btn('中止', 'danger-ghost', () => {
+        if (confirm(`確定中止「${c.title}」？正在跑的會被停掉，任務標成失敗。`)) act(`/api/tasks/${c.id}/abort`);
+      }));
     // blocked auto-resumes on every eligible tick with no other stop button — let the
     // user pull it into 待確認 (attention) triage instead of burning resume budget.
     if (c.status === 'blocked')
@@ -405,6 +413,8 @@
   function render(s) {
     lastBoard = s;
     renderTop(s);
+    // the 總覽 canvas, list and inbox (board-flow.js) draw from the same snapshot
+    document.dispatchEvent(new CustomEvent('board:snapshot', { detail: s }));
     renderPipelines(Array.isArray(s.pipelines) ? s.pipelines : []);
     const seen = new Set();
     const cards = Array.isArray(s.cards) ? s.cards : [];
@@ -452,7 +462,7 @@
 
   // ---- topbar controls -------------------------------------------------
   $('pause-btn').onclick = () => {
-    const paused = $('sched-state').classList.contains('paused');
+    const paused = lastBoard ? !!lastBoard.paused : $('sched-state').classList.contains('paused');
     act(paused ? '/api/resume-scheduler' : '/api/pause');
   };
 
@@ -813,6 +823,9 @@
       const a = el('a', null, '開啟驗收頁（結果、程式碼、試跑、人工驗收、交付）');
       a.href = `/task.html?id=${encodeURIComponent(t.id)}`;
       list.appendChild(dRow('驗收', a));
+      const f = el('a', null, '看這張任務的流程圖（每一次嘗試、每一步）');
+      f.href = `/flow.html?task=${encodeURIComponent(t.id)}`;
+      list.appendChild(dRow('工作流程', f));
     }
     detailBody.appendChild(list);
 
@@ -951,6 +964,7 @@
     conn.classList.remove('connecting', 'live', 'down');
     conn.classList.add(kind);
     conn.querySelector('.conn-text').textContent = text;
+    document.dispatchEvent(new CustomEvent('board:conn', { detail: { kind, text } }));
   }
 
   // The chat shell links here with #task=<id> (open that card's detail) or #new (new-task
@@ -961,6 +975,7 @@
     hashApplied = true;
     const h = location.hash.slice(1);
     if (h === 'new') $('new-btn').click();
+    else if (h === 'settings') $('settings-btn').click();
     else if (h.startsWith('task=')) openDetail(decodeURIComponent(h.slice(5)));
   }
 
@@ -979,5 +994,12 @@
       setTimeout(connect, 2000);
     };
   }
+  // the rail's 設定 link (and any #task= link) also works while the page is already open
+  window.addEventListener('hashchange', () => {
+    hashApplied = false;
+    applyHash();
+  });
+  // the 總覽 views act through the same calls the cards use
+  window.Board = { openDetail, act, mergeTask, delTask, snapshot: () => lastBoard };
   connect();
 })();

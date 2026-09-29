@@ -129,7 +129,7 @@ describe('chat-first shell', () => {
 
   it('links every kept page from the rail, and the manual from /docs/', () => {
     const page = read('index.html');
-    for (const href of ['/board.html', '/brain.html', '/prd.html', '/benchmarks.html', '/docs/操作說明.html']) {
+    for (const href of ['/board.html', '/brain.html', '/flow.html', '/benchmarks.html', '/docs/操作說明.html']) {
       expect(page, `rail does not link ${href}`).toContain(`href="${href}"`);
     }
   });
@@ -154,7 +154,7 @@ describe('chat-first shell', () => {
   });
 
   it('every kept secondary page returns to the conversation', () => {
-    for (const page of ['brain.html', 'prd.html', 'benchmarks.html']) {
+    for (const page of ['brain.html', 'prd.html', 'benchmarks.html', 'flow.html', 'board.html']) {
       expect(read(page), page).toContain('回到對話');
     }
   });

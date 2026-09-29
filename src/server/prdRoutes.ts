@@ -92,6 +92,10 @@ export function registerPrdRoutes(app: FastifyInstance, db: Database.Database, o
         verify_llm: b.verify_llm === true,
         benchmark_models: benchModels.length ? benchModels : undefined,
         judge_models: Array.isArray(b.judge_models) ? b.judge_models.map(String).filter(Boolean) : undefined,
+        // a 工作流程 started from a 驗證方案 keeps it, so the review page offers its image sets
+        verify_plan_id: typeof b.verify_plan_id === 'string' && b.verify_plan_id ? b.verify_plan_id : null,
+        // 拆成多個任務: the planner decomposes the PRD into a chain (an epic)
+        coding_tool: b.coding_tool === 'plan' ? 'plan' : undefined,
       });
       if (!r.ok) return reply.code(422).send({ error: 'PRD blocked by the gate', check: r.check });
       // a wizard draft that became a task remembers it, so the dock can show 已建任務

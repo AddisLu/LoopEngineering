@@ -16,6 +16,8 @@ body.app {
 body.app [hidden] { display: none !important; }
 body.app button { font: inherit; }
 body.app a { color: var(--accent-2); }
+body.app a.btn { text-decoration: none; color: var(--text); }
+body.app a.btn.primary { color: var(--on-accent); }
 body.app code, body.app .mono { font-family: var(--mono); font-size: 0.92em; }
 
 /* ---- rail ---------------------------------------------------------------- */
@@ -317,6 +319,9 @@ svg.fedges path.fail { stroke: var(--danger); }
 /* ---- node details (NDV) ----------------------------------------------------- */
 dialog.ndv { width: min(1320px, 96vw); height: min(836px, 92vh); max-width: none; padding: 0; border: 0; border-radius: 16px; background: var(--surface); color: var(--text); box-shadow: var(--shadow-pop); overflow: hidden; }
 dialog.ndv[open] { display: flex; flex-direction: column; }
+/* styles.css makes every dialog input full width — not a checkbox in the NDV */
+dialog.ndv input[type="checkbox"], dialog.ndv input[type="radio"] { width: auto; margin: 0; flex: 0 0 auto; }
+dialog.ndv label { margin: 0; }
 .ndv-head { height: 60px; flex: 0 0 auto; display: flex; align-items: center; gap: 12px; padding: 0 16px 0 20px; border-bottom: 1px solid var(--border); background: var(--surface-2); }
 .ndv-head .ic { width: 32px; height: 32px; border-radius: 9px; display: flex; align-items: center; justify-content: center; background: var(--accent-soft); color: var(--accent-2); }
 .ndv-head .ic svg { width: 19px; height: 19px; }
@@ -360,12 +365,14 @@ dialog.ndv[open] { display: flex; flex-direction: column; }
 .ndv .verdict-box { padding: 14px; display: flex; flex-direction: column; gap: 6px; border-radius: 12px; background: var(--surface-2); border: 1.5px solid var(--border-2); }
 .ndv .verdict-box.ok { border-color: var(--ok); }
 .ndv .verdict-box.bad { border-color: var(--st-attention); }
-.ndv .checks { display: flex; flex-direction: column; gap: 8px; font-size: 13px; }
-.ndv .checks div { display: flex; align-items: center; gap: 8px; }
-.ndv .checks svg { width: 16px; height: 16px; flex: 0 0 auto; }
-.ndv .checks .n { flex: 1 1 auto; font-family: var(--mono); }
-.ndv .checks .v { font-family: var(--mono); color: var(--text-2); }
-.ndv .checks .bad .v { color: var(--danger); font-weight: 600; }
+.checks { display: flex; flex-direction: column; gap: 8px; font-size: 13px; max-width: 520px; }
+.checks div { display: flex; align-items: center; gap: 8px; }
+.checks svg { width: 16px; height: 16px; flex: 0 0 auto; color: var(--ok); }
+.checks .bad svg { color: var(--danger); }
+.checks .n { flex: 1 1 auto; font-family: var(--mono); }
+.checks .v { font-family: var(--mono); color: var(--text-2); }
+.checks .bad .v { color: var(--danger); font-weight: 600; }
+.logdetail .chart { max-width: 560px; }
 .ndv .tabs-s { display: flex; gap: 18px; border-bottom: 1px solid var(--border); }
 .ndv .tabs-s button { padding: 6px 0 10px; border: 0; border-bottom: 2px solid transparent; background: transparent; font-size: 13.5px; color: var(--text-2); cursor: pointer; }
 .ndv .tabs-s button[aria-selected="true"] { border-bottom-color: var(--accent); font-weight: 700; color: var(--text); }
@@ -380,8 +387,9 @@ table.tbl tr.row { cursor: pointer; }
 table.tbl tr.row:hover td { background: var(--surface-sunk); }
 table.tbl tr.need td { background: var(--warn-soft); }
 table.tbl .stc { display: flex; align-items: center; gap: 8px; font-weight: 600; white-space: nowrap; }
-table.tbl .ttl { font-weight: 600; max-width: 460px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-table.tbl .sub { color: var(--text-2); white-space: nowrap; }
+table.tbl .ttl { font-weight: 600; max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+table.tbl .sub { color: var(--text-2); white-space: nowrap; max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
+table.tbl .nowrap { white-space: nowrap; }
 table.tbl .num { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .filters { display: flex; align-items: center; gap: 8px; padding: 12px 20px; flex-wrap: wrap; flex: 0 0 auto; }
 .fchip { height: 30px; padding: 0 12px; display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border-2); border-radius: 999px; background: var(--surface-2); color: var(--text); font-size: 12.5px; cursor: pointer; white-space: nowrap; }

@@ -82,6 +82,8 @@ export interface SubmitOptions extends PrdOptions {
   judge_models?: string[];
   /** the 驗證方案 a 新工作 was composed from (kept on the task for the record) */
   verify_plan_id?: string | null;
+  /** 'plan': an epic — the planner splits the PRD into a chain of subtasks instead of one task */
+  coding_tool?: 'claude-code' | 'plan';
 }
 
 export type SubmitResult =
@@ -164,7 +166,7 @@ export async function submitPrd(db: Database.Database, markdown: string, opts: S
   const created = createTask(db, {
     ...common,
     plan_kind: 'md',
-    coding_tool: 'claude-code',
+    coding_tool: opts.coding_tool === 'plan' ? 'plan' : 'claude-code',
     model,
     verify_mode: [...modes].join(','),
     // a local image set needs this machine's GPU; one on a sandbox host is measured over there

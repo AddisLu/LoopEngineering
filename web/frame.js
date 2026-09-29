@@ -117,6 +117,11 @@ function append(e, children) {
 }
 
 export const $ = (id) => document.getElementById(id);
+/** el.replaceChildren(...) that skips null / false, the way h() does (replaceChildren would print "null") */
+export function fill(el, ...kids) {
+  el.replaceChildren(...kids.flat(Infinity).filter((k) => k != null && k !== false));
+  return el;
+}
 export const api = (...a) => window.Ops.api(...a);
 export const toast = (...a) => window.Ops.toast(...a);
 export const withToken = (p) => window.Ops.withToken(p);

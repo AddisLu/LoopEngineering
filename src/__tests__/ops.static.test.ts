@@ -8,7 +8,7 @@ const read = (f: string) => fs.readFileSync(path.join(WEB, f), 'utf8');
 
 describe('operator pages: 新工作 / 驗收 / 驗證方案', () => {
   const pages = [
-    ['job.html', 'job.js'],
+    ['job-classic.html', 'job.js'],
     ['task.html', 'task.js'],
     ['plans.html', 'plans.js'],
   ] as const;
@@ -32,18 +32,20 @@ describe('operator pages: 新工作 / 驗收 / 驗證方案', () => {
       expect(h, html).toContain('/ops.css');
       expect(h.indexOf('/ops.js'), html).toBeLessThan(h.indexOf(`/${js}`));
       // every page offers the same four places
-      for (const href of ['/job.html', '/morning.html', '/board.html', '/plans.html']) expect(h, `${html} → ${href}`).toContain(`href="${href}"`);
+      for (const href of ['/flow.html#new', '/morning.html', '/board.html', '/plans.html']) expect(h, `${html} → ${href}`).toContain(`href="${href}"`);
     }
   });
 
   it('are reachable from the chat rail, the board and the morning report', () => {
     const index = read('index.html');
-    expect(index).toMatch(/href="\/job\.html"/);
+    // 新工作 is the start of 工作流程 now; /job.html forwards there with its prefill
+    expect(index).toMatch(/href="\/flow\.html#new"/);
     expect(index).toMatch(/href="\/plans\.html"/);
-    expect(read('board.html')).toMatch(/href="\/job\.html"/);
+    expect(read('board.html')).toMatch(/href="\/flow\.html#new"/);
+    expect(read('job.html')).toContain("location.replace('/flow.html#new'");
     const app = read('app.js');
     expect(app).toContain('/task.html?id=');
-    expect(app).toContain('用新工作重寫');
+    expect(app).toContain('用工作流程重寫');
     expect(app).toMatch(/c\.status === 'failed'[\s\S]{0,500}\/restart/); // 重來 for failed, which the API always allowed
     expect(read('morning.js')).toContain('/task.html?id=');
   });

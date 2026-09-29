@@ -5,7 +5,7 @@ import { parseTuneMarkdown } from './chat-md.js';
  * Right-hand dock: the light-touch view of everything that is not the conversation.
  *
  * Deliberately shallow. Anything that needs a real form or a decision links out to its own page
- * (/board.html, /brain.html, /prd.html, /benchmarks.html) rather than re-implementing it here —
+ * (/board.html, /brain.html, /flow.html, /benchmarks.html) rather than re-implementing it here —
  * the board's task detail alone is 140 lines of nine actions, and two copies would drift.
  * textContent only; task titles and PRD output are untrusted text.
  */
@@ -527,14 +527,14 @@ $('capture-form').addEventListener('submit', async (e) => {
 });
 
 // ---- PRD -------------------------------------------------------------------
-// The wizard lives on /prd.html (it needs the width); this pane is the way in and the way back
+// 工作流程 lives on /flow.html (it needs the width); this pane is the way in and the way back
 // to a half-written draft.
 const STEP_LABEL = ['', '改哪套軟體', '要改什麼', '怎麼驗證', '範圍與限制', '預覽與送出'];
 
 function draftRow(d) {
   const wrap = el('div', 'mini-row');
   const a = el('a', 'mini-card');
-  a.href = d.status === 'submitted' && d.task_id ? `/board.html#task=${encodeURIComponent(d.task_id)}` : `/prd.html?draft=${encodeURIComponent(d.id)}`;
+  a.href = d.status === 'submitted' && d.task_id ? `/flow.html?task=${encodeURIComponent(d.task_id)}` : `/flow.html?draft=${encodeURIComponent(d.id)}`;
   a.append(el('div', 't', d.title));
   const m = el('div', 'm');
   m.append(el('span', 'chip', d.status === 'submitted' ? `已建任務 ${d.task_id || ''} ↗` : `第 ${d.step} 步 · ${STEP_LABEL[d.step] || ''}`));
