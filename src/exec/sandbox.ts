@@ -163,6 +163,27 @@ export class OutputCapture {
   }
 }
 
+const BANNER_TOP = /^\s*={3,}\r?\n== [^\n]{1,60} ==\r?\n={3,}\r?\n/;
+const BANNER_ENDS = [/^.*NGC-DL-CONTAINER-LICENSE for your convenience\..*$/m, /^.*nvidia-deep-learning-container-license.*$/m];
+
+/**
+ * NVIDIA's CUDA and NGC images print a copyright / license banner from their entrypoint before the
+ * command runs (`== CUDA ==` … `/NGC-DL-CONTAINER-LICENSE for your convenience.`): the same dozen
+ * lines on every run, pushing the command's own first lines out of view and using up the kept
+ * head of the output. Dropped only when the output starts with it; whatever the entrypoint says
+ * after the license (no GPU driver detected, a SHMEM note) is worth reading and stays.
+ */
+export function stripImageBanner(output: string): string {
+  if (!BANNER_TOP.test(output)) return output;
+  const head = output.slice(0, 6000);
+  let end = -1;
+  for (const re of BANNER_ENDS) {
+    const m = re.exec(head);
+    if (m) end = Math.max(end, m.index + m[0].length);
+  }
+  return end < 0 ? output : output.slice(end).replace(/^\s*\n/, '');
+}
+
 /** Stop a container by name. Killing the `docker run` client alone would leave it running. */
 function dockerKill(name: string, hostArgs: string[] = []): void {
   execFile('docker', [...hostArgs, 'kill', name], { timeout: 15_000 }, () => {
@@ -407,7 +428,7 @@ export async function runSandbox(s0: SandboxSettings, req: SandboxRequest, deps:
       aborted: o.aborted,
       durationMs: now() - started,
       timeoutSec,
-      output: o.output,
+      output: stripImageBanner(o.output),
       truncated: o.truncated,
       hint: sandboxHint(s, o, timeoutSec),
       infra,
