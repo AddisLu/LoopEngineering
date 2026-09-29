@@ -97,9 +97,51 @@
           <h2>模型戰績</h2>
           <p class="hint">只統計已評分的評比：勝場＝該模型拿第一的次數；平均＝評審給的平均分（0–10）。</p>
           <div class="scroll"><table id="records"></table></div>
+          <h3>各類工作建議的本地模型</h3>
+          <p class="hint">從所有已評分的評比算出：每種軟體類型裡通過率最高的本地模型（同分再看一次就過、評分），旁邊是最好的雲端模型當對照。場數少於 3 只能當參考。</p>
+          <div class="scroll"><table id="recommend"></table></div>
+          <p class="hint" id="recommend-empty" hidden>還沒有評分完成的評比。</p>
           <h3>模型 × 領域</h3>
+          <div class="row">
+            <label class="hint">軟體類型
+              <select id="mx-domain">
+                <option value="">全部</option>
+                <option value="cuda">CUDA／GPU</option>
+                <option value="cv">影像處理</option>
+                <option value="cpp">C++</option>
+                <option value="csharp">C#</option>
+                <option value="typescript">TypeScript</option>
+                <option value="python">Python</option>
+                <option value="other">其他</option>
+              </select>
+            </label>
+            <label class="hint">模型
+              <select id="mx-kind">
+                <option value="">全部</option>
+                <option value="local">本地</option>
+                <option value="cloud">雲端</option>
+              </select>
+            </label>
+            <label class="hint">通過率
+              <select id="mx-pass">
+                <option value="">不限</option>
+                <option value="0.5">≥ 50%</option>
+                <option value="0.8">≥ 80%</option>
+                <option value="1">100%</option>
+              </select>
+            </label>
+            <label class="hint">場數
+              <select id="mx-n">
+                <option value="">不限</option>
+                <option value="2">≥ 2</option>
+                <option value="3">≥ 3</option>
+                <option value="5">≥ 5</option>
+              </select>
+            </label>
+          </div>
           <div class="scroll"><table id="matrix"></table></div>
-          <p class="hint" id="matrix-empty" hidden>還沒有評分完成的評比。</p>
+          <p class="hint">通過率＝通過門檻的比例（有最終量測就看最終量測）；一次就過＝第一次驗證就通過；第幾次過＝通過的那幾場平均在第幾次；用 ncu＝工作時自己跑過 profiler 的比例。</p>
+          <p class="hint" id="matrix-empty" hidden>沒有符合條件的評分結果。</p>
         </section>
 
         <section>
@@ -143,6 +185,7 @@
           <div id="detail-judges"></div>
 
           <div class="row" style="margin-top: 14px">
+            <a class="btn sm" id="report-link" href="#" hidden>下載報告</a>
             <button class="btn sm" id="rejudge-btn" type="button">重新評分</button>
             <button class="btn sm" id="cancel-bench-btn" type="button" hidden>取消評比</button>
             <button class="btn sm" id="delete-bench-btn" type="button" hidden>刪除這次評比</button>
@@ -176,9 +219,12 @@
             <p class="hint">臨時想比一題、但看板上沒有這張任務時用：自己填標題與目標，指定一個現有的 repo 與驗證指令，系統會照這份描述幫每個模型各開一張任務。</p>
             <label>標題 <input id="m-title" type="text" placeholder="例：CSV 解析器" /></label>
             <label>目標 <textarea id="m-goal" rows="3" placeholder="要做出什麼、怎樣算完成"></textarea></label>
-            <label>Repo 路徑（必填，要是已存在的 git repo） <input id="m-repo" type="text" placeholder="/home/auo001/Addis/…" /></label>
+            <label>驗證方案（選填：驗證指令、驗收指標、保護路徑、產出物都照方案，每一組用同一把尺）
+              <select id="m-plan"><option value="">不用方案</option></select>
+            </label>
+            <label>Repo 路徑（要是已存在的 git repo；選了方案可以不填，用方案的） <input id="m-repo" type="text" placeholder="/home/auo001/Addis/…" /></label>
             <label>Base branch <input id="m-branch" type="text" value="main" /></label>
-            <label>驗證指令（一行一個） <textarea id="m-verify" rows="2" placeholder="npm test"></textarea></label>
+            <label>驗證指令（一行一個；選了方案可以不填） <textarea id="m-verify" rows="2" placeholder="npm test"></textarea></label>
             <label>領域
               <select id="m-domain">
                 <option value="other" selected>other</option>

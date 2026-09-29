@@ -4,14 +4,17 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type Database from 'better-sqlite3';
+import type { FastifyInstance } from 'fastify';
 import { logEvent, openTestDb, setSetting } from '../db/index.js';
 import { createRun, createTask, getTask, setStatus, updateRun, latestRun } from '../tasks.js';
 import { addWorktree } from '../git/worktree.js';
 import { createPlan } from '../plans/store.js';
 import { setCachedUsage } from '../token/usage.js';
-import { BenchmarkInputError, createBenchmark, getBenchmark } from '../benchmark/store.js';
+import { BenchmarkInputError, benchmarkMatrix, benchmarkRecommendations, createBenchmark, getBenchmark } from '../benchmark/store.js';
 import { armIterations, measureArm } from '../benchmark/attempts.js';
 import { judgeBenchmark } from '../benchmark/complete.js';
+import { benchmarkReport } from '../benchmark/report.js';
+import { buildApp } from '../server/app.js';
 
 /**
  * Benchmarks held to a measured bar: a 驗證方案 gives every arm the same steps, thresholds and
@@ -21,6 +24,7 @@ import { judgeBenchmark } from '../benchmark/complete.js';
  */
 
 let db: Database.Database;
+let app: FastifyInstance | undefined;
 let tmp: string[] = [];
 
 const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8' });
@@ -70,9 +74,11 @@ beforeEach(() => {
   db = openTestDb();
   setCachedUsage(10, 10);
   setSetting(db, 'benchmark_enabled', 'true');
+  app = undefined;
   tmp = [];
 });
-afterEach(() => {
+afterEach(async () => {
+  await app?.close();
   db.close();
   for (const d of tmp) fs.rmSync(d, { recursive: true, force: true });
 });
@@ -241,9 +247,88 @@ describe('the final re-measurement and the ranking', () => {
     }
   });
 
+  it('writes a report: the verdict, the bar per arm, how each got there, and the standings on this kind of work', async () => {
+    const { benchmark } = measuredBenchmark();
+    await judgeBenchmark(db, benchmark.id, judge);
+    const md = benchmarkReport(db, benchmark.id)!;
+    expect(md).toContain('# 評比報告：kernel budget');
+    expect(md).toContain('勝出：**sonnet**');
+    expect(md).toContain('通過門檻：1／2 組');
+    expect(md).toMatch(/\| 名次 \| 模型 \| 最終量測 \| correct \| max_ms \| 迭代 \|/);
+    expect(md).toContain('第 2 次才通過（先對功能、再調效能；自己試跑 1 次、用過 ncu）');
+    expect(md).toContain('2 次都沒通過');
+    expect(md).toContain('CUDA／GPU 類工作的累積戰績');
+    expect(md).toContain('## 量測方式');
+
+    app = buildApp({ db, apiToken: null });
+    const res = await app.inject({ method: 'GET', url: `/api/benchmarks/${benchmark.id}/report.md` });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toContain('text/markdown');
+    expect(res.headers['content-disposition']).toContain(`benchmark-${benchmark.id}.md`);
+    expect(res.body).toBe(md);
+    expect((await app.inject({ method: 'GET', url: '/api/benchmarks/b_nope/report.md' })).statusCode).toBe(404);
+  });
+
   it('measures nothing when the arm left no worktree', async () => {
     const t = createTask(db, { title: 'x', goal: 'g', plan_ref: 'https://example.com/p.md', verification_steps: ['true'], complexity: 'S' });
     createRun(db, { task_id: t.id, worktree_path: '/definitely/gone' });
     expect(await measureArm(db, t.id)).toBeNull();
+  });
+});
+
+describe('which model fits which kind of software', () => {
+  /** judged benchmarks written straight into the tables: [domain, model, passed, attempts_json] */
+  function history(rows: Array<[string, string, boolean, number | null]>) {
+    rows.forEach(([domain, model, passed, passedAt], i) => {
+      const id = `b_h${i}`;
+      db.prepare("INSERT INTO benchmarks (id, title, goal, domain, status, winner) VALUES (?, 't', 'g', ?, 'judged', ?)").run(id, domain, passed ? model : null);
+      const attempts = passedAt === null ? null : JSON.stringify({ attempts: [], passed_at: passed ? passedAt : null, first_try: passed && passedAt === 1, profiler: passedAt === 2, tuned: false, self_runs: 1, label: '' });
+      db.prepare('INSERT INTO benchmark_arms (benchmark_id, model, task_id, verify_outcome, judge_score, judge_rank, attempts_json) VALUES (?, ?, ?, ?, ?, 1, ?)').run(
+        id,
+        model,
+        `t_h${i}`,
+        passed ? 'pass' : 'fail',
+        passed ? 8 : 3,
+        attempts,
+      );
+    });
+  }
+
+  it('filters by software type, local or cloud, sample size and pass rate, and reports first-try rates', () => {
+    history([
+      ['cuda', 'local:qwen3-coder-next', true, 1],
+      ['cuda', 'local:qwen3-coder-next', true, 2],
+      ['cuda', 'local:qwen38-flash', false, 3],
+      ['cuda', 'sonnet', true, 1],
+      ['python', 'local:qwen38-flash', true, 1],
+    ]);
+    const cudaLocal = benchmarkMatrix(db, { domain: 'cuda', kind: 'local' });
+    expect(cudaLocal.map((r) => r.model)).toEqual(['local:qwen3-coder-next', 'local:qwen38-flash']);
+    expect(cudaLocal[0]).toMatchObject({ n: 2, verify_pass_rate: 1, first_try_rate: 0.5, avg_passed_at: 1.5, profiler_rate: 0.5, win_rate: 1, local: true, tracked: 2 });
+    expect(benchmarkMatrix(db, { kind: 'cloud' }).map((r) => r.model)).toEqual(['sonnet']);
+    expect(benchmarkMatrix(db, { min_pass: 0.8 }).every((r) => r.verify_pass_rate >= 0.8)).toBe(true);
+    expect(benchmarkMatrix(db, { min_n: 2 }).map((r) => r.model)).toEqual(['local:qwen3-coder-next']);
+  });
+
+  it('recommends a local model per kind of software, next to the cloud reference', async () => {
+    history([
+      ['cuda', 'local:qwen3-coder-next', true, 1],
+      ['cuda', 'local:qwen38-flash', false, 3],
+      ['cuda', 'sonnet', true, 1],
+      ['python', 'local:qwen38-flash', false, 3],
+      ['python', 'sonnet', true, 1],
+    ]);
+    const recs = benchmarkRecommendations(db);
+    const cuda = recs.find((r) => r.domain === 'cuda')!;
+    expect(cuda.local?.model).toBe('local:qwen3-coder-next');
+    expect(cuda.cloud?.model).toBe('sonnet');
+    expect(cuda.verdict).toContain('可以交給 Qwen3 Coder Next');
+    expect(cuda.verdict).toContain('僅供參考');
+    expect(recs.find((r) => r.domain === 'python')!.verdict).toContain('本地模型還做不來');
+
+    app = buildApp({ db, apiToken: null });
+    const m = (await app.inject({ method: 'GET', url: '/api/benchmarks/matrix?domain=cuda&kind=local&min_pass=0.5' })).json().matrix;
+    expect(m.map((r: { model: string }) => r.model)).toEqual(['local:qwen3-coder-next']);
+    expect((await app.inject({ method: 'GET', url: '/api/benchmarks/recommend' })).json().recommendations).toHaveLength(2);
   });
 });

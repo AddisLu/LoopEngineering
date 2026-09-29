@@ -6,6 +6,8 @@
   if (params.get('token')) localStorage.setItem('loop_token', params.get('token'));
   const TOKEN = localStorage.getItem('loop_token') || '';
   const authHeaders = TOKEN ? { Authorization: `Bearer ${TOKEN}` } : {};
+  // a link a plain <a href> can open: the API takes the token as ?token= too
+  const withToken = (p) => (TOKEN ? `${p}${p.includes('?') ? '&' : '?'}token=${encodeURIComponent(TOKEN)}` : p);
 
   const $ = (id) => document.getElementById(id);
   const el = (tag, cls, text) => {
@@ -111,8 +113,8 @@
 
   async function loadList() {
     summary = await api('/api/benchmarks/summary');
-    const { matrix } = await api('/api/benchmarks/matrix');
     allBenchmarks = (await api('/api/benchmarks')).benchmarks;
+    await Promise.all([paintMatrix(), paintRecommend()]);
 
     const run = summary.running;
     $('running-box').hidden = !run;
@@ -130,13 +132,71 @@
       ['模型', '參賽', '勝場', '平均分', '驗證通過率'],
       summary.models.map((m) => row([m.label, m.n, m.wins, fmt(m.avg_score), pct(m.verify_pass_rate)])),
     );
+    paintBenchList();
+  }
+
+  const kindLabel = (m) => (m.local ? '本地' : '雲端');
+
+  // 模型 × 領域, narrowed by software type, local/cloud, pass rate and sample size
+  async function paintMatrix() {
+    const q = new URLSearchParams();
+    for (const [id, key] of [['mx-domain', 'domain'], ['mx-kind', 'kind'], ['mx-pass', 'min_pass'], ['mx-n', 'min_n']]) {
+      if ($(id).value) q.set(key, $(id).value);
+    }
+    const { matrix } = await api(`/api/benchmarks/matrix${q.toString() ? `?${q}` : ''}`);
     $('matrix-empty').hidden = matrix.length > 0;
     fillTable(
       $('matrix'),
-      ['領域', '模型', '次數', '平均分數', '勝率', '驗證通過率', '平均輸出 token', '平均耗時'],
-      matrix.map((m) => row([domainLabel(m.domain), m.model_label || modelName(m.model), m.n, el('span', 'heat', fmt(m.avg_score)), pct(m.win_rate), pct(m.verify_pass_rate), m.avg_tokens_out, dur(m.avg_duration_s)])),
+      ['領域', '模型', '類型', '場數', '通過率', '一次就過', '第幾次過', '用 ncu', '平均分數', '勝率', '平均輸出 token', '平均耗時'],
+      matrix.map((m) =>
+        row([
+          domainLabel(m.domain),
+          m.model_label || modelName(m.model),
+          kindLabel(m),
+          m.n,
+          el('span', 'heat', pct(m.verify_pass_rate)),
+          pct(m.first_try_rate),
+          fmt(m.avg_passed_at),
+          pct(m.profiler_rate),
+          fmt(m.avg_score),
+          pct(m.win_rate),
+          m.avg_tokens_out,
+          dur(m.avg_duration_s),
+        ]),
+      ),
     );
-    paintBenchList();
+  }
+  for (const id of ['mx-domain', 'mx-kind', 'mx-pass', 'mx-n']) $(id).onchange = () => paintMatrix().catch((e) => pageError(e.message));
+
+  // which local model to hand each kind of software to, next to the best cloud model
+  async function paintRecommend() {
+    const { recommendations } = await api('/api/benchmarks/recommend');
+    $('recommend-empty').hidden = recommendations.length > 0;
+    const who = (m) => (m ? `${m.model_label || modelName(m.model)}（${m.n} 場 · 通過 ${pct(m.verify_pass_rate)} · 一次就過 ${pct(m.first_try_rate)}）` : '–');
+    fillTable(
+      $('recommend'),
+      ['軟體類型', '建議的本地模型', '雲端對照', '結論'],
+      recommendations.map((r) => row([domainLabel(r.domain), who(r.local), who(r.cloud), r.verdict])),
+    );
+  }
+
+  // the final re-measurement (or the arm's own verification) in one cell: verdict + the thresholds
+  function finalCell(a) {
+    let f = null;
+    try {
+      f = a.final_json ? JSON.parse(a.final_json) : null;
+    } catch (e) { /* older rows */ }
+    if (!f) return VERIFY[a.verify_outcome] || '–';
+    const checks = (f.checks || []).map((c) => `${c.name} ${c.actual == null ? '—' : Math.round(c.actual * 1000) / 1000}${c.pass ? '' : ` ✗(${c.op}${c.target})`}`);
+    const head = f.outcome === 'pass' ? '通過' : f.outcome === 'metrics' ? '指標未達' : f.outcome === 'protected' ? '改了保護路徑' : '功能沒過';
+    return `${head}${checks.length ? `：${checks.join('、')}` : ''}`;
+  }
+  function iterCell(a) {
+    try {
+      return (a.attempts_json && JSON.parse(a.attempts_json).label) || '–';
+    } catch (e) {
+      return '–';
+    }
   }
 
   function paintBenchList() {
@@ -192,9 +252,11 @@
 
     const judges = (b.judge_models || b.judge_model || '').split(',').filter(Boolean);
     const sorted = [...arms].sort((x, y) => (x.judge_rank ?? 99) - (y.judge_rank ?? 99));
+    $('report-link').hidden = false;
+    $('report-link').href = withToken(`/api/benchmarks/${encodeURIComponent(id)}/report.md`);
     fillTable(
       $('detail-arms'),
-      ['名次', '模型', '驗證', '平均分', ...judges, '輸出 token', '耗時', '變更', '任務', '評語'],
+      ['名次', '模型', '最終量測', '迭代', '平均分', ...judges, '輸出 token', '耗時', '變更', '任務', '評語'],
       sorted.map((a) => {
         let per = {};
         try {
@@ -208,7 +270,8 @@
         return row([
           a.judge_rank ?? '–',
           a.model_label || modelName(a.model),
-          VERIFY[a.verify_outcome] || '–',
+          finalCell(a),
+          iterCell(a),
           fmt(a.judge_score),
           ...perJudge,
           a.tokens_out,
@@ -395,6 +458,31 @@
     };
   }
 
+  // 驗證方案 for a typed-in question: the same measured bar for every arm
+  async function loadPlans() {
+    const sel = $('m-plan');
+    sel.replaceChildren(el('option', null, '不用方案'));
+    sel.firstChild.value = '';
+    try {
+      const { plans } = await api('/api/verify-plans');
+      for (const p of plans) {
+        const o = el('option', null, `${p.name}${p.metrics ? `（門檻：${p.metrics}）` : ''}`);
+        o.value = p.id;
+        o.dataset.repo = p.repo_path || '';
+        o.dataset.domain = p.domain || '';
+        sel.appendChild(o);
+      }
+    } catch (e) { /* the question can still be typed in full */ }
+    sel.onchange = () => {
+      const o = sel.selectedOptions[0];
+      if (o && o.value) {
+        if (!$('m-repo').value.trim() && o.dataset.repo) $('m-repo').value = o.dataset.repo;
+        if (o.dataset.domain) $('m-domain').value = o.dataset.domain;
+      }
+      paintEstimate();
+    };
+  }
+
   async function loadModelPicks() {
     const box = $('model-picks');
     const cards = [];
@@ -480,7 +568,8 @@
     const label = sourceLabel();
     if (!label) problems.push('還沒選題目');
     if (draftState.source === 'manual' && !$('m-goal').value.trim()) problems.push('自己出題要填目標');
-    if (draftState.source === 'manual' && !$('m-repo').value.trim()) problems.push('自己出題要填 Repo 路徑');
+    if (draftState.source === 'manual' && !$('m-repo').value.trim() && !$('m-plan').value) problems.push('自己出題要填 Repo 路徑（或選一個有 repo 的驗證方案）');
+    if (draftState.source === 'manual' && !$('m-plan').value && !$('m-verify').value.trim()) problems.push('自己出題要填驗證指令（或選一個驗證方案）');
     if (draftState.source === 'task' && taskGate.get(draftState.ref) === false) problems.push('這張任務還缺 repo 或計畫，先在看板補齊才能當題目');
     if (models.length < 2) problems.push('至少選 2 個參賽模型');
     if (!draftState.judges.size) problems.push('至少選 1 位評審');
@@ -509,7 +598,7 @@
     }
     $('bench-submit').disabled = problems.length > 0;
   }
-  for (const id of ['m-title', 'm-goal']) $(id).oninput = paintEstimate;
+  for (const id of ['m-title', 'm-goal', 'm-repo', 'm-verify']) $(id).oninput = paintEstimate;
 
   $('bench-submit').onclick = async () => {
     const btn = $('bench-submit');
@@ -530,6 +619,7 @@
         base_branch: $('m-branch').value.trim() || 'main',
         verification_steps: $('m-verify').value.split('\n').map((s) => s.trim()).filter(Boolean),
         domain: $('m-domain').value,
+        ...($('m-plan').value ? { verify_plan_id: $('m-plan').value } : {}),
       };
     }
     try {
@@ -568,7 +658,7 @@
         await loadDetail(decodeURIComponent(detail[1]));
         timer = setInterval(() => loadDetail(detailId).catch((e) => pageError(`更新不了這頁：${e.message}`)), 10000);
       } else if (hash === '#new') {
-        await Promise.all([loadBuiltin(), loadTasks(), loadDrafts(), loadModelPicks()]);
+        await Promise.all([loadBuiltin(), loadTasks(), loadDrafts(), loadPlans(), loadModelPicks()]);
         setSource(draftState.source);
       } else {
         await loadList();

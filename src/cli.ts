@@ -63,7 +63,8 @@ import { getModelManager } from './local/modelManager.js';
 import { getJobRunner, JobBusyError } from './local/jobs.js';
 import { buildCatalog } from './local/catalog.js';
 import { activeLocalRunCount } from './tasks.js';
-import { BENCH_DOMAINS, BenchmarkInputError, benchmarkMatrix, createBenchmark, getBenchmark, listBenchmarks } from './benchmark/store.js';
+import { BENCH_DOMAINS, BenchmarkInputError, benchmarkMatrix, benchmarkRecommendations, createBenchmark, getBenchmark, listBenchmarks } from './benchmark/store.js';
+import { benchmarkReport } from './benchmark/report.js';
 import { judgeBenchmark } from './benchmark/complete.js';
 import { checkPrd, submitPrd, PrdInputError, type PrdCheck } from './prd/intake.js';
 import { formatSandboxResult, runSandbox, sandboxSettings, settingsForHost } from './exec/sandbox.js';
@@ -1093,24 +1094,66 @@ bench
         `  #${a.judge_rank ?? '-'} ${pad(a.model, 28)} score=${a.judge_score ?? '-'} verify=${a.verify_outcome ?? '-'} ` +
           `tokens_out=${a.tokens_out ?? '-'} time=${a.duration_s ?? '-'}s task=${a.task_id} [${a.task_status ?? '?'}]`,
       );
+      const it = a.attempts_json ? (JSON.parse(a.attempts_json) as { label?: string }) : null;
+      if (it?.label) console.log(`      迭代：${it.label}`);
       if (a.notes) console.log(`      ${a.notes}`);
     }
   });
 
 bench
-  .command('matrix')
-  .description('model x domain results over all judged benchmarks')
-  .action(() => {
+  .command('report <id>')
+  .description('the benchmark as a Markdown report (verdict, measured bar, iterations, notes, standings)')
+  .option('--out <file>', 'write it to a file instead of stdout')
+  .action((id: string, o) => {
     if (!benchOn()) return;
-    const rows = benchmarkMatrix(getDb());
-    if (!rows.length) return console.log('(no judged benchmarks yet)');
-    console.log(`${pad('domain', 11)} ${pad('model', 28)} ${pad('n', 3)} ${pad('score', 6)} ${pad('win', 5)} ${pad('verify', 7)} tokens_out  time`);
+    const md = benchmarkReport(getDb(), id);
+    if (md == null) return fail(`no such benchmark: ${id}`);
+    if (!o.out) return void process.stdout.write(md);
+    fs.writeFileSync(path.resolve(o.out), md);
+    console.log(`wrote ${path.resolve(o.out)}`);
+  });
+
+const pctCell = (v: number | null) => (v == null ? '-' : `${Math.round(v * 100)}%`);
+
+bench
+  .command('matrix')
+  .description('model x domain results over all judged benchmarks, filterable')
+  .option('--domain <domain>', `only this kind of software: ${BENCH_DOMAINS.join('|')}`)
+  .option('--local', 'local models only')
+  .option('--cloud', 'cloud models only')
+  .option('--min-n <n>', 'at least this many judged benchmarks')
+  .option('--min-pass <rate>', 'at least this pass rate, 0-1 (e.g. 0.8)')
+  .action((o) => {
+    if (!benchOn()) return;
+    const rows = benchmarkMatrix(getDb(), {
+      domain: o.domain ?? null,
+      kind: o.local ? 'local' : o.cloud ? 'cloud' : null,
+      min_n: o.minN != null ? Number(o.minN) : null,
+      min_pass: o.minPass != null ? Number(o.minPass) : null,
+    });
+    if (!rows.length) return console.log('(no judged benchmarks match)');
+    console.log(
+      `${pad('domain', 11)} ${pad('model', 28)} ${pad('n', 3)} ${pad('pass', 5)} ${pad('1st', 5)} ${pad('at', 4)} ${pad('ncu', 5)} ${pad('score', 6)} ${pad('win', 5)} tokens_out  time`,
+    );
     for (const r of rows) {
       console.log(
-        `${pad(r.domain, 11)} ${pad(r.model, 28)} ${pad(String(r.n), 3)} ${pad(String(r.avg_score ?? '-'), 6)} ` +
-          `${pad(`${Math.round(r.win_rate * 100)}%`, 5)} ${pad(`${Math.round(r.verify_pass_rate * 100)}%`, 7)} ${pad(String(r.avg_tokens_out ?? '-'), 11)} ${r.avg_duration_s ?? '-'}s`,
+        `${pad(r.domain, 11)} ${pad(r.model, 28)} ${pad(String(r.n), 3)} ${pad(pctCell(r.verify_pass_rate), 5)} ${pad(pctCell(r.first_try_rate), 5)} ` +
+          `${pad(String(r.avg_passed_at ?? '-'), 4)} ${pad(pctCell(r.profiler_rate), 5)} ${pad(String(r.avg_score ?? '-'), 6)} ` +
+          `${pad(pctCell(r.win_rate), 5)} ${pad(String(r.avg_tokens_out ?? '-'), 11)} ${r.avg_duration_s ?? '-'}s`,
       );
     }
+    console.log('pass = 通過門檻率；1st = 第一次就通過；at = 平均第幾次通過；ncu = 自己用過 profiler 的比例');
+  });
+
+bench
+  .command('recommend')
+  .description('per kind of software: the local model to hand it to, next to the best cloud model')
+  .option('--min-n <n>', 'only models with at least this many judged benchmarks', '1')
+  .action((o) => {
+    if (!benchOn()) return;
+    const recs = benchmarkRecommendations(getDb(), { min_n: Number(o.minN) || 1 });
+    if (!recs.length) return console.log('(no judged benchmarks yet)');
+    for (const r of recs) console.log(`${pad(r.domain, 11)} ${r.verdict}`);
   });
 
 bench

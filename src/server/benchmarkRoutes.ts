@@ -6,6 +6,7 @@ import {
   activeBenchmark,
   BenchmarkInputError,
   benchmarkMatrix,
+  benchmarkRecommendations,
   benchmarkSummary,
   cancelBenchmark,
   createBenchmark,
@@ -14,6 +15,7 @@ import {
   listBenchmarks,
 } from '../benchmark/store.js';
 import { isJudging, judgeBenchmark } from '../benchmark/complete.js';
+import { benchmarkReport } from '../benchmark/report.js';
 import type { BenchJudgeExec } from '../benchmark/judge.js';
 import { listBuiltin, resolveSource, type ResolveDeps, type SourceKind } from '../benchmark/source.js';
 import { getDraft } from '../prd/drafts.js';
@@ -55,7 +57,21 @@ export function registerBenchmarkRoutes(
 
   app.get('/api/benchmarks', async (_req, reply) => (enabled() ? { benchmarks: listBenchmarks(db) } : off(reply)));
 
-  app.get('/api/benchmarks/matrix', async (_req, reply) => (enabled() ? { matrix: benchmarkMatrix(db) } : off(reply)));
+  // ?domain=cuda&kind=local|cloud&min_n=2&min_pass=0.5 — which models pass which kind of software
+  app.get('/api/benchmarks/matrix', async (req, reply) => {
+    if (!enabled()) return off(reply);
+    const q = (req.query ?? {}) as Record<string, string | undefined>;
+    const n = (v?: string) => (v == null || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
+    const kind = q.kind === 'local' || q.kind === 'cloud' ? q.kind : null;
+    return { matrix: benchmarkMatrix(db, { domain: str(q.domain), kind, min_n: n(q.min_n), min_pass: n(q.min_pass) }) };
+  });
+
+  /** Per software type: the local model to hand that work to, next to the best cloud model. */
+  app.get('/api/benchmarks/recommend', async (req, reply) => {
+    if (!enabled()) return off(reply);
+    const minN = Number((req.query as Record<string, string | undefined>)?.min_n);
+    return { recommendations: benchmarkRecommendations(db, { min_n: Number.isFinite(minN) && minN > 0 ? minN : 1 }) };
+  });
 
   /** What the dock shows: the running one, the last few, and each model's record. */
   app.get('/api/benchmarks/summary', async (_req, reply) => (enabled() ? benchmarkSummary(db) : off(reply)));
@@ -69,6 +85,18 @@ export function registerBenchmarkRoutes(
     return detail ?? reply.code(404).send({ error: 'not found' });
   });
 
+  /** The benchmark as a Markdown report (a download; ?inline=1 shows it in the browser). */
+  app.get('/api/benchmarks/:id/report.md', async (req, reply) => {
+    if (!enabled()) return off(reply);
+    const id = (req.params as { id: string }).id;
+    const md = benchmarkReport(db, id);
+    if (md == null) return reply.code(404).send({ error: 'not found' });
+    reply.header('content-type', 'text/markdown; charset=utf-8');
+    if ((req.query as Record<string, string | undefined>)?.inline !== '1') {
+      reply.header('content-disposition', `attachment; filename="benchmark-${id.replace(/[^\w-]/g, '')}.md"`);
+    }
+    return md;
+  });
 
   /**
    * Start a benchmark. The question comes from a source (an existing task, a PRD-wizard draft,

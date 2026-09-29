@@ -465,40 +465,130 @@ export function benchmarkSummary(db: Database.Database): { running: BenchmarkLis
 export interface MatrixRow {
   model: string;
   model_label?: string | null;
+  /** a local vLLM model (local:<id>) rather than a cloud one */
+  local: boolean;
   domain: string;
   n: number;
   avg_score: number | null;
   win_rate: number;
+  /** passed the bar: the final re-measurement when the benchmark had one, else the arm's own verification */
   verify_pass_rate: number;
+  /** of the arms with attempt records: passed on the first verification, no send-back needed */
+  first_try_rate: number | null;
+  /** among the arms that passed: on which attempt, on average */
+  avg_passed_at: number | null;
+  /** of the arms with attempt records: ran a profiler (ncu / nsys) itself while working */
+  profiler_rate: number | null;
+  /** how many arms have attempt records (benchmarks judged before they were kept have none) */
+  tracked: number;
   avg_tokens_out: number | null;
   avg_duration_s: number | null;
 }
 
-/** Judged arms aggregated per (model, domain): the "which local model writes which code well" view. */
-export function benchmarkMatrix(db: Database.Database): MatrixRow[] {
+export interface MatrixFilter {
+  /** software type: one of BENCH_DOMAINS */
+  domain?: string | null;
+  /** local models, cloud models, or both */
+  kind?: 'local' | 'cloud' | 'all' | null;
+  /** at least this many judged benchmarks behind a row */
+  min_n?: number | null;
+  /** at least this pass rate (0-1) */
+  min_pass?: number | null;
+}
+
+/**
+ * Judged arms aggregated per (model, domain): the "which model writes which kind of software well"
+ * view, filterable by software type, local/cloud and how reliably a model passes.
+ */
+export function benchmarkMatrix(db: Database.Database, filter: MatrixFilter = {}): MatrixRow[] {
+  const where = ["b.status = 'judged'"];
+  const args: Array<string | number> = [];
+  if (filter.domain) {
+    where.push('b.domain = ?');
+    args.push(filter.domain);
+  }
+  if (filter.kind === 'local') where.push("a.model LIKE 'local:%'");
+  if (filter.kind === 'cloud') where.push("a.model NOT LIKE 'local:%'");
+  const having: string[] = [];
+  if (filter.min_n) {
+    having.push('COUNT(*) >= ?');
+    args.push(filter.min_n);
+  }
+  if (filter.min_pass != null) {
+    having.push("AVG(CASE WHEN a.verify_outcome = 'pass' THEN 1.0 ELSE 0.0 END) >= ?");
+    args.push(filter.min_pass - 1e-9);
+  }
+  const tracked = "CASE WHEN a.attempts_json IS NULL THEN NULL WHEN json_extract(a.attempts_json, '$.%s') THEN 1.0 ELSE 0.0 END";
   const rows = db
     .prepare(
       `SELECT a.model AS model, b.domain AS domain, COUNT(*) AS n,
               AVG(a.judge_score) AS avg_score,
               AVG(CASE WHEN a.model = b.winner THEN 1.0 ELSE 0.0 END) AS win_rate,
               AVG(CASE WHEN a.verify_outcome = 'pass' THEN 1.0 ELSE 0.0 END) AS verify_pass_rate,
+              AVG(${tracked.replace('%s', 'first_try')}) AS first_try_rate,
+              AVG(json_extract(a.attempts_json, '$.passed_at')) AS avg_passed_at,
+              AVG(${tracked.replace('%s', 'profiler')}) AS profiler_rate,
+              COUNT(a.attempts_json) AS tracked,
               AVG(a.tokens_out) AS avg_tokens_out,
               AVG(a.duration_s) AS avg_duration_s
          FROM benchmark_arms a JOIN benchmarks b ON b.id = a.benchmark_id
-        WHERE b.status = 'judged'
+        WHERE ${where.join(' AND ')}
         GROUP BY a.model, b.domain
-        ORDER BY b.domain, avg_score DESC`,
+        ${having.length ? `HAVING ${having.join(' AND ')}` : ''}
+        ORDER BY b.domain, verify_pass_rate DESC, avg_score DESC`,
     )
-    .all() as MatrixRow[];
+    .all(...args) as MatrixRow[];
   const r1 = (v: number | null) => (v == null ? null : Math.round(v * 10) / 10);
-  const r2 = (v: number) => Math.round(v * 100) / 100;
+  const r2 = (v: number | null) => (v == null ? null : Math.round(v * 100) / 100);
   return rows.map((r) => ({
     ...r,
     model_label: modelLabel(db, r.model),
+    local: isLocalModel(r.model),
     avg_score: r1(r.avg_score),
-    win_rate: r2(r.win_rate),
-    verify_pass_rate: r2(r.verify_pass_rate),
+    win_rate: r2(r.win_rate)!,
+    verify_pass_rate: r2(r.verify_pass_rate)!,
+    first_try_rate: r2(r.first_try_rate),
+    avg_passed_at: r1(r.avg_passed_at),
+    profiler_rate: r2(r.profiler_rate),
     avg_tokens_out: r.avg_tokens_out == null ? null : Math.round(r.avg_tokens_out),
     avg_duration_s: r.avg_duration_s == null ? null : Math.round(r.avg_duration_s),
   }));
+}
+
+export interface Recommendation {
+  domain: string;
+  /** the local model to hand this kind of work to, if any has passed a benchmark of it */
+  local: MatrixRow | null;
+  /** the best cloud model on the same work, for comparison */
+  cloud: MatrixRow | null;
+  /** fewer than 3 judged benchmarks behind the local pick: a hint, not a finding */
+  thin: boolean;
+  verdict: string;
+}
+
+const pct = (v: number | null) => (v == null ? '—' : `${Math.round(v * 100)}%`);
+const better = (a: MatrixRow, b: MatrixRow) =>
+  b.verify_pass_rate - a.verify_pass_rate || (b.first_try_rate ?? -1) - (a.first_try_rate ?? -1) || (b.avg_score ?? -1) - (a.avg_score ?? -1) || b.n - a.n;
+
+/**
+ * Which local model fits which kind of software, read off every judged benchmark: per domain the
+ * local model that passes most often (then first-try, then score), next to the best cloud model.
+ */
+export function benchmarkRecommendations(db: Database.Database, opts: { min_n?: number } = {}): Recommendation[] {
+  const rows = benchmarkMatrix(db, { min_n: opts.min_n ?? 1 });
+  const out: Recommendation[] = [];
+  for (const domain of BENCH_DOMAINS) {
+    const here = rows.filter((r) => r.domain === domain);
+    if (!here.length) continue;
+    const local = here.filter((r) => r.local).sort(better)[0] ?? null;
+    const cloud = here.filter((r) => !r.local).sort(better)[0] ?? null;
+    const thin = !local || local.n < 3;
+    let verdict: string;
+    if (!local) verdict = '還沒有本地模型評比過這類工作';
+    else if (local.verify_pass_rate === 0) verdict = `本地模型還做不來（${local.model_label} 通過率 0%）${cloud ? `，先交給雲端 ${cloud.model_label}` : ''}`;
+    else if (!cloud || local.verify_pass_rate >= cloud.verify_pass_rate) verdict = `可以交給 ${local.model_label}（通過率 ${pct(local.verify_pass_rate)}，一次就過 ${pct(local.first_try_rate)}）`;
+    else verdict = `${local.model_label} 做得到但不如雲端（通過率 ${pct(local.verify_pass_rate)} 對 ${cloud.model_label} ${pct(cloud.verify_pass_rate)}），重要的工作交給雲端`;
+    out.push({ domain, local, cloud, thin, verdict: thin && local ? `${verdict}；只有 ${local.n} 場，僅供參考` : verdict });
+  }
+  return out;
 }
