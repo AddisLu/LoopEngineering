@@ -575,7 +575,13 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
               return [];
             }
           },
-          env: (name) => runtimeEnvFor(name, db, { apiUrl: `http://127.0.0.1:${process.env.LOOP_PORT || 4711}`, apiToken: apiToken ?? '', dataDir: paths.dataDir }),
+          env: (name) =>
+            runtimeEnvFor(name, db, {
+              apiUrl: `http://127.0.0.1:${process.env.LOOP_PORT || 4711}`,
+              apiToken: apiToken ?? '',
+              dataDir: paths.dataDir,
+              toolTimeoutMs: getNum(db, 'mcp_timeout_ms', 30_000),
+            }),
           timeoutMs: () => getNum(db, 'mcp_timeout_ms', 30_000),
         });
   app.addHook('onClose', async () => {

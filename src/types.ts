@@ -68,6 +68,8 @@ export interface TaskRun {
   backend: string | null; // adapter that ran it: claude-code | opencode | mock
   verify_json?: string | null; // last verification: [{step, ok, exitCode, timedOut, tail}] (+ skipped note)
   metrics_json?: string | null; // last metrics: {values, checks[{name, op, target, actual, pass}], pass}
+  head_sha?: string | null; // the commit that verification looked at
+  base_sha?: string | null; // merge-base with the base branch at that time: the task's diff is base_sha..head_sha
   started_at: string;
   finished_at: string | null;
 }

@@ -31,6 +31,7 @@ import { runGapReview } from '../review/gapReviewer.js';
 import { createPr } from '../git/pr.js';
 import { prBody } from './runSummary.js';
 import { syncWithBase, pushBranch, stripLoopArtifacts, integrateIntoBase, baseRefFor } from '../git/integrate.js';
+import { verifiedShas } from '../review/code.js';
 import { createMergeTask } from './mergeTask.js';
 import { cleanupWorktree } from './cleanup.js';
 import { killRun } from './kill.js';
@@ -649,7 +650,7 @@ export async function runVerifyPipeline(
     }
     if (touched.length) {
       const out = `這些受保護的檔案被改動了，請還原（git checkout ${base} -- <檔案>）再完成任務：\n${touched.map((f) => `- ${f}`).join('\n')}\n受保護的範圍：${protectedGlobs.join(', ')}`;
-      recordVerification(db, runId, [{ step: '保護路徑', ok: false, exitCode: null, timedOut: false, output: out }], null);
+      recordVerification(db, runId, [{ step: '保護路徑', ok: false, exitCode: null, timedOut: false, output: out }], null, worktree, base);
       handleVerifyFailure(db, task, runId, worktree, { ok: false, results: [{ step: '保護路徑', ok: false, exitCode: null, timedOut: false, output: out }], failedStep: '保護路徑' });
       return 'fail';
     }
@@ -678,7 +679,7 @@ export async function runVerifyPipeline(
     const metrics = specs.length || vres.results.some((r) => r.output.includes('LOOP_METRICS'))
       ? evaluateAcceptance(specs, extractMetrics(vres.results.map((r) => r.output)))
       : null;
-    recordVerification(db, runId, vres.results, metrics);
+    recordVerification(db, runId, vres.results, metrics, worktree, base);
     if (!vres.ok) {
       handleVerifyFailure(db, task, runId, worktree, vres);
       return 'fail';
@@ -714,14 +715,26 @@ export async function runVerifyPipeline(
   return needsManual ? 'manual' : 'pass';
 }
 
-/** What the last verification of a run found, for the morning report and the PR body. */
-function recordVerification(db: Database.Database, runId: string, results: VerifyStepResult[], metrics: MetricsReport | null): void {
+/**
+ * What the last verification of a run found, for the morning report, the PR body and the review
+ * page — and which code it looked at (HEAD and its merge-base with the base branch), so the
+ * task's diff can still be shown after the worktree is reclaimed.
+ */
+function recordVerification(
+  db: Database.Database,
+  runId: string,
+  results: VerifyStepResult[],
+  metrics: MetricsReport | null,
+  worktree: string,
+  base: string | null,
+): void {
   try {
     updateRun(db, runId, {
       verify_json: JSON.stringify(
         results.map((r) => ({ step: r.step, ok: r.ok, exitCode: r.exitCode, timedOut: r.timedOut, tail: r.output.replace(/\s+$/, '').slice(-600) })),
       ),
       metrics_json: metrics ? JSON.stringify(metrics) : null,
+      ...(base ? verifiedShas(worktree, base) : {}),
     });
   } catch {
     /* reporting only — never fail a verification over it */

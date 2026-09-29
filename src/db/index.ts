@@ -201,6 +201,13 @@ function migrate(db: Database.Database): void {
     ['verify_json', 'TEXT'],
     ['metrics_json', 'TEXT'],
   ]);
+  // which code that verification looked at: HEAD, and the base it is measured against
+  // (merge-base with the base branch) — so "what did this task change" still answers after the
+  // branch has been fast-forwarded into base and the worktree reclaimed. Nullable = never verified.
+  add('task_runs', [
+    ['head_sha', 'TEXT'],
+    ['base_sha', 'TEXT'],
+  ]);
 }
 
 function seedSettings(db: Database.Database): void {
