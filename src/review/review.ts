@@ -160,7 +160,12 @@ export function trialAllowed(db: Database.Database, userKey: string): string | n
   return null;
 }
 
-export function reviewBundle(db: Database.Database, task: Task, viewer: { user_key: string }): ReviewBundle {
+export function reviewBundle(
+  db: Database.Database,
+  task: Task,
+  viewer: { user_key: string },
+  opts: { releaseToken?: string } = {},
+): ReviewBundle {
   const runs = db.prepare('SELECT * FROM task_runs WHERE task_id = ? ORDER BY started_at DESC, rowid DESC').all(task.id) as TaskRun[];
   const run = runs[0] ?? null;
   const verified = runs.find((r) => r.verify_json) ?? null;
@@ -208,7 +213,7 @@ export function reviewBundle(db: Database.Database, task: Task, viewer: { user_k
   const releaseReason =
     !task.approved_at ? '核可後才能發佈'
     : !(getSetting(db, 'gitea_url') ?? '').trim() ? '還沒設定 gitea_url'
-    : !process.env.GITEA_TOKEN ? '引擎的環境變數沒有 GITEA_TOKEN'
+    : !(opts.releaseToken ?? process.env.GITEA_TOKEN) ? '引擎的環境變數沒有 GITEA_TOKEN'
     : !art?.manifest.files.length ? '沒有收集到產出物（驗證方案要設定「產出物」）'
     : null;
   const started = ts(run?.started_at ?? null);

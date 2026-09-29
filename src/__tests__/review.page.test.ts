@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { execFileSync } from 'node:child_process';
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type Database from 'better-sqlite3';
 import type { FastifyInstance } from 'fastify';
 import { openTestDb, setSetting } from '../db/index.js';
@@ -221,6 +221,14 @@ describe('驗收頁', () => {
     expect(early.statusCode).toBe(409);
     expect(early.json().error).toContain('核可後');
     db.prepare("UPDATE tasks SET approved_by = 'x', approved_at = datetime('now') WHERE id = ?").run(task.id);
+    // the page's button reads the same token the release uses, not only the process env
+    vi.stubEnv('GITEA_TOKEN', '');
+    try {
+      const can = (await app.inject({ method: 'GET', url: `/api/tasks/${task.id}/review` })).json().can;
+      expect([can.release, can.release_reason]).toEqual([true, null]);
+    } finally {
+      vi.unstubAllEnvs();
+    }
     const bad = await app.inject({ method: 'POST', url: `/api/tasks/${task.id}/release`, payload: { tag: 'v 1' } });
     expect(bad.statusCode).toBe(400);
     const ok = await app.inject({ method: 'POST', url: `/api/tasks/${task.id}/release`, headers: as('呂侑儒'), payload: { tag: 'v1.0.0' } });

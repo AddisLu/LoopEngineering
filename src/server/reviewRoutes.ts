@@ -62,7 +62,7 @@ export function registerReviewRoutes(app: FastifyInstance, db: Database.Database
   app.get('/api/tasks/:id/review', async (req, reply) => {
     const c = ctx(req, reply);
     if (!c) return;
-    return { ...reviewBundle(db, c.task, c.who), viewer: { label: c.who.label, user_key: c.who.user_key } };
+    return { ...reviewBundle(db, c.task, c.who, { releaseToken: opts.releaseToken }), viewer: { label: c.who.label, user_key: c.who.user_key } };
   });
 
   // ---- 程式碼 ----
