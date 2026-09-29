@@ -281,4 +281,20 @@ describe('attempts carry their time and tokens (the iteration timeline)', () => 
     const a = armIterations(db, t.id).attempts[0]!;
     expect(a).toMatchObject({ started_at: '2026-09-29 10:00:00', finished_at: null, duration_s: null, tokens_out: 42, steps: [] });
   });
+
+  it('an attempt still running is in progress, not a miss', () => {
+    const t = createTask(db, { title: 'a', goal: 'g', plan_ref: 'https://example.com/p.md', verification_steps: ['true'], complexity: 'S' });
+    const r1 = createRun(db, { task_id: t.id, worktree_path: '/tmp/x' });
+    db.prepare("UPDATE task_runs SET started_at = '2026-09-29 10:00:00', finished_at = '2026-09-29T10:05:00Z', verify_json = ? WHERE id = ?").run(
+      JSON.stringify([{ step: 'bash bench.sh', ok: false, exitCode: 1, timedOut: false, tail: 'boom' }]),
+      r1.id,
+    );
+    const r2 = createRun(db, { task_id: t.id, worktree_path: '/tmp/x' });
+    db.prepare("UPDATE task_runs SET started_at = '2026-09-29 10:06:00', finished_at = NULL WHERE id = ?").run(r2.id);
+    setStatus(db, t.id, 'running');
+    expect(armIterations(db, t.id).label).toBe('第 2 次進行中（前 1 次沒通過，最後：功能沒過（bash bench.sh）；沒自己試跑、沒用 ncu）');
+    // once the task has stopped, an attempt left without an end is just one that never got verified
+    setStatus(db, t.id, 'attention');
+    expect(armIterations(db, t.id).label).toMatch(/^2 次都沒通過（最後：沒跑到驗證/);
+  });
 });

@@ -137,7 +137,7 @@ export function describeAttempt(a: Pick<AttemptRecord, 'outcome' | 'failed_step'
   }
 }
 
-function label(s: Omit<IterationSummary, 'label'>): string {
+function label(s: Omit<IterationSummary, 'label'>, live = false): string {
   if (!s.attempts.length) return '沒有執行紀錄';
   const tools = [s.self_runs ? `自己試跑 ${s.self_runs} 次` : '沒自己試跑', s.profiler ? '用過 ncu' : '沒用 ncu'].join('、');
   if (s.passed_at === 1) return `第 1 次就通過（${tools}）`;
@@ -145,7 +145,13 @@ function label(s: Omit<IterationSummary, 'label'>): string {
     const why = s.tuned ? '先對功能、再調效能' : '先前功能沒過';
     return `第 ${s.passed_at} 次才通過（${why}；${tools}）`;
   }
-  return `${s.attempts.length} 次都沒通過（最後：${describeAttempt(s.attempts[s.attempts.length - 1]!)}；${tools}）`;
+  const last = s.attempts[s.attempts.length - 1]!;
+  // a run still in flight has not been verified yet — it is not a miss
+  if (live && last.finished_at === null) {
+    const prev = s.attempts[s.attempts.length - 2];
+    return prev ? `第 ${last.attempt} 次進行中（前 ${prev.attempt} 次沒通過，最後：${describeAttempt(prev)}；${tools}）` : `第 1 次進行中（${tools}）`;
+  }
+  return `${s.attempts.length} 次都沒通過（最後：${describeAttempt(last)}；${tools}）`;
 }
 
 /** Every attempt of one arm task, oldest first, with what its verification and the agent did. */
@@ -189,7 +195,8 @@ export function armIterations(db: Database.Database, taskId: string): IterationS
     self_runs: attempts.reduce((s, a) => s + a.self_runs, 0),
     profiler: attempts.some((a) => a.profiler),
   };
-  return { ...summary, label: label(summary) };
+  const status = getTask(db, taskId)?.status;
+  return { ...summary, label: label(summary, status === 'running' || status === 'verifying') };
 }
 
 /**
