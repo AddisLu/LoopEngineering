@@ -24,6 +24,7 @@ import { createPlan, deletePlan, getPlan, listDatasets, listPlans, PlanError, up
 import { computeMetrics } from './server/metrics.js';
 import { killRun } from './orchestrator/kill.js';
 import { cleanupWorktree } from './orchestrator/cleanup.js';
+import { updateVerification, TaskEditError, type VerificationPatch } from './taskEdit.js';
 import { pruneTaskArtifacts, type ArtifactCleanup } from './git/worktree.js';
 import { DEFAULT_SETTINGS, ENGINE_REPO_ROOT, type Complexity } from './config.js';
 import { validateSetting } from './settings.js';
@@ -314,6 +315,37 @@ program
     // fire-and-forget: never delays this command returning (see knowledge/distill.ts)
     void runDistiller(db, t, material).catch(() => {});
     console.log(`${id} -> closed`);
+  });
+
+program
+  .command('edit <id>')
+  .description("change how a task is verified: steps, verify mode, 驗收指標, 產出物, 保護路徑 (not while it runs)")
+  .option('--verify <steps...>', 'verification steps, one argument each (e.g. "sandbox: bash run.sh"); replaces the list')
+  .option('--verify-mode <csv>', 'command|llm|manual')
+  .option('--acceptance <spec>', 'e.g. "pass == 4; min_occupancy >= 80" ("" clears)')
+  .option('--artifacts <csv>', 'globs collected after verification, e.g. "out/*.ncu-rep" ("" clears)')
+  .option('--protected <csv>', 'globs the task must not change ("" clears)')
+  .option('--verify-timeout <min>', 'per-step timeout in minutes ("default" = the setting)')
+  .action((id, o) => {
+    const patch: VerificationPatch = {};
+    if (o.verify) patch.verification_steps = o.verify as string[];
+    if (o.verifyMode !== undefined) patch.verify_mode = String(o.verifyMode);
+    if (o.acceptance !== undefined) patch.acceptance_metrics = String(o.acceptance);
+    if (o.artifacts !== undefined) patch.artifacts = String(o.artifacts);
+    if (o.protected !== undefined) patch.protected_paths = String(o.protected);
+    if (o.verifyTimeout !== undefined) patch.verify_timeout_min = o.verifyTimeout === 'default' ? null : Number(o.verifyTimeout);
+    try {
+      const t = updateVerification(getDb(), id, patch, 'cli');
+      console.log(`${id} verification:`);
+      console.log(`  steps       ${t.verification_steps}`);
+      console.log(`  mode        ${t.verify_mode || 'command'}`);
+      console.log(`  acceptance  ${t.acceptance_metrics ?? '-'}`);
+      console.log(`  artifacts   ${t.artifacts ?? '-'}`);
+      console.log(`  protected   ${t.protected_paths ?? '-'}`);
+      console.log(`  timeout     ${t.verify_timeout_min ?? 'default'}`);
+    } catch (err) {
+      fail(err instanceof TaskEditError ? err.message : String(err));
+    }
   });
 
 program

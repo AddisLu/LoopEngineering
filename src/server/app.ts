@@ -14,6 +14,7 @@ import { killRun } from '../orchestrator/kill.js';
 import { cleanupWorktree, resetTaskWorkspace } from '../orchestrator/cleanup.js';
 import { pruneTaskArtifacts } from '../git/worktree.js';
 import { integrateIntoBase } from '../git/integrate.js';
+import { updateVerification, TaskEditError, type VerificationPatch } from '../taskEdit.js';
 import { identityOf, IdentityError } from './identity.js';
 import { latestRun } from '../tasks.js';
 import fs from 'node:fs';
@@ -277,6 +278,34 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
     const t = getTask(db, (req.params as any).id);
     if (!t) return reply.code(404).send({ error: 'not found' });
     return { task: t, gate: validateTask(t, getSetting(db, 'host_capabilities') ?? '', environmentMap(db)) };
+  });
+
+  // Change how a task is verified after it was created (taskEdit.ts) — e.g. move a step into
+  // the GPU 沙盒 so 試跑 can re-run it. Only the verification fields; never while it runs.
+  app.patch('/api/tasks/:id', async (req, reply) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const patch: VerificationPatch = {};
+    if (b.verification_steps !== undefined) {
+      patch.verification_steps = typeof b.verification_steps === 'string'
+        ? b.verification_steps.split(',').map((s) => s.trim()).filter(Boolean)
+        : (b.verification_steps as string[]);
+    }
+    for (const k of ['verify_mode', 'acceptance_metrics', 'artifacts', 'protected_paths'] as const) {
+      if (b[k] !== undefined) patch[k] = b[k] === null ? null : String(b[k]);
+    }
+    if (b.verify_timeout_min !== undefined) patch.verify_timeout_min = b.verify_timeout_min === null ? null : Number(b.verify_timeout_min);
+    let by: string | null = null;
+    try {
+      by = identityOf(req).label;
+    } catch {
+      /* an unreadable name header only loses the attribution */
+    }
+    try {
+      return { task: updateVerification(db, (req.params as { id: string }).id, patch, by) };
+    } catch (err) {
+      if (err instanceof TaskEditError) return reply.code(err.status).send({ error: err.message });
+      throw err;
+    }
   });
 
   // Who the engine takes this request to be (server/identity.ts) — the operator pages show it
