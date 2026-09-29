@@ -412,8 +412,13 @@ async function loadDetail(id) {
   const detail = await api(`/api/benchmarks/${encodeURIComponent(id)}`);
   // attempts of arms still running are not stored on the benchmark yet: read each arm's history
   const live = detail.benchmark.status === 'running' || detail.benchmark.status === 'judging';
+  // attempts stored before they carried timestamps (or not stored yet) are read from the task's history
+  const stale = (a) => {
+    const it = parseJson(a.attempts_json);
+    return !it || (it.attempts || []).some((x) => !('started_at' in x));
+  };
   const histories = await Promise.all(
-    detail.arms.map((a) => (a.task_status && (live || !a.attempts_json) ? api(`/api/tasks/${encodeURIComponent(a.task_id)}/runs`).catch(() => null) : Promise.resolve(null))),
+    detail.arms.map((a) => (a.task_status && (live || stale(a)) ? api(`/api/tasks/${encodeURIComponent(a.task_id)}/runs`).catch(() => null) : Promise.resolve(null))),
   );
   lastDetail = { ...detail, histories };
   paintDetail(lastDetail);
@@ -468,7 +473,9 @@ const parseSteps = (s) => {
 
 /** one arm, read the same way whether it was judged (stored) or is still running (its history) */
 function armView(a, history, head, specs) {
-  const it = parseJson(a.attempts_json) || history?.iterations || null;
+  const stored = parseJson(a.attempts_json);
+  const timed = stored && (stored.attempts || []).every((x) => 'started_at' in x);
+  const it = (timed ? stored : history?.iterations) || stored || null;
   const final = parseJson(a.final_json);
   const attempts = it?.attempts || [];
   const lastMeasured = [...attempts].reverse().find((x) => x.metrics);
