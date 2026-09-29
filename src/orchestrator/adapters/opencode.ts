@@ -85,6 +85,7 @@ export const opencodeAdapter: Adapter = {
     }
     const env: NodeJS.ProcessEnv = {
       ...process.env,
+      ...(ctx.env ?? {}),
       OPENCODE_CONFIG_CONTENT: buildOpencodeConfig(local, ctx.localBaseUrl || DEFAULT_LOCAL_BASE_URL, ctx.mcpServers ?? []),
     };
     // LOOP_OPENCODE_BIN: test seam (a replay script) / non-PATH installs.

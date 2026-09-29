@@ -48,6 +48,7 @@ import { registerBenchmarkRoutes, type BenchmarkRouteOptions } from './benchmark
 import type { BenchJudgeExec } from '../benchmark/judge.js';
 import { registerPrdRoutes, type PrdRouteOptions } from './prdRoutes.js';
 import { registerChatRoutes, type ChatRouteOptions } from './chatRoutes.js';
+import { registerExecRoutes } from './execRoutes.js';
 import fastifyWebsocket from '@fastify/websocket';
 import { registerTerminalRoutes, type TerminalRouteOptions } from './terminalRoutes.js';
 import { McpPool } from '../mcp/client.js';
@@ -122,6 +123,8 @@ export interface AppOptions {
   prdGit?: PrdRouteOptions['git'];
   /** Test-only injection point for 模型對話 的使用者辨識 (see src/server/identity.ts). */
   chatIdentity?: ChatRouteOptions['identity'];
+  /** Test-only: stands in for `docker run` behind the chat's GPU 沙盒 tools and POST /api/exec/run. */
+  sandboxRun?: ChatRouteOptions['sandboxRun'];
 }
 
 interface CreateTaskBody {
@@ -567,7 +570,8 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
   app.addHook('onClose', async () => {
     await mcpPool?.close();
   });
-  registerChatRoutes(app, db, { identity: opts.chatIdentity, toolFetch: opts.chatToolFetch, toolLookup: opts.chatToolLookup, mcpPool });
+  registerChatRoutes(app, db, { identity: opts.chatIdentity, toolFetch: opts.chatToolFetch, toolLookup: opts.chatToolLookup, mcpPool, sandboxRun: opts.sandboxRun });
+  registerExecRoutes(app, db, { run: opts.sandboxRun });
   // inside a child plugin so it loads after @fastify/websocket (a `websocket: true` route
   // declared in the root scope runs before the plugin has decorated the instance)
   app.register(async (inst) => {

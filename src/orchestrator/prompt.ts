@@ -47,7 +47,14 @@ const DISCIPLINE_BLOCK = `
 export function writeTaskFile(
   cwd: string,
   task: Task,
-  extras?: { knowledge?: string | null; rag?: string | null; discipline?: boolean; mcpServers?: string[] },
+  extras?: {
+    knowledge?: string | null;
+    rag?: string | null;
+    discipline?: boolean;
+    mcpServers?: string[];
+    /** GPU 執行沙盒 details when the run has the loop-exec server (null/absent = no section) */
+    exec?: { image: string; timeoutSec: number; maxTimeoutSec: number } | null;
+  },
 ): string {
   const steps = parseSteps(task);
   const modes = parseVerifyMode(task);
@@ -67,7 +74,7 @@ export function writeTaskFile(
   // The injected knowledge above is a packed excerpt chosen at dispatch time. When the task
   // also has the MCP tools, say so and say WHEN — an agent that does not know a tool exists
   // never calls it, and "look it up if you feel like it" is not a trigger anyone acts on.
-  const askBlock = extras?.mcpServers?.length
+  const askBlock = extras?.mcpServers?.some((s) => s !== 'loop-exec')
     ? `\n## 查知識庫（執行中隨時可用）\n` +
       `上面的 Knowledge 只是派工當下挑出來的摘要，不是全部。遇到下列情況請先查再動手：\n` +
       `- 要改設定檔、機台參數、網路或硬體相關的東西 → \`loop_recall\`（查已核可的限制與環境知識）\n` +
@@ -75,12 +82,22 @@ export function writeTaskFile(
       `- 要讀本 repo 以外、但已登錄的專案檔案 → \`list_dir\` / \`read_file\` / \`search_text\`（唯讀）\n` +
       `查到的限制與 Knowledge 段落同等有效；若與 Plan 衝突，以 Plan 為準，並在 HANDOFF.md 註明衝突。\n`
     : '';
+  // The GPU 沙盒 is the only way a Claude run can compile or execute anything (its Bash is limited
+  // to git/npm/node/ls/cat) — without this section the agent does not know the tool exists.
+  const execBlock = extras?.exec
+    ? `\n## GPU 沙盒（執行中可用）\n` +
+      `可以用 \`loop-exec\` 的 \`run\` 工具（Claude 下名稱為 \`mcp__loop-exec__run\`）在 Docker 沙盒裡執行 bash 指令：這個 worktree 掛在 /work 並是工作目錄，有 GPU、沒有網路，映像 ${extras.exec.image}，預設 ${extras.exec.timeoutSec} 秒逾時（最多 ${extras.exec.maxTimeoutSec} 秒）。\n` +
+      `- 寫完程式就自己編譯、執行、跑測試或量測，以實際輸出為準，不要只憑閱讀判斷。\n` +
+      `- 驗證要能自動判斷：讓程式自己檢查結果，以 exit code 表示成敗（例如和 CPU 參考值比對，不符就 exit 1）。\n` +
+      `- 編譯產物放在 \`build/\` 之類的目錄並加進 .gitignore，不要 commit 執行檔或量測報告。\n` +
+      `- Verification steps 裡以 \`sandbox:\` 開頭的步驟，引擎會在同一個沙盒裡執行；你自己跑時，去掉這個前綴交給 run 工具即可。\n`
+    : '';
   const disciplineBlock = extras?.discipline ? DISCIPLINE_BLOCK : '';
   const body = `# Loop task: ${task.title}
 
 ## Goal
 ${task.goal}
-${knowledgeBlock}${ragBlock}${askBlock}
+${knowledgeBlock}${ragBlock}${askBlock}${execBlock}
 ## Plan
 ${planContent(task)}
 

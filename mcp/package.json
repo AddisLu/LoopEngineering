@@ -8,7 +8,8 @@
     "loop-mcp": "./loop-mcp.mjs",
     "loop-ssot-mcp": "./loop-ssot-mcp.mjs",
     "loop-fs-mcp": "./loop-fs-mcp.mjs",
-    "loop-gh-mcp": "./loop-gh-mcp.mjs"
+    "loop-gh-mcp": "./loop-gh-mcp.mjs",
+    "loop-exec-mcp": "./loop-exec-mcp.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0"

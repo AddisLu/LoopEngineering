@@ -41,23 +41,29 @@ import { runDeployTask, type DeployExec } from './deployTask.js';
 import { getEnvironment } from '../deploy/store.js';
 import { isLocalModel, localId, getLocalModel } from '../local/models.js';
 import { parseMcpServers, runtimeEnvFor, type McpServerCfg } from '../mcp/config.js';
-import { cleanupTaskMcp, writeTaskMcp, type TaskMcp } from './taskMcp.js';
+import { cleanupTaskMcp, writeTaskMcp, execServerForTask, execToolTimeoutMs, EXEC_SERVER, type TaskMcp } from './taskMcp.js';
+import { sandboxSettings, verifySandboxRunner, type SandboxDeps } from '../exec/sandbox.js';
 
 /**
  * MCP servers a local-model task may use (mcp_servers_json), with the runtime env the chat page
  * would inject — read-only fs roots, Loop's own API. A bad setting means no servers, not a
  * failed dispatch.
  */
-function mcpServersForTask(db: Database.Database): McpServerCfg[] {
+function mcpServersForTask(db: Database.Database, runId?: string): McpServerCfg[] {
+  let servers: McpServerCfg[];
   try {
     const apiUrl = `http://127.0.0.1:${process.env.LOOP_PORT || 4711}`;
-    return parseMcpServers(getSetting(db, 'mcp_servers_json') || '').map((s) => ({
+    servers = parseMcpServers(getSetting(db, 'mcp_servers_json') || '').map((s) => ({
       ...s,
       environment: { ...(s.environment ?? {}), ...runtimeEnvFor(s.name, db, { apiUrl, apiToken: process.env.LOOP_API_TOKEN ?? '', dataDir: paths.dataDir }) },
     }));
   } catch {
-    return [];
+    servers = [];
   }
+  // GPU 執行沙盒: only the engine's own per-run server may carry this name
+  servers = servers.filter((s) => s.name !== EXEC_SERVER);
+  const exec = runId ? execServerForTask(db, runId) : null;
+  return exec ? [...servers, exec] : servers;
 }
 
 /**
@@ -229,12 +235,15 @@ export async function runTask(
 
   // 任務執行中查知識庫: the read-only MCP servers this run may call (null when disabled).
   // Written outside the worktree so `git add -A` can never sweep it into the task branch.
-  const taskMcp: TaskMcp | null = isMock || isGeneric ? null : writeTaskMcp(db, run.id, mcpServersForTask(db));
+  const taskMcp: TaskMcp | null = isMock || isGeneric ? null : writeTaskMcp(db, run.id, mcpServersForTask(db, run.id));
+  const sandbox = sandboxSettings(db);
+  const withSandbox = !!taskMcp?.servers.includes(EXEC_SERVER);
   const taskFilePath = writeTaskFile(worktreePath, task, {
     knowledge: knowledgeContext(db, task),
     rag: await ragTaskContext(db, task, opts.ragEmbedExec),
     discipline: disciplineOn,
     mcpServers: taskMcp?.servers,
+    exec: withSandbox ? { image: sandbox.image, timeoutSec: sandbox.timeoutSec, maxTimeoutSec: sandbox.maxTimeoutSec } : null,
   });
   if (!isMock && !isGeneric) {
     // Keep engine-written artifacts out of the task branch/PR: exclude them locally
@@ -303,9 +312,11 @@ export async function runTask(
       timeoutMs,
       local: isLocal ? (getLocalModel(db, localId(dispatchModel!)) ?? null) : null,
       localBaseUrl: getSetting(db, 'local_vllm_base_url') || undefined,
-      mcpServers: isLocal ? mcpServersForTask(db) : undefined,
+      mcpServers: isLocal ? mcpServersForTask(db, run.id) : undefined,
       mcpConfigPath: taskMcp?.configPath ?? null,
       mcpTools: taskMcp?.tools,
+      // a sandbox build can outlast Claude Code's default MCP tool timeout
+      env: withSandbox ? { MCP_TOOL_TIMEOUT: String(execToolTimeoutMs(sandbox)) } : undefined,
       resumeSessionId: resumeSid,
       resume: !!opts.resume,
       handoff,
@@ -596,6 +607,8 @@ export async function runVerifyPipeline(
   // Test-only injection point for the LLM judge exec (mirrors distill.ts's DistillExec
   // plumbing) — production call sites omit it and get the real `claude` CLI call.
   judgeExec?: JudgeExec,
+  // Test-only: stands in for `docker run` behind `sandbox:` verification steps.
+  sandboxDeps?: SandboxDeps,
 ): Promise<VerifyPipelineOutcome> {
   const modes = parseVerifyMode(task);
   const timeoutMs = (task.verify_timeout_min ?? getNum(db, 'verify_step_timeout_min', 10)) * 60_000;
@@ -622,7 +635,16 @@ export async function runVerifyPipeline(
   }
 
   if (modes.has('command') && parseSteps(task).length > 0) {
-    const vres = await runVerification(task, worktree, timeoutMs, { shellSetting: getSetting(db, 'shell') });
+    // `sandbox:` steps run in the same GPU 沙盒 the agent had — null when exec is off, so such
+    // a step fails with a clear message instead of silently running on the host
+    const sandbox = sandboxSettings(db);
+    const vres = await runVerification(
+      task,
+      worktree,
+      timeoutMs,
+      { shellSetting: getSetting(db, 'shell') },
+      sandbox.enabled ? verifySandboxRunner(sandbox, sandboxDeps) : null,
+    );
     if (!vres.ok) {
       handleVerifyFailure(db, task, runId, worktree, vres);
       return 'fail';
