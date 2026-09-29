@@ -454,3 +454,6 @@ table.tbl .num { font-variant-numeric: tabular-nums; white-space: nowrap; }
   .app-body { padding: 14px 12px 32px; }
   .hide-sm { display: none !important; }
 }
+
+/* styles.css stacks every dialog label; in the NDV only a field (label.f) stacks — a checkbox sits beside its words */
+dialog.ndv label:not(.f) { flex-direction: row; align-items: center; gap: 8px; font-size: 13px; color: var(--text); }

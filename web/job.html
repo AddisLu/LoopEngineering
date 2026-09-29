@@ -6,7 +6,14 @@
     <title>工作流程 · Loop Engineering</title>
     <!-- 新工作 became the start of 工作流程 (/flow.html#new); ?title=&symptom=&expected= prefill it.
          The four-step form stays at /job-classic.html. -->
-    <script>location.replace('/flow.html#new' + (location.search ? '?' + location.search.slice(1) : ''));</script>
+    <script>
+      // ?token= stays a real query (the pages store it from there); the prefill rides in the hash
+      var q = new URLSearchParams(location.search);
+      var tok = q.get('token');
+      q.delete('token');
+      var rest = q.toString();
+      location.replace('/flow.html' + (tok ? '?token=' + encodeURIComponent(tok) : '') + '#new' + (rest ? '?' + rest : ''));
+    </script>
   </head>
   <body>
     <p>新工作已經搬到 <a href="/flow.html#new">工作流程</a>。舊版在 <a href="/job-classic.html">這裡</a>。</p>

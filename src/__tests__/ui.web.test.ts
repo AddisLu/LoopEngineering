@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, it, expect } from 'vitest';
 // the web modules are plain ESM with no DOM at import time
 import { rankNodes, layered, grid, stackGroups, bounds, fitTransform, edgePath } from '../../web/flow/layout.js';
-import { niceMax, ticks, scaleLinear, scaleLog, logTicks, heatColor, fmtNum } from '../../web/charts.js';
+import { niceMax, ticks, scaleLinear, scaleLog, logTicks, heatColor, fmtNum, stackLabels } from '../../web/charts.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WEB = path.join(__dirname, '..', '..', 'web');
@@ -107,10 +107,28 @@ describe('chart scales', () => {
     expect(fmtNum(null)).toBe('–');
     expect(fmtNum(1234.5)).toBe('1235');
   });
+
+  it('stacks names that would print over each other (two models ending on the same point)', () => {
+    const out = stackLabels([
+      { x: 10, y: 50, name: 'haiku' },
+      { x: 12, y: 50, name: 'sonnet' },
+      { x: 300, y: 52, name: 'far away' },
+      { x: 11, y: 90, name: 'lower' },
+    ]);
+    expect(out.map((l) => [l.name, l.y])).toEqual([
+      ['haiku', 50],
+      ['sonnet', 64],
+      ['far away', 52],
+      ['lower', 90],
+    ]);
+    // a label is checked against every one placed before it, not just the one above it
+    const abc = stackLabels([{ x: 10, y: 50 }, { x: 300, y: 51 }, { x: 12, y: 52 }, { x: 14, y: 60 }]);
+    expect(abc.map((l) => l.y)).toEqual([50, 51, 64, 78]);
+  });
 });
 
 describe('the new pages stay textContent-only and offline', () => {
-  const files = ['frame.js', 'charts.js', 'flow/layout.js', 'flow/canvas.js'];
+  const files = ['frame.js', 'charts.js', 'flow/layout.js', 'flow/canvas.js', 'flow.js', 'board-flow.js', 'benchmarks.js'];
   it.each(files)('%s never builds markup from strings', (f) => {
     const src = fs.readFileSync(path.join(WEB, f), 'utf8');
     for (const bad of ['innerHTML', 'outerHTML', 'insertAdjacentHTML', 'document.write']) expect(src, `${f} uses ${bad}`).not.toContain(bad);

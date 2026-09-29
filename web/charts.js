@@ -215,6 +215,23 @@ export function bullet(o) {
  * lineChart({ xLabels, series: [{ label, color, points: [v|null], fails: [index] }], band: { below, label } })
  * `fails` marks attempts that measured nothing (the function was wrong) with a square at the top.
  */
+/**
+ * Labels ({x, y}) that would print over each other — within `near` px sideways and less than `gap`
+ * apart vertically — are pushed down until they clear every label placed before them. Placed (and
+ * returned) in the order of their original height; y is updated in place.
+ */
+export function stackLabels(labels, gap = 14, near = 90) {
+  const placed = [];
+  for (const l of [...labels].sort((a, b) => a.y - b.y)) {
+    // each push moves the label strictly down, so this ends once it is below every neighbour
+    for (let hit = placed.find((p) => Math.abs(p.x - l.x) < near && Math.abs(l.y - p.y) < gap); hit; hit = placed.find((p) => Math.abs(p.x - l.x) < near && Math.abs(l.y - p.y) < gap)) {
+      l.y = hit.y + gap;
+    }
+    placed.push(l);
+  }
+  return placed;
+}
+
 export function lineChart(o) {
   const W = o.width ?? 520;
   const H = o.height ?? 260;
@@ -240,6 +257,7 @@ export function lineChart(o) {
   }
   svg.appendChild(el('line', { class: 'axis', x1: L, x2: L + plotW, y1: T + plotH, y2: T + plotH }));
   o.xLabels.forEach((lab, i) => svg.appendChild(el('text', { x: x(i), y: H - 8, 'text-anchor': 'middle' }, lab)));
+  const ends = [];
   for (const s of o.series) {
     const pts = s.points.map((v, i) => (Number.isFinite(v) ? [x(i), y(v)] : null));
     const seg = pts.filter(Boolean);
@@ -256,8 +274,11 @@ export function lineChart(o) {
       svg.appendChild(r);
     }
     const last = [...pts].reverse().find(Boolean);
-    if (last) svg.appendChild(el('text', { class: 'lab', x: last[0] + 10, y: last[1] - 8, fill: s.color }, s.label));
+    // near the right edge the name goes on the left of its point
+    if (last) ends.push({ right: last[0] > W - 90, x: last[0] > W - 90 ? last[0] - 10 : last[0] + 10, y: last[1] - 8, s });
   }
+  // series that end on the same spot would print their names over each other
+  for (const e of stackLabels(ends)) svg.appendChild(el('text', { class: 'lab', x: e.x, y: e.y, fill: e.s.color, 'text-anchor': e.right ? 'end' : 'start' }, e.s.label));
   return wrap;
 }
 
@@ -323,13 +344,16 @@ export function scatter(o) {
   svg.appendChild(el('line', { class: 'axis', x1: L, x2: L, y1: T, y2: T + plotH }));
   if (o.xLabel) svg.appendChild(el('text', { x: L + plotW, y: H - 2, 'text-anchor': 'end' }, o.xLabel));
   if (o.yLabel) svg.appendChild(el('text', { x: L + 4, y: T - 2 }, o.yLabel));
+  const labels = [];
   for (const p of o.points) {
     const r = p.r ?? 8;
     const c = el('circle', { cx: x(p.x), cy: y(p.y), r, fill: p.color, 'fill-opacity': 0.88, stroke: 'var(--surface-2)', 'stroke-width': 2 });
     c.appendChild(el('title', {}, `${p.label}：${o.xFmt ? o.xFmt(p.x) : p.x}，${o.yFmt ? o.yFmt(p.y) : p.y}`));
     svg.appendChild(c);
-    svg.appendChild(el('text', { class: 'lab', x: x(p.x) + r + 5, y: y(p.y) + 4, fill: p.color }, p.label));
+    labels.push({ x: x(p.x) + r + 5, y: y(p.y) + 4, p });
   }
+  // points on (nearly) the same spot: stack their names instead of printing them over each other
+  for (const l of stackLabels(labels)) svg.appendChild(el('text', { class: 'lab', x: l.x, y: l.y, fill: l.p.color }, l.p.label));
   return wrap;
 }
 

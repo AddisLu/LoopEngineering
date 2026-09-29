@@ -114,7 +114,7 @@ async function loadOptions() {
 }
 
 function fillRepos(sel, branchSel, current, currentBranch) {
-  fill(sel, );
+  fill(sel);
   const repos = options.repos || [];
   for (const r of repos) sel.appendChild(h('option', { value: r.path }, r.name || baseName(r.path)));
   if (current && !repos.some((r) => r.path === current)) sel.appendChild(h('option', { value: current }, baseName(current)));
@@ -406,7 +406,8 @@ function clientIssues() {
   if (!form.repo.path) add('need', '缺 repo：選要改的軟體');
   if (!form.acceptance.some((x) => x.trim())) add('gate', '缺驗收標準（Given／When／Then）');
   const cmds = form.verify.commands.filter((x) => x.trim());
-  if (!cmds.length && !form.verify.dataset && !manualRows().length && flowKind() !== 'epic') add('verify', '缺驗證：至少一條指令、圖集比對或人工清單');
+  // an epic's steps are verified one by one: its commands go to the 子任務 node
+  if (!cmds.length && !form.verify.dataset && !manualRows().length) add(flowKind() === 'epic' ? 'kids' : 'verify', '缺驗證：至少一條指令、圖集比對或人工清單');
   if (form.verify.metrics.some((x) => x.trim()) && !cmds.length) add('verify', '有驗收指標就要有一條會印出 LOOP_METRICS 的驗證指令');
   for (const m of form.verify.metrics.filter((x) => x.trim())) {
     if (!/^\s*[A-Za-z_][\w.-]*\s*(<=|>=|==|!=|<|>)\s*-?\d+(\.\d+)?\s*$/.test(m)) add('gate', `指標「${m}」看不懂：寫成 max_ms <= 10 這樣`);
@@ -416,15 +417,23 @@ function clientIssues() {
   return out;
 }
 
-/** a server gate message → the node it is about */
+/** a server gate message → the node it is about (an epic has only 需求, AI 拆解 and 子任務) */
 function nodeForMessage(m) {
-  if (/驗收指標|保護路徑/.test(m)) return 'gate';
-  if (/驗收標準|Acceptance/i.test(m)) return 'gate';
-  if (/驗證|Verify|圖集|產出物/i.test(m)) return 'verify';
-  if (/人工/.test(m)) return 'approve';
-  if (/前置|Setup/i.test(m)) return 'setup';
-  if (/領域|複雜度|Domain|Complexity/i.test(m)) return 'ai';
-  return 'need';
+  const n = /驗收指標|保護路徑/.test(m)
+    ? 'gate'
+    : /驗收標準|Acceptance/i.test(m)
+      ? 'gate'
+      : /驗證|Verify|圖集|產出物/i.test(m)
+        ? 'verify'
+        : /人工/.test(m)
+          ? 'approve'
+          : /前置|Setup/i.test(m)
+            ? 'setup'
+            : /領域|複雜度|Domain|Complexity/i.test(m)
+              ? 'ai'
+              : 'need';
+  if (flowKind() !== 'epic' || n === 'need') return n;
+  return n === 'ai' ? 'split' : 'kids';
 }
 
 function allIssues() {
@@ -445,7 +454,7 @@ function editorInfo() {
     setup: { sub: form.scope.setup.filter((x) => x.trim()).length ? `${form.scope.setup.filter((x) => x.trim()).length} 條前置指令` : '無前置指令', ...warn('setup') },
     ai: { sub: `${kind === 'bench' ? `${models.length} 個模型比` : models.map(modelName).join('、') || '選模型'} · ${form.scope.complexity}`, ...warn('ai') },
     split: { sub: `${models.map(modelName).join('、') || '預設模型'} 拆成 2–6 步` },
-    kids: { sub: '依序執行，一步結案才放下一步' },
+    kids: { sub: cmds.length ? `依序執行 · 每步驗證 ${cmds.length} 條` : '依序執行，一步結案才放下一步', ...warn('kids') },
     verify: { sub: `${cmds.length ? `${cmds.length} 步${cmds.some((c) => /^sandbox/i.test(c)) ? ' · 沙盒' : ''}` : '沒有指令'}${form.verify.dataset ? ' · 圖集' : ''}`, ...warn('verify') },
     gate: { sub: metrics.length ? `${metrics.length} 條指標` : `${form.acceptance.filter((x) => x.trim()).length} 條驗收標準`, ...warn('gate') },
     approve: { sub: `${manual.length} 項清單`, ...warn('approve') },
@@ -469,10 +478,19 @@ function editorSubs() {
   ];
 }
 
+/** a phone cannot show the whole row readably: start zoomed in on the node that matters */
+function focusOnPhone(cv, host, id, done) {
+  if (done || !host.clientWidth || host.clientWidth >= 700) return done;
+  cv.focus(id);
+  return true;
+}
+
+let editorFocused = false;
 function paintEditor() {
   const kind = flowKind();
   const scene = stageScene(kind, manualRows().length > 0, editorInfo(), kind === 'epic' ? null : editorSubs());
   canvas.render({ ...scene, lift: 60 });
+  editorFocused = focusOnPhone(canvas, $('canvas'), allIssues().find((i) => !i.warnOnly && scene.nodes.some((n) => n.id === i.node))?.node || 'need', editorFocused);
   $('flow-title').textContent = form.change.title || '未命名工作流程';
   paintTopEditor();
 }
@@ -486,7 +504,7 @@ function paintTopEditor() {
   );
   const tabs = $('tabs');
   tabs.hidden = false;
-  fill(tabs, 
+  fill(tabs,
     ...[
       ['canvas', '編輯器'],
       ['doc', '文件'],
@@ -540,7 +558,7 @@ function toggleIssues() {
     return;
   }
   const issues = allIssues();
-  fill(pop, 
+  fill(pop,
     h('b', { style: { fontSize: '13px' } }, issues.length ? '送出前要處理' : '沒有問題，可以開始執行'),
     ...issues.map((i) =>
       h(
@@ -626,7 +644,10 @@ function touch(repaint = true) {
   $('save-state').textContent = '儲存中…';
   clearTimeout(saveTimer);
   saveTimer = setTimeout(saveNow, 700);
-  if (repaint) paintEditor();
+  if (repaint) {
+    paintEditor();
+    paintNdvNav();
+  }
 }
 
 async function saveNow() {
@@ -687,7 +708,7 @@ function textArea(value, onInput, rows = 3, attrs = {}) {
 function listEditor(items, onChange, opts = {}) {
   const box = h('div', { style: { display: 'flex', flexDirection: 'column', gap: '6px' } });
   const paint = () => {
-    fill(box, 
+    fill(box,
       ...items.map((v, i) =>
         h(
           'div.li',
@@ -715,16 +736,26 @@ function issueBox(node) {
 function ro(text, mono) {
   return h(`div.ro${mono ? '.mono' : ''}`, null, text || '—');
 }
+/** one 人工清單 row as a person reads it (the wording web/prd-compose.js writes into the PRD) */
+function manualText(m) {
+  if (typeof m === 'string') return m;
+  if (!m.given && !m.when) return m.then || '';
+  return `Given ${m.given || '…'} When ${m.when || '…'} Then ${m.then || '…'}`;
+}
+/** the 人工核可 checklist; any line on it adds the 人工核可 node */
+function manualEditor() {
+  return listEditor(form.verify.manual.map(manualText), (list) => { form.verify.manual = list.map((t) => ({ given: '', when: '', then: t })); touch(); }, { placeholder: '例：在現場機台上看過一次結果畫面', label: '人工清單', add: '加一條人工確認' });
+}
 
 function openNdv(node) {
   if (!STAGES[node] || node === 'done') return;
   const dlg = $('ndv');
   const st = STAGES[node];
-  const nav = ORDER_FOR_NAV();
-  const at = nav.indexOf(node);
-  const prev = at > 0 ? nav[at - 1] : null;
-  const next = at >= 0 && at < nav.length - 1 ? nav[at + 1] : null;
   const body = NDV[node] ? NDV[node]() : { input: [], params: [ro('這一步沒有要填的東西。')], output: [] };
+  const prevBtn = h('button.btn.sm', { type: 'button' });
+  const nextBtn = h('button.btn.sm', { type: 'button' });
+  ndvOpen = { node, prevBtn, nextBtn };
+  paintNdvNav();
   const tabsBox = h('div.tabs-s', { role: 'tablist' });
   const paramsPane = h('div', { style: { display: 'flex', flexDirection: 'column', gap: '18px' } });
   const settingsPane = h('div', { style: { display: 'flex', flexDirection: 'column', gap: '18px' }, hidden: true });
@@ -733,7 +764,7 @@ function openNdv(node) {
   const mk = (label, pane, other) =>
     h('button', { type: 'button', role: 'tab', 'aria-selected': String(pane === paramsPane), onclick: (e) => { pane.hidden = false; other.hidden = true; for (const b of tabsBox.children) b.setAttribute('aria-selected', String(b === e.currentTarget)); } }, label);
   tabsBox.append(mk('參數', paramsPane, settingsPane), ...(body.settings ? [mk('設定', settingsPane, paramsPane)] : []));
-  fill(dlg, 
+  fill(dlg,
     h(
       'div.ndv-head',
       null,
@@ -741,8 +772,8 @@ function openNdv(node) {
       h('h2', null, st.title),
       body.chip ? h('span.chip-s', null, body.chip) : null,
       h('span', { style: { flex: '1 1 auto' } }),
-      prev ? h('button.btn.sm', { type: 'button', onclick: () => openNdv(prev) }, icon('chevL', { size: 14 }), STAGES[prev].title) : null,
-      next ? h('button.btn.sm', { type: 'button', onclick: () => openNdv(next) }, STAGES[next].title, icon('chevR', { size: 14 })) : null,
+      prevBtn,
+      nextBtn,
       h('button.btn.icon', { type: 'button', 'aria-label': '關閉', onclick: () => dlg.close() }, icon('x', { size: 16 })),
     ),
     h(
@@ -754,7 +785,28 @@ function openNdv(node) {
     ),
   );
   if (!dlg.open) dlg.showModal();
-  dlg.onclose = () => paintEditor();
+  dlg.onclose = () => {
+    ndvOpen = null;
+    paintEditor();
+  };
+}
+
+/** the NDV's previous / next buttons follow the flow as it is now (adding a 人工 line adds a stage) */
+let ndvOpen = null;
+function paintNdvNav() {
+  if (!ndvOpen) return;
+  const nav = ORDER_FOR_NAV();
+  const at = nav.indexOf(ndvOpen.node);
+  const prev = at > 0 ? nav[at - 1] : null;
+  const next = at >= 0 && at < nav.length - 1 ? nav[at + 1] : null;
+  const set = (btn, key, left) => {
+    btn.hidden = !key;
+    if (!key) return;
+    fill(btn, ...(left ? [icon('chevL', { size: 14 }), STAGES[key].title] : [STAGES[key].title, icon('chevR', { size: 14 })]));
+    btn.onclick = () => openNdv(key);
+  };
+  set(ndvOpen.prevBtn, prev, true);
+  set(ndvOpen.nextBtn, next, false);
 }
 
 const summaryIn = () => [
@@ -776,7 +828,7 @@ const NDV = {
           suggest.textContent = '找中…';
           try {
             const r = await api('/api/prd/suggest-files', 'POST', { repo_path: form.repo.path, module: form.repo.module, description: `${c.title} ${c.symptom} ${c.expected}` });
-            fill(suggestBox, 
+            fill(suggestBox,
               ...(r.files || []).slice(0, 8).map((f) => {
                 const cb = h('input', { type: 'checkbox' });
                 cb.checked = c.files.some((x) => x.path === f.path);
@@ -852,7 +904,7 @@ const NDV = {
     const judgePicks = h('div.picks');
     const all = [...(options.models || []).map((m) => [m.id, m.name || modelName(m.id), '本地 · 不花額度']), ...CLOUD_MODELS];
     const paintPicks = () => {
-      fill(picks, 
+      fill(picks,
         ...all.map(([id, name, sub]) =>
           h(
             'button.pick',
@@ -875,7 +927,7 @@ const NDV = {
           ),
         ),
       );
-      fill(judgePicks, 
+      fill(judgePicks,
         ...JUDGES.map((j) =>
           h('button.pick', { type: 'button', 'aria-pressed': String(judges.includes(j)), onclick: () => { const i = judges.indexOf(j); if (i >= 0) judges.splice(i, 1); else judges.push(j); touch(); paintPicks(); } }, modelName(j)),
         ),
@@ -907,7 +959,13 @@ const NDV = {
     return NDV.ai();
   },
   kids() {
-    return { input: [], params: [ro('AI 拆解會照需求拆出 2–6 個子任務，串成依序執行的鏈：第一個先排入，上一個結案才放下一個。每個子任務都有自己的驗證。')], output: [] };
+    const v = form.verify;
+    return {
+      chip: '一步結案才放下一步',
+      input: [section('會做什麼', null, h('p.sub', null, 'AI 拆解會照需求拆出 2–6 個子任務，串成依序執行的鏈：第一個先排入，上一個結案才放下一個。'))],
+      params: [section('每一步的驗證', '寫進 PRD 的驗證指令；AI 拆解時照著給每個子任務配上可以單獨跑的驗證（寫成「sandbox: 指令」會在 GPU 沙盒跑）', listEditor(v.commands, (list) => { v.commands = list; touch(); }, { mono: true, placeholder: 'npm test', label: '驗證指令' }))],
+      output: [h('p.sub', null, '拆完之後，子任務會出現在總覽的「拆解」群組裡，各自有自己的工作流程。')],
+    };
   },
   verify() {
     const v = form.verify;
@@ -976,6 +1034,7 @@ const NDV = {
         section('引擎檢查', '引擎自己比，每一條都要過（名稱 運算 目標，例如 max_ms <= 10）', listEditor(v.metrics, (list) => { v.metrics = list; touch(); }, { mono: true, placeholder: 'max_ms <= 10', label: '指標', add: '加一條指標' })),
         section('驗收標準', 'Given／When／Then：給實作的模型看，也給核可的人勾', listEditor(form.acceptance, (list) => { form.acceptance = list; touch(); }, { placeholder: 'Given … When … Then …', label: '驗收標準' }), h('div.row2', null, draftBtn)),
         section('AI 評審', '指標都過了，再請雲端模型依驗收標準看一次程式碼（會用額度；判斷不了就轉人工）', h('label', { style: { display: 'flex', gap: '8px', alignItems: 'center', fontSize: '13px' } }, llm, '開啟')),
+        section('人工核可', '要有人親自確認的事，一行一條；有清單就會多一個「人工核可」節點，核可時才合併', manualEditor()),
       ],
       settings: [section('保護路徑', '實作的模型不能改的檔案（量測程式、標準答案）；改了就算沒過', listEditor(form.scope.protected, (list) => { form.scope.protected = list; touch(); }, { mono: true, placeholder: 'bench/**', label: '保護路徑' }))],
       outCap: '判定之後往哪走',
@@ -983,12 +1042,10 @@ const NDV = {
     };
   },
   approve() {
-    const rows = form.verify.manual;
-    const asText = rows.map((m) => (typeof m === 'string' ? m : [m.given && `Given ${m.given}`, m.when && `When ${m.when}`, m.then && `Then ${m.then}`].filter(Boolean).join(' ') || m.then || ''));
     return {
       chip: '有清單就要有人核可',
       input: [section('會看到什麼', null, h('p.sub', null, '驗證過了以後，任務停在「待核可」；驗收頁會列出這份清單讓你逐條勾。核可就會合併。'))],
-      params: [section('人工清單', '每一條是一件要人確認的事；全部刪掉就不需要人工核可', listEditor(asText, (list) => { form.verify.manual = list.map((t) => ({ given: '', when: '', then: t })); touch(); }, { placeholder: '例：在現場機台上看過一次結果畫面', label: '清單' }))],
+      params: [section('人工清單', '每一條是一件要人確認的事；全部刪掉就不需要人工核可', manualEditor())],
       output: [],
     };
   },
@@ -1013,7 +1070,9 @@ let runTask = null;
 let hist = null;
 let runCanvas = null;
 let selected = null;
+let picked = false; // a step chosen by hand stays selected across refreshes
 let runTimer = null;
+let runFocused = false;
 
 const OUT_LABEL = { pass: '通過', metrics: '指標未達', functional: '功能沒過', protected: '改了保護路徑', unverified: '沒跑到驗證' };
 const OUT_CLS = { pass: 'ok', metrics: 'warn', functional: 'bad', protected: 'bad', unverified: '' };
@@ -1061,9 +1120,50 @@ function runInfo() {
   if (s.done === 'warn') info.done = { ...(info.done || {}), state: 'review', badge: { kind: 'review' } };
   put('merge', t.merge_status === 'merged' ? '已合併' : t.merge_status === 'conflict' ? '合併衝突' : t.merge_status === 'pending' ? '待合併' : t.base_branch || 'main');
   put('done', '');
+  if (t.coding_tool === 'plan') Object.assign(info, epicInfo());
   info.backHot = s.gate === 'fail' && t.status === 'blocked';
-  info.backLabel = hist.retry.used ? `未通過 ${hist.retry.used} 次 → 自動續跑 ${Math.min(hist.retry.used, hist.retry.max)}/${hist.retry.max}` : `未通過：退回重做（自動續跑最多 ${hist.retry.max} 次）`;
+  const fails = atts.filter((a) => a.finished_at && !['pass', 'unverified'].includes(a.outcome)).length;
+  const { used, max } = hist.retry;
+  info.backLabel =
+    used >= max && t.status === 'attention' && s.gate === 'fail'
+      ? `未通過 ${fails} 次 · 自動續跑 ${max}/${max} 用完，轉給你`
+      : used
+        ? `未通過 ${fails} 次 → 自動續跑 ${Math.min(used, max)}/${max}`
+        : `未通過：退回重做（自動續跑最多 ${max} 次）`;
   return info;
+}
+
+/** an epic: the planner's pass, then the chain of subtasks it made */
+function epicInfo() {
+  const t = runTask;
+  const kids = hist.children || [];
+  const doneN = kids.filter((k) => k.status === 'closed').length;
+  const st = (state, sub) => ({ sub, state, badge: STATE_BADGE[state] ? { kind: STATE_BADGE[state] } : state === 'review' ? { kind: 'review' } : null });
+  const split =
+    t.status === 'running'
+      ? st('active', '拆解中…')
+      : kids.length
+        ? st('ok', `拆成 ${kids.length} 個子任務`)
+        : t.status === 'attention'
+          ? st('fail', '拆解失敗')
+          : st('idle', `${modelName(t.model) || '預設模型'} 拆成 2–6 步`);
+  const kidsState = !kids.length
+    ? 'idle'
+    : doneN === kids.length
+      ? 'ok'
+      : kids.some((k) => ['attention', 'failed'].includes(k.status))
+        ? 'warn'
+        : kids.some((k) => ['running', 'verifying'].includes(k.status))
+          ? 'active'
+          : kids.some((k) => k.status === 'review')
+            ? 'review'
+            : 'idle';
+  return {
+    split,
+    kids: st(kidsState, kids.length ? `${doneN}/${kids.length} 完成` : '等拆解'),
+    // the epic itself closes as soon as it is split; the flow ends when its last step does
+    done: st(kids.length && doneN === kids.length ? 'ok' : 'idle', ''),
+  };
 }
 
 function runSubs() {
@@ -1091,14 +1191,16 @@ async function runView(id) {
   if (!runCanvas) runCanvas = createCanvas($('run-canvas'), { onNodeClick: (nodeId) => selectStage(nodeId) });
   paintRun();
   clearInterval(runTimer);
-  if (!['closed', 'failed'].includes(runTask.status)) {
+  // an epic is closed once it is split, but its subtasks keep going
+  const settled = () => ['closed', 'failed'].includes(runTask.status) && !(hist.children || []).some((k) => !['closed', 'failed'].includes(k.status));
+  if (!settled()) {
     runTimer = setInterval(async () => {
       try {
         const [{ task }, h2] = await Promise.all([api(`/api/tasks/${encodeURIComponent(id)}`), api(`/api/tasks/${encodeURIComponent(id)}/runs`)]);
         runTask = task;
         hist = h2;
         paintRun();
-        if (['closed', 'failed'].includes(task.status)) clearInterval(runTimer);
+        if (settled()) clearInterval(runTimer);
       } catch (e) {
         /* keep the last picture */
       }
@@ -1112,7 +1214,13 @@ const TASK_CLS = { running: 'ok', verifying: 'ok', review: 'info', attention: 'w
 function paintRun() {
   const t = runTask;
   $('flow-title').textContent = String(t.title).replace(/^\[bench\]\s*/, '');
-  fill($('top-chips'), h(`span.chip-s${TASK_CLS[t.status] ? `.${TASK_CLS[t.status]}` : ''}`, null, TASK_WORD[t.status] || t.status), t.repo_path ? h('span.chip-s.mono', null, `${baseName(t.repo_path)} · ${t.base_branch || 'main'}`) : null);
+  // an epic closes as soon as it is split; while its subtasks run, say that instead
+  const kidsOpen = t.coding_tool === 'plan' && t.status === 'closed' && (hist.children || []).some((k) => !['closed', 'failed'].includes(k.status));
+  fill(
+    $('top-chips'),
+    kidsOpen ? h('span.chip-s.info', null, '子任務進行中') : h(`span.chip-s${TASK_CLS[t.status] ? `.${TASK_CLS[t.status]}` : ''}`, null, TASK_WORD[t.status] || t.status),
+    t.repo_path ? h('span.chip-s.mono', null, `${baseName(t.repo_path)} · ${t.base_branch || 'main'}`) : null,
+  );
   $('tabs').hidden = true;
   const acts = [];
   const act = async (path, confirmMsg) => {
@@ -1125,6 +1233,7 @@ function paintRun() {
     }
   };
   if (t.benchmark_id) acts.push(h('a.btn', { href: `/benchmarks.html#b=${encodeURIComponent(t.benchmark_id)}` }, '看整場評比'));
+  if (t.status === 'draft') acts.push(h('button.btn.primary', { type: 'button', onclick: () => act(`/api/tasks/${t.id}/queue`) }, icon('play', { fill: true }), '加入排程'));
   if (['running', 'verifying'].includes(t.status)) acts.push(h('button.btn.danger-ghost', { type: 'button', onclick: () => act(`/api/tasks/${t.id}/abort`, `確定中止「${t.title}」？正在跑的會被停掉，任務標成失敗。`) }, '中止'));
   if (t.status === 'attention') {
     acts.push(h('button.btn.primary', { type: 'button', onclick: () => act(`/api/tasks/${t.id}/resume`) }, '續跑'));
@@ -1132,7 +1241,7 @@ function paintRun() {
     acts.push(h('button.btn.danger-ghost', { type: 'button', onclick: () => act(`/api/tasks/${t.id}/abandon`, '放棄這張任務？會標成失敗。') }, '放棄'));
   }
   if (t.status === 'blocked') acts.push(h('button.btn', { type: 'button', onclick: () => act(`/api/tasks/${t.id}/hold`) }, '轉待確認'));
-  acts.push(h(`a.btn${t.status === 'review' ? '.primary' : ''}`, { href: `/task.html?id=${encodeURIComponent(t.id)}` }, '驗收頁', icon('ext', { size: 14 })));
+  if (t.coding_tool !== 'plan') acts.push(h(`a.btn${t.status === 'review' ? '.primary' : ''}`, { href: `/task.html?id=${encodeURIComponent(t.id)}` }, '驗收頁', icon('ext', { size: 14 })));
   fill($('top-actions'), ...acts);
 
   const kind = t.coding_tool === 'plan' ? 'epic' : 'task';
@@ -1140,6 +1249,8 @@ function paintRun() {
   const info = runInfo();
   const scene = stageScene(kind, manual, info, kind === 'epic' ? null : runSubs());
   runCanvas.render({ ...scene, lift: 60 });
+  const at = kind === 'epic' ? ((hist.children || []).length ? 'kids' : 'split') : { trigger: 'need', implement: 'ai' }[hist.focus] || hist.focus;
+  runFocused = focusOnPhone(runCanvas, $('run-canvas'), scene.nodes.some((n) => n.id === at) ? at : 'need', runFocused);
   paintTree();
 }
 
@@ -1161,10 +1272,39 @@ function treeItems() {
   return items;
 }
 
+const KID_CLS = { running: 'ok', verifying: 'ok', review: 'info', attention: 'warn', blocked: 'warn', failed: 'bad' };
+
+function paintKids() {
+  const kids = hist.children || [];
+  $('log-sub').textContent = kids.length ? `${kids.length} 個子任務 · ${kids.filter((k) => k.status === 'closed').length} 個已結案` : '還沒拆解';
+  fill(
+    $('tree'),
+    ...(kids.length
+      ? kids.map((k, i) =>
+          h(
+            'li.step',
+            { role: 'treeitem', 'aria-selected': 'false', onclick: () => (location.href = `/flow.html?task=${encodeURIComponent(k.id)}`) },
+            icon(k.status === 'closed' ? 'check' : ['attention', 'failed'].includes(k.status) ? 'x' : 'clock', { size: 14 }),
+            h('span', null, `${i + 1}. ${k.title}`),
+            h(`span.chip-s${KID_CLS[k.status] ? `.${KID_CLS[k.status]}` : ''}`, null, TASK_WORD[k.status] || k.status),
+            h('span.grow'),
+            h('span.aux', null, '看流程 →'),
+          ),
+        )
+      : [h('li', null, h('span.aux', null, runTask.status === 'attention' ? '拆解失敗：可以在總覽按「續跑」再拆一次，或自己建子任務。' : '拆解完成後，子任務會列在這裡。'))]),
+  );
+  fill($('logdetail'), h('h3', null, 'AI 拆解'), h('p.sub', { style: { margin: 0 } }, '子任務串成依序執行的鏈：第一個先排入，上一個結案才放下一個；每一個都有自己的驗證與工作流程（點左邊的子任務打開）。'));
+}
+
 function paintTree() {
+  if (runTask.coding_tool === 'plan') return paintKids();
   const items = treeItems();
   $('log-sub').textContent = `${hist.iterations.attempts.length} 次嘗試${hist.iterations.label ? ` · ${hist.iterations.label}` : ''}`;
-  if (!selected || !items.some((i) => i.key === selected)) selected = items.find((i) => i.bad)?.key || items[0]?.key || null;
+  // until you pick a step yourself, follow the newest attempt: its verdict, else the attempt itself
+  if (!picked || !items.some((i) => i.key === selected)) {
+    const newest = items.find((i) => i.run);
+    selected = (newest && items.find((i) => i.a === newest.a && i.stage === 'gate')?.key) || newest?.key || null;
+  }
   fill($('tree'), 
     ...(items.length
       ? items.map((it) => {
@@ -1172,7 +1312,7 @@ function paintTree() {
           if (!it.run) glyph.style.color = it.bad ? 'var(--danger)' : it.icon === 'spin' ? 'var(--st-running)' : 'var(--ok)';
           return h(
             `li.${it.run ? 'run' : 'step'}`,
-            { role: 'treeitem', 'aria-selected': String(it.key === selected), onclick: () => { selected = it.key; paintTree(); } },
+            { role: 'treeitem', 'aria-selected': String(it.key === selected), onclick: () => { selected = it.key; picked = true; paintTree(); } },
             glyph,
             h('span', null, it.label),
             it.chip ? h(`span.chip-s${it.chip[1] ? `.${it.chip[1]}` : ''}`, null, it.chip[0]) : null,
@@ -1232,6 +1372,7 @@ function selectStage(nodeId) {
   const hit = items.find((i) => i.stage === want) || items.find((i) => i.run);
   if (hit) {
     selected = hit.key;
+    picked = true;
     paintTree();
   }
 }

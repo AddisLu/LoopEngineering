@@ -42,7 +42,10 @@ describe('operator pages: 新工作 / 驗收 / 驗證方案', () => {
     expect(index).toMatch(/href="\/flow\.html#new"/);
     expect(index).toMatch(/href="\/plans\.html"/);
     expect(read('board.html')).toMatch(/href="\/flow\.html#new"/);
-    expect(read('job.html')).toContain("location.replace('/flow.html#new'");
+    const job = read('job.html');
+    expect(job).toContain("location.replace('/flow.html'");
+    expect(job).toContain("'#new'");
+    expect(job).toContain("q.get('token')"); // ?token= stays a real query; only the prefill rides in the hash
     const app = read('app.js');
     expect(app).toContain('/task.html?id=');
     expect(app).toContain('用工作流程重寫');

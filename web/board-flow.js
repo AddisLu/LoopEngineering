@@ -315,6 +315,9 @@ function groupScene(g, widthHint) {
     );
     for (const c of g.cards) edges.push({ from: c.id, to: `${bid}:final`, cls: allDone || judged ? 'ok' : 'wait' });
     edges.push({ from: `${bid}:final`, to: `${bid}:judge`, cls: judged ? 'ok' : 'wait' });
+    // a filter or search dims the benchmark's own steps too, unless one of its arms matches
+    const shown = g.cards.some(matches);
+    for (const n of nodes) if (!n.card) n.dim = !shown;
     return { nodes, edges, layout: layered(nodes, edges, { gapX: 56, gapY: 16 }) };
   }
   if (g.kind === 'single') {
@@ -404,7 +407,7 @@ function actionsFor(c) {
     case 'draft':
       return c.gate && !c.gate.ok
         ? [['補齊', go(`/flow.html#new?title=${encodeURIComponent(c.title || '')}&expected=${encodeURIComponent(c.goal || '')}`), 'primary'], ['詳情', () => B.openDetail(c.id)]]
-        : [['排入', () => B.act(`/api/tasks/${c.id}/queue`), 'primary'], ['詳情', () => B.openDetail(c.id)]];
+        : [['加入排程', () => B.act(`/api/tasks/${c.id}/queue`), 'primary'], ['詳情', () => B.openDetail(c.id)]];
     case 'queued':
     case 'ready':
       return [flow, ['詳情', () => B.openDetail(c.id)]];
@@ -545,7 +548,8 @@ function paintInbox() {
   if (q.length) nextLine('queued', `排隊中 ${q.length} 個：${q.slice(0, 2).map(nodeTitle).join('、')}${q.length > 2 ? '…' : ''}`);
   if (snap.local && (snap.local.enabled || snap.local.inflight)) nextLine(snap.local.status === 'error' ? 'failed' : 'running', `本地模型：${snap.local.loaded ? modelName(snap.local.loaded) : '未載入'}${snap.local.inflight ? ` · 執行中 ${snap.local.inflight}` : ''}`);
   if (snap.benchmark) nextLine('running', `評比「${snap.benchmark.title}」：${snap.benchmark.arms_done}/${snap.benchmark.arm_count} 組完成，全部完成後一組一組量測再評分`);
-  fill(box, 
+  if (next.children.length === 1) next.appendChild(h('div', null, h('span.sub', null, '沒有排隊或等續跑的任務。')));
+  fill(box,
     h('h2', null, '需要你處理', h('span.count', null, String(items.length))),
     ...(items.length ? items.map((i) => i.el) : [h('p.empty-s', null, '目前沒有要你處理的事。')]),
     next,
@@ -649,6 +653,8 @@ function setView(v) {
   $('view-canvas').hidden = v !== 'canvas';
   $('view-list').hidden = v !== 'list';
   $('view-kanban').hidden = v !== 'kanban';
+  // the kanban's own columns already sort out what needs you, and its cards need the width
+  $('inbox').hidden = v === 'kanban';
   paintAll();
   if (v === 'canvas') requestAnimationFrame(() => canvas.fit(false));
 }

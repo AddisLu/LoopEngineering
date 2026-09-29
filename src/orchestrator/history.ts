@@ -41,6 +41,8 @@ export interface TaskHistory {
   active_run: { id: string; started_at: string } | null;
   /** the last status change's reason ("verify failed at: …", "watchdog timeout", …) */
   last_detail: string | null;
+  /** an epic's subtasks (the chain its planner made), in order; empty for any other task */
+  children: Array<Pick<Task, 'id' | 'title' | 'status' | 'merge_status'>>;
 }
 
 const manualMode = (t: Pick<Task, 'verify_mode'>) =>
@@ -181,5 +183,9 @@ export function taskHistory(db: Database.Database, id: string): TaskHistory | nu
     retry: { used: t.resume_count ?? 0, max: getNum(db, 'max_resumes', 2) },
     active_run: active ?? null,
     last_detail: lastDetail,
+    children:
+      t.coding_tool === 'plan'
+        ? (db.prepare('SELECT id, title, status, merge_status FROM tasks WHERE parent_id = ? ORDER BY created_at, rowid').all(id) as TaskHistory['children'])
+        : [],
   };
 }

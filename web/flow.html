@@ -60,6 +60,19 @@
       .runbar { display: flex; align-items: center; gap: 8px; }
       @media (max-width: 820px) {
         .issues-pop { left: 12px; right: 12px; width: auto; }
+        /* the top bar takes two rows: the name and its chips, then the tabs and actions */
+        #top { height: auto; flex-wrap: wrap; row-gap: 8px; padding-top: 8px; padding-bottom: 8px; }
+        #top .crumb, #top .crumb-sep, #top .grow { display: none; }
+        #top h1 { flex: 1 1 0; min-width: 0; }
+        #top-chips .mono { display: none; }
+        #top-actions { flex: 1 1 100%; flex-wrap: wrap; }
+        #top-actions > .btn { flex: 1 1 auto; justify-content: center; }
+        /* the log reads top to bottom: the steps, then the one you picked */
+        #logpanel { flex-basis: 46%; }
+        .logpanel-body { flex-direction: column; overflow-y: auto; }
+        .tree { width: auto; max-width: none; border-right: 0; border-bottom: 1px solid var(--border); overflow: visible; }
+        .tree li.step { padding-left: 28px; }
+        .logdetail { overflow: visible; }
       }
     </style>
   </head>

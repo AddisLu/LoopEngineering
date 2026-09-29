@@ -33,6 +33,7 @@ export function createCanvas(host, opts = {}) {
 
   let t = { x: 24, y: 24, k: 1 };
   let fitted = false;
+  let shape = ''; // the node ids last rendered
   let userMoved = false;
   let scene = { groups: [], nodes: [], edges: [] };
   const nodeMap = new Map(); // id → { el, sig, badge, prog }
@@ -301,10 +302,12 @@ export function createCanvas(host, opts = {}) {
     }
     edges.appendChild(markers());
 
+    const nextShape = scene.nodes.map((n) => n.id).join('|');
     if (!fitted && scene.nodes.length && host.clientWidth) {
       fitted = true;
       fit(true);
-    }
+    } else if (nextShape !== shape) fit(false); // a node came or went: show the new whole, unless the view was moved by hand
+    shape = nextShape;
   }
 
   // arrowheads, one per edge colour class (a marker cannot follow the path's stroke everywhere)

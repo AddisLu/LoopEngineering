@@ -45,9 +45,9 @@ const JUDGES = [
   ['fable-5', 'fable 5', '同上，較新'],
 ];
 
-// one colour per model: cloud in blues, local in oranges (told apart by lightness too), baseline grey
-const CLOUD_COLORS = ['#3f6fa8', '#274a78', '#7a9cc9'];
-const LOCAL_COLORS = ['#d9893a', '#9a5418', '#e8b27a', '#6e3a0f'];
+// one colour per model: cloud in cool hues, local in warm ones (distinct hues, not shades of one), baseline grey
+const CLOUD_COLORS = ['#3f78c0', '#2a9d8f', '#8a6cc9'];
+const LOCAL_COLORS = ['#d9893a', '#9a5418', '#d4a72c', '#b5523b'];
 const BASE_COLOR = '#c9c1b2';
 function colorMap(models) {
   const m = new Map();
@@ -100,7 +100,7 @@ function pageError(msg) {
 }
 
 function fillTable(table, headers, rows) {
-  fill(table, );
+  fill(table);
   const thead = h('thead', null, h('tr', null, headers.map((x) => h('th', null, x))));
   const tbody = h('tbody', null, rows);
   table.append(thead, tbody);
@@ -324,7 +324,7 @@ function paintFirstTry(matrix) {
     fill(box, h('p.empty-s', null, '還沒有資料。'));
     return;
   }
-  fill(box, 
+  fill(box,
     ...rows.map((t) => {
       const first = t.firstRate == null ? null : Math.min(t.passRate, t.firstRate);
       const later = first == null ? t.passRate : Math.max(0, t.passRate - first);
@@ -350,7 +350,7 @@ function paintStScatter(matrix) {
   }
   const colors = colorMap(rows.map((r) => r.model));
   const xMax = Math.max(10, ...rows.map((r) => r.avgMin)) * 1.2;
-  fill(box, 
+  fill(box,
     scatter({
       label: '通過率 vs 平均花費時間',
       points: rows.map((r) => ({ label: modelName(r.model), x: r.avgMin, y: r.passRate * 100, r: 7 + Math.min(8, r.n), color: colors.get(r.model) })),
@@ -523,9 +523,13 @@ function paintCards(views, head, baseline, colors, live) {
     ...views.map((v) => {
       const a = v.a;
       const running = a.task_status && !['review', 'attention', 'failed', 'closed'].includes(a.task_status);
+      // an arm that finished before the others is waiting for the final measurement, not for you
+      const waiting = live && a.task_status && !running && !OUTCOME_PILL[v.outcome];
       const [pillText, pillCls] = running
         ? [taskLabel(a.task_status), 'info']
-        : OUTCOME_PILL[v.outcome] || (a.task_status ? [taskLabel(a.task_status), a.task_status === 'failed' ? 'bad' : ''] : ['任務已刪除', '']);
+        : waiting
+          ? a.task_status === 'review' ? ['做完了，等其他組', 'info'] : ['停了，等其他組', 'warn']
+          : OUTCOME_PILL[v.outcome] || (a.task_status ? [taskLabel(a.task_status), a.task_status === 'failed' ? 'bad' : ''] : ['任務已刪除', '']);
       const rank = a.judge_rank ? ` · 第 ${a.judge_rank} 名` : '';
       const unit = head ? unitOf(head.name) : '';
       const sp = head && v.value != null ? speedup(head, baseVal, v.value) : null;
@@ -662,7 +666,7 @@ function paintConvergence(views, head, colors) {
     }),
     fails: v.attempts.map((x, i) => (x.outcome === 'functional' || x.outcome === 'protected' ? i : -1)).filter((i) => i >= 0),
   }));
-  fill(box, 
+  fill(box,
     lineChart({
       label: `每次嘗試的 ${head.name}`,
       xLabels: Array.from({ length: n }, (_, i) => `第 ${i + 1} 次`),
@@ -703,7 +707,7 @@ function paintQuality(views, colors) {
   }
   const maxTok = Math.max(1, ...pts.map((p) => p.tok || 0));
   const xMax = Math.max(10, ...pts.map((p) => p.x)) * 1.2;
-  fill(box, 
+  fill(box,
     scatter({
       label: '品質 vs 花費時間',
       points: pts.map((p) => ({ ...p, r: 8 + 10 * Math.sqrt((p.tok || 0) / maxTok) })),
@@ -839,7 +843,7 @@ async function loadBuiltin() {
   const box = $('builtin-list');
   try {
     const { questions } = await api('/api/benchmarks/builtin');
-    fill(box, 
+    fill(box,
       ...questions.map((q) =>
         pickCard({
           id: q.key,
@@ -939,7 +943,7 @@ async function loadPlans() {
       if (!$('m-title').value.trim() && p) $('m-title').value = p.name;
     }
     const chipsBox = $('m-plan-chips');
-    fill(chipsBox, );
+    fill(chipsBox);
     if (p) {
       if (p.domain) chipsBox.appendChild(chip(domainLabel(p.domain)));
       for (const s of p.steps || []) chipsBox.appendChild(chip(s, 'mono'));
@@ -1028,7 +1032,7 @@ function paintEstimate() {
 
   const switches = Math.max(0, locals.length);
   const minutes = switches * draftState.switchMin + models.length * 12 + draftState.judges.size * 3;
-  fill(box, );
+  fill(box);
   box.append(h('div', null, `題目：${label || '—'}`));
   box.append(h('div', null, `參賽：${models.length ? models.map(modelName).join('、') : '—'}`));
   box.append(h('div', null, `評審：${[...draftState.judges].map(modelName).join('、') || '—'}`));
