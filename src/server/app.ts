@@ -14,6 +14,7 @@ import { killRun } from '../orchestrator/kill.js';
 import { cleanupWorktree, resetTaskWorkspace } from '../orchestrator/cleanup.js';
 import { pruneTaskArtifacts } from '../git/worktree.js';
 import { integrateIntoBase } from '../git/integrate.js';
+import { identityOf, IdentityError } from './identity.js';
 import { latestRun } from '../tasks.js';
 import fs from 'node:fs';
 import { boardState, taskResult } from './board.js';
@@ -276,6 +277,17 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
     const t = getTask(db, (req.params as any).id);
     if (!t) return reply.code(404).send({ error: 'not found' });
     return { task: t, gate: validateTask(t, getSetting(db, 'host_capabilities') ?? '', environmentMap(db)) };
+  });
+
+  // Who the engine takes this request to be (server/identity.ts) — the operator pages show it
+  // instead of only the name typed into the browser, which a Tailscale login overrides.
+  app.get('/api/whoami', async (req, reply) => {
+    try {
+      return identityOf(req);
+    } catch (err) {
+      if (err instanceof IdentityError) return reply.code(400).send({ error: err.message });
+      throw err;
+    }
   });
 
   app.post('/api/tasks/:id/queue', async (req, reply) => {

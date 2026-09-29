@@ -125,8 +125,16 @@
     }
     const box = document.getElementById('ops-who');
     if (box) {
+      // who the engine takes this browser to be: a Tailscale login outranks the typed name
+      let server = null;
       const paint = () => {
         box.replaceChildren();
+        if (server && server.source === 'tailscale') {
+          const me = el('span', null, `你是 ${server.label}`);
+          me.title = `由 Tailscale 登入辨識（${server.user_key.replace(/^ts:/, '')}）；勾選、核可、發佈都記在這個名字下`;
+          box.appendChild(me);
+          return;
+        }
         box.appendChild(el('span', null, who() ? `你是 ${who()}` : '還沒填名字'));
         const b = el('button', null, who() ? '更改' : '填名字');
         b.type = 'button';
@@ -140,6 +148,12 @@
         box.appendChild(b);
       };
       paint();
+      api('/api/whoami')
+        .then((me) => {
+          server = me;
+          paint();
+        })
+        .catch(() => { /* older engine or no network: the typed name stays */ });
     }
   }
 
