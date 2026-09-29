@@ -20,6 +20,7 @@ import { validateTask } from './gate/validateTask.js';
 import { readUsage, setCachedUsage } from './token/usage.js';
 import { forecastBacklog } from './token/accounting.js';
 import { buildMorningReport, formatMorningText } from './report/morning.js';
+import { createPlan, deletePlan, getPlan, listDatasets, listPlans, PlanError, updatePlan, type VerifyPlan } from './plans/store.js';
 import { computeMetrics } from './server/metrics.js';
 import { killRun } from './orchestrator/kill.js';
 import { cleanupWorktree } from './orchestrator/cleanup.js';
@@ -700,6 +701,112 @@ execHost
     );
     if (r.code !== 0) return fail(`prune failed: ${r.out.slice(-300)}`);
     console.log(r.out.trim() ? `removed:\n${r.out.trim()}` : 'nothing older than that');
+  });
+
+// ---- 驗證方案 (src/plans/store.ts): picked on the 新工作 page -------------------------------------
+const repeat = (v: string, prev: string[]): string[] => [...prev, v];
+const vplan = program
+  .command('verify-plan')
+  .description('驗證方案: how a change is proven good — which machine, commands, 圖資, thresholds (picked on /job.html)');
+
+function printPlan(p: VerifyPlan): void {
+  console.log(`${p.id}  ${p.name}${p.repo_path ? `  repo=${p.repo_path}` : '  (every repo)'}  host=${p.host ?? '(engine shell)'}`);
+  if (p.description) console.log(`  ${p.description}`);
+  for (const st of p.steps) console.log(`  step: ${st}`);
+  if (p.dataset_root) console.log(`  圖資: ${p.dataset_root}/<資料夾>${p.dataset_default ? `  (default ${p.dataset_default})` : ''}`);
+  if (p.metrics) console.log(`  門檻: ${p.metrics}`);
+  if (p.protected_paths.length) console.log(`  保護: ${p.protected_paths.join(', ')}`);
+  if (p.artifacts.length) console.log(`  產出物: ${p.artifacts.join(', ')}`);
+  for (const c of p.manual_checks) console.log(`  人工: ${c}`);
+}
+
+vplan
+  .command('list')
+  .description('verification plans (optionally only those offered for one repo)')
+  .option('--repo <path>', 'only plans for this repo (and those for every repo)')
+  .action((o: { repo?: string }) => {
+    const plans = listPlans(getDb(), o.repo ? path.resolve(o.repo) : null);
+    if (!plans.length) console.log('（還沒有驗證方案：loop verify-plan add --name … --step …）');
+    for (const p of plans) printPlan(p);
+  });
+
+vplan
+  .command('add')
+  .description('add a verification plan (or update one with --id)')
+  .requiredOption('--name <text>', 'what operators see, e.g. "亮缺陷判型 — 標準圖集"')
+  .option('--id <id>', 'update this plan instead of adding one')
+  .option('--repo <path>', 'the software it is for (omit = offered for every repo)')
+  .option('--host <name>', "where it runs: 'local' or a `loop exec host` name (omit = the engine's shell, no sandbox)")
+  .option('--step <cmd>', 'a verification command; repeat for several; {dataset} = the picked 圖資 folder', repeat, [])
+  .option('--dataset-root <path>', 'container path whose sub-folders are offered as 圖資, e.g. /datasets')
+  .option('--dataset-default <name>', 'the 圖資 folder preselected')
+  .option('--metrics <expr>', 'thresholds the engine checks, e.g. "detection_rate >= 0.98; miss == 0"')
+  .option('--protect <globs>', 'CSV globs the implementer must not change')
+  .option('--artifacts <globs>', 'CSV globs collected after verification (never committed)')
+  .option('--check <text>', 'a manual check a person ticks on the 驗收頁 (repeatable)', repeat, [])
+  .option('--domain <domain>', 'cuda | cv | cpp | csharp | typescript | python | other')
+  .option('--setup <cmd>', 'runs before the agent starts; failure stops the task before any token spend')
+  .option('--desc <text>', 'what it checks, in plain words')
+  .action((o) => {
+    const db = getDb();
+    const input = {
+      name: String(o.name),
+      repo_path: o.repo ? path.resolve(String(o.repo)) : null,
+      host: o.host ?? null,
+      steps: o.step as string[],
+      dataset_root: o.datasetRoot ?? null,
+      dataset_default: o.datasetDefault ?? null,
+      metrics: o.metrics ?? null,
+      protected_paths: o.protect ?? null,
+      artifacts: o.artifacts ?? null,
+      manual_checks: o.check as string[],
+      domain: o.domain ?? null,
+      setup_cmd: o.setup ?? null,
+      description: o.desc ?? null,
+    };
+    try {
+      const p = o.id ? updatePlan(db, String(o.id), input, 'cli') : createPlan(db, input, 'cli');
+      if (!p) return fail(`no such verification plan: ${o.id}`);
+      printPlan(p);
+      if (p.dataset_root) console.log(`下一步：loop verify-plan datasets ${p.id}`);
+    } catch (err) {
+      if (err instanceof PlanError) return fail(err.message);
+      throw err;
+    }
+  });
+
+vplan
+  .command('show <id>')
+  .description('one verification plan')
+  .action((id: string) => {
+    const p = getPlan(getDb(), id);
+    if (!p) return fail(`no such verification plan: ${id}`);
+    printPlan(p);
+  });
+
+vplan
+  .command('rm <id>')
+  .description('delete a verification plan (tasks already created from it keep their copy)')
+  .action((id: string) => {
+    if (!deletePlan(getDb(), id)) return fail(`no such verification plan: ${id}`);
+    console.log(`removed ${id}`);
+  });
+
+vplan
+  .command('datasets <id>')
+  .description('the 圖資 folders an operator can pick for this plan (lists its machine over ssh when remote)')
+  .action(async (id: string) => {
+    const db = getDb();
+    const p = getPlan(db, id);
+    if (!p) return fail(`no such verification plan: ${id}`);
+    try {
+      const ds = await listDatasets(db, p);
+      if (!ds.length) console.log(`（${p.dataset_root ?? '沒有設定圖資位置'} 裡沒有資料夾）`);
+      for (const d of ds) console.log(`${d.name === p.dataset_default ? '*' : ' '} ${d.path}  ${d.images ?? '?'} 張`);
+    } catch (err) {
+      if (err instanceof PlanError) return fail(err.message);
+      throw err;
+    }
   });
 
 const local = program.command('local').description('本地模型: list / load / stop / download / build / jobs (see local_models_enabled)');

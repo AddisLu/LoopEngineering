@@ -208,6 +208,19 @@ function migrate(db: Database.Database): void {
     ['head_sha', 'TEXT'],
     ['base_sha', 'TEXT'],
   ]);
+  // 驗收／交付 (src/review/*, the 驗收頁): the 驗證方案 a task came from, the outputs it collects
+  // (CSV globs, kept out of commits), the person's manual checklist, the approval and the Gitea
+  // release. All nullable = the task behaves exactly as before.
+  add('tasks', [
+    ['verify_plan_id', 'TEXT'],
+    ['artifacts', 'TEXT'],
+    ['checklist_json', 'TEXT'],
+    ['approved_by', 'TEXT'],
+    ['approved_at', 'TEXT'],
+    ['release_url', 'TEXT'],
+  ]);
+  // what a run's verification collected: {dir, files:[{path,size,sha256}], ...} (null = nothing)
+  add('task_runs', [['artifacts_json', 'TEXT']]);
 }
 
 function seedSettings(db: Database.Database): void {

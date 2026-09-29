@@ -49,6 +49,7 @@ import type { BenchJudgeExec } from '../benchmark/judge.js';
 import { registerPrdRoutes, type PrdRouteOptions } from './prdRoutes.js';
 import { registerChatRoutes, type ChatRouteOptions } from './chatRoutes.js';
 import { registerExecRoutes } from './execRoutes.js';
+import { registerPlanRoutes, type PlanRouteOptions } from './planRoutes.js';
 import { buildMorningReport } from '../report/morning.js';
 import fastifyWebsocket from '@fastify/websocket';
 import { registerTerminalRoutes, type TerminalRouteOptions } from './terminalRoutes.js';
@@ -126,6 +127,10 @@ export interface AppOptions {
   chatIdentity?: ChatRouteOptions['identity'];
   /** Test-only: stands in for `docker run` behind the chat's GPU 沙盒 tools and POST /api/exec/run. */
   sandboxRun?: ChatRouteOptions['sandboxRun'];
+  /** test injection: ssh behind 驗證方案 圖資 listing */
+  planHostExec?: PlanRouteOptions['hostExec'];
+  /** test injection: the sandbox probe behind 檢查機台 */
+  planCheck?: PlanRouteOptions['check'];
 }
 
 interface CreateTaskBody {
@@ -589,6 +594,7 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
   });
   registerChatRoutes(app, db, { identity: opts.chatIdentity, toolFetch: opts.chatToolFetch, toolLookup: opts.chatToolLookup, mcpPool, sandboxRun: opts.sandboxRun });
   registerExecRoutes(app, db, { run: opts.sandboxRun });
+  registerPlanRoutes(app, db, { hostExec: opts.planHostExec, check: opts.planCheck });
   // inside a child plugin so it loads after @fastify/websocket (a `websocket: true` route
   // declared in the root scope runs before the plugin has decorated the instance)
   app.register(async (inst) => {

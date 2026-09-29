@@ -38,6 +38,12 @@ export interface Task {
   benchmark_id: string | null; // benchmark mode: this task is one arm of benchmarks.id (never integrates; judged)
   acceptance_metrics?: string | null; // 驗收指標: e.g. "detection_rate >= 0.98; miss == 0" (src/orchestrator/acceptance.ts)
   protected_paths?: string | null; // 保護路徑: CSV globs the agent must not change (e.g. scripts/eval/**)
+  verify_plan_id?: string | null; // 驗證方案 this task was created from (src/plans/store.ts)
+  artifacts?: string | null; // 產出物: CSV globs collected after verification, never committed
+  checklist_json?: string | null; // 人工驗收: [{text, checked, by, at}] ticked on the 驗收頁
+  approved_by?: string | null; // who 核可'd it on the 驗收頁
+  approved_at?: string | null;
+  release_url?: string | null; // the Gitea release it was published as
   created_at: string;
   updated_at: string;
 }
@@ -70,6 +76,7 @@ export interface TaskRun {
   metrics_json?: string | null; // last metrics: {values, checks[{name, op, target, actual, pass}], pass}
   head_sha?: string | null; // the commit that verification looked at
   base_sha?: string | null; // merge-base with the base branch at that time: the task's diff is base_sha..head_sha
+  artifacts_json?: string | null; // what verification collected (src/review/artifacts.ts)
   started_at: string;
   finished_at: string | null;
 }
