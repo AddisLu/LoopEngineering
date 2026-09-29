@@ -50,6 +50,7 @@ import { registerPrdRoutes, type PrdRouteOptions } from './prdRoutes.js';
 import { registerChatRoutes, type ChatRouteOptions } from './chatRoutes.js';
 import { registerExecRoutes } from './execRoutes.js';
 import { registerPlanRoutes, type PlanRouteOptions } from './planRoutes.js';
+import { registerReviewRoutes } from './reviewRoutes.js';
 import { buildMorningReport } from '../report/morning.js';
 import fastifyWebsocket from '@fastify/websocket';
 import { registerTerminalRoutes, type TerminalRouteOptions } from './terminalRoutes.js';
@@ -131,6 +132,9 @@ export interface AppOptions {
   planHostExec?: PlanRouteOptions['hostExec'];
   /** test injection: the sandbox probe behind 檢查機台 */
   planCheck?: PlanRouteOptions['check'];
+  /** test injection: Gitea behind the 驗收頁's 發佈 */
+  releaseFetch?: typeof fetch;
+  releaseToken?: string;
 }
 
 interface CreateTaskBody {
@@ -596,7 +600,8 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
   });
   registerChatRoutes(app, db, { identity: opts.chatIdentity, toolFetch: opts.chatToolFetch, toolLookup: opts.chatToolLookup, mcpPool, sandboxRun: opts.sandboxRun });
   registerExecRoutes(app, db, { run: opts.sandboxRun });
-  registerPlanRoutes(app, db, { hostExec: opts.planHostExec, check: opts.planCheck });
+  registerPlanRoutes(app, db, { hostExec: opts.planHostExec, check: opts.planCheck, reviewExec: opts.prdReviewExec });
+  registerReviewRoutes(app, db, { sandboxRun: opts.sandboxRun, releaseFetch: opts.releaseFetch, releaseToken: opts.releaseToken, identity: opts.chatIdentity });
   // inside a child plugin so it loads after @fastify/websocket (a `websocket: true` route
   // declared in the root scope runs before the plugin has decorated the instance)
   app.register(async (inst) => {

@@ -1,13 +1,17 @@
 import path from 'node:path';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type Database from 'better-sqlite3';
-import { logEvent } from '../db/index.js';
+import { getSetting, logEvent } from '../db/index.js';
 import { identityOf, IdentityError } from './identity.js';
 import { createPlan, deletePlan, getPlan, listDatasets, listPlans, PlanError, updatePlan, type PlanInput } from '../plans/store.js';
 import { describeExecHosts, getExecHost, LOCAL_HOST, realHostExec, setHostIds, type HostExec } from '../exec/hosts.js';
 import { checkSandbox, type CheckLine } from '../exec/check.js';
 import { sandboxSettings } from '../exec/sandbox.js';
 import { execRoot } from '../exec/workspace.js';
+import { checkJob, JobError, listJobRepos, submitJob, type JobInput } from '../plans/job.js';
+import { resolvePrdModel } from '../prd/intake.js';
+import type { PrdReviewExec } from '../prd/review.js';
+import { listLocalModels } from '../local/models.js';
 
 /**
  * 驗證方案 API for the /plans.html editor (engineers) and the 新工作 page (operators pick one and
@@ -16,6 +20,8 @@ import { execRoot } from '../exec/workspace.js';
  */
 
 export interface PlanRouteOptions {
+  /** test injection: the local-model review behind 新工作's check (as the PRD gate's) */
+  reviewExec?: PrdReviewExec;
   /** test injection: ssh for listing a remote machine's 圖資 */
   hostExec?: HostExec;
   /** test injection: the sandbox probe behind 檢查機台 */
@@ -105,6 +111,64 @@ export function registerPlanRoutes(app: FastifyInstance, db: Database.Database, 
       return { datasets: await listDatasets(db, p, opts.hostExec ?? realHostExec), default: p.dataset_default };
     } catch (err) {
       if (err instanceof PlanError) return reply.code(409).send({ error: err.message });
+      throw err;
+    }
+  });
+
+  // ---- 新工作 ----
+  const jobInput = (body: unknown): JobInput => {
+    const b = (body ?? {}) as Record<string, unknown>;
+    return {
+      repo_path: str(b.repo_path) ?? '',
+      base_branch: str(b.base_branch) ?? '',
+      title: str(b.title) ?? '',
+      symptom: str(b.symptom) ?? '',
+      expected: str(b.expected) ?? '',
+      files: Array.isArray(b.files) ? b.files.map(String) : [],
+      plan_id: str(b.plan_id) ?? '',
+      dataset: str(b.dataset),
+      model: str(b.model),
+      complexity: b.complexity === 'S' || b.complexity === 'L' ? b.complexity : 'M',
+      notes: str(b.notes),
+    };
+  };
+
+  // what the 新工作 page offers: the software (with branches), who can do the work, when it runs
+  app.get('/api/jobs/options', async () => {
+    let defaultModel: string | null = null;
+    try {
+      defaultModel = resolvePrdModel(db, null);
+    } catch {
+      defaultModel = null;
+    }
+    return {
+      repos: listJobRepos(db),
+      models: listLocalModels(db, { enabledOnly: true }).map((m) => ({ id: `local:${m.id}`, name: m.display_name })),
+      default_model: defaultModel,
+      local_task_window: getSetting(db, 'local_task_window') ?? '',
+      morning_report_time: getSetting(db, 'morning_report_time') ?? '',
+    };
+  });
+
+  // 送出前檢查: the PRD this job becomes, through the gate (rules + the local model's review)
+  app.post('/api/jobs/check', async (req, reply) => {
+    try {
+      return await checkJob(db, jobInput(req.body), { exec: opts.reviewExec });
+    } catch (err) {
+      if (err instanceof JobError) return reply.code(400).send({ error: err.message });
+      throw err;
+    }
+  });
+
+  app.post('/api/jobs', async (req, reply) => {
+    try {
+      const { markdown, result } = await submitJob(db, jobInput(req.body), { exec: opts.reviewExec });
+      if (!result.ok) return reply.code(422).send({ error: '需求還有沒寫清楚的地方', check: result.check, markdown });
+      if (result.kind !== 'task') return reply.code(500).send({ error: 'unexpected benchmark' });
+      logEvent(db, { task_id: result.task.id, kind: 'note', detail: `新工作（${who(req)}）：${result.task.title}` });
+      return reply.code(201).send({ task: result.task, gate: result.gate, markdown });
+    } catch (err) {
+      if (err instanceof JobError) return reply.code(400).send({ error: err.message });
       throw err;
     }
   });
