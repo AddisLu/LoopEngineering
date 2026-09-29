@@ -428,6 +428,9 @@
           <tr><td><code>resume</code></td><td>恢復排程。</td></tr>
           <tr><td><code>abort &lt;id&gt;</code></td><td>中斷該任務的 run 並標記 failed。</td></tr>
           <tr><td><code>close &lt;id&gt;</code></td><td>把已審閱的任務標記 closed（並放行鏈上下一個任務）。</td></tr>
+          <tr><td><code>edit &lt;id&gt;</code></td><td>任務建立後修改它的驗證設定（執行中不行）：<code>--verify "sandbox: bash run.sh" …</code>（每個步驟一個參數，整批取代）<code>--verify-mode</code> <code>--acceptance "pass == 4; ncu == 1"</code> <code>--artifacts &lt;glob,…&gt;</code> <code>--protected &lt;glob,…&gt;</code> <code>--verify-timeout &lt;分鐘｜default&gt;</code>；給空字串就清掉那一項。常見用途：把舊任務的步驟改成 <code>sandbox:</code> 開頭，驗收頁才能試跑。API：<code>PATCH /api/tasks/:id</code>。</td></tr>
+          <tr><td><code>verify &lt;id&gt;</code></td><td>對已結束的任務重跑一次 command 驗證並記錄下來（驗收頁的「結果」、指標、產出物會更新）；不改任務狀態、不合併。給在引擎開始保存驗證紀錄之前跑的任務補紀錄，或環境變了（例如開了 GPU 效能計數器）想再量一次。</td></tr>
+          <tr><td><code>merge &lt;id&gt;</code></td><td>和看板的「合併」一樣：把最新的 base 併進任務分支，有變動就重新驗證，通過才併回 base。</td></tr>
           <tr><td><code>delete &lt;id&gt; [--force]</code></td><td>永久刪除任務＋磁碟產物（worktree／plan／logs）。</td></tr>
           <tr><td><code>prune [--status &lt;list&gt;] [--older-than &lt;days&gt;] [--yes]</code></td><td>批次清理終態任務＋產物（預設 dry-run，加 <code>--yes</code> 才真刪）。</td></tr>
           <tr><td><code>config [list｜get｜set] [key] [value]</code></td><td>檢視 / 即時修改排程設定（門檻、模型、Git 收尾旗標）。例：<code>loop config set default_model sonnet</code>。改完下一個 tick 生效、免重啟；含防呆。</td></tr>
@@ -766,7 +769,7 @@ systemctl --user disable loop-engineering</code></pre>
         <li>push 分支備份 → <b>FF-only 自動併回 <code>main</code> 並 push 到 GitHub</b>。</li>
         <li>卡片進 <code>review</code>，徽章顯示 <code>✓ 已合併</code>。</li>
       </ol>
-      <div class="note warn"><span class="ic">🛡️</span><span><b>安全保證：</b>所有網路 git 操作都有 30 秒逾時、失敗不會卡住引擎；併回一律 <b>fast-forward-only</b>，<b>絕不改動你的髒工作區、絕不強推</b>。無法乾淨 FF（例如你的 base 有未推的本地 commit）就降級為 <code>待合併</code>，卡片上按<b>合併</b>再試。</span></div>
+      <div class="note warn"><span class="ic">🛡️</span><span><b>安全保證：</b>所有網路 git 操作都有 30 秒逾時、失敗不會卡住引擎；併回一律 <b>fast-forward-only</b>，<b>絕不改動你的髒工作區、絕不強推</b>。無法乾淨 FF（例如你的 base 有未推的本地 commit）就降級為 <code>待合併</code>，卡片上按<b>合併</b>再試。按<b>合併</b>時，引擎會先把最新的 base 併進任務分支；分支因此有變動就重新跑一次驗證，通過才併回，沒通過就不合併、任務留在 review，並跳出原因。</span></div>
       <div class="note info"><span class="ic">🧩</span><span><b>遇衝突自動解：</b>併回若衝突，引擎自動建一個 <b>merge 任務</b>（標題 <code>[merge] …</code>），交給 Claude Code 拉最新 base、解衝突、跑 verify，再自己走一次收尾。你不用手動處理。</span></div>
 
       <h3>2 · attention（待確認）：出問題時保留現場交回人工</h3>
@@ -1726,7 +1729,7 @@ loop morning                                    # 在終端機看同一份晨報
         <li><b>網址</b>：用 Tailscale 網址開，例如 <code>https://&lt;主機&gt;/job.html</code>。第一次在網址後加 <code>?token=…</code>，瀏覽器會記住。</li>
         <li><b>你是誰</b>：
           <ul>
-            <li>用 Tailscale 登入的人會自動帶出身分。</li>
+            <li>用 Tailscale 登入的人會自動帶出身分，右上角直接顯示你的名字，不用再填。</li>
             <li>其他人請按右上角「填名字」。勾選、核可、發佈都會記在這個名字下。</li>
           </ul>
         </li>
@@ -1766,7 +1769,7 @@ loop morning                                    # 在終端機看同一份晨報
       <div class="tbl-wrap"><table>
         <thead><tr><th>東西</th><th>放在哪裡</th><th>說明</th></tr></thead>
         <tbody>
-          <tr><td>原始碼</td><td>Gitea：<code>loop/&lt;任務&gt;</code> 分支與 PR → 整合分支</td><td>唯一的正本。核可時，如果合併還在等人，就在這時併進分支。</td></tr>
+          <tr><td>原始碼</td><td>Gitea：<code>loop/&lt;任務&gt;</code> 分支與 PR → 整合分支</td><td>唯一的正本。核可時，如果合併還在等人，就在這時合併：先把最新的整合分支併進任務分支並重新驗證，通過才合併；沒通過就不核可，並告訴你原因。</td></tr>
           <tr><td>產出物（執行檔、報告）</td><td>引擎主機 <code>~/.local/share/loop-engineering/artifacts/&lt;任務&gt;/&lt;run&gt;/</code></td><td>驗證通過後，從工作區和驗證機台收回來。<code>manifest.json</code> 記錄每個檔案的 sha256，以及機台、commit、指標。這些檔案不會進 git；總大小上限是 <code>artifacts_max_mb</code>。</td></tr>
           <tr><td>交付包</td><td>驗收頁「下載 zip」，或「發佈到 Gitea」</td><td>
             <ul>
@@ -1816,8 +1819,15 @@ loop verify-plan datasets &lt;方案 id&gt;     # 人員會看到的圖資清單
             <ul>
               <li><code>exec_enabled</code> 沒開</li>
               <li>你不在 <code>exec_allowed_users</code> 裡</li>
-              <li>驗證方案有不在沙盒裡的步驟</li>
+              <li>驗證方案有不在沙盒裡的步驟：工程師可以用 <code>loop edit &lt;任務&gt; --verify "sandbox: …"</code> 把步驟改成在沙盒執行。</li>
               <li>任務還在執行</li>
+            </ul>
+            在等工程師處理之前，也可以先用「執行一個指令」直接輸入驗證指令，一樣是在沙盒裡跑。
+          </td></tr>
+          <tr><td>「結果」是空的，或「程式碼」是 0 個檔案</td><td>任務是在引擎開始保存驗證紀錄之前跑的，或是在引擎外手動合併的，所以沒有「驗了什麼、看的是哪個 commit」的紀錄。
+            <ul>
+              <li>結果：工程師執行 <code>loop verify &lt;任務&gt;</code> 就會重新驗證並記錄下來，結果、指標和產出物都會補上。</li>
+              <li>程式碼：差異是用驗證時記下的 commit 算的。已經合併的舊任務沒有這筆紀錄，引擎也推不回來，請改看 PR 或 commit 歷史。之後的任務都會記錄，合併後照樣看得到。</li>
             </ul>
           </td></tr>
           <tr><td>「核可」按鈕是灰的</td><td>人工驗收清單還沒勾完，或任務還沒進到「待驗收」（看板上叫「待結案」）。滑鼠停在按鈕上會顯示原因。</td></tr>
@@ -1881,7 +1891,9 @@ loop verify-plan datasets &lt;方案 id&gt;     # 人員會看到的圖資清單
           <tr><td>POST</td><td><code>/api/tasks/:id/restart</code></td><td>attention/failed → 重來（清 worktree/分支，從最新 base）</td></tr>
           <tr><td>POST</td><td><code>/api/tasks/:id/abandon</code></td><td>attention → 放棄（<code>?cleanup=1</code> 一併清 worktree）</td></tr>
           <tr><td>POST</td><td><code>/api/tasks/:id/hold</code></td><td>blocked → 轉待確認（停止自動續跑）</td></tr>
-          <tr><td>POST</td><td><code>/api/tasks/:id/merge</code></td><td>review 待合併/衝突 → 一鍵併回 base</td></tr>
+          <tr><td>POST</td><td><code>/api/tasks/:id/merge</code></td><td>review 待合併/衝突 → 先把最新 base 併進任務分支、有變動就重新驗證（記錄在 run 上），通過才併回 base；沒通過回 <code>pending</code>、衝突回 <code>conflict</code>（並排入解衝突任務）</td></tr>
+          <tr><td>PATCH</td><td><code>/api/tasks/:id</code></td><td>修改驗證設定：<code>verification_steps</code>、<code>verify_mode</code>、<code>acceptance_metrics</code>、<code>artifacts</code>、<code>protected_paths</code>、<code>verify_timeout_min</code>（執行中回 409）</td></tr>
+          <tr><td>GET</td><td><code>/api/whoami</code></td><td>引擎認定的你是誰：Tailscale 登入優先，其次是頁面填的名字，都沒有就是 <code>local</code></td></tr>
           <tr><td>GET</td><td><code>/api/tasks/:id/result</code></td><td>PR 連結、gap-review、失敗原因、log 尾巴</td></tr>
           <tr><td>DELETE</td><td><code>/api/tasks/:id</code></td><td>永久刪除任務＋磁碟產物（<code>?force=1</code>）</td></tr>
           <tr><td>POST</td><td><code>/api/tasks/prune</code></td><td>批次清理終態任務（<code>dryRun</code> 預覽）</td></tr>
