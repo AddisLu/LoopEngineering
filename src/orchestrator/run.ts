@@ -29,6 +29,7 @@ import { parseSteps, parseVerifyMode } from '../types.js';
 import { unmetCapabilities } from '../capabilities.js';
 import { runGapReview } from '../review/gapReviewer.js';
 import { createPr } from '../git/pr.js';
+import { prBody } from './runSummary.js';
 import { syncWithBase, pushBranch, stripLoopArtifacts, integrateIntoBase, baseRefFor } from '../git/integrate.js';
 import { createMergeTask } from './mergeTask.js';
 import { cleanupWorktree } from './cleanup.js';
@@ -510,14 +511,14 @@ export async function runTask(
           const mt = createMergeTask(db, task, sync.conflictFiles, sync.baseRef);
           db.prepare('UPDATE tasks SET merge_status = ? WHERE id = ?').run('conflict', task.id);
           // still attempt a backup PR for the branch, but skip integrate
-          tryCreatePr(db, task, run.id, worktreePath, branch);
+          await tryCreatePr(db, task, run.id, worktreePath, branch);
           setStatus(db, task.id, 'review', {
             run_id: run.id,
             detail: `verification passed; merge conflict vs ${sync.baseRef}; resolution task ${mt.id} queued`,
           });
         } else {
           db.prepare('UPDATE tasks SET merge_status = ? WHERE id = ?').run('conflict', task.id);
-          tryCreatePr(db, task, run.id, worktreePath, branch);
+          await tryCreatePr(db, task, run.id, worktreePath, branch);
           setStatus(db, task.id, 'review', {
             run_id: run.id,
             detail: `verification passed; merge conflict vs ${sync.baseRef} — awaiting manual merge`,
@@ -543,7 +544,7 @@ export async function runTask(
     }
 
     // 4. PR (its internal push is now a cheap re-push)
-    const prUrl = tryCreatePr(db, task, run.id, worktreePath, branch);
+    const prUrl = await tryCreatePr(db, task, run.id, worktreePath, branch);
 
     // 5. integrate into base (skipped entirely for a manual verify outcome)
     let mergeStatus: string | null = null;
@@ -763,16 +764,23 @@ function handleVerifyFailure(
   setStatus(db, task.id, 'attention', { run_id: runId, detail: `verify failed at: ${failedStep}\n${tail}` });
 }
 
-/** Best-effort PR creation; records pr_url + a note on success. Returns the URL or null. */
-function tryCreatePr(
+/** Best-effort PR creation; records pr_url + a note on success. Returns the URL or null. On a local
+ * Gitea (gitea_url + GITEA_TOKEN) the description carries what was verified (runSummary.prBody). */
+async function tryCreatePr(
   db: Database.Database,
   task: Task,
   runId: string,
   worktreePath: string,
   branch: string,
-): string | null {
+): Promise<string | null> {
   try {
-    const prUrl = createPr(worktreePath, branch, task.title);
+    const giteaUrl = (getSetting(db, 'gitea_url') ?? '').trim();
+    const prUrl = await createPr(worktreePath, branch, task.title, {
+      base: task.base_branch,
+      body: giteaUrl ? prBody(task, getRun(db, runId), worktreePath) : undefined,
+      gitea: giteaUrl ? { url: giteaUrl, token: process.env.GITEA_TOKEN ?? '' } : null,
+      onError: (msg) => logEvent(db, { task_id: task.id, run_id: runId, kind: 'note', detail: msg }),
+    });
     if (prUrl) {
       db.prepare('UPDATE tasks SET pr_url = ? WHERE id = ?').run(prUrl, task.id);
       logEvent(db, { task_id: task.id, run_id: runId, kind: 'note', detail: `PR: ${prUrl}` });

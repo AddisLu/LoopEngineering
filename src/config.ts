@@ -320,6 +320,10 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // never the DB. 'none' (default) disables both import and pushback regardless of creds.
   integration_provider: 'none',
   integration_pushback: 'false',
+  // local Gitea (src/git/gitea.ts): when a task repo's origin lives on this server, its PR is opened
+  // through Gitea's API with the verification results in the description. Token: GITEA_TOKEN in
+  // ~/.config/loop-engineering/env. '' = off (PRs only through gh, as before).
+  gitea_url: '',
 
   // mobile voice -> task intake (src/voice/, src/server/voiceRoutes.ts): record on the
   // board/voice.html -> faster-whisper (RTX 2080 venv) transcribes -> an LLM cleans the

@@ -174,6 +174,8 @@ export function validateSetting(key: string, value: string): string | null {
   } else if (key === 'terminal_allowed_users' || key === 'exec_allowed_users') {
     const bad = value.split(',').map((s) => s.trim()).filter(Boolean).filter((s) => !/^(ts:\S+|name:\S+|local)$/i.test(s));
     if (bad.length) return `${key} entries must be ts:<login>, name:<name> or local (got: ${bad.join(', ')})`;
+  } else if (key === 'gitea_url') {
+    if (value !== '' && !/^https?:\/\/[^\s/]+(\/\S*)?$/.test(value)) return 'gitea_url must be an http(s) URL (e.g. http://gitea.corp:3000) or empty';
   } else if (key === 'exec_default_host') {
     if (value !== '' && !/^[a-z0-9][a-z0-9_-]{0,39}$/.test(value)) return 'exec_default_host must be empty, local, or an exec host name';
   } else if (key === 'exec_data_mounts') {
