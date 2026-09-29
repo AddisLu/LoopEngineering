@@ -1,6 +1,7 @@
 // Shared settings metadata + validation, used by the CLI (`loop config`) and the
 // board settings panel (GET/POST /api/settings). One source of truth so both agree.
 import { parseMcpServers } from './mcp/config.js';
+import { parseDataMounts } from './exec/hosts.js';
 
 export const PERCENT_KEYS = new Set([
   'day_session_max', 'day_weekly_max', 'night_session_max', 'night_weekly_max',
@@ -173,6 +174,14 @@ export function validateSetting(key: string, value: string): string | null {
   } else if (key === 'terminal_allowed_users' || key === 'exec_allowed_users') {
     const bad = value.split(',').map((s) => s.trim()).filter(Boolean).filter((s) => !/^(ts:\S+|name:\S+|local)$/i.test(s));
     if (bad.length) return `${key} entries must be ts:<login>, name:<name> or local (got: ${bad.join(', ')})`;
+  } else if (key === 'exec_default_host') {
+    if (value !== '' && !/^[a-z0-9][a-z0-9_-]{0,39}$/.test(value)) return 'exec_default_host must be empty, local, or an exec host name';
+  } else if (key === 'exec_data_mounts') {
+    try {
+      parseDataMounts(value);
+    } catch (err) {
+      return `exec_data_mounts: ${(err as Error).message}`;
+    }
   } else if (key === 'exec_image') {
     if (!/^[\w][\w./:@-]*$/.test(value)) return 'exec_image must be a docker image reference, e.g. nvidia/cuda:13.0.3-devel-ubuntu24.04';
   } else if (key === 'exec_gpus') {

@@ -61,9 +61,10 @@ import { activeLocalRunCount } from './tasks.js';
 import { BENCH_DOMAINS, BenchmarkInputError, benchmarkMatrix, createBenchmark, getBenchmark, listBenchmarks } from './benchmark/store.js';
 import { judgeBenchmark } from './benchmark/complete.js';
 import { checkPrd, submitPrd, PrdInputError, type PrdCheck } from './prd/intake.js';
-import { formatSandboxResult, runSandbox, sandboxSettings } from './exec/sandbox.js';
+import { formatSandboxResult, runSandbox, sandboxSettings, settingsForHost } from './exec/sandbox.js';
 import { checkSandbox, formatCheck } from './exec/check.js';
 import { ensureWorkspace, execRoot } from './exec/workspace.js';
+import { deleteExecHost, getExecHost, listExecHosts, LOCAL_HOST, realHostExec, resolveExecTarget, setHostIds, sshArgs, upsertExecHost, type ExecHost, type ExecTarget } from './exec/hosts.js';
 
 const program = new Command();
 program.name('loop').description('Loop Engineering — token-aware coding-task scheduler').version('0.1.0');
@@ -548,13 +549,26 @@ const execCmd = program.command('exec').description('GPU 執行沙盒: check the
 
 execCmd
   .command('check')
-  .description('is this machine ready? docker, image, GPU, nvcc/ncu, no network, writable /work')
+  .description('is this machine (or --host) ready? docker, image, GPU, nvcc/ncu, no network, writable /work, read-only data')
+  .option('--host <name>', 'check a registered remote sandbox host instead (see `loop exec host`)')
   .option('--profile', 'also build a tiny kernel and run ncu on it (checks GPU counter permissions)')
   .action(async (o) => {
     const db = getDb();
     const s = sandboxSettings(db);
-    console.log(`exec_enabled=${s.enabled}  image=${s.image}  gpus=${s.gpus || '(none)'}  memory=${s.memory}  cpus=${s.cpus}`);
-    const lines = await checkSandbox(s, path.join(execRoot(), 'check'), { profile: !!o.profile });
+    let remote: ExecHost | undefined;
+    if (o.host && o.host !== LOCAL_HOST) {
+      remote = getExecHost(db, String(o.host));
+      if (!remote) return fail(`no such exec host: ${o.host} (loop exec host list)`);
+    }
+    const shown = remote ? settingsForHost(s, remote) : s;
+    console.log(
+      `exec_enabled=${s.enabled}  host=${remote ? `${remote.name} (${remote.ssh_target})` : 'local'}  image=${shown.image}  gpus=${shown.gpus || '(none)'}  memory=${shown.memory}  cpus=${shown.cpus}`,
+    );
+    const lines = await checkSandbox(s, path.join(execRoot(), 'check'), {
+      profile: !!o.profile,
+      remote,
+      onRemoteIds: remote ? (uid, gid) => setHostIds(db, remote!.name, uid, gid) : undefined,
+    });
     console.log(formatCheck(lines));
     if (lines.some((l) => l.ok === false)) process.exitCode = 1;
     else if (!s.enabled) console.log('\n一切就緒；要讓對話頁與任務使用，執行：loop config set exec_enabled true');
@@ -564,16 +578,104 @@ execCmd
   .command('run')
   .description('run one bash command in the sandbox (default workspace: <data dir>/exec/cli)')
   .argument('<command...>', 'the command (quote it, or put it after --)')
-  .option('--dir <path>', 'host directory to mount at /work')
+  .option('--dir <path>', 'local directory to mount at /work (synced to the host first when --host is remote)')
+  .option('--host <name>', 'run on a registered remote sandbox host')
   .option('--timeout <sec>', 'timeout in seconds (capped by exec_max_timeout_sec)')
   .action(async (parts: string[], o) => {
     const db = getDb();
     const s = sandboxSettings(db);
     if (!s.enabled) console.error('（注意：exec_enabled=false —— 對話頁與任務還不能用沙盒；這個指令照樣執行）');
+    let target: ExecTarget;
+    try {
+      target = resolveExecTarget(db, o.host ?? LOCAL_HOST);
+    } catch (err) {
+      return fail((err as Error).message);
+    }
     const dir = o.dir ? path.resolve(String(o.dir)) : ensureWorkspace(path.join(execRoot(), 'cli'));
-    const r = await runSandbox(s, { workdir: dir, command: parts.join(' '), timeoutSec: o.timeout, scope: 'cli' });
+    const remote = target.kind === 'remote' ? { host: target.host, key: 'cli' } : null;
+    const r = await runSandbox(s, { workdir: dir, command: parts.join(' '), timeoutSec: o.timeout, scope: 'cli', remote });
     console.log(formatSandboxResult(r));
     process.exitCode = r.exitCode === 0 && !r.infra ? 0 : r.exitCode && r.exitCode > 0 ? r.exitCode : 1;
+  });
+
+const execHost = execCmd.command('host').description('remote sandbox hosts: Linux + Docker + NVIDIA Container Toolkit, reached over SSH');
+
+execHost
+  .command('add <name>')
+  .description('register (or update) a remote sandbox host')
+  .requiredOption('--ssh <target>', 'user@host or an ~/.ssh/config alias (key login, no password)')
+  .requiredOption('--work-root <dir>', 'remote directory for synced workspaces, e.g. /srv/loop-exec')
+  .option('--port <n>', 'ssh port', (v) => parseInt(v, 10))
+  .option('--image <image>', 'docker image on that host (default: exec_image)')
+  .option('--gpus <value>', "docker --gpus value on that host ('' = none; default: exec_gpus)")
+  .option('--memory <size>', 'container memory limit (default: exec_memory)')
+  .option('--cpus <n>', 'container CPU limit (default: exec_cpus)')
+  .option('--data <csv>', 'read-only data mounts, CSV of /remote/path:/container/path, e.g. /mnt/aoi:/datasets')
+  .option('--desc <text>', 'what this host is for — shown to the model (e.g. "AOI 圖庫與 RTX 4090")')
+  .option('--disabled', 'register it switched off')
+  .action((name: string, o) => {
+    const db = getDb();
+    try {
+      const h = upsertExecHost(db, {
+        name,
+        ssh_target: String(o.ssh),
+        ssh_port: o.port ?? null,
+        work_root: String(o.workRoot),
+        image: o.image ?? null,
+        gpus: o.gpus ?? null,
+        memory: o.memory ?? null,
+        cpus: o.cpus ?? null,
+        data_mounts: o.data ?? '',
+        description: o.desc ?? null,
+        enabled: !o.disabled,
+      });
+      console.log(`${h.name}  ${h.ssh_target}${h.ssh_port ? `:${h.ssh_port}` : ''}  work_root=${h.work_root}  data=${h.data_mounts || '-'}`);
+      console.log(`下一步：loop exec check --host ${h.name} --profile`);
+    } catch (err) {
+      fail((err as Error).message);
+    }
+  });
+
+execHost
+  .command('list')
+  .description('registered remote sandbox hosts')
+  .action(() => {
+    const db = getDb();
+    const def = (getSetting(db, 'exec_default_host') ?? '').trim() || LOCAL_HOST;
+    console.log(`${def === LOCAL_HOST ? '*' : ' '} local  (this machine)`);
+    for (const h of listExecHosts(db)) {
+      console.log(
+        `${def === h.name ? '*' : ' '} ${h.name}  ${h.ssh_target}${h.ssh_port ? `:${h.ssh_port}` : ''}  work_root=${h.work_root}` +
+          `  image=${h.image ?? '(exec_image)'}  data=${h.data_mounts || '-'}${h.enabled ? '' : '  [disabled]'}${h.description ? `\n    ${h.description}` : ''}`,
+      );
+    }
+    console.log('(* = exec_default_host)');
+  });
+
+execHost
+  .command('rm <name>')
+  .description('forget a remote sandbox host (its synced workspaces stay; use prune first)')
+  .action((name: string) => {
+    if (!deleteExecHost(getDb(), name)) return fail(`no such exec host: ${name}`);
+    console.log(`removed ${name}`);
+  });
+
+execHost
+  .command('prune <name>')
+  .description('delete synced workspaces on that host not touched for N days')
+  .option('--days <n>', 'age in days', (v) => parseInt(v, 10), 7)
+  .action(async (name: string, o) => {
+    const db = getDb();
+    const h = getExecHost(db, name);
+    if (!h) return fail(`no such exec host: ${name}`);
+    const days = Math.max(1, Number(o.days) || 7);
+    const r = await realHostExec(
+      'ssh',
+      [...sshArgs(h), h.ssh_target, `find ${h.work_root} -mindepth 1 -maxdepth 1 -type d -mtime +${days} -print -exec rm -rf {} +`],
+      120_000,
+    );
+    if (r.code !== 0) return fail(`prune failed: ${r.out.slice(-300)}`);
+    console.log(r.out.trim() ? `removed:\n${r.out.trim()}` : 'nothing older than that');
   });
 
 const local = program.command('local').description('本地模型: list / load / stop / download / build / jobs (see local_models_enabled)');

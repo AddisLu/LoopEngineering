@@ -239,6 +239,12 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // a chat answer that compiles/runs/profiles needs more rounds and time than a web lookup
   exec_chat_max_rounds: '10',
   exec_chat_wall_ms: '900000',
+  // where a run goes when the caller does not name a host: '' / 'local' = this machine, else the
+  // name of an exec host (`loop exec host add`, src/exec/hosts.ts)
+  exec_default_host: '',
+  // read-only bind mounts for the LOCAL sandbox, CSV of /host/path:/container/path (remote hosts
+  // carry their own). e.g. /mnt/nas/aoi:/datasets
+  exec_data_mounts: '',
   // 轉成任務 → 驗證新技術: where spike repos (and their bare origins under .origins/) are created
   spike_root: path.join(os.homedir(), 'Addis', 'spikes'),
   // PRD 精靈: directories the repo picker / image-set checker may look at, on top of the enabled

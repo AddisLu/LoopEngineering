@@ -29,6 +29,17 @@ const DISCIPLINE_BLOCK = `
 - 這是無人值守執行，遇不確定一律自主決策後繼續，絕不停下反問。
 `;
 
+/** The sandbox hosts a run may pick, with their read-only data — only when there is a choice or data. */
+function execHostsBlock(hosts?: Array<{ name: string; description: string; data: Array<{ source: string; target: string }>; default: boolean }>): string {
+  if (!hosts || !hosts.length || (hosts.length === 1 && !hosts[0]!.data.length)) return '';
+  const rows = hosts.map((h) => {
+    const data = h.data.length ? `；唯讀資料：${h.data.map((d) => `\`${d.target}\``).join('、')}` : '';
+    return `  - \`${h.name}\`${h.default ? '（預設）' : ''}：${h.description}${data}`;
+  });
+  return `- 可用的沙盒主機（run 的 \`host\` 參數；不帶就是預設）：\n${rows.join('\n')}\n` +
+    `- 在遠端主機跑時，worktree 會先同步過去（.gitignore 的檔案不同步也不刪，增量編譯保留）；遠端產生的檔案不會同步回來，要看就在指令裡 \`cat\`。資料目錄是唯讀的，不要嘗試寫入或複製整個圖庫。\n`;
+}
+
 /**
  * Write LOOP_TASK.md into the worktree. The dispatch prompt only tells the agent to
  * read this file, so all task context lives here (goal, plan, verification, rules).
@@ -53,7 +64,13 @@ export function writeTaskFile(
     discipline?: boolean;
     mcpServers?: string[];
     /** GPU 執行沙盒 details when the run has the loop-exec server (null/absent = no section) */
-    exec?: { image: string; timeoutSec: number; maxTimeoutSec: number } | null;
+    exec?: {
+      image: string;
+      timeoutSec: number;
+      maxTimeoutSec: number;
+      /** where `run` can go (src/exec/hosts.ts describeExecHosts); absent/local-only = no list */
+      hosts?: Array<{ name: string; description: string; data: Array<{ source: string; target: string }>; default: boolean }>;
+    } | null;
   },
 ): string {
   const steps = parseSteps(task);
@@ -90,7 +107,9 @@ export function writeTaskFile(
       `- 寫完程式就自己編譯、執行、跑測試或量測，以實際輸出為準，不要只憑閱讀判斷。\n` +
       `- 驗證要能自動判斷：讓程式自己檢查結果，以 exit code 表示成敗（例如和 CPU 參考值比對，不符就 exit 1）。\n` +
       `- 編譯產物放在 \`build/\` 之類的目錄並加進 .gitignore，不要 commit 執行檔或量測報告。\n` +
-      `- Verification steps 裡以 \`sandbox:\` 開頭的步驟，引擎會在同一個沙盒裡執行；你自己跑時，去掉這個前綴交給 run 工具即可。\n`
+      `- Verification steps 裡以 \`sandbox:\` 開頭的步驟，引擎會在同一個沙盒裡執行；你自己跑時，去掉這個前綴交給 run 工具即可。` +
+      `\`sandbox@<主機>:\` 的步驟要在那台主機上跑：呼叫 run 時帶 \`host: "<主機>"\`。\n` +
+      execHostsBlock(extras.exec.hosts)
     : '';
   const disciplineBlock = extras?.discipline ? DISCIPLINE_BLOCK : '';
   const body = `# Loop task: ${task.title}

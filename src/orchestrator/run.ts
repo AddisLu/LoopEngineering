@@ -43,6 +43,7 @@ import { isLocalModel, localId, getLocalModel } from '../local/models.js';
 import { parseMcpServers, runtimeEnvFor, type McpServerCfg } from '../mcp/config.js';
 import { cleanupTaskMcp, writeTaskMcp, execServerForTask, execToolTimeoutMs, EXEC_SERVER, type TaskMcp } from './taskMcp.js';
 import { sandboxSettings, verifySandboxRunner, type SandboxDeps } from '../exec/sandbox.js';
+import { describeExecHosts, resolveExecTarget } from '../exec/hosts.js';
 
 /**
  * MCP servers a local-model task may use (mcp_servers_json), with the runtime env the chat page
@@ -243,7 +244,7 @@ export async function runTask(
     rag: await ragTaskContext(db, task, opts.ragEmbedExec),
     discipline: disciplineOn,
     mcpServers: taskMcp?.servers,
-    exec: withSandbox ? { image: sandbox.image, timeoutSec: sandbox.timeoutSec, maxTimeoutSec: sandbox.maxTimeoutSec } : null,
+    exec: withSandbox ? { image: sandbox.image, timeoutSec: sandbox.timeoutSec, maxTimeoutSec: sandbox.maxTimeoutSec, hosts: describeExecHosts(db) } : null,
   });
   if (!isMock && !isGeneric) {
     // Keep engine-written artifacts out of the task branch/PR: exclude them locally
@@ -643,7 +644,8 @@ export async function runVerifyPipeline(
       worktree,
       timeoutMs,
       { shellSetting: getSetting(db, 'shell') },
-      sandbox.enabled ? verifySandboxRunner(sandbox, sandboxDeps) : null,
+      // the task's remote workspace is shared with the agent's own runs (same key): incremental builds
+      sandbox.enabled ? verifySandboxRunner(sandbox, sandboxDeps, (name) => resolveExecTarget(db, name), `task-${task.id}`) : null,
     );
     if (!vres.ok) {
       handleVerifyFailure(db, task, runId, worktree, vres);

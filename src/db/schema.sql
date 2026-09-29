@@ -518,3 +518,24 @@ CREATE TABLE IF NOT EXISTS knowledge_bridge_edges (
   PRIMARY KEY (src, dst)
 );
 CREATE INDEX IF NOT EXISTS idx_knowledge_bridge_signature ON knowledge_bridge_edges(signature);
+
+-- GPU 執行沙盒 on other machines (src/exec/hosts.ts): each row is a Linux box the engine reaches
+-- over SSH and drives with `docker -H ssh://…` — same container policy as the local sandbox. The
+-- workspace is rsync'ed to <work_root>/<key> before each run; data_mounts are bind-mounted
+-- read-only (e.g. the AOI image library). remote_uid/gid are learned by `loop exec check --host`.
+CREATE TABLE IF NOT EXISTS exec_hosts (
+  name        TEXT PRIMARY KEY,
+  ssh_target  TEXT NOT NULL,            -- user@host, or an ~/.ssh/config alias
+  ssh_port    INTEGER,                  -- NULL = 22 / whatever ssh config says
+  work_root   TEXT NOT NULL,            -- remote dir that holds the synced workspaces
+  image       TEXT,                     -- NULL = exec_image
+  gpus        TEXT,                     -- NULL = exec_gpus ('' = no GPU)
+  memory      TEXT,                     -- NULL = exec_memory
+  cpus        TEXT,                     -- NULL = exec_cpus
+  data_mounts TEXT NOT NULL DEFAULT '', -- CSV of /remote/src:/container/dst, always read-only
+  description TEXT,                     -- told to the model: what this box is for / what data it has
+  remote_uid  INTEGER,
+  remote_gid  INTEGER,
+  enabled     INTEGER NOT NULL DEFAULT 1,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);

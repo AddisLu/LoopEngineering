@@ -1,5 +1,7 @@
+import path from 'node:path';
 import type Database from 'better-sqlite3';
 import { getSetting } from '../db/index.js';
+import { describeExecHosts, ExecHostError, resolveExecTarget, type ExecTarget } from '../exec/hosts.js';
 import { parseAllowedUsers } from '../terminal/access.js';
 import { formatSandboxResult, runSandbox, sandboxSettings, summarizeSandboxResult, type SandboxDeps, type SandboxRequest, type SandboxResult, type SandboxSettings } from '../exec/sandbox.js';
 import { ensureWorkspace, listWorkspace, readWorkspaceFile, writeWorkspaceFile, WorkspaceError } from '../exec/workspace.js';
@@ -34,7 +36,7 @@ function runDetail(command: string, r: SandboxResult): string {
 }
 
 const fileError = (err: unknown, fallback: string): ToolResult => {
-  const msg = err instanceof WorkspaceError ? err.message : `${fallback}：${(err as Error).message.slice(0, 160)}`;
+  const msg = err instanceof WorkspaceError || err instanceof ExecHostError ? err.message : `${fallback}：${(err as Error).message.slice(0, 160)}`;
   return { ok: false, text: msg, summary: msg.slice(0, 80) };
 };
 
@@ -42,6 +44,12 @@ export function sandboxTools(db: Database.Database, workspaceDir: string, deps: 
   const s = sandboxSettings(db);
   const run = deps.run ?? runSandbox;
   const root = () => ensureWorkspace(workspaceDir);
+  // other machines the run may go to (e.g. the one with the image library)
+  const hosts = describeExecHosts(db);
+  const hostNote =
+    hosts.length > 1
+      ? `可用 host：${hosts.map((h) => `${h.name}${h.default ? '（預設）' : ''}＝${h.description}${h.data.length ? `，唯讀資料 ${h.data.map((d) => d.target).join('、')}` : ''}`).join('；')}。在遠端跑時，工作目錄會先同步過去；遠端產生的檔案不會同步回來，要看就在指令裡 cat。`
+      : '';
   return [
     {
       name: 'sandbox_write_file',
@@ -113,12 +121,13 @@ export function sandboxTools(db: Database.Database, workspaceDir: string, deps: 
       description:
         `在 GPU 沙盒裡用 bash 執行一行指令並回傳 exit code 與輸出。容器有 GPU、沒有網路，工作目錄是 /work；映像 ${s.image}。` +
         '用來編譯、執行、量測，例如 "nvcc -O3 -o arith arith.cu && ./arith" 或 "ncu --section SpeedOfLight ./arith"。' +
-        `預設 ${s.timeoutSec} 秒逾時，可用 timeout_sec 加長（上限 ${s.maxTimeoutSec} 秒）。`,
+        `預設 ${s.timeoutSec} 秒逾時，可用 timeout_sec 加長（上限 ${s.maxTimeoutSec} 秒）。${hostNote}`,
       parameters: {
         type: 'object',
         properties: {
           command: { type: 'string', description: '在 /work 裡執行的 bash 指令' },
           timeout_sec: { type: 'integer', minimum: 1, maximum: s.maxTimeoutSec },
+          ...(hosts.length > 1 ? { host: { type: 'string', enum: hosts.map((h) => h.name), description: '在哪台沙盒主機跑；不帶＝預設' } } : {}),
         },
         required: ['command'],
       },
@@ -127,12 +136,15 @@ export function sandboxTools(db: Database.Database, workspaceDir: string, deps: 
       run: async (args, ctx) => {
         const command = typeof args.command === 'string' ? args.command : '';
         let dir: string;
+        let target: ExecTarget;
         try {
           dir = root();
+          target = resolveExecTarget(db, typeof args.host === 'string' ? args.host : null);
         } catch (err) {
-          return fileError(err, '建立工作目錄失敗');
+          return fileError(err, '準備沙盒失敗');
         }
-        const r = await run(s, { workdir: dir, command, timeoutSec: args.timeout_sec, scope: 'chat', signal: ctx.signal }, deps.sandbox);
+        const remote = target.kind === 'remote' ? { host: target.host, key: `chat-${path.basename(dir)}` } : null;
+        const r = await run(s, { workdir: dir, command, timeoutSec: args.timeout_sec, scope: 'chat', signal: ctx.signal, remote }, deps.sandbox);
         return {
           ok: !r.infra,
           text: formatSandboxResult(r),

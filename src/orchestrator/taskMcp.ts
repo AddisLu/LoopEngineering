@@ -5,6 +5,7 @@ import { getBool } from '../db/index.js';
 import { ENGINE_REPO_ROOT, paths } from '../config.js';
 import type { McpServerCfg } from '../mcp/config.js';
 import { sandboxSettings, type SandboxSettings } from '../exec/sandbox.js';
+import { describeExecHosts } from '../exec/hosts.js';
 
 /**
  * 任務執行中查知識庫: the MCP config a dispatched Claude Code run is given.
@@ -58,6 +59,8 @@ export function execServerForTask(db: Database.Database, runId: string): McpServ
       LOOP_EXEC_RUN_ID: runId,
       LOOP_EXEC_TIMEOUT_SEC: String(s.timeoutSec),
       LOOP_EXEC_MAX_TIMEOUT_SEC: String(s.maxTimeoutSec),
+      // names + what they hold, for the tool description; the engine re-resolves every call
+      LOOP_EXEC_HOSTS: JSON.stringify(describeExecHosts(db).map((h) => ({ name: h.name, description: h.description, data: h.data.map((d) => ({ target: d.target })), default: h.default }))),
     },
     enabled: true,
     // a build may take the full sandbox timeout; opencode reads this per server

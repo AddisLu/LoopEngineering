@@ -4,6 +4,7 @@ import path from 'node:path';
 import { nanoid } from 'nanoid';
 import type Database from 'better-sqlite3';
 import { getBool, getNum, getSetting } from '../db/index.js';
+import { dockerHostUrl, parseDataMounts, realHostExec, remoteIds, remoteWorkdir, syncToRemote, type DataMount, type ExecHost, type HostExec } from './hosts.js';
 
 /**
  * 執行沙盒: run one shell command in a throwaway Docker container that may use the GPU and
@@ -38,6 +39,16 @@ export interface SandboxSettings {
   outputChars: number;
   /** --cap-add SYS_ADMIN so Nsight Compute can read GPU counters without the host driver option */
   profilingCap: boolean;
+  /** read-only bind mounts for the LOCAL sandbox (exec_data_mounts); remote hosts carry their own */
+  dataMounts: DataMount[];
+}
+
+function localDataMounts(db: Database.Database): DataMount[] {
+  try {
+    return parseDataMounts(getSetting(db, 'exec_data_mounts') ?? '');
+  } catch {
+    return []; // the validator refuses bad values; an old bad row just mounts nothing
+  }
 }
 
 export function sandboxSettings(db: Database.Database): SandboxSettings {
@@ -53,6 +64,19 @@ export function sandboxSettings(db: Database.Database): SandboxSettings {
     maxConcurrency: Math.max(1, getNum(db, 'exec_max_concurrency', 2)),
     outputChars: Math.max(1000, getNum(db, 'exec_output_chars', 12_000)),
     profilingCap: getBool(db, 'exec_profiling_cap', false),
+    dataMounts: localDataMounts(db),
+  };
+}
+
+/** A remote host's overrides on top of the global settings (its own image, GPUs, limits, data). */
+export function settingsForHost(s: SandboxSettings, h: ExecHost): SandboxSettings {
+  return {
+    ...s,
+    image: h.image?.trim() || s.image,
+    gpus: h.gpus ?? s.gpus,
+    memory: h.memory?.trim() || s.memory,
+    cpus: h.cpus?.trim() || s.cpus,
+    dataMounts: parseDataMounts(h.data_mounts),
   };
 }
 
@@ -88,6 +112,8 @@ export function buildDockerArgs(s: SandboxSettings, i: DockerArgsInput): string[
   args.push('--read-only', '--tmpfs', '/tmp:rw,exec,nosuid,size=2g');
   args.push('-e', 'HOME=/tmp', '-e', 'TMPDIR=/tmp');
   args.push('--mount', `type=bind,source=${i.workdir},target=/work`, '-w', '/work');
+  // data (image libraries, golden results) is always read-only: a run can use it, never change it
+  for (const m of s.dataMounts) args.push('--mount', `type=bind,source=${m.source},target=${m.target},readonly`);
   args.push(s.image, 'bash', '-c', i.command);
   return args;
 }
@@ -106,7 +132,8 @@ export interface DockerOutcome {
 
 export type DockerRunner = (
   args: string[],
-  o: { name: string; timeoutMs: number; maxChars: number; signal?: AbortSignal },
+  // hostArgs (e.g. ['-H', 'ssh://loop@aoi-gpu']) go before every docker invocation, `kill` included
+  o: { name: string; timeoutMs: number; maxChars: number; signal?: AbortSignal; hostArgs?: string[] },
 ) => Promise<DockerOutcome>;
 
 const HEAD_CHARS = 2000;
@@ -137,8 +164,8 @@ export class OutputCapture {
 }
 
 /** Stop a container by name. Killing the `docker run` client alone would leave it running. */
-function dockerKill(name: string): void {
-  execFile('docker', ['kill', name], { timeout: 15_000 }, () => {
+function dockerKill(name: string, hostArgs: string[] = []): void {
+  execFile('docker', [...hostArgs, 'kill', name], { timeout: 15_000 }, () => {
     /* already gone, or docker unreachable — nothing more to do */
   });
 }
@@ -153,14 +180,14 @@ export const realDockerRunner: DockerRunner = (args, o) =>
       resolve({ code: null, output: '', truncated: false, timedOut: false, aborted: true });
       return;
     }
-    const child = spawn('docker', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn('docker', [...(o.hostArgs ?? []), ...args], { stdio: ['ignore', 'pipe', 'pipe'] });
     const outDec = new TextDecoder();
     const errDec = new TextDecoder();
     child.stdout.on('data', (d: Buffer) => cap.push(outDec.decode(d, { stream: true })));
     child.stderr.on('data', (d: Buffer) => cap.push(errDec.decode(d, { stream: true })));
     let killTimer: ReturnType<typeof setTimeout> | undefined;
     const stop = () => {
-      dockerKill(o.name);
+      dockerKill(o.name, o.hostArgs);
       // the client normally exits as soon as the container dies; this is the backstop
       killTimer = setTimeout(() => child.kill('SIGKILL'), 10_000);
       killTimer.unref?.();
@@ -233,12 +260,14 @@ export const sandboxInUse = (): number => slots.inUse;
 // ---- the call everyone uses --------------------------------------------------------------------
 
 export interface SandboxRequest {
-  /** host directory mounted at /work — must exist */
+  /** local directory mounted at /work — must exist (for a remote host it is synced there first) */
   workdir: string;
   command: string;
   timeoutSec?: unknown;
   scope?: string;
   signal?: AbortSignal;
+  /** run on another machine (src/exec/hosts.ts); `key` names its workspace there (task-…, chat-…) */
+  remote?: { host: ExecHost; key: string } | null;
 }
 
 export interface SandboxResult {
@@ -254,6 +283,8 @@ export interface SandboxResult {
   /** the sandbox could not run the command at all (docker missing, image not pulled, GPU runtime) */
   infra: boolean;
   error: string | null;
+  /** where it ran: 'local' or the exec host's name */
+  host: string;
 }
 
 export interface SandboxDeps {
@@ -263,12 +294,14 @@ export interface SandboxDeps {
   now?: () => number;
   /** how long to wait for a free slot before giving up */
   queueWaitMs?: number;
+  /** ssh / rsync for remote hosts (tests inject a fake) */
+  hostExec?: HostExec;
 }
 
 const MAX_COMMAND_CHARS = 20_000;
 
-function failed(timeoutSec: number, error: string, hint: string | null = null): SandboxResult {
-  return { exitCode: null, timedOut: false, aborted: false, durationMs: 0, timeoutSec, output: '', truncated: false, hint, infra: true, error };
+function failed(timeoutSec: number, error: string, hint: string | null = null, host = 'local', output = ''): SandboxResult {
+  return { exitCode: null, timedOut: false, aborted: false, durationMs: 0, timeoutSec, output, truncated: false, hint, infra: true, error, host };
 }
 
 const DAEMON_UNREACHABLE = /Cannot connect to the Docker daemon|permission denied while trying to connect to the Docker daemon/i;
@@ -311,34 +344,61 @@ export function sandboxHint(
   return null;
 }
 
-export async function runSandbox(s: SandboxSettings, req: SandboxRequest, deps: SandboxDeps = {}): Promise<SandboxResult> {
+export async function runSandbox(s0: SandboxSettings, req: SandboxRequest, deps: SandboxDeps = {}): Promise<SandboxResult> {
   const now = deps.now ?? Date.now;
+  const remote = req.remote ?? null;
+  const where = remote ? remote.host.name : 'local';
+  let s = s0;
+  if (remote) {
+    try {
+      s = settingsForHost(s0, remote.host);
+    } catch (err) {
+      return failed(effectiveTimeoutSec(s0, req.timeoutSec), `沙盒主機 ${where} 的設定有誤：${(err as Error).message}`, null, where);
+    }
+  }
   const timeoutSec = effectiveTimeoutSec(s, req.timeoutSec);
+  const fail = (error: string, hint: string | null = null, output = '') => failed(timeoutSec, error, hint, where, output);
   const command = typeof req.command === 'string' ? req.command.trim() : '';
-  if (!command) return failed(timeoutSec, 'command 不可為空');
-  if (command.length > MAX_COMMAND_CHARS) return failed(timeoutSec, `command 太長（上限 ${MAX_COMMAND_CHARS} 字）；長的腳本請先寫成檔案再執行`);
-  if (!s.image) return failed(timeoutSec, 'exec_image 沒有設定');
+  if (!command) return fail('command 不可為空');
+  if (command.length > MAX_COMMAND_CHARS) return fail(`command 太長（上限 ${MAX_COMMAND_CHARS} 字）；長的腳本請先寫成檔案再執行`);
+  if (!s.image) return fail('exec_image 沒有設定');
   // `,` and `"` would be read as --mount syntax
-  if (!path.isAbsolute(req.workdir) || /[,"]/.test(req.workdir)) return failed(timeoutSec, `工作目錄不合法：${req.workdir}`);
+  if (!path.isAbsolute(req.workdir) || /[,"]/.test(req.workdir)) return fail(`工作目錄不合法：${req.workdir}`);
   try {
-    if (!fs.statSync(req.workdir).isDirectory()) return failed(timeoutSec, `工作目錄不是資料夾：${req.workdir}`);
+    if (!fs.statSync(req.workdir).isDirectory()) return fail(`工作目錄不是資料夾：${req.workdir}`);
   } catch {
-    return failed(timeoutSec, `工作目錄不存在：${req.workdir}`);
+    return fail(`工作目錄不存在：${req.workdir}`);
   }
 
   const release = await slots.acquire(s.maxConcurrency, deps.queueWaitMs ?? 120_000, req.signal);
   if (!release) {
     return req.signal?.aborted
-      ? { ...failed(timeoutSec, '已被使用者中止'), aborted: true, infra: false }
-      : failed(timeoutSec, `執行沙盒忙碌中（同時最多 ${s.maxConcurrency} 個，exec_max_concurrency）；請稍後再試`);
+      ? { ...fail('已被使用者中止'), aborted: true, infra: false }
+      : fail(`執行沙盒忙碌中（同時最多 ${s.maxConcurrency} 個，exec_max_concurrency）；請稍後再試`);
   }
   const started = now();
   try {
     const name = `loop-exec-${nanoid(12).replace(/[^A-Za-z0-9]/g, 'x')}`;
-    const uid = deps.uid !== undefined ? deps.uid : typeof process.getuid === 'function' ? process.getuid() : null;
-    const gid = deps.gid !== undefined ? deps.gid : typeof process.getgid === 'function' ? process.getgid() : null;
-    const args = buildDockerArgs(s, { workdir: req.workdir, command, name, uid, gid, scope: req.scope });
-    const o = await (deps.runner ?? realDockerRunner)(args, { name, timeoutMs: timeoutSec * 1000, maxChars: s.outputChars, signal: req.signal });
+    let workdir = req.workdir;
+    let uid = deps.uid !== undefined ? deps.uid : typeof process.getuid === 'function' ? process.getuid() : null;
+    let gid = deps.gid !== undefined ? deps.gid : typeof process.getgid === 'function' ? process.getgid() : null;
+    let hostArgs: string[] = [];
+    if (remote) {
+      // the remote account owns what it syncs, so the container writes as that account too
+      const exec = deps.hostExec ?? realHostExec;
+      const ids = await remoteIds(remote.host, exec);
+      if (!ids) return fail(`連不上沙盒主機 ${where}（ssh ${remote.host.ssh_target}）`, `確認 Spark 能以金鑰免密碼登入：ssh ${remote.host.ssh_target} true，再跑 loop exec check --host ${where}。`);
+      uid = deps.uid !== undefined ? deps.uid : ids.uid;
+      gid = deps.gid !== undefined ? deps.gid : ids.gid;
+      workdir = remoteWorkdir(remote.host, remote.key);
+      const sync = await syncToRemote(remote.host, req.workdir, workdir, exec);
+      if (!sync.ok) {
+        return fail(`同步工作目錄到 ${where} 失敗`, '確認兩邊都裝了 rsync、work_root 可寫入，再跑 loop exec check --host。', sync.out.slice(-2000));
+      }
+      hostArgs = ['-H', dockerHostUrl(remote.host)];
+    }
+    const args = buildDockerArgs(s, { workdir, command, name, uid, gid, scope: req.scope });
+    const o = await (deps.runner ?? realDockerRunner)(args, { name, timeoutMs: timeoutSec * 1000, maxChars: s.outputChars, signal: req.signal, hostArgs });
     // exit 125 is docker's own "could not create/start the container" — never the command's
     const infra = isDockerFailure(o);
     return {
@@ -352,6 +412,7 @@ export async function runSandbox(s: SandboxSettings, req: SandboxRequest, deps: 
       hint: sandboxHint(s, o, timeoutSec),
       infra,
       error: o.error ?? (infra ? `docker 無法啟動容器（exit ${o.code}）` : null),
+      host: where,
     };
   } finally {
     release();
@@ -364,14 +425,29 @@ export type SandboxStepRunner = (
   command: string,
   cwd: string,
   timeoutMs: number,
+  /** `sandbox@<host>:` — null = exec_default_host */
+  host?: string | null,
 ) => Promise<{ ok: boolean; exitCode: number | null; timedOut: boolean; output: string }>;
 
 /** How src/orchestrator/verify.ts runs a `sandbox:` step: same container policy the agent had,
- * with the engine's verify timeout (not the per-call cap agents are held to). */
-export function verifySandboxRunner(s: SandboxSettings, deps?: SandboxDeps): SandboxStepRunner {
-  return async (command, cwd, timeoutMs) => {
+ * with the engine's verify timeout (not the per-call cap agents are held to). `resolveHost` turns
+ * the step's host name into a target (throws on an unknown host); `key` names the remote workspace. */
+export function verifySandboxRunner(
+  s: SandboxSettings,
+  deps?: SandboxDeps,
+  resolveHost?: (name: string | null) => { kind: 'local' } | { kind: 'remote'; host: ExecHost },
+  key = 'verify',
+): SandboxStepRunner {
+  return async (command, cwd, timeoutMs, host) => {
     const sec = Math.max(1, Math.ceil(timeoutMs / 1000));
-    const r = await runSandbox({ ...s, maxTimeoutSec: Math.max(s.maxTimeoutSec, sec) }, { workdir: cwd, command, timeoutSec: sec, scope: 'verify' }, deps);
+    let remote: SandboxRequest['remote'] = null;
+    try {
+      const t = resolveHost ? resolveHost(host ?? null) : { kind: 'local' as const };
+      if (t.kind === 'remote') remote = { host: t.host, key };
+    } catch (err) {
+      return { ok: false, exitCode: null, timedOut: false, output: (err as Error).message };
+    }
+    const r = await runSandbox({ ...s, maxTimeoutSec: Math.max(s.maxTimeoutSec, sec) }, { workdir: cwd, command, timeoutSec: sec, scope: 'verify', remote }, deps);
     return { ok: r.exitCode === 0 && !r.infra, exitCode: r.exitCode, timedOut: r.timedOut, output: formatSandboxResult(r) };
   };
 }
@@ -382,16 +458,18 @@ const secs = (ms: number): string => (ms / 1000).toFixed(1);
 
 /** One short status: "exit 0 · 3.2 s", "逾時（120 s）", "沙盒錯誤". */
 export function summarizeSandboxResult(r: SandboxResult): string {
-  if (r.error && r.infra) return `沙盒錯誤：${r.error.slice(0, 80)}`;
-  if (r.aborted) return '已中止';
-  if (r.timedOut) return `逾時（${r.timeoutSec} s）`;
-  return `exit ${r.exitCode ?? '?'} · ${secs(r.durationMs)} s`;
+  const at = r.host && r.host !== 'local' ? ` @${r.host}` : '';
+  if (r.error && r.infra) return `沙盒錯誤${at}：${r.error.slice(0, 80)}`;
+  if (r.aborted) return `已中止${at}`;
+  if (r.timedOut) return `逾時（${r.timeoutSec} s）${at}`;
+  return `exit ${r.exitCode ?? '?'} · ${secs(r.durationMs)} s${at}`;
 }
 
 /** What the model / agent reads: status line, the output, then the hint. */
 export function formatSandboxResult(r: SandboxResult): string {
   const lines = [summarizeSandboxResult(r)];
   if (r.error && !r.infra) lines.push(r.error);
+  else if (r.error && r.infra && r.error.length > 80) lines.push(r.error);
   if (r.output.trim()) lines.push('----- 輸出 -----', r.output.replace(/\s+$/, ''));
   else if (!r.infra) lines.push('（沒有輸出）');
   if (r.hint) lines.push(`提示：${r.hint}`);

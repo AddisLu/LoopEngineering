@@ -23,6 +23,16 @@ const TOKEN = process.env.LOOP_API_TOKEN || ENVF.LOOP_API_TOKEN || '';
 const RUN_ID = (process.env.LOOP_EXEC_RUN_ID || '').trim();
 const DEFAULT_SEC = Number(process.env.LOOP_EXEC_TIMEOUT_SEC) || 120;
 const MAX_SEC = Number(process.env.LOOP_EXEC_MAX_TIMEOUT_SEC) || 900;
+/** [{name, description, data: [{target}], default}] — the machines `host` may name (engine-provided) */
+let HOSTS = [];
+try {
+  HOSTS = JSON.parse(process.env.LOOP_EXEC_HOSTS || '[]');
+} catch {
+  HOSTS = [];
+}
+const hostLine = HOSTS.length > 1
+  ? `可用 host：${HOSTS.map((h) => `${h.name}${h.default ? '（預設）' : ''}＝${h.description}${h.data?.length ? `，唯讀資料 ${h.data.map((d) => d.target).join('、')}` : ''}`).join('；')}。`
+  : '';
 
 /**
  * POST without a client-side timeout: the engine enforces the run's own timeout (and kills the
@@ -77,16 +87,17 @@ server.registerTool(
       `在 GPU 沙盒（Docker 容器，有 GPU、沒有網路）裡用 bash 執行一行指令；這個任務的 worktree 掛在 /work，是指令的工作目錄。` +
       `用來編譯、執行、跑測試或量測（例如 "nvcc -O3 -o build/x x.cu && ./build/x"、"ncu --section SpeedOfLight ./build/x"）。` +
       `回傳 exit code 與輸出。預設 ${DEFAULT_SEC} 秒逾時，可用 timeout_sec 加長（上限 ${MAX_SEC} 秒）。` +
-      `非 0 的 exit code 是程式的結果，不是工具壞了。`,
+      `非 0 的 exit code 是程式的結果，不是工具壞了。${hostLine}`,
     inputSchema: {
       command: z.string().min(1).describe('在 /work 裡執行的 bash 指令'),
       timeout_sec: z.number().int().min(1).max(MAX_SEC).optional().describe(`逾時秒數（預設 ${DEFAULT_SEC}）`),
+      host: z.string().optional().describe('在哪台沙盒主機跑（例如放圖庫的那台）；不帶＝預設主機'),
     },
   },
-  async ({ command, timeout_sec }) => {
+  async ({ command, timeout_sec, host }) => {
     if (!RUN_ID) return fail('loop-exec：沒有 LOOP_EXEC_RUN_ID（這個 server 只給 Loop 派出的任務使用）');
     try {
-      const { status, json } = await postJson('/api/exec/run', { run_id: RUN_ID, command, timeout_sec });
+      const { status, json } = await postJson('/api/exec/run', { run_id: RUN_ID, command, timeout_sec, host });
       if (status !== 200) return fail(`沙盒無法執行（HTTP ${status}）：${json.error ?? JSON.stringify(json).slice(0, 300)}`);
       const out = typeof json.text === 'string' ? json.text : JSON.stringify(json).slice(0, 4000);
       return json.infra ? fail(out) : text(out);
