@@ -1,4 +1,6 @@
-import { execFile } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import fs from 'node:fs';
 import path from 'node:path';
 import type Database from 'better-sqlite3';
 import { getSetting } from '../db/index.js';
@@ -227,6 +229,60 @@ export async function syncToRemote(
   );
   if (r.code === null) return { ok: false, out: '找不到 rsync（Spark 上請安裝 rsync）' };
   return { ok: r.code === 0, out: r.out };
+}
+
+/**
+ * What the local workspace looks like: HEAD plus every changed/untracked path with its size and
+ * mtime. null = not a git checkout (a chat workspace), which always syncs.
+ */
+export function treeFingerprint(dir: string): string | null {
+  const run = (args: string[]) => execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8', timeout: 15_000, stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 16 * 1024 * 1024 });
+  try {
+    const head = run(['rev-parse', 'HEAD']).trim();
+    const entries = run(['status', '--porcelain=v1', '-z', '-uall']).split('\0').filter(Boolean);
+    const parts = entries.map((e) => {
+      try {
+        const st = fs.statSync(path.join(dir, e.slice(3)));
+        return `${e}:${st.size}:${st.mtimeMs}`;
+      } catch {
+        return e;
+      }
+    });
+    return createHash('sha1').update(`${head}\n${parts.join('\n')}`).digest('hex');
+  } catch {
+    return null;
+  }
+}
+
+const lastSync = new Map<string, { fp: string; at: number }>();
+const SYNC_REUSE_MS = 30 * 60_000;
+
+/**
+ * Sync only when the local tree changed since the last sync to that remote dir. `rsync --delete`
+ * removes whatever exists only on the remote, so re-syncing an unchanged tree between two steps
+ * would delete what the first step built (a binary outside .gitignore) before the second step
+ * runs it, and the outputs verification is supposed to collect.
+ */
+export async function syncIfChanged(
+  h: ExecHost,
+  localDir: string,
+  remoteDir: string,
+  exec: HostExec = realHostExec,
+  now: () => number = Date.now,
+): Promise<{ ok: boolean; out: string; skipped: boolean }> {
+  const key = `${h.name}\0${h.ssh_target}\0${remoteDir}`;
+  const fp = treeFingerprint(localDir);
+  const prev = lastSync.get(key);
+  if (fp && prev && prev.fp === fp && now() - prev.at < SYNC_REUSE_MS) return { ok: true, out: '', skipped: true };
+  const r = await syncToRemote(h, localDir, remoteDir, exec);
+  if (r.ok && fp) lastSync.set(key, { fp, at: now() });
+  else lastSync.delete(key);
+  return { ...r, skipped: false };
+}
+
+/** tests: forget what was synced */
+export function resetSyncCache(): void {
+  lastSync.clear();
 }
 
 /** The remote account's uid/gid, so files the container writes stay the ssh user's to rsync over. */

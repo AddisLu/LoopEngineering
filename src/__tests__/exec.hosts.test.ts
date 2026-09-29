@@ -326,3 +326,35 @@ describe('loop exec check --host', () => {
     expect(lines[0]!.detail).toContain('ssh-copy-id loop@aoi-gpu');
   });
 });
+
+describe('sync only when the workspace changed', () => {
+  it('a second step on an unchanged tree reuses the remote copy (rsync --delete would drop what step 1 built)', async () => {
+    const { syncIfChanged, resetSyncCache } = await import('../exec/hosts.js');
+    const { execFileSync } = await import('node:child_process');
+    resetSyncCache();
+    const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'loop-sync-'));
+    try {
+      const g = (...a: string[]) => execFileSync('git', ['-C', repo, ...a], { encoding: 'utf8' });
+      g('init', '-q', '-b', 'main');
+      g('config', 'user.email', 't@t');
+      g('config', 'user.name', 't');
+      fs.writeFileSync(path.join(repo, 'arith.cu'), 'a');
+      g('add', '-A');
+      g('commit', '-qm', 'x');
+      const h = { name: 'gpu', ssh_target: 'loop@gpu', ssh_port: null, work_root: '/srv/loop-exec' } as unknown as Parameters<typeof syncIfChanged>[0];
+      const { exec, calls } = fakeHost();
+      let t = 0;
+      const now = () => t;
+      expect((await syncIfChanged(h, repo, '/srv/loop-exec/task-1', exec, now)).skipped).toBe(false);
+      t = 60_000;
+      expect((await syncIfChanged(h, repo, '/srv/loop-exec/task-1', exec, now)).skipped).toBe(true);
+      fs.writeFileSync(path.join(repo, 'arith.cu'), 'changed');
+      expect((await syncIfChanged(h, repo, '/srv/loop-exec/task-1', exec, now)).skipped).toBe(false);
+      t = 60_000 + 31 * 60_000; // an old copy is re-synced anyway (someone may have pruned it)
+      expect((await syncIfChanged(h, repo, '/srv/loop-exec/task-1', exec, now)).skipped).toBe(false);
+      expect(calls.filter((c) => c.cmd === 'rsync')).toHaveLength(3);
+    } finally {
+      fs.rmSync(repo, { recursive: true, force: true });
+    }
+  });
+});

@@ -98,3 +98,63 @@ export async function createGiteaPr(
     return { url: null, error: `Gitea 連不上：${(err as Error).message.slice(0, 160)}` };
   }
 }
+
+export interface GiteaReleaseInput {
+  tag: string;
+  /** a commit sha or a branch the tag is created on when it does not exist yet */
+  target: string;
+  name: string;
+  body: string;
+}
+
+/**
+ * A release with the delivery zip attached: POST …/releases (reusing the release when the tag
+ * already has one), then POST …/releases/{id}/assets. Returns the release page, or the reason.
+ */
+export async function publishGiteaRelease(
+  giteaUrl: string,
+  token: string,
+  repo: RemoteRepo,
+  input: GiteaReleaseInput,
+  asset: { name: string; data: Buffer },
+  fetchImpl: Fetch = fetch,
+  timeoutMs = 120_000,
+): Promise<{ url: string | null; asset_url?: string | null; error?: string }> {
+  const api = `${giteaUrl.replace(/\/+$/, '')}/api/v1/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.repo)}/releases`;
+  const auth = { authorization: `token ${token}`, accept: 'application/json' };
+  const fail = async (res: Response, what: string) => {
+    const detail = (await res.text().catch(() => '')).slice(0, 200);
+    return { url: null, error: `Gitea ${what} HTTP ${res.status}${res.status === 401 || res.status === 403 ? '（GITEA_TOKEN 缺少或沒有寫入權限）' : ''}: ${detail}` };
+  };
+  try {
+    type Release = { id?: number; html_url?: string };
+    let rel: Release | null = null;
+    const res = await fetchImpl(api, {
+      method: 'POST',
+      headers: { ...auth, 'content-type': 'application/json' },
+      body: JSON.stringify({ tag_name: input.tag, target_commitish: input.target, name: input.name.slice(0, 250), body: input.body, draft: false, prerelease: false }),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (res.ok) rel = (await res.json().catch(() => null)) as Release | null;
+    else if (res.status === 409) {
+      // the tag already has a release (published before): attach to it
+      const got = await fetchImpl(`${api}/tags/${encodeURIComponent(input.tag)}`, { headers: auth, signal: AbortSignal.timeout(timeoutMs) });
+      if (!got.ok) return await fail(got, '讀取既有 release');
+      rel = (await got.json().catch(() => null)) as Release | null;
+    } else return await fail(res, '建立 release');
+    if (!rel?.id) return { url: null, error: 'Gitea 沒有回傳 release id' };
+    const form = new FormData();
+    form.append('attachment', new Blob([asset.data], { type: 'application/zip' }), asset.name);
+    const up = await fetchImpl(`${api}/${rel.id}/assets?name=${encodeURIComponent(asset.name)}`, {
+      method: 'POST',
+      headers: auth,
+      body: form,
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!up.ok) return { ...(await fail(up, '上傳附件')), url: rel.html_url ?? null };
+    const a = (await up.json().catch(() => ({}))) as { browser_download_url?: string };
+    return { url: rel.html_url ?? null, asset_url: a.browser_download_url ?? null };
+  } catch (err) {
+    return { url: null, error: `Gitea 連不上：${(err as Error).message.slice(0, 160)}` };
+  }
+}

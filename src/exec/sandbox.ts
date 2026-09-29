@@ -4,7 +4,7 @@ import path from 'node:path';
 import { nanoid } from 'nanoid';
 import type Database from 'better-sqlite3';
 import { getBool, getNum, getSetting } from '../db/index.js';
-import { dockerHostUrl, parseDataMounts, realHostExec, remoteIds, remoteWorkdir, syncToRemote, type DataMount, type ExecHost, type HostExec } from './hosts.js';
+import { dockerHostUrl, parseDataMounts, realHostExec, remoteIds, remoteWorkdir, syncIfChanged, type DataMount, type ExecHost, type HostExec } from './hosts.js';
 
 /**
  * 執行沙盒: run one shell command in a throwaway Docker container that may use the GPU and
@@ -391,7 +391,7 @@ export async function runSandbox(s0: SandboxSettings, req: SandboxRequest, deps:
       uid = deps.uid !== undefined ? deps.uid : ids.uid;
       gid = deps.gid !== undefined ? deps.gid : ids.gid;
       workdir = remoteWorkdir(remote.host, remote.key);
-      const sync = await syncToRemote(remote.host, req.workdir, workdir, exec);
+      const sync = await syncIfChanged(remote.host, req.workdir, workdir, exec);
       if (!sync.ok) {
         return fail(`同步工作目錄到 ${where} 失敗`, '確認兩邊都裝了 rsync、work_root 可寫入，再跑 loop exec check --host。', sync.out.slice(-2000));
       }

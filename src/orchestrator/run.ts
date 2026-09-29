@@ -32,6 +32,7 @@ import { createPr } from '../git/pr.js';
 import { prBody } from './runSummary.js';
 import { syncWithBase, pushBranch, stripLoopArtifacts, integrateIntoBase, baseRefFor } from '../git/integrate.js';
 import { verifiedShas } from '../review/code.js';
+import { artifactGlobs, collectArtifacts, unstageArtifacts } from '../review/artifacts.js';
 import { createMergeTask } from './mergeTask.js';
 import { cleanupWorktree } from './cleanup.js';
 import { killRun } from './kill.js';
@@ -130,7 +131,7 @@ export function commitCheckpoint(
 ): boolean {
   try {
     if (!isDirty(worktreePath)) return false;
-    commitAll(worktreePath, `loop(${task.id}): checkpoint (interrupted: ${reason})`);
+    commitAll(worktreePath, `loop(${task.id}): checkpoint (interrupted: ${reason})`, (wt) => unstageArtifacts(wt, artifactGlobs(task)));
     return true;
   } catch (err) {
     logEvent(db, { task_id: task.id, run_id: runId, kind: 'note', detail: `checkpoint commit failed: ${String(err)}` });
@@ -438,7 +439,7 @@ export async function runTask(
   // auto-commit insurance (real repos only — generic has no git worktree to commit)
   if (!isMock && !isGeneric) {
     try {
-      if (isDirty(worktreePath)) commitAll(worktreePath, `loop(${task.id}): auto-commit`);
+      if (isDirty(worktreePath)) commitAll(worktreePath, `loop(${task.id}): auto-commit`, (wt) => unstageArtifacts(wt, artifactGlobs(task)));
     } catch (err) {
       logEvent(db, { task_id: task.id, run_id: run.id, kind: 'note', detail: `auto-commit failed: ${String(err)}` });
     }
@@ -450,6 +451,8 @@ export async function runTask(
   const verifyOutcome = await runVerifyPipeline(db, task, worktreePath, run.id, task.base_branch);
   if (verifyOutcome === 'fail') return; // already routed to blocked/attention inside the pipeline
   let manualVerify = verifyOutcome === 'manual';
+  // 產出物: take them now, before the close-out can reclaim the worktree
+  if (!isMock && !isGeneric) await collectTaskArtifacts(db, task, run.id, worktreePath);
 
   // A manual verify outcome always parks the task in review with merge_status='pending'
   // (reusing the existing pending/合併 button) — true for a mock/repo-less task too, so
@@ -494,6 +497,7 @@ export async function runTask(
         setStatus(db, task.id, 'verifying', { run_id: run.id });
         const reOutcome = await runVerifyPipeline(db, task, worktreePath, run.id, base);
         if (reOutcome === 'fail') return;
+        await collectTaskArtifacts(db, task, run.id, worktreePath); // what was re-verified is what ships
         if (reOutcome === 'manual') {
           manualVerify = true; // e.g. budget crossed the hard limit between the two passes
           reviewDetail = markManualPending(db, task.id);
@@ -738,6 +742,16 @@ function recordVerification(
     });
   } catch {
     /* reporting only — never fail a verification over it */
+  }
+}
+
+/** 產出物 of a passing run; never fails the task over it. */
+async function collectTaskArtifacts(db: Database.Database, task: Task, runId: string, worktree: string): Promise<void> {
+  if (!artifactGlobs(task).length) return;
+  try {
+    await collectArtifacts(db, task, getRun(db, runId)!, worktree);
+  } catch (err) {
+    logEvent(db, { task_id: task.id, run_id: runId, kind: 'note', detail: `產出物收集失敗：${String(err).slice(0, 200)}` });
   }
 }
 

@@ -52,6 +52,8 @@ export interface PrdFields {
   acceptance_metrics: string | null;
   /** 保護路徑: globs the implementer must not change (evaluation scripts, golden data) */
   protected_paths: string[];
+  /** 產出物: globs of files collected after verification (binaries, reports), never committed */
+  artifacts: string[];
 }
 
 export const VERIFY_MODES = ['command', 'llm', 'manual'] as const;
@@ -70,6 +72,7 @@ export interface LintDeps {
 export type SectionKey =
   | 'metrics'
   | 'protected'
+  | 'artifacts'
   | 'non_goals'
   | 'manual'
   | 'verify_mode'
@@ -92,6 +95,7 @@ const ALIASES: [SectionKey, string[]][] = [
   // '驗收指標' ⊃ '驗收' (acceptance): must win first
   ['metrics', ['驗收指標', 'acceptance metric', 'metric']],
   ['protected', ['保護路徑', 'protected', '不得修改']],
+  ['artifacts', ['產出物', 'artifact', '交付物']],
   ['non_goals', ['非範圍', 'non-goal', 'non goal', 'out of scope', '不做']],
   ['manual', ['人工驗收', '人工檢查', 'manual check', 'manual verification']],
   ['verify_mode', ['驗證方式', 'verify mode', 'verify_mode']],
@@ -111,6 +115,7 @@ const ALIASES: [SectionKey, string[]][] = [
 const LABEL: Record<SectionKey, string> = {
   metrics: '驗收指標',
   protected: '保護路徑',
+  artifacts: '產出物',
   goal: '目標',
   scope: '範圍',
   non_goals: '非範圍',
@@ -313,6 +318,12 @@ export function lintPrd(markdown: string, deps: LintDeps = {}): PrdLint {
   if (sections.has('protected') && protectedPaths.some((g) => g.startsWith('/') || g.includes('..'))) {
     missing.push('「保護路徑」要寫 repo 內的相對路徑或 glob（例如 scripts/eval/**）');
   }
+  const artifacts = sections.has('artifacts')
+    ? bullets(sec('artifacts')).map((b) => b.replace(/`/g, '').trim()).filter((b) => b && !PLACEHOLDER.test(b))
+    : [];
+  if (artifacts.some((g) => g.startsWith('/') || g.includes('..'))) {
+    missing.push('「產出物」要寫 repo 內的相對路徑或 glob（例如 build/app、reports/*.csv）');
+  }
 
   // a dataset on another machine is only reachable through a sandbox step aimed at it
   if (dataset?.host && !verify.some((v) => v.toLowerCase().startsWith(`sandbox@${dataset!.host}:`))) {
@@ -342,6 +353,7 @@ export function lintPrd(markdown: string, deps: LintDeps = {}): PrdLint {
       setup_steps: setupSteps,
       acceptance_metrics: acceptanceMetrics,
       protected_paths: protectedPaths,
+      artifacts,
     },
   };
 }

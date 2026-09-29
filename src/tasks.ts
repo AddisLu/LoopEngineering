@@ -34,6 +34,8 @@ export interface NewTaskInput {
   benchmark_id?: string | null;
   acceptance_metrics?: string | null;
   protected_paths?: string | null;
+  artifacts?: string | null;
+  verify_plan_id?: string | null;
 }
 
 export function createTask(db: Database.Database, input: NewTaskInput): Task {
@@ -42,11 +44,11 @@ export function createTask(db: Database.Database, input: NewTaskInput): Task {
     `INSERT INTO tasks (id, title, goal, plan_ref, plan_kind, coding_tool, verification_steps,
        setup_cmd, repo_path, base_branch, complexity, priority, model, timeout_min, depends_on, environment,
        verify_mode, verify_rubric, verify_timeout_min, requires, owner, created_by, parent_id,
-       pipeline_id, stage_name, source_ref, experiment, benchmark_id, acceptance_metrics, protected_paths, status)
+       pipeline_id, stage_name, source_ref, experiment, benchmark_id, acceptance_metrics, protected_paths, artifacts, verify_plan_id, status)
      VALUES (@id, @title, @goal, @plan_ref, @plan_kind, @coding_tool, @verification_steps,
        @setup_cmd, @repo_path, @base_branch, @complexity, @priority, @model, @timeout_min, @depends_on, @environment,
        @verify_mode, @verify_rubric, @verify_timeout_min, @requires, @owner, @created_by, @parent_id,
-       @pipeline_id, @stage_name, @source_ref, @experiment, @benchmark_id, @acceptance_metrics, @protected_paths, 'draft')`,
+       @pipeline_id, @stage_name, @source_ref, @experiment, @benchmark_id, @acceptance_metrics, @protected_paths, @artifacts, @verify_plan_id, 'draft')`,
   ).run({
     id,
     title: input.title,
@@ -77,6 +79,8 @@ export function createTask(db: Database.Database, input: NewTaskInput): Task {
     experiment: input.experiment ?? null,
     benchmark_id: input.benchmark_id ?? null,
     acceptance_metrics: input.acceptance_metrics?.trim() || null,
+    artifacts: input.artifacts?.trim() || null,
+    verify_plan_id: input.verify_plan_id ?? null,
     protected_paths: input.protected_paths?.trim() || null,
   });
   logEvent(db, { task_id: id, kind: 'status', to_status: 'draft', detail: 'created' });

@@ -9,7 +9,7 @@ export const PERCENT_KEYS = new Set([
   'est_weekly_pct_S', 'est_weekly_pct_M', 'est_weekly_pct_L',
 ]);
 export const NONNEG_KEYS = new Set([
-  'max_concurrency', 'poll_interval_sec', 'min_runway_min', 'max_resumes', 'max_autoqueue',
+  'max_concurrency', 'poll_interval_sec', 'min_runway_min', 'max_resumes', 'max_autoqueue', 'artifacts_max_mb',
   'timeout_S', 'timeout_M', 'timeout_L', 'usage_refresh_sec', 'ledger_fallback_after_min',
   'chat_context_turns', 'chat_retention_days', 'chat_escalate_timeout_ms', 'local_spark_nodes',
   'chat_tool_max_rounds', 'chat_tool_timeout_ms', 'chat_tool_wall_ms', 'chat_tool_result_chars', 'chat_fetch_max_bytes',

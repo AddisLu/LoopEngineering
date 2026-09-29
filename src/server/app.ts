@@ -154,6 +154,7 @@ interface CreateTaskBody {
   requires?: string | null;
   experiment?: string | null;
   acceptance_metrics?: string | null;
+  artifacts?: string | null;
   protected_paths?: string | null;
 }
 
@@ -260,6 +261,7 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
       requires: b.requires ?? null,
       experiment: b.experiment ?? null,
       acceptance_metrics: b.acceptance_metrics ?? null,
+      artifacts: b.artifacts ?? null,
       protected_paths: b.protected_paths ?? null,
     });
     return { task: t, gate: validateTask(t, getSetting(db, 'host_capabilities') ?? '', environmentMap(db)) };

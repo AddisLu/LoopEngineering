@@ -107,8 +107,21 @@ export function excludeLocal(worktreePath: string, patterns: string[]): void {
   }
 }
 
-export function commitAll(worktreePath: string, message: string): void {
+/**
+ * Stage everything and commit. `keepOut` may unstage paths first (a task's 產出物); when nothing
+ * is left staged there is no commit.
+ */
+export function commitAll(worktreePath: string, message: string, keepOut?: (worktreePath: string) => unknown): void {
   git(worktreePath, ['add', '-A']);
+  if (keepOut) {
+    keepOut(worktreePath);
+    try {
+      git(worktreePath, ['diff', '--cached', '--quiet']);
+      return; // exit 0: nothing staged
+    } catch {
+      /* exit 1: there is something to commit */
+    }
+  }
   git(worktreePath, ['commit', '--no-verify', '-m', message]);
 }
 

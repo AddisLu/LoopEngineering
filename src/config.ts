@@ -480,6 +480,9 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // morning_report_last is engine STATE (the local date of the last push), not a tunable.
   morning_report_time: '',
   morning_report_last: '',
+  // 產出物（src/review/artifacts.ts）：total size collected per run into <data>/artifacts; a file
+  // past the cap is listed as skipped. Only tasks that declare artifacts collect anything.
+  artifacts_max_mb: '1024',
 
   // Benchmark mode（src/benchmark/*.ts）：同一任務交給多個（本地）模型各做一次，全部結束後由外部高階
   // 模型評比排名，累積成 模型 × 領域 矩陣。off by default = routes 404, nothing is judged. The judge

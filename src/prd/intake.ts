@@ -80,6 +80,8 @@ export interface SubmitOptions extends PrdOptions {
   benchmark_models?: string[];
   /** several cloud judges for the benchmark branch (defaults to bench_judge_model) */
   judge_models?: string[];
+  /** the 驗證方案 a 新工作 was composed from (kept on the task for the record) */
+  verify_plan_id?: string | null;
 }
 
 export type SubmitResult =
@@ -171,6 +173,8 @@ export async function submitPrd(db: Database.Database, markdown: string, opts: S
     created_by: 'prd',
     acceptance_metrics: f.acceptance_metrics,
     protected_paths: f.protected_paths.length ? f.protected_paths.join(',') : null,
+    artifacts: f.artifacts.length ? f.artifacts.join(',') : null,
+    verify_plan_id: opts.verify_plan_id ?? null,
   });
   const gate = validateTask(created, getSetting(db, 'host_capabilities') ?? '');
   if (gate.ok && opts.queue !== false) setStatus(db, created.id, 'queued', { detail: 'queued from PRD intake' });

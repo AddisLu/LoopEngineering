@@ -95,6 +95,7 @@ program
   .option('--experiment <tag>', 'A/B cohort label for measurement (see `loop experiment`) — pure tag, does not affect scheduling')
   .option('--metrics <expr>', '驗收指標 the engine checks against LOOP_METRICS lines, e.g. "detection_rate >= 0.98; miss == 0"')
   .option('--protect <globs>', '保護路徑: CSV globs the agent must not change, e.g. "scripts/eval/**,data/golden/**"')
+  .option('--artifacts <globs>', '產出物: CSV globs collected after verification and never committed, e.g. "build/app,reports/*.csv"')
   .action((o) => {
     const db = getDb();
     if (o.metrics) {
@@ -132,6 +133,7 @@ program
       requires: o.requires ?? null,
       experiment: o.experiment ?? null,
       acceptance_metrics: o.metrics ?? null,
+      artifacts: o.artifacts ?? null,
       protected_paths: o.protect ?? null,
     });
     const gate = validateTask(getTask(db, t.id)!, getSetting(db, 'host_capabilities') ?? '', environmentMap(db));

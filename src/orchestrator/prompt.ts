@@ -103,6 +103,10 @@ export function writeTaskFile(
   const protectedBlock = protectedList.length
     ? `\n## 保護路徑（不得修改）\n${protectedList.map((g) => `- \`${g}\``).join('\n')}\n這些是量尺（評估程式、標準答案、設定）：改到任何一個，驗證直接失敗。要改的是演算法，不是量尺。\n`
     : '';
+  const artifactList = (task.artifacts ?? '').split(',').map((g) => g.trim()).filter(Boolean);
+  const artifactsBlock = artifactList.length
+    ? `\n## 產出物（不要 commit）\n${artifactList.map((g) => `- \`${g}\``).join('\n')}\n驗證通過後，引擎會把符合這些路徑的檔案（執行檔、報告）收走並附上 sha256，交給人下載或發佈。讓驗證步驟產生它們即可；不要把它們 commit 進 git（commit 時引擎也會自動排除）。\n`
+    : '';
   const manualRule = modes.has('manual')
     ? '\n- 你可能無法在此環境完整驗證（缺硬體/非目標 OS）。盡量自動驗證能驗的部分，並在 repo 根目錄寫一份 `VERIFY.md`：列出你做了什麼、還有哪些必須在目標環境（硬體/公司 Windows）手動驗證的具體步驟與預期結果。'
     : '';
@@ -140,7 +144,7 @@ ${planContent(task)}
 
 ## Verification steps (must all pass before you finish)
 ${steps.map((s) => `- \`${s}\``).join('\n') || '- (none)'}
-${acceptanceBlock}${metricsBlock}${protectedBlock}
+${acceptanceBlock}${metricsBlock}${protectedBlock}${artifactsBlock}
 ## Rules
 - Only modify files needed for this task; do not touch anything outside its scope.
 - Commit your work in small, conventional commits.

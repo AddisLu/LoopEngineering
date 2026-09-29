@@ -143,6 +143,7 @@ server.registerTool('loop_add_task', {
     experiment: z.string().optional().describe('A/B cohort label for measurement (e.g. "ab_A"/"ab_B"). Pure tag — never affects scheduling/gate; compare cohorts later with the `loop experiment` CLI or metrics.experiment_ab.'),
     acceptance_metrics: z.string().optional().describe('Thresholds the ENGINE checks, e.g. "kernels_pass == 4; ncu_ok == 1; mem_throughput_pct >= 60". A verification step must print one line `LOOP_METRICS {"name": number, ...}`; a metric that is missing or misses its threshold fails verification. Use this whenever "done" is measurable — never let a skipped measurement count as a pass.'),
     protected_paths: z.string().optional().describe('CSV of repo-relative globs the implementer must not change (the checker, golden data), e.g. "tests/eval/**,scripts/check.sh". Changing one fails verification.'),
+    artifacts: z.string().optional().describe('CSV of repo-relative globs of files people take away (a built binary, an .ncu-rep report). Never committed; collected with sha256 after verification passes, downloadable from the review page.'),
   },
 }, async (a) => {
   const isMock = a.coding_tool === 'mock';
@@ -182,6 +183,7 @@ server.registerTool('loop_add_task', {
       experiment: a.experiment ?? null,
       acceptance_metrics: a.acceptance_metrics ?? null,
       protected_paths: a.protected_paths ?? null,
+      artifacts: a.artifacts ?? null,
     },
   });
   const id = created.task?.id;
