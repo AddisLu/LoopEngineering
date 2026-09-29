@@ -183,6 +183,7 @@
     <a href="#tools">26a · 上網／工具、MCP 與終端機</a>
     <a href="#sandbox">26b · GPU 執行沙盒：自己跑、自己驗證</a>
     <a href="#overnight">26c · 夜間無人開發：遠端沙盒、驗收指標、晨報</a>
+    <a href="#operators">26d · 操作人員流程：新工作、驗收、交付</a>
     <a href="#appendix">27 · 附錄（API / 檔案位置）</a>
   </nav>
 
@@ -415,7 +416,7 @@
       <table>
         <thead><tr><th>指令</th><th>作用</th></tr></thead>
         <tbody>
-          <tr><td><code>add</code></td><td>建立任務（起始 draft）。旗標：<code>--title*</code> <code>--goal*</code> <code>--plan</code> <code>--tool</code> <code>--verify</code> <code>--setup</code> <code>--repo</code> <code>--base</code> <code>--complexity</code> <code>--priority</code> <code>--model</code> <code>--depends-on &lt;taskId&gt;</code>（串行鏈：押住直到該任務結案）<code>--metrics &lt;門檻&gt;</code>（驗收指標，例如 <code>"detection_rate &gt;= 0.98; miss == 0"</code>）<code>--protect &lt;glob,…&gt;</code>（保護路徑，見第 26c 章）</td></tr>
+          <tr><td><code>add</code></td><td>建立任務（起始 draft）。旗標：<code>--title*</code> <code>--goal*</code> <code>--plan</code> <code>--tool</code> <code>--verify</code> <code>--setup</code> <code>--repo</code> <code>--base</code> <code>--complexity</code> <code>--priority</code> <code>--model</code> <code>--depends-on &lt;taskId&gt;</code>（串行鏈：押住直到該任務結案）<code>--metrics &lt;門檻&gt;</code>（驗收指標，例如 <code>"detection_rate &gt;= 0.98; miss == 0"</code>）<code>--protect &lt;glob,…&gt;</code>（保護路徑，見第 26c 章）<code>--artifacts &lt;glob,…&gt;</code>（產出物：驗證通過後收回、不進 git，見第 26d 章）</td></tr>
           <tr><td><code>gate &lt;id&gt;</code></td><td>顯示該任務的入場檢查清單。</td></tr>
           <tr><td><code>chat prune [--days n] [--yes]</code></td><td>刪除超過保留天數的對話（含圖片檔）。不加 <code>--yes</code> 只列出要刪什麼。</td></tr>
           <tr><td><code>chat export &lt;id&gt;</code></td><td>把一段對話輸出成 Markdown 到 stdout（<code>--reasoning</code> 連思考過程一起）。</td></tr>
@@ -437,6 +438,9 @@
           <tr><td><code>exec run [--host &lt;名&gt;] [--dir &lt;path&gt;] [--timeout &lt;秒&gt;] &lt;指令…&gt;</code></td><td>在沙盒裡跑一行指令（預設工作目錄 <code>&lt;資料目錄&gt;/exec/cli</code>），exit code 照實回傳。<code>--host</code> 時先把目錄同步到那台再執行。</td></tr>
           <tr><td><code>exec host add &lt;名&gt; --ssh &lt;user@host&gt; --work-root &lt;dir&gt;</code></td><td>登記（或更新）遠端沙盒主機。選填：<code>--port</code> <code>--image</code> <code>--gpus</code> <code>--memory</code> <code>--cpus</code> <code>--data &lt;那台路徑:容器路徑,…&gt;</code>（唯讀）<code>--desc</code> <code>--disabled</code>。</td></tr>
           <tr><td><code>exec host list｜rm &lt;名&gt;｜prune &lt;名&gt; [--days 7]</code></td><td>列出主機（* ＝ <code>exec_default_host</code>）、移除登記、刪掉那台上超過 N 天沒動的工作區。</td></tr>
+          <tr><td><code>verify-plan list [--repo]｜show &lt;id&gt;｜rm &lt;id&gt;</code></td><td>驗證方案（見第 26d 章）：列出、看內容、刪除。刪除不影響已經建立的任務。</td></tr>
+          <tr><td><code>verify-plan add --name* --step* [--repo] [--host] [--dataset-root] [--dataset-default] [--metrics] [--protect] [--artifacts] [--check] [--domain] [--setup] [--desc] [--id]</code></td><td>新增驗證方案，加 <code>--id</code> 則修改。<code>--step</code> 和 <code>--check</code> 可以重複；步驟裡的 <code>{dataset}</code> 會換成人員選的圖資資料夾。</td></tr>
+          <tr><td><code>verify-plan datasets &lt;id&gt;</code></td><td>列出這個方案的圖資資料夾和張數（遠端機台用一次 ssh 查）。</td></tr>
           <tr><td><code>morning [--hours 24] [--json]</code></td><td>晨報：這段時間跑過的任務、驗證步驟、指標與門檻、PR、要人處理的原因（見第 26c 章）。</td></tr>
           <tr><td><code>deploy --env &lt;name&gt; --repo &lt;path&gt; --base &lt;branch&gt;</code></td><td>建立並排入一個 <code>tool=deploy</code> 任務（見第 19 章）。</td></tr>
           <tr><td><code>deploy rollback &lt;env&gt;</code></td><td>把該環境回滾到上一次成功部署的 commit。</td></tr>
@@ -605,6 +609,7 @@ npm run loop -- list --status review</code></pre>
         <tbody>
           <tr><td><code>local_task_window</code></td><td>（空）</td><td>本地模型任務只在這段時間開始，<code>HH:MM-HH:MM</code>，可跨午夜（例如 <code>19:00-07:00</code>）。空＝任何時間。</td></tr>
           <tr><td><code>morning_report_time</code></td><td>（空）</td><td>每天經 ntfy 推播晨報的時間 <code>HH:MM</code>；空＝不推播（晨報頁與 <code>loop morning</code> 照常可用）。</td></tr>
+          <tr><td><code>artifacts_max_mb</code></td><td>1024</td><td>每次 run 收回產出物的總大小上限（MB）；超過的檔案列為「略過」。</td></tr>
           <tr><td><code>gitea_url</code></td><td>（空）</td><td>公司內部 Gitea 的網址。任務 repo 的 origin 在這台時，PR 經 Gitea API 開，描述附上驗證結果。token 放 <code>GITEA_TOKEN</code>。</td></tr>
         </tbody>
       </table></div>
@@ -620,7 +625,7 @@ npm run loop -- list --status review</code></pre>
           <tr><td><code>TOKENBAR_MCP_DIR</code></td><td>TokenBar 的 <code>mcp/</code> 安裝目錄，重用 usage-core 與共享快取。</td></tr>
           <tr><td><code>TOKENBAR_TOKEN_CACHE</code> / <code>TOKENBAR_HISTORY</code></td><td>共享 token 快取 / 歷史 ledger 路徑。</td></tr>
           <tr><td><code>NTFY_SERVER</code> / <code>NTFY_TOPIC</code></td><td>ntfy 推播（含一鍵暫停動作）。</td></tr>
-          <tr><td><code>LOOP_PUBLIC_URL</code></td><td>ntfy 暫停動作與晨報推播連結用的公開網址（例如 Tailscale 網址）。</td></tr>
+          <tr><td><code>LOOP_PUBLIC_URL</code></td><td>公開網址（例如 Tailscale 網址）。用在 ntfy 的暫停動作、晨報推播連結，以及 PR 描述裡指向驗收頁的連結。</td></tr>
           <tr><td><code>GITEA_TOKEN</code></td><td>公司內部 Gitea 的 access token（repository 讀寫），搭配 <code>gitea_url</code> 開 PR（見第 26c 章）。</td></tr>
           <tr><td><code>GITHUB_TOKEN</code> / <code>GITHUB_API_URL</code></td><td>GitHub PAT；<code>GITHUB_API_URL</code> 選填，指向 GHES 時覆寫預設的 <code>api.github.com</code>（見第 21 章）。</td></tr>
           <tr><td><code>ADO_PAT</code> / <code>ADO_ORG</code> / <code>ADO_PROJECT</code></td><td>Azure DevOps PAT ＋ 組織／專案；三者需同時存在才會啟用 <code>ado</code> provider（見第 21 章）。</td></tr>
@@ -1629,7 +1634,7 @@ loop morning                                    # 在終端機看同一份晨報
       <h3>早上怎麼看</h3>
       <ol>
         <li><b>要你處理</b>：先看「原因」和失敗輸出。worktree 還保留著，可以開終端機進去看。需求寫錯就改 PRD 重新送；可以補救的就在看板上續跑。</li>
-        <li><b>驗收通過</b>：打開 PR 看 diff。指標表是引擎量的，不是模型說的。VERIFY.md 裡有要上機台確認的項目就照做，確認後再合併或結案。</li>
+        <li><b>驗收通過</b>：點進任務的驗收頁，看程式碼差異、試跑、勾人工驗收清單，再核可與交付（見<a href="#operators">第 26d 章</a>）。指標表是引擎量的，不是模型說的。</li>
         <li><b>中斷、還沒輪到</b>：今晚會繼續跑。如果一直輪不到，檢查 <code>local_task_window</code> 和 <code>local_max_concurrency</code>。</li>
       </ol>
 
@@ -1671,6 +1676,168 @@ loop morning                                    # 在終端機看同一份晨報
         <li><code>GET /api/morning?hours=24</code>：晨報 JSON。</li>
         <li><code>POST /api/exec/run</code>：可以帶 <code>host</code>。</li>
         <li><code>GET /api/exec/status</code>：會列出主機。</li>
+      </ul>
+    </section>
+
+    <section id="operators">
+      <h2><span class="num">26d</span>操作人員流程：不寫程式也能維護軟體</h2>
+      <p>分兩種角色：</p>
+      <ul>
+        <li><b>操作人員</b>：從瀏覽器連進來，說清楚要改什麼、挑驗證方案，早上看結果、自己試跑、確認沒問題再交付。</li>
+        <li><b>工程師</b>：事先設定好驗證方案（在哪台機台、跑什麼、用哪些圖資、門檻多少），之後就不用每次參與。</li>
+      </ul>
+      <p>操作人員用到的頁面都在對話頁左欄和任務看板上方：<b>新工作</b>、<b>晨報</b>、<b>驗收頁</b>、<b>驗證方案</b>。畫面設計稿在 Claude Design 的「Loop 操作介面重設計」。</p>
+
+      <h3>四個步驟</h3>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>步驟</th><th>頁面</th><th>做什麼</th></tr></thead>
+        <tbody>
+          <tr><td>1 新工作</td><td><code>/job.html</code></td><td>
+            <ol>
+              <li>選要改的軟體和分支。</li>
+              <li>用自己的話寫「現在哪裡不對」「改好後應該怎樣」。</li>
+              <li>挑驗證方案和圖資。</li>
+              <li>按「檢查需求」，本地模型會先讀一次，沒寫清楚的地方會列出來。</li>
+              <li>補好後按「送出」。</li>
+            </ol>
+          </td></tr>
+          <tr><td>2 等結果</td><td><code>/morning.html</code></td><td>本地模型的工作在夜間時段執行。早上會推播晨報，點開就是晨報頁；從任務的驗收頁也能看到進度。</td></tr>
+          <tr><td>3 驗收</td><td><code>/task.html?id=…</code></td><td>
+            <ul>
+              <li>看結論和指標。</li>
+              <li>看程式改了什麼。</li>
+              <li>按「試跑」重跑驗證、換一批圖資再量，或自己執行一個指令。</li>
+              <li>把人工驗收清單逐項勾完。</li>
+            </ul>
+          </td></tr>
+          <tr><td>4 交付</td><td>同一頁的「交付」</td><td>
+            <ul>
+              <li><b>確定沒問題</b>：核可 → 下載 zip 或發佈到 Gitea → 結案。</li>
+              <li><b>要修改</b>：按「退回修改」並寫下意見，任務會回到佇列，在同一個分支上接著改。</li>
+            </ul>
+          </td></tr>
+        </tbody>
+      </table></div>
+      <p>從新工作送出的任務一定要經過人核可：它的驗證方式固定包含人工驗收。所以就算自動驗收全部通過，程式也要等你按了核可才會併進分支。</p>
+
+      <h3>第一次使用</h3>
+      <ul>
+        <li><b>網址</b>：用 Tailscale 網址開，例如 <code>https://&lt;主機&gt;/job.html</code>。第一次在網址後加 <code>?token=…</code>，瀏覽器會記住。</li>
+        <li><b>你是誰</b>：
+          <ul>
+            <li>用 Tailscale 登入的人會自動帶出身分。</li>
+            <li>其他人請按右上角「填名字」。勾選、核可、發佈都會記在這個名字下。</li>
+          </ul>
+        </li>
+        <li><b>能不能試跑</b>：試跑會執行程式，所以你的身分要在 <code>exec_allowed_users</code> 裡，例如 <code>ts:&lt;登入帳號&gt;</code> 或 <code>name:&lt;名字&gt;</code>，由工程師設定。看、勾選、核可、下載不需要這個權限。</li>
+      </ul>
+
+      <h3>驗收頁怎麼看</h3>
+      <ul>
+        <li><b>最上面的色塊</b>：
+          <ul>
+            <li>綠色：自動驗收通過，指標全部達標，步驟都成功。</li>
+            <li>黃色：沒有能自動判定的驗證，要靠人工驗收。</li>
+            <li>紅色：沒通過。色塊裡寫出原因，並顯示失敗步驟的輸出。</li>
+            <li>藍色：還在執行。頁面每 5 秒自動更新，並顯示最近的動作。</li>
+          </ul>
+        </li>
+        <li><b>結果</b>：
+          <ul>
+            <li>驗收指標表，數字是引擎量的，不是模型自己說的。</li>
+            <li>每個驗證步驟，點開可以看輸出。</li>
+            <li>產出物，附大小和 sha256，可以逐一下載。</li>
+          </ul>
+        </li>
+        <li><b>程式碼</b>：這次改了哪些檔案，可以切換「只看差異」和「完整檔案」。任務的工作區清掉以後照樣看得到，因為是直接從 git 讀。</li>
+        <li><b>試跑</b>：
+          <ul>
+            <li>在驗證過的那個版本的獨立副本裡執行，而且只在沙盒裡跑：沒有網路，只看得到這個任務的程式和唯讀圖資。</li>
+            <li>試跑結果只顯示在這一頁，不會改變任務的驗收結果。</li>
+            <li>每次試跑都會記在任務事件裡，包括誰執行了什麼、結果如何。</li>
+          </ul>
+        </li>
+        <li><b>需求</b>：當初要求了什麼、用了哪個驗證方案和門檻。</li>
+        <li><b>人工驗收清單</b>：來自驗證方案的人工項目，加上實作者在 VERIFY.md 裡列出的待確認事項。全部勾完才能核可，每一項都記錄誰在什麼時候勾的。</li>
+      </ul>
+
+      <h3>核可之後：下載還是放回 Gitea？</h3>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>東西</th><th>放在哪裡</th><th>說明</th></tr></thead>
+        <tbody>
+          <tr><td>原始碼</td><td>Gitea：<code>loop/&lt;任務&gt;</code> 分支與 PR → 整合分支</td><td>唯一的正本。核可時，如果合併還在等人，就在這時併進分支。</td></tr>
+          <tr><td>產出物（執行檔、報告）</td><td>引擎主機 <code>~/.local/share/loop-engineering/artifacts/&lt;任務&gt;/&lt;run&gt;/</code></td><td>驗證通過後，從工作區和驗證機台收回來。<code>manifest.json</code> 記錄每個檔案的 sha256，以及機台、commit、指標。這些檔案不會進 git；總大小上限是 <code>artifacts_max_mb</code>。</td></tr>
+          <tr><td>交付包</td><td>驗收頁「下載 zip」，或「發佈到 Gitea」</td><td>
+            <ul>
+              <li>zip 裡有：產出物、<code>manifest.json</code>、<code>REPORT.md</code>（驗證結果與指標）、<code>SHA256SUMS</code>。</li>
+              <li>Gitea Release 打在驗證過的那個 commit 上，附同一個 zip，產線從 Gitea 下載。</li>
+              <li>發佈需要：已核可、有 <code>gitea_url</code> 和 <code>GITEA_TOKEN</code>，而且這個 repo 的 origin 就在那台 Gitea 上。</li>
+            </ul>
+          </td></tr>
+        </tbody>
+      </table></div>
+      <div class="note warn"><span class="ic">⚠️</span><span>在哪種平台建置，就只能在那種平台執行。Spark 建出來的是 ARM64 執行檔，要給產線 x86 機台的版本，驗證方案必須指定規格相同的驗證機台（見第 26c 章）。</span></div>
+
+      <h3>工程師：設定驗證方案（只要一次）</h3>
+      <p>在「驗證方案」頁（<code>/plans.html</code>）新增，或用 CLI：</p>
+      <pre><code>loop verify-plan add --name "亮缺陷判型 — 標準圖集" --repo /srv/repos/cf-aoi --host aoi-gpu \
+  --step "cmake -S . -B build -DCMAKE_BUILD_TYPE=Release &amp;&amp; cmake --build build -j" \
+  --step "python3 scripts/eval/run.py --gallery {dataset} --golden {dataset}/golden" \
+  --dataset-root /datasets --dataset-default 20260615 \
+  --metrics "detection_rate &gt;= 0.98; false_positive_rate &lt;= 0.01; miss == 0" \
+  --protect "scripts/eval/**" --artifacts "build/cfaoi_ip,reports/*.csv" \
+  --check "上機台跑一次選定的圖集，確認判型正確" --domain cuda
+loop verify-plan datasets &lt;方案 id&gt;     # 人員會看到的圖資清單</code></pre>
+      <ul>
+        <li><b>驗證機台</b>：
+          <ul>
+            <li>指定了機台（<code>local</code> 或 <code>loop exec host</code> 登記的名稱），步驟會自動加上 <code>sandbox@…:</code>。</li>
+            <li>只有在沙盒裡執行的方案，人員才能在網頁上試跑。</li>
+            <li>沒有指定機台的步驟，會在引擎主機的 shell 直接執行。</li>
+          </ul>
+        </li>
+        <li><b>圖資</b>：<code>--dataset-root</code> 是容器裡的路徑，它的子資料夾就是人員可以選的圖資，要先用機台的 <code>--data</code> 以唯讀方式掛好。步驟裡的 <code>{dataset}</code> 會換成人員選的那一個。</li>
+        <li><b>門檻</b>：評估程式要印一行 <code>LOOP_METRICS {…}</code>，少回報任何一個指標就算不通過（寫法見第 26c 章）。</li>
+        <li><b>保護路徑、產出物、人工驗收項目</b>：分別對應「不能動的量尺」「要收回的檔案」「早上要人確認的事」。</li>
+        <li><b>檢查機台與圖資</b>：頁面上的這個按鈕，和 <code>loop exec check --host</code> 做同樣的檢查，另外再列一次圖資。</li>
+        <li><b>之後修改方案</b>：只影響之後建立的任務。已經建立的任務保留建立當下的方案內容。</li>
+      </ul>
+
+      <h3>常見問題</h3>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>看到</th><th>原因與處理</th></tr></thead>
+        <tbody>
+          <tr><td>新工作沒有可選的軟體</td><td>repo 要在知識庫來源（git／資料夾），或列在 <code>prd_repo_allowlist</code>。</td></tr>
+          <tr><td>沒有驗證方案</td><td>請工程師在「驗證方案」頁新增一個。</td></tr>
+          <tr><td>圖資清單是空的或讀不到</td><td>方案的圖資位置不在那台機台的唯讀掛載裡。請工程師用 <code>loop exec host add … --data</code> 掛好，再按「檢查機台與圖資」。</td></tr>
+          <tr><td>「檢查需求」很久沒有結果</td><td>本地模型沒有載入。這一步不會擋送出，除非設定了 <code>prd_require_llm</code>。</td></tr>
+          <tr><td>不能試跑</td><td>頁面會寫出原因，常見的有：
+            <ul>
+              <li><code>exec_enabled</code> 沒開</li>
+              <li>你不在 <code>exec_allowed_users</code> 裡</li>
+              <li>驗證方案有不在沙盒裡的步驟</li>
+              <li>任務還在執行</li>
+            </ul>
+          </td></tr>
+          <tr><td>「核可」按鈕是灰的</td><td>人工驗收清單還沒勾完，或任務還沒進到「待驗收」（看板上叫「待結案」）。滑鼠停在按鈕上會顯示原因。</td></tr>
+          <tr><td>「發佈到 Gitea」按鈕是灰的</td><td>滑鼠停在按鈕上會顯示原因，可能是：
+            <ul>
+              <li>還沒核可</li>
+              <li>沒有設定 <code>gitea_url</code> 或 <code>GITEA_TOKEN</code></li>
+              <li>沒有收集到產出物</li>
+            </ul>
+          </td></tr>
+          <tr><td>退回修改之後</td><td>任務回到佇列，你的意見會附在需求後面。它在同一個分支上接著改，人工清單重新開始。</td></tr>
+          <tr><td>看板上的草稿一直加不進排程</td><td>通常是從對話轉成的待辦，缺 repo 或驗證。按「用新工作重寫」，內容會帶到新工作頁。</td></tr>
+        </tbody>
+      </table></div>
+      <p>API（給整合用）：</p>
+      <ul>
+        <li><code>GET /api/jobs/options</code>、<code>POST /api/jobs/check</code>、<code>POST /api/jobs</code></li>
+        <li><code>GET|POST|PUT|DELETE /api/verify-plans</code>、<code>GET /api/verify-plans/:id/datasets</code>、<code>POST /api/verify-plans/:id/check</code></li>
+        <li><code>GET /api/tasks/:id/review</code>、<code>/code/file</code>、<code>/code/diff</code></li>
+        <li><code>POST /api/tasks/:id/checks</code>、<code>/approve</code>、<code>/request-changes</code>、<code>/trials</code>、<code>/release</code></li>
+        <li><code>GET /api/tasks/:id/artifacts</code>、<code>/artifacts/file</code>、<code>/artifacts.zip</code></li>
       </ul>
     </section>
 

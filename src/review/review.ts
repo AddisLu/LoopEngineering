@@ -202,7 +202,7 @@ export function reviewBundle(db: Database.Database, task: Task, viewer: { user_k
   const unchecked = checklist.filter((c) => !c.checked).length;
   const approveReason =
     task.approved_at ? `已由 ${task.approved_by} 核可`
-    : task.status !== 'review' ? '要等任務進到「待結案」才能核可'
+    : task.status !== 'review' ? '要等任務進到「待驗收」（看板上的「待結案」）才能核可'
     : unchecked ? `人工驗收還有 ${unchecked} 項沒勾`
     : null;
   const releaseReason =
@@ -271,7 +271,7 @@ export function reviewBundle(db: Database.Database, task: Task, viewer: { user_k
 
 export function approveTask(db: Database.Database, task: Task, by: string): { merged: boolean; detail: string } {
   if (task.approved_at) throw new ReviewError(`已由 ${task.approved_by} 核可`);
-  if (task.status !== 'review') throw new ReviewError('要等任務進到「待結案」才能核可');
+  if (task.status !== 'review') throw new ReviewError('要等任務進到「待驗收」（看板上的「待結案」）才能核可');
   const unchecked = checklistFor(db, task).filter((c) => !c.checked);
   if (unchecked.length) throw new ReviewError(`人工驗收還有 ${unchecked.length} 項沒勾：${unchecked.map((c) => c.text).join('；')}`);
   let merged = false;

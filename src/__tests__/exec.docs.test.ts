@@ -62,3 +62,28 @@ describe('the PRD example in chapter 26c', () => {
     expect(r.fields.base_branch).toBe('feature/bright-defect');
   });
 });
+
+describe('the manual documents the operator flow', () => {
+  it('chapter 26d is in the TOC and walks a non-programmer through 新工作 → 驗收 → 交付', () => {
+    const manual = fs.readFileSync(path.join(__dirname, '..', '..', 'docs', '操作說明.html'), 'utf8');
+    expect(manual).toContain('<section id="operators">');
+    expect(manual).toContain('href="#operators"');
+    for (const s of [
+      '/job.html',
+      '/task.html',
+      '/plans.html',
+      'loop verify-plan add',
+      '{dataset}',
+      '退回修改',
+      '核可',
+      '發佈到 Gitea',
+      'SHA256SUMS',
+      'artifacts_max_mb',
+      'exec_allowed_users',
+      '用新工作重寫',
+      '--artifacts',
+    ]) {
+      expect(manual, s).toContain(s);
+    }
+  });
+});
