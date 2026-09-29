@@ -5,6 +5,7 @@ import type Database from 'better-sqlite3';
 import { getNum } from '../db/index.js';
 import { readUsage } from '../token/usage.js';
 import type { Benchmark } from './store.js';
+import type { FinalMeasurement, IterationSummary } from './attempts.js';
 
 /**
  * Comparative judge for a benchmark: one external high-tier model (bench_judge_model, default
@@ -20,12 +21,19 @@ export type BenchJudgeExec = (prompt: string, model: string) => Promise<string>;
 
 export interface ArmEvidence {
   model: string;
+  /** what the ranking goes by: the final re-measurement when there is one, else the arm's own verification */
   verify_outcome: 'pass' | 'manual' | 'fail';
   failure: string | null;
   diff_stat: string;
   diff: string;
   tokens_out: number | null;
   duration_s: number | null;
+  /** the arm's own verification, before the final re-measurement */
+  own_outcome?: 'pass' | 'manual' | 'fail';
+  /** attempt by attempt: what failed, what was measured, whether it profiled */
+  iterations?: IterationSummary | null;
+  /** its final code measured again, one arm at a time, when judged */
+  final?: FinalMeasurement | null;
 }
 
 export interface ArmJudgement {
@@ -74,9 +82,39 @@ function planExcerpt(ref: string | null): string {
 }
 
 function verifyLine(a: ArmEvidence): string {
-  if (a.verify_outcome === 'pass') return 'PASSED — every verification step exited 0';
-  if (a.verify_outcome === 'manual') return 'NOT AUTO-VERIFIED (manual verification required)';
+  const own = a.own_outcome ?? a.verify_outcome;
+  if (own === 'pass') return 'PASSED — every verification step exited 0';
+  if (own === 'manual') return 'NOT AUTO-VERIFIED (manual verification required)';
   return `FAILED${a.failure ? ` — ${a.failure}` : ''}`;
+}
+
+const metricList = (m: Record<string, number | string> | null | undefined) =>
+  m ? Object.entries(m).map(([k, v]) => `${k}=${typeof v === 'number' ? Math.round(v * 1000) / 1000 : v}`).join(', ') : '';
+
+const ATTEMPT_EN: Record<string, string> = {
+  pass: 'passed',
+  functional: 'a step failed',
+  metrics: 'function right, thresholds missed',
+  protected: 'changed the protected yardstick',
+  unverified: 'ended before verification',
+};
+
+/** The measured facts about one arm, in the prompt's language. */
+function measuredLines(a: ArmEvidence): string {
+  const lines: string[] = [];
+  if (a.final) {
+    const verdict = a.final.outcome === 'pass' ? 'PASSED' : `FAILED (${ATTEMPT_EN[a.final.outcome] ?? a.final.outcome}${a.final.failed_step ? `: ${a.final.failed_step}` : ''})`;
+    lines.push(`- Final re-measurement (every arm's final code, same machine, one arm at a time): ${verdict}${a.final.metrics ? ` — ${metricList(a.final.metrics)}` : ''}`);
+  }
+  const it = a.iterations;
+  if (it?.attempts.length) {
+    const steps = it.attempts
+      .map((t) => `${t.attempt}) ${ATTEMPT_EN[t.outcome] ?? t.outcome}${t.metrics ? ` [${metricList(t.metrics)}]` : ''}`)
+      .join(' → ');
+    lines.push(`- Its own verification attempts (the engine sends a failure back to the model): ${steps}`);
+    lines.push(`- While working it ran code in the GPU sandbox ${it.self_runs} time(s); used a profiler (ncu/nsys): ${it.profiler ? 'yes' : 'no'}`);
+  }
+  return lines.join('\n');
 }
 
 export function buildBenchPrompt(bench: Benchmark, arms: ArmEvidence[]): string {
@@ -86,10 +124,11 @@ export function buildBenchPrompt(bench: Benchmark, arms: ArmEvidence[]): string 
   } catch {
     /* ignore */
   }
+  const measured = arms.some((a) => a.final || a.iterations?.attempts.some((t) => t.metrics));
   const armBlocks = arms
     .map(
       (a, i) => `## Arm ${label(i)}
-- Verification: ${verifyLine(a)}
+- Verification: ${verifyLine(a)}${measuredLines(a) ? `\n${measuredLines(a)}` : ''}
 - Diffstat:
 ${a.diff_stat.trim() || '(empty)'}
 - Diff against the base branch:
@@ -116,11 +155,11 @@ ${bench.verify_rubric?.trim() || '(none provided — judge against the goal and 
 
 ## Verification steps every arm had to pass
 ${steps.map((s) => `- \`${s}\``).join('\n') || '- (none)'}
-
+${bench.acceptance_metrics?.trim() ? `\n## Engine-checked thresholds every arm had to meet\n${bench.acceptance_metrics.trim()}\n` : ''}
 ${armBlocks}
 
 ## Scoring
-Score every arm 0-10 on each criterion:
+${measured ? 'The measurements above were taken by the engine, not reported by the models. An arm that FAILED the final re-measurement ranks below every arm that passed whatever its scores (the ranking enforces this); among arms that passed, better measured results within the bar count toward correctness and completeness.\n' : ''}Score every arm 0-10 on each criterion:
 - correctness: the code does what the goal requires and would hold up beyond the given checks. A FAILED verification caps correctness at 4.
 - completeness: every requirement in the goal, plan and acceptance criteria is covered.
 - code_quality: readable, idiomatic for the domain, sensible structure, no hacks or dead code.
@@ -154,22 +193,24 @@ export function parseBenchJudgement(text: string, arms: ArmEvidence[]): BenchJud
     const total = Math.round((CRITERIA.reduce((s, c) => s + scores[c], 0) / CRITERIA.length) * 10) / 10;
     judged.push({ model: arms[i]!.model, label: lbl, scores, total, rank: 0, notes: String(row?.notes ?? '').slice(0, 1000) });
   }
-  // Rank from the scores: total desc -> verification outcome -> fewer output tokens.
+  // Rank: verification outcome first (an arm that failed never outranks one that passed), then
+  // the score, then fewer output tokens.
   const order = judged
     .map((j, i) => ({ j, e: arms[i]! }))
     .sort(
       (x, y) =>
-        y.j.total - x.j.total ||
         VERIFY_ORDER[x.e.verify_outcome] - VERIFY_ORDER[y.e.verify_outcome] ||
+        y.j.total - x.j.total ||
         (x.e.tokens_out ?? Number.MAX_SAFE_INTEGER) - (y.e.tokens_out ?? Number.MAX_SAFE_INTEGER),
     );
   order.forEach((o, i) => (o.j.rank = i + 1));
-  const top = order[0]?.j;
+  const top = order[0];
   const judgeWinner = typeof parsed?.winner === 'string' ? parsed.winner.trim().toUpperCase() : null;
   return {
     ok: true,
     arms: judged,
-    winner: top && top.total > 0 ? top.model : null,
+    // nobody wins a benchmark nobody passed
+    winner: top && top.j.total > 0 && top.e.verify_outcome !== 'fail' ? top.j.model : null,
     summary: String(parsed?.summary ?? '').slice(0, 2000),
     judge_winner_label: judgeWinner,
   };
@@ -275,15 +316,16 @@ export function aggregateJudgements(per: Map<string, BenchJudgeResult>, arms: Ar
     .map((e) => ({ e, a: byModel.get(e.model)! }))
     .sort(
       (x, y) =>
-        y.a.mean.total - x.a.mean.total ||
         VERIFY_ORDER[x.e.verify_outcome] - VERIFY_ORDER[y.e.verify_outcome] ||
+        y.a.mean.total - x.a.mean.total ||
         (x.e.tokens_out ?? Number.MAX_SAFE_INTEGER) - (y.e.tokens_out ?? Number.MAX_SAFE_INTEGER),
     );
   order.forEach((o, i) => (o.a.rank = i + 1));
-  const top = order[0]?.a;
+  const top = order[0];
   const firsts = new Set(ok.map(([, r]) => r.winner ?? ''));
   const consensus: Aggregated['consensus'] = ok.length <= 1 ? 'single' : firsts.size === 1 ? 'unanimous' : 'split';
   // one judge reads as a plain paragraph; several are labelled so the page can tell them apart
   const summary = ok.length === 1 ? (ok[0]![1].summary ?? '') : ok.map(([judge, r]) => `【${judge}】${r.summary}`).join('\n');
-  return { arms: [...byModel.values()], winner: top && top.mean.total > 0 ? top.model : null, consensus, summary };
+  const winner = top && top.a.mean.total > 0 && top.e.verify_outcome !== 'fail' ? top.a.model : null;
+  return { arms: [...byModel.values()], winner, consensus, summary };
 }

@@ -491,6 +491,9 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   bench_judge_model: 'opus',
   bench_diff_cap_chars: '8000',
   bench_judge_timeout_ms: '600000',
+  // re-measure every arm's final code, one arm at a time, before judging (attempts.ts measureArm):
+  // what an arm timed for itself may have shared the GPU with another arm. The ranking goes by this.
+  bench_final_measure: 'true',
 
   // PRD 閘門（src/prd/*.ts, web/prd.html）：貼上 PRD → 規則檢查 + 已載入的本地模型審查（零 token），
   // 不完整就擋下；通過才建成任務（或 benchmark）。off by default = routes 404.

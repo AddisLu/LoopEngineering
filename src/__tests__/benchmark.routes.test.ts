@@ -139,10 +139,12 @@ describe('/api/benchmarks', () => {
       const detail = (await app.inject({ method: 'GET', url: `/api/benchmarks/${benchmark.id}` })).json();
       expect(detail.judgements.map((j: { judge_model: string }) => j.judge_model)).toEqual(['opus', 'sonnet']);
       expect(JSON.parse(detail.arms[0].scores_json)).toHaveProperty('mean');
-      // the dock's summary: record per model + the recent list
+      // the dock's summary: record per model + the recent list. Neither arm passed the question's
+      // tests, so nobody wins — the appearance still counts, the win does not
       const sum = (await app.inject({ method: 'GET', url: '/api/benchmarks/summary' })).json();
-      expect(sum.recent[0]).toMatchObject({ id: benchmark.id, winner_label: 'Qwen3.8 Flash Next (NVFP4)' });
-      expect(sum.models[0]).toMatchObject({ model: 'local:qwen38-flash', wins: 1 });
+      expect(sum.recent[0]).toMatchObject({ id: benchmark.id, winner_label: null });
+      expect(sum.models).toHaveLength(2);
+      expect(sum.models.every((m: { n: number; wins: number }) => m.n === 1 && m.wins === 0)).toBe(true);
     });
 
     it('starts from a task or a PRD draft, and says why a draft cannot be used', async () => {

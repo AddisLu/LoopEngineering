@@ -79,7 +79,7 @@ export const BOOL_KEYS = new Set([
   // 本地模型 (src/local/*.ts) — off = local:<id> tasks stay queued, no docker/vLLM access
   'local_models_enabled', 'local_gap_review',
   // benchmark mode (src/benchmark/*.ts)
-  'benchmark_enabled',
+  'benchmark_enabled', 'bench_final_measure',
   // PRD gate (src/prd/*.ts)
   'prd_gate_enabled', 'prd_require_llm',
   // GPU 執行沙盒 (src/exec/sandbox.ts) — off = no sandbox tools, no loop-exec MCP server
@@ -119,7 +119,7 @@ export const TUNABLE_KEYS = [
   // 晨報
   'morning_report_time',
   // benchmark mode
-  'benchmark_enabled', 'bench_judge_model',
+  'benchmark_enabled', 'bench_judge_model', 'bench_final_measure',
   // PRD gate
   'prd_gate_enabled', 'prd_require_llm', 'prd_default_model', 'prd_repo_allowlist',
 ] as const;

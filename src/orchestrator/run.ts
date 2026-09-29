@@ -654,6 +654,9 @@ export interface VerifyGateResult {
   manual: boolean;
   /** the command steps actually ran, so their results are on the run */
   ran: boolean;
+  /** what the steps (and the 保護路徑 check) produced, and the 驗收指標 verdict */
+  results: VerifyStepResult[];
+  metrics: MetricsReport | null;
 }
 
 /**
@@ -661,6 +664,8 @@ export interface VerifyGateResult {
  * host or in the GPU 沙盒) and 驗收指標 — recorded on the run (verify_json, metrics_json, verified
  * SHAs). It routes nothing: runVerifyPipeline turns a failure into blocked/attention, while the
  * review page's 合併/核可 and `loop verify` re-verify with it and leave the task where it is.
+ * `record: false` measures without writing the run (a benchmark's final re-measurement keeps every
+ * attempt's own record intact).
  */
 export async function runVerifyGate(
   db: Database.Database,
@@ -669,8 +674,10 @@ export async function runVerifyGate(
   runId: string,
   base: string | null,
   sandboxDeps?: SandboxDeps,
+  opts: { record?: boolean } = {},
 ): Promise<VerifyGateResult> {
   const timeoutMs = (task.verify_timeout_min ?? getNum(db, 'verify_step_timeout_min', 10)) * 60_000;
+  const record = opts.record ?? true;
   let runCommands = parseVerifyMode(task).has('command');
   let manual = false;
 
@@ -707,8 +714,8 @@ export async function runVerifyGate(
     if (touched.length) {
       const out = `這些受保護的檔案被改動了，請還原（git checkout ${base} -- <檔案>）再完成任務：\n${touched.map((f) => `- ${f}`).join('\n')}\n受保護的範圍：${protectedGlobs.join(', ')}`;
       const step = { step: '保護路徑', ok: false, exitCode: null, timedOut: false, output: out };
-      recordVerification(db, runId, [step], null, worktree, base);
-      return { failure: { ok: false, results: [step], failedStep: '保護路徑' }, manual, ran: false };
+      if (record) recordVerification(db, runId, [step], null, worktree, base);
+      return { failure: { ok: false, results: [step], failedStep: '保護路徑' }, manual, ran: false, results: [step], metrics: null };
     }
   }
 
@@ -735,27 +742,28 @@ export async function runVerifyGate(
     const metrics = specs.length || vres.results.some((r) => r.output.includes('LOOP_METRICS'))
       ? evaluateAcceptance(specs, extractMetrics(vres.results.map((r) => r.output)))
       : null;
-    recordVerification(db, runId, vres.results, metrics, worktree, base);
-    if (!vres.ok) return { failure: vres, manual, ran: true };
+    if (record) recordVerification(db, runId, vres.results, metrics, worktree, base);
+    const measured = { ran: true, results: vres.results, metrics };
+    if (!vres.ok) return { failure: vres, manual, ...measured };
     if (metrics && !metrics.pass) {
       const out = `驗收指標未達標（門檻由任務設定，不在 repo 裡）：\n${formatAcceptance(metrics)}`;
       return {
         failure: { ok: false, results: [...vres.results, { step: '驗收指標', ok: false, exitCode: null, timedOut: false, output: out }], failedStep: '驗收指標' },
         manual,
-        ran: true,
+        ...measured,
       };
     }
-    if (metrics?.checks.length) {
+    if (metrics?.checks.length && record) {
       logEvent(db, { task_id: task.id, run_id: runId, kind: 'note', detail: `驗收指標通過：${metrics.checks.map((c) => `${c.name}=${c.actual}`).join('，')}` });
     }
-    return { failure: null, manual, ran: true };
+    return { failure: null, manual, ...measured };
   }
   if (specs.length) {
     // thresholds that could not be measured here are a human's to check, never a silent pass
     logEvent(db, { task_id: task.id, run_id: runId, kind: 'note', detail: `驗收指標未檢查（沒有執行 command 驗證）：${formatSpecs(specs)} → 人工驗收` });
     manual = true;
   }
-  return { failure: null, manual, ran: false };
+  return { failure: null, manual, ran: false, results: [], metrics: null };
 }
 
 /**

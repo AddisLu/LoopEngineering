@@ -69,6 +69,7 @@ export function registerBenchmarkRoutes(
     return detail ?? reply.code(404).send({ error: 'not found' });
   });
 
+
   /**
    * Start a benchmark. The question comes from a source (an existing task, a PRD-wizard draft,
    * a built-in question, or the fields typed on the page); `models` compete, `judge_models`
@@ -114,9 +115,18 @@ export function registerBenchmarkRoutes(
         return reply.code(201).send({ benchmark: r.benchmark, arms: r.arms });
       }
       const q = resolveSource(db, kind, ref, overrides, opts.source);
+      const minutes = (v: unknown) => (v == null || v === '' ? null : Number(v));
       try {
         const created = createBenchmark(db, {
           ...q,
+          // the measured bar every arm shares — from a 驗證方案 and/or set here
+          verify_plan_id: str(o.verify_plan_id),
+          dataset: str(o.dataset),
+          ...(o.acceptance_metrics !== undefined ? { acceptance_metrics: str(o.acceptance_metrics) ?? '' } : {}),
+          ...(o.protected_paths !== undefined ? { protected_paths: list(o.protected_paths).join(',') } : {}),
+          ...(o.artifacts !== undefined ? { artifacts: list(o.artifacts).join(',') } : {}),
+          verify_timeout_min: minutes(o.verify_timeout_min),
+          timeout_min: minutes(o.timeout_min),
           models,
           judge_model: str(b.judge_model) ?? undefined,
           judge_models: judges.length ? judges : undefined,

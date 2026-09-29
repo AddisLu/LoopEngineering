@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type Database from 'better-sqlite3';
 import { openTestDb, setSetting } from '../db/index.js';
-import { createTask, getTask } from '../tasks.js';
+import { createTask, getTask, setStatus } from '../tasks.js';
 import { validateTask } from '../gate/validateTask.js';
 import { BENCH_SEED_DIR, listBuiltin, loadBuiltin, resolveSource, taskDomain } from '../benchmark/source.js';
 import { aggregateJudgements, type ArmEvidence, type BenchJudgeResult } from '../benchmark/judge.js';
@@ -198,6 +198,8 @@ describe('judgeBenchmark with several judges', () => {
     expect(benchmark.judge_models).toBe('opus,sonnet');
     expect(benchmark.restore_model).toBe('qwen38-flash');
     expect(judgeList(benchmark)).toEqual(['opus', 'sonnet']);
+    // both arms finished and passed their verification (a winner needs an arm that passed)
+    for (const a of getBenchmark(db, benchmark.id)!.arms) setStatus(db, a.task_id, 'review', { detail: 'verification passed' });
 
     const ensured: string[] = [];
     const mm = { state: () => ({ loaded: 'qwen3-coder-next', wanted: null, status: 'ready' as const, since: null, error: null }), ensureLoaded: (id: string) => { ensured.push(id); return 'switching' as const; } };

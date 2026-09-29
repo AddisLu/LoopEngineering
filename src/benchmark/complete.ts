@@ -3,8 +3,10 @@ import { execFileSync } from 'node:child_process';
 import type Database from 'better-sqlite3';
 import { getBool, getNum, logEvent } from '../db/index.js';
 import { getTask, latestRun, listRunsForTask, setStatus } from '../tasks.js';
-import { diffstat } from '../git/worktree.js';
+import { baseRefFor } from '../git/integrate.js';
 import { cleanupWorktree } from '../orchestrator/cleanup.js';
+import type { SandboxDeps } from '../exec/sandbox.js';
+import { armIterations, measureArm, type FinalMeasurement } from './attempts.js';
 import { notify } from '../notify.js';
 import { getBenchmark, judgeList, type Benchmark, type BenchmarkArmView } from './store.js';
 import { aggregateJudgements, runBenchJudge, type ArmEvidence, type BenchJudgeExec, type BenchJudgeResult } from './judge.js';
@@ -49,7 +51,7 @@ export async function judgeBenchmark(
   db: Database.Database,
   id: string,
   exec?: BenchJudgeExec,
-  opts: { judges?: string[]; modelManager?: Pick<ModelManager, 'state' | 'ensureLoaded'> } = {},
+  opts: { judges?: string[]; modelManager?: Pick<ModelManager, 'state' | 'ensureLoaded'>; sandboxDeps?: SandboxDeps } = {},
 ): Promise<Benchmark | null> {
   if (judging.has(id)) return null;
   const detail = getBenchmark(db, id);
@@ -67,7 +69,19 @@ export async function judgeBenchmark(
       logEvent(db, { kind: 'note', detail: `benchmark ${id} cancelled: ${why}` });
       return getBenchmark(db, id)!.benchmark;
     }
-    const evidence = live.map((arm) => collectArmEvidence(db, bench, arm));
+    // Measure every arm's final code again, one arm at a time, now that none of them is running:
+    // what each arm measured for itself may have shared the GPU with another arm's build or a local
+    // model generating. An arm already judged (worktree reclaimed) keeps its earlier measurement.
+    if (getBool(db, 'bench_final_measure', true)) {
+      const putFinal = db.prepare('UPDATE benchmark_arms SET final_json = ? WHERE benchmark_id = ? AND model = ?');
+      for (const arm of live) {
+        const final = await measureArm(db, arm.task_id, opts.sandboxDeps);
+        if (final) putFinal.run(JSON.stringify(final), id, arm.model);
+      }
+    }
+    const previous = previousEvidence(bench);
+    const arms = getBenchmark(db, id)!.arms.filter((a) => a.task_status != null);
+    const evidence = arms.map((arm) => collectArmEvidence(db, bench, arm, previous.get(arm.model)));
     const judges = opts.judges?.length ? opts.judges : judgeList(bench);
     // every judge scores on its own; one failing does not sink the others
     const per = new Map<string, BenchJudgeResult>();
@@ -142,36 +156,69 @@ function ts(s: string): number {
   return Date.parse(s.includes('T') ? s : `${s.replace(' ', 'T')}Z`);
 }
 
-/** Bounded diff of the arm branch vs base, without the engine's own hand-off artifacts. */
-function armDiff(worktree: string, base: string, cap: number): string {
+const EXCLUDE = [':(exclude)HANDOFF.md', ':(exclude)LOOP_RESUME_CONTEXT.md', ':(exclude)VERIFY.md'];
+
+/** Bounded diff of the arm's work (`head` in `dir`) vs `base`, without the engine's hand-off artifacts. */
+function armDiff(dir: string, base: string, head: string, cap: number): { diff: string; stat: string } {
+  const git = (args: string[]) => execFileSync('git', args, { cwd: dir, encoding: 'utf8', maxBuffer: 50 * 1024 * 1024, timeout: 30_000 });
   try {
-    const out = execFileSync(
-      'git',
-      ['diff', `${base}...HEAD`, '--', '.', ':(exclude)HANDOFF.md', ':(exclude)LOOP_RESUME_CONTEXT.md', ':(exclude)VERIFY.md'],
-      { cwd: worktree, encoding: 'utf8', maxBuffer: 50 * 1024 * 1024, timeout: 30_000 },
-    );
-    return out.length > cap ? `${out.slice(0, cap)}\n...(truncated at ${cap} chars)` : out;
+    const out = git(['diff', `${base}...${head}`, '--', '.', ...EXCLUDE]);
+    let stat = '';
+    try {
+      stat = git(['diff', '--stat', `${base}...${head}`, '--', '.', ...EXCLUDE]).trim();
+    } catch {
+      /* best effort */
+    }
+    return { diff: out.length > cap ? `${out.slice(0, cap)}\n...(truncated at ${cap} chars)` : out, stat };
   } catch {
-    return '(diff unavailable)';
+    return { diff: '(diff unavailable)', stat: '' };
   }
 }
 
-function collectArmEvidence(db: Database.Database, bench: Benchmark, arm: BenchmarkArmView): ArmEvidence {
+/** The evidence an earlier judging stored, by model — a re-judge after the arms were closed and their worktrees reclaimed reuses it. */
+function previousEvidence(bench: Benchmark): Map<string, ArmEvidence> {
+  try {
+    const list = (JSON.parse(bench.result_json ?? '{}') as { evidence?: ArmEvidence[] }).evidence ?? [];
+    return new Map(list.map((e) => [e.model, e]));
+  } catch {
+    return new Map();
+  }
+}
+
+function parseJson<T>(s: string | null | undefined): T | null {
+  try {
+    return s ? (JSON.parse(s) as T) : null;
+  } catch {
+    return null;
+  }
+}
+
+function collectArmEvidence(db: Database.Database, bench: Benchmark, arm: BenchmarkArmView, prev?: ArmEvidence): ArmEvidence {
   const task = getTask(db, arm.task_id);
   let tokensIn: number | null = null;
   let tokensOut: number | null = null;
   let durationS = 0;
-  for (const r of task ? listRunsForTask(db, task.id) : []) {
+  const runs = task ? listRunsForTask(db, task.id) : [];
+  for (const r of runs) {
     if (r.tokens_in != null) tokensIn = (tokensIn ?? 0) + r.tokens_in;
     if (r.tokens_out != null) tokensOut = (tokensOut ?? 0) + r.tokens_out;
     if (r.finished_at) durationS += Math.max(0, (ts(r.finished_at) - ts(r.started_at)) / 1000);
   }
 
+  const run = task ? latestRun(db, task.id) : undefined;
+  const wt = run?.worktree_path && fs.existsSync(run.worktree_path) ? run.worktree_path : null;
+  // judged before: the arm was closed on purpose and its worktree reclaimed, so its status no longer
+  // says how it did — the evidence recorded then does
+  const judgedBefore = !!prev && !wt;
+
   const status = task?.status ?? 'failed';
-  const verify: ArmEvidence['verify_outcome'] =
+  let own: ArmEvidence['verify_outcome'] =
     status === 'review' || status === 'closed' ? (task?.merge_status === 'pending' ? 'manual' : 'pass') : 'fail';
   let failure: string | null = null;
-  if (verify === 'fail') {
+  if (judgedBefore) {
+    own = prev!.own_outcome ?? prev!.verify_outcome;
+    failure = prev!.failure;
+  } else if (own === 'fail') {
     const ev = db
       .prepare(
         `SELECT detail FROM task_events WHERE task_id = ? AND to_status IN ('attention','failed') AND detail IS NOT NULL
@@ -181,23 +228,43 @@ function collectArmEvidence(db: Database.Database, bench: Benchmark, arm: Benchm
     failure = ev?.detail ? ev.detail.slice(-1500) : `arm ended in ${status}`;
   }
 
-  const run = task ? latestRun(db, task.id) : undefined;
-  const wt = run?.worktree_path && fs.existsSync(run.worktree_path) ? run.worktree_path : null;
-  let diff = wt
-    ? '(no base branch recorded for this benchmark — cannot diff)'
-    : '(no worktree — the arm never produced a change)';
+  // the diff is measured from where the arm's verification recorded it started (the arm branched off
+  // origin/<base>; the local base may have moved), falling back to origin/<base>, then <base>
+  let diff = '(no worktree — the arm never produced a change)';
   let stat = '';
+  const cap = getNum(db, 'bench_diff_cap_chars', 8000);
+  const recordedBase = [...runs].reverse().find((r) => r.base_sha)?.base_sha ?? null;
   if (wt && bench.base_branch) {
-    diff = armDiff(wt, bench.base_branch, getNum(db, 'bench_diff_cap_chars', 8000));
-    try {
-      stat = diffstat(wt, bench.base_branch);
-    } catch {
-      /* best effort */
-    }
+    ({ diff, stat } = armDiff(wt, recordedBase ?? baseRefFor(wt, bench.base_branch), 'HEAD', cap));
+  } else if (judgedBefore) {
+    diff = prev!.diff;
+    stat = prev!.diff_stat;
+  } else if (task?.repo_path && bench.base_branch && fs.existsSync(task.repo_path)) {
+    // worktree gone but the branch is kept for inspection
+    const r = armDiff(task.repo_path, recordedBase ?? baseRefFor(task.repo_path, bench.base_branch), `loop/${task.id}`, cap);
+    if (r.diff !== '(diff unavailable)') ({ diff, stat } = r);
+  } else if (wt) {
+    diff = '(no base branch recorded for this benchmark — cannot diff)';
   }
+
+  const iterations = task ? armIterations(db, task.id) : null;
+  const final = parseJson<FinalMeasurement>(arm.final_json) ?? prev?.final ?? null;
+  // the final re-measurement, when there is one, is what the ranking goes by
+  const verify: ArmEvidence['verify_outcome'] = final ? (final.outcome === 'pass' ? 'pass' : 'fail') : own;
   const duration = Math.round(durationS);
   db.prepare(
-    'UPDATE benchmark_arms SET verify_outcome = ?, tokens_in = ?, tokens_out = ?, duration_s = ?, diff_stat = ? WHERE benchmark_id = ? AND model = ?',
-  ).run(verify, tokensIn, tokensOut, duration, stat || null, bench.id, arm.model);
-  return { model: arm.model, verify_outcome: verify, failure, diff_stat: stat, diff, tokens_out: tokensOut, duration_s: duration };
+    'UPDATE benchmark_arms SET verify_outcome = ?, tokens_in = ?, tokens_out = ?, duration_s = ?, diff_stat = ?, attempts_json = ? WHERE benchmark_id = ? AND model = ?',
+  ).run(verify, tokensIn, tokensOut, duration, stat || null, iterations ? JSON.stringify(iterations) : null, bench.id, arm.model);
+  return {
+    model: arm.model,
+    verify_outcome: verify,
+    own_outcome: own,
+    failure,
+    diff_stat: stat,
+    diff,
+    tokens_out: tokensOut,
+    duration_s: duration,
+    iterations,
+    final,
+  };
 }

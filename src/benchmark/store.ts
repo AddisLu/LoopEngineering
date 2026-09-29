@@ -5,6 +5,8 @@ import { createTask, getTask, setStatus } from '../tasks.js';
 import { validateTask } from '../gate/validateTask.js';
 import { isModelValue, BENCH_JUDGE_MODELS } from '../settings.js';
 import { getLocalModel, isLocalModel, localId } from '../local/models.js';
+import { parseAcceptance } from '../orchestrator/acceptance.js';
+import { datasetPath, getPlan, planSteps, type VerifyPlan } from '../plans/store.js';
 import type { Complexity } from '../config.js';
 import type { Task } from '../types.js';
 
@@ -46,6 +48,16 @@ export interface Benchmark {
   restore_model: string | null;
   /** unanimous | split | single, once judged */
   consensus: string | null;
+  /** 驗收指標 every arm is held to (engine-checked, e.g. "correct == 1; max_ms <= 10") */
+  acceptance_metrics: string | null;
+  /** CSV globs no arm may change (the yardstick) */
+  protected_paths: string | null;
+  /** CSV globs collected from each arm after verification */
+  artifacts: string | null;
+  /** the 驗證方案 the verification came from, if any */
+  verify_plan_id: string | null;
+  verify_timeout_min: number | null;
+  timeout_min: number | null;
 }
 
 export interface BenchmarkJudgement {
@@ -71,6 +83,10 @@ export interface BenchmarkArm {
   tokens_out: number | null;
   duration_s: number | null;
   diff_stat: string | null;
+  /** IterationSummary (attempts.ts): what every attempt of the arm's verification found */
+  attempts_json: string | null;
+  /** FinalMeasurement (attempts.ts): the re-measurement of the arm's final code, taken when judged */
+  final_json: string | null;
 }
 
 export type BenchmarkArmView = BenchmarkArm & { task_status: string | null; task_title: string | null; model_label?: string | null };
@@ -98,6 +114,18 @@ export interface NewBenchmarkInput {
   /** 驗收指標 / 保護路徑 from the PRD: every arm is held to the same engine-checked bar */
   acceptance_metrics?: string | null;
   protected_paths?: string | null;
+  /** 產出物 globs collected from every arm */
+  artifacts?: string | null;
+  /**
+   * A 驗證方案 to take the verification from: its steps (sandbox-prefixed for its machine), 驗收指標,
+   * 保護路徑, 產出物, setup and domain — each unless the input sets it — and its repo when none is given.
+   */
+  verify_plan_id?: string | null;
+  /** the plan's 圖資 to verify against, when its steps take one (default: the plan's default) */
+  dataset?: string | null;
+  /** per-step verification timeout (minutes) and per-run time limit (minutes) for every arm */
+  verify_timeout_min?: number | null;
+  timeout_min?: number | null;
 }
 
 /** Human name for a model id: local display name, else the alias itself. */
@@ -169,14 +197,44 @@ export function createBenchmark(
     }
   }
 
-  const domain = (input.domain ?? 'other').trim().toLowerCase();
+  // a 驗證方案 supplies the verification every arm shares; whatever the input sets itself wins
+  let plan: VerifyPlan | null = null;
+  let planStepList: string[] = [];
+  if (input.verify_plan_id) {
+    plan = getPlan(db, input.verify_plan_id);
+    if (!plan) throw new BenchmarkInputError(`找不到驗證方案：${input.verify_plan_id}`);
+    try {
+      planStepList = planSteps(plan, datasetPath(plan, input.dataset ?? null));
+    } catch (err) {
+      throw new BenchmarkInputError(`驗證方案「${plan.name}」：${(err as Error).message}`);
+    }
+  }
+
+  const domain = (input.domain ?? plan?.domain ?? 'other').trim().toLowerCase();
   if (!(BENCH_DOMAINS as readonly string[]).includes(domain)) {
     throw new BenchmarkInputError(`領域只能是：${BENCH_DOMAINS.join('、')}`);
   }
-  const steps = (input.verification_steps ?? []).map((s) => String(s).trim()).filter(Boolean);
+  const typed = (input.verification_steps ?? []).map((s) => String(s).trim()).filter(Boolean);
+  const steps = typed.length ? typed : planStepList;
   if (steps.length === 0) {
     throw new BenchmarkInputError('題目還缺：驗證指令（至少一行）——每一組都要用同一個真的檢查來比');
   }
+  const csv = (v: string | string[] | null | undefined) => (Array.isArray(v) ? v.join(',') : (v ?? '')).trim() || null;
+  const acceptance = csv(input.acceptance_metrics ?? plan?.metrics);
+  try {
+    parseAcceptance(acceptance);
+  } catch (err) {
+    throw new BenchmarkInputError(`驗收指標寫法不對：${(err as Error).message}`);
+  }
+  const protectedPaths = csv(input.protected_paths ?? plan?.protected_paths);
+  const artifacts = csv(input.artifacts ?? plan?.artifacts);
+  const minutes = (v: number | null | undefined, what: string) => {
+    if (v == null) return null;
+    if (!Number.isInteger(v) || v < 1 || v > 1440) throw new BenchmarkInputError(`${what}要是 1 到 1440 的整數分鐘`);
+    return v;
+  };
+  const verifyTimeout = minutes(input.verify_timeout_min, '每個驗證步驟的時間上限');
+  const runTimeout = minutes(input.timeout_min, '每一組的執行時間上限');
   const judges = [...new Set((input.judge_models?.length ? input.judge_models : [input.judge_model || getSetting(db, 'bench_judge_model') || 'opus']).map((j) => String(j).trim()).filter(Boolean))];
   for (const j of judges) {
     if (!BENCH_JUDGE_MODELS.has(j)) throw new BenchmarkInputError(`評審只能選：${[...BENCH_JUDGE_MODELS].join('、')}（收到 ${j}）`);
@@ -185,9 +243,10 @@ export function createBenchmark(
 
   const codingTool = input.coding_tool ?? 'claude-code';
   const planRef = input.plan_ref?.trim() || null;
-  const repoPath = input.repo_path?.trim() || null;
+  const repoPath = input.repo_path?.trim() || plan?.repo_path || null;
   const baseBranch = input.base_branch?.trim() || null;
   const complexity: Complexity = input.complexity ?? 'M';
+  const setupCmd = input.setup_cmd ?? plan?.setup_cmd ?? null;
 
   // Gate the shared task definition ONCE before creating anything, so a bad repo/plan never
   // leaves half a benchmark behind.
@@ -200,7 +259,7 @@ export function createBenchmark(
     verify_rubric: input.verify_rubric ?? null,
     repo_path: repoPath,
     base_branch: baseBranch,
-    setup_cmd: input.setup_cmd ?? null,
+    setup_cmd: setupCmd,
     environment: null,
     requires: null,
   } as unknown as Task;
@@ -214,9 +273,11 @@ export function createBenchmark(
   const id = `b_${nanoid(10)}`;
   db.prepare(
     `INSERT INTO benchmarks (id, title, goal, plan_ref, repo_path, base_branch, verification_steps, setup_cmd,
-       verify_rubric, domain, complexity, judge_model, judge_models, source_kind, source_ref, restore_model)
+       verify_rubric, domain, complexity, judge_model, judge_models, source_kind, source_ref, restore_model,
+       acceptance_metrics, protected_paths, artifacts, verify_plan_id, verify_timeout_min, timeout_min)
      VALUES (@id, @title, @goal, @plan_ref, @repo_path, @base_branch, @verification_steps, @setup_cmd,
-       @verify_rubric, @domain, @complexity, @judge_model, @judge_models, @source_kind, @source_ref, @restore_model)`,
+       @verify_rubric, @domain, @complexity, @judge_model, @judge_models, @source_kind, @source_ref, @restore_model,
+       @acceptance_metrics, @protected_paths, @artifacts, @verify_plan_id, @verify_timeout_min, @timeout_min)`,
   ).run({
     id,
     title,
@@ -225,7 +286,13 @@ export function createBenchmark(
     repo_path: repoPath,
     base_branch: baseBranch,
     verification_steps: JSON.stringify(steps),
-    setup_cmd: input.setup_cmd ?? null,
+    setup_cmd: setupCmd,
+    acceptance_metrics: acceptance,
+    protected_paths: protectedPaths,
+    artifacts,
+    verify_plan_id: plan?.id ?? null,
+    verify_timeout_min: verifyTimeout,
+    timeout_min: runTimeout,
     verify_rubric: input.verify_rubric ?? null,
     domain,
     complexity,
@@ -246,18 +313,22 @@ export function createBenchmark(
       plan_kind: planKind(planRef),
       coding_tool: codingTool,
       verification_steps: steps,
-      setup_cmd: input.setup_cmd ?? null,
+      setup_cmd: setupCmd,
       repo_path: repoPath,
       base_branch: baseBranch,
       complexity,
       priority: input.priority ?? 2,
       model,
+      timeout_min: runTimeout,
       verify_mode: 'command',
       verify_rubric: input.verify_rubric ?? null,
+      verify_timeout_min: verifyTimeout,
       experiment: `bench:${id}`,
       benchmark_id: id,
-      acceptance_metrics: input.acceptance_metrics ?? null,
-      protected_paths: input.protected_paths ?? null,
+      acceptance_metrics: acceptance,
+      protected_paths: protectedPaths,
+      artifacts,
+      verify_plan_id: plan?.id ?? null,
     });
     insertArm.run(id, model, task.id);
     setStatus(db, task.id, 'queued', { detail: `benchmark ${id} arm (${model})` });
@@ -370,7 +441,7 @@ export function benchmarkSummary(db: Database.Database): { running: BenchmarkLis
   const rows = db
     .prepare(
       `SELECT a.model AS model, COUNT(*) AS n,
-              SUM(CASE WHEN a.judge_rank = 1 THEN 1 ELSE 0 END) AS wins,
+              SUM(CASE WHEN a.model = b.winner THEN 1 ELSE 0 END) AS wins,
               AVG(a.judge_score) AS avg_score,
               AVG(CASE WHEN a.verify_outcome = 'pass' THEN 1.0 ELSE 0.0 END) AS verify_pass_rate
          FROM benchmark_arms a JOIN benchmarks b ON b.id = a.benchmark_id
@@ -409,7 +480,7 @@ export function benchmarkMatrix(db: Database.Database): MatrixRow[] {
     .prepare(
       `SELECT a.model AS model, b.domain AS domain, COUNT(*) AS n,
               AVG(a.judge_score) AS avg_score,
-              AVG(CASE WHEN a.judge_rank = 1 THEN 1.0 ELSE 0.0 END) AS win_rate,
+              AVG(CASE WHEN a.model = b.winner THEN 1.0 ELSE 0.0 END) AS win_rate,
               AVG(CASE WHEN a.verify_outcome = 'pass' THEN 1.0 ELSE 0.0 END) AS verify_pass_rate,
               AVG(a.tokens_out) AS avg_tokens_out,
               AVG(a.duration_s) AS avg_duration_s

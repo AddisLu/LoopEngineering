@@ -1007,34 +1007,54 @@ bench
   .description('create a benchmark: one arm task per model, queued now, judged when all arms finish')
   .requiredOption('--title <title>')
   .requiredOption('--goal <goal>')
-  .requiredOption('--models <csv>', 'e.g. local:qwen38-flash,local:qwen3-coder-next (2+)')
-  .requiredOption('--repo <path>', 'git repo every arm branches from')
-  .requiredOption('--verify <csv>', 'verification commands every arm must pass')
+  .requiredOption('--models <csv>', 'e.g. local:qwen38-flash,local:qwen3-coder-next,sonnet (2+)')
+  .option('--repo <path>', 'git repo every arm branches from (default: the 驗證方案\'s repo)')
+  .option('--verify <csv>', 'verification commands every arm must pass (comma-separated)')
+  .option('--step <cmd>', 'one verification command (repeatable; commas stay inside it)', (v: string, acc: string[]) => [...acc, v], [] as string[])
+  .option('--verify-plan <id>', 'take steps, 驗收指標, 保護路徑, 產出物 and setup from this 驗證方案 (loop verify-plan list)')
+  .option('--dataset <name>', "the 驗證方案's 圖資 to verify against (default: its default)")
+  .option('--metrics <expr>', '驗收指標 every arm must meet, e.g. "correct == 1; max_ms <= 10"')
+  .option('--protect <csv>', 'globs no arm may change (the yardstick)')
+  .option('--artifacts <csv>', 'globs collected from every arm after verification')
+  .option('--verify-timeout <min>', 'per verification step, minutes')
+  .option('--timeout <min>', 'per arm run, minutes')
   .option('--base <branch>', 'base branch', 'main')
   .option('--plan <ref>', 'plan/PRD file path or URL every arm follows')
   .option('--setup <cmd>', 'setup command (e.g. npm ci)')
   .option('--rubric <text>', 'acceptance criteria shown to the judge')
-  .option('--domain <domain>', BENCH_DOMAINS.join('|'), 'other')
+  .option('--domain <domain>', `${BENCH_DOMAINS.join('|')} (default: the 驗證方案's, else other)`)
   .option('--complexity <c>', 'S|M|L', 'M')
   .option('--judge <model>', 'opus|fable|fable-5|sonnet (default: bench_judge_model)')
+  .option('--judges <csv>', 'several judges; each scores on its own and arms carry the mean')
   .option('--priority <n>', 'arm task priority')
   .action((o) => {
     if (!benchOn()) return;
     const plan = o.plan && !/^https?:\/\//i.test(o.plan) ? path.resolve(o.plan) : o.plan;
+    const steps = [...csvList(o.verify), ...(o.step as string[])];
+    if (!o.verifyPlan && (!o.repo || !steps.length)) return fail('--repo and --verify/--step are required unless --verify-plan supplies them');
+    const minutes = (v?: string) => (v == null ? null : Number(v));
     try {
       const { benchmark, arms } = createBenchmark(getDb(), {
         title: o.title,
         goal: o.goal,
         models: csvList(o.models),
-        repo_path: path.resolve(o.repo),
+        repo_path: o.repo ? path.resolve(o.repo) : null,
         base_branch: o.base,
-        verification_steps: csvList(o.verify),
+        verification_steps: steps,
+        verify_plan_id: o.verifyPlan ?? null,
+        dataset: o.dataset ?? null,
+        acceptance_metrics: o.metrics,
+        protected_paths: o.protect,
+        artifacts: o.artifacts,
+        verify_timeout_min: minutes(o.verifyTimeout),
+        timeout_min: minutes(o.timeout),
         plan_ref: plan ?? null,
         setup_cmd: o.setup ?? null,
         verify_rubric: o.rubric ?? null,
         domain: o.domain,
         complexity: o.complexity as Complexity,
         judge_model: o.judge,
+        judge_models: o.judges ? csvList(o.judges) : undefined,
         priority: o.priority != null ? Number(o.priority) : undefined,
       });
       console.log(`benchmark ${benchmark.id}  domain=${benchmark.domain} judge=${benchmark.judge_model}`);

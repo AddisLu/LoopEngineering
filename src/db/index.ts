@@ -179,6 +179,21 @@ function migrate(db: Database.Database): void {
     ['restore_model', 'TEXT'],
     ['consensus', 'TEXT'],
   ]);
+  // benchmarks held to a measured bar: the engine-checked thresholds, yardstick and artifacts every
+  // arm shares (often from a 驗證方案), its time limits, and per arm what each attempt measured
+  // (attempts_json) and the final same-conditions re-measurement the ranking goes by (final_json)
+  add('benchmarks', [
+    ['acceptance_metrics', 'TEXT'],
+    ['protected_paths', 'TEXT'],
+    ['artifacts', 'TEXT'],
+    ['verify_plan_id', 'TEXT'],
+    ['verify_timeout_min', 'INTEGER'],
+    ['timeout_min', 'INTEGER'],
+  ]);
+  add('benchmark_arms', [
+    ['attempts_json', 'TEXT'],
+    ['final_json', 'TEXT'],
+  ]);
   // 分享連結: an unguessable token makes one conversation readable without a login. Partial index
   // so the many NULLs (every unshared conversation) do not collide.
   add('chat_conversations', [
