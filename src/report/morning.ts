@@ -86,7 +86,12 @@ export interface MorningReport {
 
 /** SQLite's datetime('now') format (UTC), so string comparison orders correctly */
 const sqlTime = (d: Date) => d.toISOString().slice(0, 19).replace('T', ' ');
-const parseSql = (s: string | null) => (s ? new Date(`${s.replace(' ', 'T')}Z`) : null);
+/** started_at is SQLite's "YYYY-MM-DD HH:MM:SS" (UTC); finished_at is an ISO string (finishRun) */
+const parseSql = (s: string | null) => {
+  if (!s) return null;
+  const d = new Date(/[TZ]/.test(s) ? s : `${s.replace(' ', 'T')}Z`);
+  return Number.isNaN(d.getTime()) ? null : d;
+};
 
 function outcomeOf(task: Task, steps: VerifiedStep[], metrics: MetricsReport | null): MorningOutcome {
   switch (task.status) {
@@ -122,9 +127,9 @@ export function buildMorningReport(db: Database.Database, opts: { hours?: number
   const ids = db
     .prepare(
       `SELECT id FROM tasks t WHERE benchmark_id IS NULL AND (
-         EXISTS (SELECT 1 FROM task_runs r WHERE r.task_id = t.id AND (r.started_at >= @s OR r.finished_at >= @s))
+         EXISTS (SELECT 1 FROM task_runs r WHERE r.task_id = t.id AND (datetime(r.started_at) >= @s OR datetime(r.finished_at) >= @s))
          OR status IN ('running', 'verifying', 'queued', 'blocked')
-         OR (status IN ('attention', 'failed') AND updated_at >= @s))`,
+         OR (status IN ('attention', 'failed') AND datetime(updated_at) >= @s))`,
     )
     .all({ s }) as { id: string }[];
 
@@ -135,7 +140,7 @@ export function buildMorningReport(db: Database.Database, opts: { hours?: number
   const lastWorktree = db.prepare(
     'SELECT worktree_path FROM task_runs WHERE task_id = ? AND worktree_path IS NOT NULL ORDER BY started_at DESC, rowid DESC LIMIT 1',
   );
-  const runsInWindow = db.prepare('SELECT COUNT(*) n FROM task_runs WHERE task_id = ? AND started_at >= ?');
+  const runsInWindow = db.prepare('SELECT COUNT(*) n FROM task_runs WHERE task_id = ? AND datetime(started_at) >= ?');
   const statusDetail = db.prepare(
     "SELECT detail FROM task_events WHERE task_id = ? AND kind = 'status' AND to_status = ? ORDER BY id DESC LIMIT 1",
   );

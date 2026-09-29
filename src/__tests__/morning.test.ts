@@ -125,6 +125,8 @@ describe('local_task_window', () => {
 
 const sqlTime = (d: Date) => d.toISOString().slice(0, 19).replace('T', ' ');
 const hoursAgo = (h: number) => sqlTime(new Date(Date.now() - h * 3_600_000));
+/** finishRun writes finished_at as an ISO string, not SQLite's format */
+const isoHoursAgo = (h: number) => new Date(Date.now() - h * 3_600_000).toISOString();
 
 function seedRun(taskId: string, o: { startedH: number; finishedH?: number | null; verify?: unknown; metrics?: unknown; worktree?: string; model?: string }) {
   const id = `r_${nanoid(8)}`;
@@ -135,7 +137,7 @@ function seedRun(taskId: string, o: { startedH: number; finishedH?: number | nul
     id,
     taskId,
     hoursAgo(o.startedH),
-    o.finishedH == null ? null : hoursAgo(o.finishedH),
+    o.finishedH == null ? null : isoHoursAgo(o.finishedH),
     o.verify ? JSON.stringify(o.verify) : null,
     o.metrics ? JSON.stringify(o.metrics) : null,
     o.worktree ?? null,
@@ -225,6 +227,17 @@ describe('morning report', () => {
     expect(text).toContain('指標：沒有量到（門檻 detection_rate >= 0.98）');
     expect(text).toContain('PR：http://gitea.corp:3000/aoi/cf-aoi/pulls/12');
     expect(text).toContain('人工驗收：VERIFY.md 有 2 項待勾');
+  });
+
+  it('compares finish times as times, not strings (ISO finished_at vs SQLite started_at)', () => {
+    const t = createTask(db, { ...BASE, title: '昨天早上' });
+    setStatus(db, t.id, 'review');
+    // window starts 2026-09-28 12:00 UTC; the run finished the same day at 08:00 — as strings
+    // '2026-09-28T08…' sorts after '2026-09-28 12…', as times it is 4h before the window
+    db.prepare(`INSERT INTO task_runs (id, task_id, attempt, started_at, finished_at) VALUES ('r_same_day', ?, 1, '2026-09-28 07:00:00', '2026-09-28T08:00:00.000Z')`).run(t.id);
+    const now = new Date('2026-09-29T12:00:00Z');
+    expect(buildMorningReport(db, { now }).tasks.some((x) => x.id === t.id)).toBe(false);
+    expect(buildMorningReport(db, { now, hours: 30 }).tasks.find((x) => x.id === t.id)?.run?.minutes).toBe(60);
   });
 
   it('the window is adjustable, and an empty night says so', () => {
