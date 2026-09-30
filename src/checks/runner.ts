@@ -62,12 +62,14 @@ export interface CheckDeps {
   now?: () => number;
 }
 
-interface Deps {
+/** CheckDeps with every default filled in (resolveCheckDeps). */
+export interface ResolvedCheckDeps {
   machines: MachineRunner | null;
   shell: CheckShell;
   git: CheckGit;
   now: () => number;
 }
+type Deps = ResolvedCheckDeps;
 
 /**
  * The machine runner production uses when the caller injects none. The integrator binds the real SSH
