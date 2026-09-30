@@ -1,7 +1,11 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type Database from 'better-sqlite3';
 import { openTestDb, getSetting, setSetting } from '../db/index.js';
 import { ModelManager, type ModelManagerDeps, launchArgs, launchCommand } from '../local/modelManager.js';
+import { clearRecipeCache } from '../local/recipes.js';
 
 const QWEN = 'local-inference-lab/Qwen3.8-Flash-Next-NVFP4';
 
@@ -83,6 +87,58 @@ describe('launchArgs', () => {
       '-e',
       'HF_HUB_OFFLINE=1',
     ]);
+  });
+});
+
+describe('two Sparks', () => {
+  const GLM = 'zai-org/GLM-5.3-Flash';
+  function clusterSetup(sparks: number) {
+    const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'loop-vllm-'));
+    fs.mkdirSync(path.join(repo, 'recipes'));
+    fs.writeFileSync(path.join(repo, 'recipes', 'glm-5.3-flash.yaml'), 'model: zai-org/GLM-5.3-Flash\ncluster_only: true\ncommand: vllm serve x\n');
+    setSetting(db, 'local_vllm_repo', repo);
+    setSetting(db, 'local_spark_nodes', String(sparks));
+    db.prepare("INSERT INTO local_models (id, display_name, recipe, served_model_id, enabled) VALUES ('glm53', 'GLM', 'glm-5.3-flash', ?, 1)").run(GLM);
+    return repo;
+  }
+
+  it('a recipe that needs two Sparks starts across the cluster, and switching away stops both nodes', async () => {
+    clearRecipeCache();
+    const repo = clusterSetup(2);
+    expect(launchArgs('/r/spark', 'glm-5.3-flash', true)).toEqual(['/r/spark/run-recipe.sh', 'glm-5.3-flash', '--earlyoom', '-e', 'HF_HUB_OFFLINE=1']);
+    const h = harness({ served: [null, GLM] });
+    const launched: Array<{ recipe: string; cluster: boolean }> = [];
+    const mm = new ModelManager(db, { ...h.deps, launch: (_r, recipe, _l, o) => (launched.push({ recipe, cluster: o?.cluster ?? false }), { pid: 1, onExit: () => {} }) });
+    mm.ensureLoaded('glm53');
+    await mm.waitForSwitch();
+    expect(mm.state().status).toBe('ready');
+    expect(launched).toEqual([{ recipe: 'glm-5.3-flash', cluster: true }]);
+    // before anything starts, whatever ran on either node is stopped
+    expect(h.calls.slice(0, 3)).toEqual(['shutdownWorkers', `bash ${repo}/launch-cluster.sh --name vllm_node stop`, 'docker stop vllm_node']);
+    // a one-Spark recipe on the same cluster still runs solo, and the worker's container still goes
+    const h2 = harness({ served: [null, QWEN] });
+    const launched2: boolean[] = [];
+    const mm2 = new ModelManager(db, { ...h2.deps, launch: (_r, _recipe, _l, o) => (launched2.push(o?.cluster ?? false), { pid: 1, onExit: () => {} }) });
+    mm2.ensureLoaded('qwen38-flash');
+    await mm2.waitForSwitch();
+    expect(launched2).toEqual([false]);
+    expect(h2.calls).toContain(`bash ${repo}/launch-cluster.sh --name vllm_node stop`);
+    await mm2.stop();
+    expect(h2.calls.filter((c) => c.includes('launch-cluster.sh')).length).toBe(2);
+    fs.rmSync(repo, { recursive: true, force: true });
+  });
+
+  it('one Spark: exactly as before — no cluster launch, no remote stop', async () => {
+    clearRecipeCache();
+    const repo = clusterSetup(1);
+    const h = harness({ served: [null, QWEN] });
+    const mm = new ModelManager(db, h.deps);
+    mm.ensureLoaded('qwen38-flash');
+    await mm.waitForSwitch();
+    expect(h.calls.some((c) => c.includes('launch-cluster.sh'))).toBe(false);
+    await mm.stop();
+    expect(h.calls.some((c) => c.includes('launch-cluster.sh'))).toBe(false);
+    fs.rmSync(repo, { recursive: true, force: true });
   });
 });
 

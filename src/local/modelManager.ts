@@ -8,6 +8,8 @@ import { getNum, getSetting, setSetting, logEvent } from '../db/index.js';
 import { notify } from '../notify.js';
 import { getLocalModel, listLocalModels } from './models.js';
 import { weightsComplete } from './weights.js';
+import { recipeInfo } from './recipes.js';
+import { localSparkNodes } from './guard.js';
 import { scopedCommand, unitName } from './scope.js';
 import { shutdownWarmWorkers } from '../voice/daemon.js';
 import { getTranscribeWarmWorkerSingleton } from '../voice/transcribe.js';
@@ -42,8 +44,11 @@ export interface LauncherHandle {
 }
 
 export interface ModelManagerDeps {
-  /** Start `bash <repo>/run-recipe.sh <recipe> --solo --earlyoom` detached, output -> logPath. */
-  launch?: (repo: string, recipe: string, logPath: string) => LauncherHandle;
+  /**
+   * Start `bash <repo>/run-recipe.sh <recipe> --solo --earlyoom` detached, output -> logPath;
+   * with `cluster`, without --solo: across the nodes in the vLLM repo's .env (CLUSTER_NODES).
+   */
+  launch?: (repo: string, recipe: string, logPath: string, opts?: { cluster: boolean }) => LauncherHandle;
   /** Run a short command (docker stop/rm); resolves with the exit code, never rejects. */
   exec?: (cmd: string, args: string[], timeoutMs: number) => Promise<number | null>;
   /** Is a container with this name still known to docker? (the --rm removal race, see switchTo) */
@@ -67,8 +72,9 @@ const REFRESH_MS = 5 * 60_000;
  * makes vLLM resolve that revision instead and quietly start re-downloading ~100 GB mid-switch —
  * which is how this machine ended up with no model at all during a demo.
  */
-export function launchArgs(repo: string, recipe: string): string[] {
-  return [path.join(repo, 'run-recipe.sh'), recipe, '--solo', '--earlyoom', '-e', 'HF_HUB_OFFLINE=1'];
+export function launchArgs(repo: string, recipe: string, cluster = false): string[] {
+  // two Sparks: no --solo — run-recipe.sh reads the nodes from the vLLM repo's .env (CLUSTER_NODES)
+  return [path.join(repo, 'run-recipe.sh'), recipe, ...(cluster ? [] : ['--solo']), '--earlyoom', '-e', 'HF_HUB_OFFLINE=1'];
 }
 
 /**
@@ -77,13 +83,19 @@ export function launchArgs(repo: string, recipe: string): string[] {
  * model the operator is talking to down with it. The launcher therefore runs in its own
  * transient scope (src/local/scope.ts) and reconcile() re-adopts it after the restart.
  */
-export function launchCommand(repo: string, recipe: string, logName: string, env: NodeJS.ProcessEnv = process.env): { cmd: string; args: string[] } {
-  return scopedCommand('bash', launchArgs(repo, recipe), unitName('loop', logName), env);
+export function launchCommand(
+  repo: string,
+  recipe: string,
+  logName: string,
+  env: NodeJS.ProcessEnv = process.env,
+  cluster = false,
+): { cmd: string; args: string[] } {
+  return scopedCommand('bash', launchArgs(repo, recipe, cluster), unitName('loop', logName), env);
 }
 
-function defaultLaunch(repo: string, recipe: string, logPath: string): LauncherHandle {
+function defaultLaunch(repo: string, recipe: string, logPath: string, opts?: { cluster: boolean }): LauncherHandle {
   const fd = fs.openSync(logPath, 'a');
-  const { cmd, args } = launchCommand(repo, recipe, path.basename(logPath, '.log'));
+  const { cmd, args } = launchCommand(repo, recipe, path.basename(logPath, '.log'), process.env, opts?.cluster ?? false);
   // detached + unref: vLLM outlives an engine restart (reconcile() re-adopts it).
   const child = nodeSpawn(cmd, args, {
     cwd: repo,
@@ -212,9 +224,26 @@ export class ModelManager {
   /** Stop vLLM entirely (frees the GPU). Waits for an in-flight switch first. */
   async stop(): Promise<void> {
     if (this.switching) await this.switching.catch(() => {});
+    await this.stopClusterNodes();
     await this.d.exec('docker', ['stop', this.container()], 120_000);
     this.set({ loaded: null, status: 'idle', error: null });
     logEvent(this.db, { kind: 'note', detail: 'local model: stopped' });
+  }
+
+  /**
+   * Two Sparks: a model may have been started across both, so the worker's container must go too.
+   * launch-cluster.sh stop stops it on every node in the vLLM repo's .env (over ssh). One Spark:
+   * nothing to do — the local `docker stop` that follows is all there ever was.
+   */
+  private async stopClusterNodes(): Promise<void> {
+    if (localSparkNodes(this.db) < 2) return;
+    const repo = getSetting(this.db, 'local_vllm_repo') || '';
+    await this.d.exec('bash', [path.join(repo, 'launch-cluster.sh'), '--name', this.container(), 'stop'], 180_000);
+  }
+
+  /** A recipe that needs more than one Spark, on a deployment that has them: start it across the cluster. */
+  private clusterLaunch(recipe: string, repo: string): boolean {
+    return (recipeInfo(recipe, repo)?.nodes ?? 1) > 1 && localSparkNodes(this.db) >= 2;
   }
 
   private container(): string {
@@ -236,6 +265,7 @@ export class ModelManager {
     }
 
     this.d.shutdownWorkers();
+    await this.stopClusterNodes();
     await this.d.exec('docker', ['stop', this.container()], 120_000);
     await this.d.exec('docker', ['rm', '-f', this.container()], 60_000);
     // launch-cluster.sh runs the container with `--rm`, so the daemon removes it asynchronously
@@ -247,9 +277,11 @@ export class ModelManager {
 
     const repo = getSetting(this.db, 'local_vllm_repo') || '';
     const logPath = path.join(paths.logsDir, `vllm-${id}-${started}.log`);
+    const cluster = this.clusterLaunch(model.recipe, repo);
+    if (cluster) logEvent(this.db, { kind: 'note', detail: `local model: ${id} needs two Sparks — starting it across the cluster` });
     let exited: number | null | undefined;
     try {
-      this.d.launch(repo, model.recipe, logPath).onExit((code) => {
+      this.d.launch(repo, model.recipe, logPath, { cluster }).onExit((code) => {
         exited = code;
       });
     } catch (err) {
