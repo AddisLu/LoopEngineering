@@ -119,9 +119,11 @@ function paintNeedBadge() {
 
 /** Registered in the init block, after every `let` it reads: a snapshot already in hand is delivered at once. */
 function onSnapshot(s) {
-  const wasBench = benchBusy && benchBusy.id;
+  const benchKey = () => (benchBusy ? `${benchBusy.id}|${benchBusy.status}|${benchBusy.arms_done}|${schedPaused}` : '');
+  const was = benchKey();
   benchBusy = s.benchmark || null;
-  if ((benchBusy && benchBusy.id) !== wasBench && catalogData) paintCatalog(catalogData);
+  schedPaused = Boolean(s.paused);
+  if (benchKey() !== was && catalogData) paintCatalog(catalogData);
   needCount = (s.cards || []).filter(needsYou).length;
   waitCount = (s.cards || []).filter(awaiting).length;
   paintNeedBadge();
@@ -156,7 +158,13 @@ function roleTag(e, small) {
 let switching = false;
 let jobTimer = null;
 let catalogData = null;
-let benchBusy = null; // board snapshot: a benchmark owns the GPU, so switching must wait
+let benchBusy = null; // board snapshot: the benchmark in progress, if any
+let schedPaused = false; // board snapshot: nothing dispatches, so a benchmark between arms is not on the GPU
+
+/** A benchmark owns the GPU (switching must wait) unless the scheduler is paused before it judges. */
+function benchHolds() {
+  return Boolean(benchBusy) && !(schedPaused && benchBusy.status === 'running');
+}
 
 function actionButton(e, data) {
   const busy = data.job && data.job.status === 'running';
@@ -178,8 +186,9 @@ function actionButton(e, data) {
     b.textContent = `建置映像（${e.container}）`;
     b.onclick = () => startJob('build', e.recipe, e.name);
   }
-  if (busy || switching || (benchBusy && e.action === 'switch')) b.disabled = true;
-  if (benchBusy && e.action === 'switch') b.title = `評比使用中：${benchBusy.title}`;
+  const held = benchHolds() && e.action === 'switch';
+  if (busy || switching || held) b.disabled = true;
+  if (held) b.title = `評比使用中：${benchBusy.title}`;
   return b;
 }
 
@@ -224,10 +233,15 @@ function paintCatalog(data) {
   const note = $('switch-state');
   note.classList.toggle('busy', st.status !== 'ready' && st.status !== 'idle');
   note.classList.toggle('bad', st.status === 'error');
+  // the benchmark gets its own line: the lists below must still paint, or the panel goes blank
+  const bench = $('switch-bench');
+  bench.hidden = !benchBusy;
+  bench.classList.toggle('busy', benchHolds());
   if (benchBusy) {
-    note.classList.add('busy');
-    note.textContent = `評比使用中：${benchBusy.title}（${benchBusy.arms_done}/${benchBusy.arm_count} 組）——評比會自己輪流切換模型，結束後切回原本的`;
-    return;
+    const which = `${benchBusy.title}（${benchBusy.arms_done}/${benchBusy.arm_count} 組）`;
+    bench.textContent = benchHolds()
+      ? `評比使用中：${which}——評比會自己輪流切換模型，結束後切回原本的`
+      : `評比暫停中：${which}——現在可以切換模型；恢復排程後，評比會自己換回它要用的模型`;
   }
   note.textContent =
     st.status === 'ready'

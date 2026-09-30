@@ -513,6 +513,8 @@ a.menu-item { display: block; text-decoration: none; color: inherit; }
 #switch-state { font-size: 14px; font-weight: 500; opacity: 1; }
 #switch-state.busy { color: var(--warn); }
 #switch-state.bad { color: var(--danger); }
+#switch-bench { margin-top: 6px; }
+#switch-bench.busy { color: var(--warn); }
 
 /* 推薦 cards: one tag, one name, one button */
 .reco-list { display: flex; flex-direction: column; gap: 8px; }

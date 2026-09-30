@@ -116,6 +116,13 @@ describe('benchmarks page + local model board wiring: static assets', () => {
     const dock = fs.readFileSync(path.join(WEB_DIR, 'dock.js'), 'utf8');
     expect(dock).not.toContain('/api/benchmarks/summary');
     expect(dock).toContain('評比使用中'); // the model switcher waits for the benchmark
+    // …but only while it can touch the GPU: paused before judging, the operator may switch
+    expect(dock).toContain("schedPaused && benchBusy.status === 'running'");
+    expect(dock).toContain('評比暫停中');
+    // and the note never cuts the panel short: 推薦 and 全部模型 still paint under it
+    const paint = dock.slice(dock.indexOf('function paintCatalog('), dock.indexOf('function paintJob('));
+    expect(paint).toContain("$('model-list')");
+    expect(paint.slice(0, paint.indexOf("$('model-list')"))).not.toMatch(/\breturn\b/);
     const html = fs.readFileSync(path.join(WEB_DIR, 'index.html'), 'utf8');
     for (const id of ['pane-bench', 'bench-running', 'bench-models', 'bench-list']) expect(html).not.toContain(`id="${id}"`);
   });
