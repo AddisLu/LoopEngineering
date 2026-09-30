@@ -160,6 +160,7 @@
     <a href="#remote">4 · 遠端存取（Mac / 手機）</a>
     <a href="#board">5 · 對話工作台與任務看板</a>
     <a href="#redesign">5a · 介面改版：總覽・工作流程・評比</a>
+    <a href="#tickets">5b · 問題單：從問題到 PR</a>
     <a href="#newtask">6 · 新增任務與入場審核</a>
     <a href="#cli">7 · CLI 指令參考</a>
     <a href="#settings">8 · 設定與環境變數</a>
@@ -417,6 +418,298 @@
       </table>
       </div>
       <p>驗證步驟現在會記錄各自花的時間（<code>task_runs.verify_json</code> 的 <code>ms</code>）；看板的即時串流改成每秒只組一份快照給所有連線、入場審核結果依任務快取、log 只讀檔尾 64 KB，開很多分頁也不會拖慢引擎。</p>
+    </section>
+
+    <section id="tickets">
+      <h2><span class="num">05b</span>問題單：從問題到 PR</h2>
+      <p>修 bug、加功能、調效能、改演算法，都從<b>問題單</b>開始。你只要給三樣東西：<b>repo 網址（或 Gitea issue 連結）</b>、<b>一段描述</b>，有的話再加<b>截圖</b>。其餘由 Loop 偵測並提出分析，你確認之後它才動手：在隔離的 worktree 修、到設好的機台跑檢查、開 Gitea PR、回 issue 留言。驗收是每個 repo 設定一次的<b>檢查</b>，像 CI 一樣一項一項亮綠燈或紅燈。每個 LLM 步驟都可以只用本地模型（見下面的「公司模式」）。</p>
+      <div class="note info"><span class="ic">ℹ️</span><span><b>問題單就是一張草稿任務。</b>它是 <code>draft</code> 狀態的任務：總覽、需要你處理、晨報都看得到，按「開始修」之後走同一套生命週期（第 2 章）。分析卡存在任務上；需求文件（PRD）仍是任務的計畫，由 Loop 照範本組好，介面上不再有表單要填。<b>工作流程</b>與<b>驗證方案</b>（第 5a、26d 章）還在，留給評比與進階用途，之後會移除。</span></div>
+
+      <h3>四步流程</h3>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>步驟</th><th>在哪裡</th><th>做什麼</th></tr></thead>
+        <tbody>
+          <tr><td>1 開單</td><td>左側欄「問題單」（<code>/fix.html</code>），或對話頁</td><td>貼 Gitea 的 repo 或 issue 網址，寫發生什麼事、在哪裡、期望應該怎樣，<kbd>Ctrl</kbd>+<kbd>V</kbd> 貼截圖，按「請 Loop 分析」。第一次用到的 repo 會先跳出匯入對話框（約 1 分鐘，見下面「Repo 設定」）。</td></tr>
+          <tr><td>2 看分析卡</td><td>同一頁（<code>/fix.html?id=t_…</code>）</td><td>30 秒到 2 分鐘後出現：可能原因與位置、重現方式、驗收清單、機台、模型、預估。哪一塊不對，就按那一塊的「改一下」。</td></tr>
+          <tr><td>3 開始修</td><td>分析卡的「開始修」（主管模式是「送出核可」）</td><td>Loop 在隔離的 worktree 修，自己先跑到綠；引擎再到機台跑全部檢查。修不好就換下一個本地模型再試。通過後做本地自評、開 Gitea PR、在 issue 留言。</td></tr>
+          <tr><td>4 看結果</td><td>結果頁（<code>/task.html?id=…</code>）</td><td>結論色塊、Loop 的自評、檢查清單（每項都能看紀錄）、圖資逐案例、程式碼 diff、嘗試記錄。按「合併」（走 Gitea PR 合併，可以順便關 issue），或按「退回修改…」寫一句話讓 Loop 接著改。</td></tr>
+        </tbody>
+      </table></div>
+      <p>問題單頁（<code>/fix.html</code>）的細節：</p>
+      <ul>
+        <li><b>描述框</b>：寫「發生什麼事、在哪裡、期望應該怎樣」，可以直接貼錯誤訊息、螢幕截圖、Gitea 的 issue 或 repo 連結。標題可以留空，Loop 會取。描述至少 10 個字、而且選好 repo，「請 Loop 分析」才會亮；「先存草稿」先存起來，之後再回來分析。</li>
+        <li><b>貼網址會自動偵測</b>：issue 連結 → 出現「issue #12 · 標題」晶片，描述帶入 issue 內容、repo 鎖定、issue 的附件圖變成截圖；repo 連結 → 帶入 repo。還沒匯入的 repo 會出現「匯入 aoi/cf-aoi」內嵌卡。</li>
+        <li><b>截圖</b>：貼上或拖進來，最多 6 張、每張 4 MB 以內，瀏覽器先縮到 1600 px。截圖上的文字由本地模型或 OCR 讀出來，用在找原因與實作模型的提示（見「準確度設定」的 <code>intake_vision</code>）；圖檔本身也附給實作模型。</li>
+        <li><b>右欄屬性</b>：Repo（已匯入的清單，最後一項「＋ 匯入 Repo…」）、分支、類型（錯誤修復／功能／效能／演算法，分析後自動填，可改）、機台（唯讀摘要，帶健康點）、模型（「由 Loop 依領域挑」，可改）、優先（低／中／高）、來源（issue 或對話）。</li>
+        <li><b>分析中</b>：表單下方是進度清單，每 3 秒更新：讀取 repo 地圖 → 讀截圖（有截圖時）→ 比對錯誤字串與符號 → 提出重現方式 → 挑選必過檢查 → 本地模型複核。分析沒完成時可以「重試」，或「改成手動填寫」（分析卡以空白的編輯狀態打開，自己填重現方式、勾檢查）。</li>
+        <li><b>對話頁也能開單</b>：描述問題並貼上 repo 或 issue 連結，Loop 會開一張問題單，在對話裡顯示精簡的分析卡，回覆「確認」就開始修。輸入框旁的「轉成問題單」晶片把目前的文字與截圖直接開成問題單；回答底下的「轉成任務」變成「開問題單／留待辦」。</li>
+      </ul>
+      <p>分析卡標頭上的狀態：</p>
+      <div class="lifecycle">
+        <span class="st">分析中</span><span class="arr">→</span>
+        <span class="st">就緒</span><span class="arr">→（主管模式）→</span>
+        <span class="st rev">待核可</span><span class="arr">→</span>
+        <span class="st">已排入</span><span class="arr">→</span>
+        <span class="st run">執行中</span><span class="arr">→</span>
+        <span class="st ok">已完成</span>
+      </div>
+      <p style="color:var(--ink-3);font-size:14px">對應的任務狀態：就緒＝分析好的 <code>draft</code>；已排入＝<code>queued</code>；執行中＝<code>running</code>／<code>verifying</code>；已完成＝<code>review</code>／<code>closed</code>；<code>attention</code>／<code>failed</code> 顯示「需要處理」。</p>
+
+      <h3>分析卡：每一塊在說什麼</h3>
+      <p>標頭一行：標題 · 類型 · <code>aoi/cf-aoi @ main</code> · 狀態。下面五塊，每塊右上角有「改一下」的鉛筆，只把那一塊切成編輯。</p>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>區塊</th><th>內容</th><th>可以怎麼改</th></tr></thead>
+        <tbody>
+          <tr><td>可能原因與位置</td><td>最多 6 列：檔案 · 一句話 · 證據行（「第 214 行：…」）· 最近修改（「2 週前 · fix(control): …」）。Loop 從描述與截圖文字抽出錯誤字串、識別字、路徑、中文介面字，在 repo 裡搜尋計分，排出最可疑的檔案，附上每個檔案最近的 commit。找不到時寫「沒有找到明確位置；Loop 會從描述裡的關鍵字搜尋。」</td><td>刪掉一列；加一個檔案（路徑從 repo 地圖自動完成）。</td></tr>
+          <tr><td>重現方式</td><td>二選一。<b>「有現成的重現指令」</b>：指令＋徽章「修改前必須失敗」＋分析時試跑的結果（「現在：✗ 失敗（exit 1）— 正確」，或警告「現在就通過了，可能重現不了」）。<b>「請 Loop 先寫一個會失敗的測試」</b>：寫出會在哪個測試檔新增，驗收時確認它修改前紅、修改後綠。</td><td>切換兩種方式、改指令。</td></tr>
+          <tr><td>驗收清單</td><td>這次會跑的檢查，長得像 GitHub 的 checks：<code>☑ 必過 · 建置 · cmake --build build（aoi-1）</code>、<code>☑ 必過 · 單元測試</code>、<code>☑ 重現 · 修前紅、修後綠</code>、<code>☐ 圖資回歸 · dataset-2026Q2 · 正確率不低於 98.7%、時間不超過 5.3 s</code>。</td><td>必過的不能取消勾選；選用的可以勾掉。「管理這個 repo 的檢查」連到 Repo 頁。</td></tr>
+          <tr><td>執行條件</td><td>機台（含上次檢查時間）· 模型與理由（例：「qwen3-coder-next（本地；C++ 領域通過率 71%）」）· 預估（規模、約幾分鐘、要不要等夜間時段 <code>local_task_window</code>）· 修不好時（最多自己修幾次、之後換哪個本地模型，來自 <code>fix_attempts</code>／<code>fix_escalation</code>）。</td><td>改模型。</td></tr>
+          <tr><td>Loop 還不確定</td><td>本地模型複核時覺得沒講清楚的地方；沒有就不顯示。主管退回的原因也放在這裡。</td><td>每條按「回答」：答案接在描述後面，分析重跑。這些問題不會擋住「開始修」（除非設了 <code>prd_require_llm</code>）。</td></tr>
+        </tbody>
+      </table></div>
+      <p>頁尾：<b>開始修</b>（主管模式：<b>送出核可</b>）、<b>取消</b>（刪掉這張草稿和它的截圖）、<b>看需求文件</b>（唯讀抽屜：Loop 照範本組出來的 PRD，也就是實作模型實際讀到的計畫）。</p>
+      <div class="note tip"><span class="ic">🔗</span><span><b>按下「開始修」之後。</b>它照樣要過入場審核（第 6 章），沒過會列出原因。這張單要跑的檢查（連同基準換算出來的門檻）存在任務上：之後再改 repo 的檢查，已經排入的任務不受影響。</span></div>
+
+      <h3>驗收清單與「檢查」</h3>
+      <p>檢查是每個 repo 設定一次的驗收項目（Repo 頁的「檢查」分頁），之後每張問題單都會跑。你只回答兩件事：<b>怎麼跑</b>、<b>怎麼算過</b>。<code>LOOP_METRICS</code>、<code>{dataset}</code>、<code>sandbox:</code>、容器路徑、指標名稱都由 Loop 產生或偵測。</p>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>類型</th><th>怎麼跑</th><th>怎麼算過</th></tr></thead>
+        <tbody>
+          <tr><td>建置／測試／自訂</td><td>一行指令（Windows 機台用 PowerShell 語法）。</td><td><code>exit 0</code>，或指標門檻。</td></tr>
+          <tr><td>重現腳本</td><td>指令＋「修改前必須失敗」（預設勾）＋測試檔 glob（例 <code>tests/**</code>）。</td><td>修改前失敗、修改後通過（紅→綠）。</td></tr>
+          <tr><td>圖資回歸</td><td>選一個圖資＋指令範本，例 <code>run_inference --in {images} --out {out}</code>：<code>{images}</code> 圖片資料夾、<code>{answers}</code> 答案檔、<code>{out}</code> 輸出資料夾（Loop 會收回來比對）。</td><td>正確率不低於基準／時間不超過基準 ×1.1／自訂門檻。</td></tr>
+          <tr><td>人工</td><td>一行清單文字。</td><td>在結果頁由人勾選。</td></tr>
+        </tbody>
+      </table></div>
+      <p>編輯器（對話框）的類型分段有五種：<b>建置 · 測試 · 重現腳本 · 圖資回歸 · 自訂</b>，欄位隨類型改變。其他欄位：在哪裡跑（引擎主機或某台機台，帶作業系統與健康點）、怎麼算過（<code>exit 0</code>／指標門檻／不比基準差）、逾時（分鐘，預設 20，<code>check_timeout_min</code>）、產出物、保護路徑（提示：量尺、評估程式、答案檔）、必過。</p>
+      <p>檢查清單每一列：名稱 · 類型 · 在哪跑 · 怎麼算過 · 最近一次（✓ 2 小時前／✗／未跑過）· 必過 · ⋯（試跑一次／編輯／停用／刪除），可以拖曳排序（建置排在測試前面）。還沒有檢查時會寫「還沒有檢查。先加一個建置或測試檢查；之後每張問題單都會跑它們。」，旁邊的「用偵測到的指令建立」一次建好建置與測試兩項。</p>
+      <ul>
+        <li><b>試跑一次＝偵測指標</b>：編輯器頁尾的「試跑一次」在 repo 的預設分支跑一次，輸出即時顯示，結束時列出「偵測到的指標」晶片。<b>指標門檻的名稱只能從這些晶片選</b>，還沒試跑過會先請你試跑，不必再猜名字。圖資回歸的指標名稱固定：<code>correct_rate</code>、<code>mismatches</code>、<code>missing</code>、<code>total</code>、<code>time_ms</code>。</li>
+        <li><b>基準</b>：圖資回歸試跑完會顯示「基準：正確率 98.7%，5.1 s（@ 3f2a1c）」，按「設為基準」記下那個 commit 與數值。「不比基準差」在建立任務時換算成具體門檻（正確率 ≥ 基準、<code>time_ms</code> ≤ 基準 ×1.1），所以之後改基準不會影響已排入的任務。<code>checks_baseline_refresh</code>（預設關）打開後，夜間會自動重量預設分支已經往前走的基準。</li>
+        <li><b>重現紅→綠</b>：驗收時，引擎把測試檔（這次新增的，加上符合 glob 的）放到 base 的暫存 worktree 跑，必須<b>失敗</b>；再在修改後的版本跑，必須<b>通過</b>。結果寫成「修改前：✗ exit 1 · 修改後：✓ exit 0」。在機台上跑的重現檢查，兩次都在那台跑。這是給本地模型最硬的護欄：它不能靠改測試過關。</li>
+        <li><b>圖資回歸</b>：圖資是一個 Gitea repo，放原圖資料夾與答案檔，在 Repo 頁的「圖資」分頁連結。執行時：機台上 clone 或更新圖資 repo（有 LFS 就 <code>git lfs pull</code>，機台要裝 git-lfs）→ 代入 <code>{images}</code> <code>{answers}</code> <code>{out}</code> 執行 → 把 <code>{out}</code> 拉回 Spark → 引擎比對：答案檔的 json、csv、labels（每張圖一個 YOLO <code>.txt</code>）三種格式自動判斷，標籤相同才算對，兩邊都有框時 IoU 要 ≥ 0.5 → 產生指標與逐案例結果。軟體輸出在 <code>{out}/overlays/</code> 的覆蓋圖會一起收回。比對在引擎主機做，機台不需要 Python。</li>
+        <li><b>檢查的名稱就是步驟名稱</b>：失敗原因、需要你處理、PR 內文、晨報都寫「單元測試」，不會出現 <code>check:ck_…</code>。實作模型在 LOOP_TASK.md 看到每項檢查的名稱、指令與在哪台跑，並被要求把本地能跑的（建置、測試、重現）自己先跑到綠。</li>
+        <li><b>舊的驗證方案</b>會轉成對應 repo 的檢查；驗證方案頁保留到移除為止。</li>
+      </ul>
+      <div class="note warn"><span class="ic">⚠️</span><span><b>AOI 軟體目前只有 GUI：圖資回歸要先有命令列入口。</b>圖資回歸需要一個「給一個資料夾、輸出結果檔」的 headless 命令列入口。還沒有的 repo，編輯器會寫「這個 repo 還沒有命令列入口，圖資回歸無法自動跑」，旁邊的「請 Loop 幫這個 repo 加命令列入口」會開一張範本問題單。在那之前，圖資項目以<b>人工驗收</b>的形式進驗收清單，結果頁附圖讓人勾選。建議每個 AOI repo 的第一張問題單就是這一張：加一個命令列入口。</span></div>
+
+      <h3>Repo 設定</h3>
+      <p>Repo 頁（<code>/repos.html</code>，左側欄「Repo」）列出匯入過的 repo，每張卡一行，例：<code>cf-aoi · aoi/cf-aoi · main · 3 個必過檢查 · 機台 aoi-1 · 地圖 3 分鐘前</code>。右上角是「匯入 Repo」；還沒有 repo 時寫「還沒有 repo。貼上 Gitea 的網址就能開始。」</p>
+      <p><b>匯入對話框</b>（一個對話框、三步）：</p>
+      <ol>
+        <li><b>貼網址</b>：只接受公司 Gitea 上的 repo。</li>
+        <li><b>等進度</b>：複製中 → 偵測建置與測試指令 → 產生 repo 地圖。</li>
+        <li><b>確認三個欄位</b>：名稱、預設分支、在哪台機台驗證（機台清單，或「引擎主機」）。下方唯讀的「偵測到」列出語言比例、建置、測試、前置指令。偵測不到也能完成（「偵測不到建置指令，之後可在 Repo 設定補」）。</li>
+      </ol>
+      <ul>
+        <li><b>複製到哪</b>：<code>git_clone_root</code>（預設 <code>~/Addis/repos</code>）底下。這份 clone 是引擎用的，不要在裡面手動改。已經有同一個網址的本機副本（例如對話操作抓過的），就直接登錄它。</li>
+        <li><b>網址</b>：https 或 ssh（<code>ssh://git@主機:埠/擁有者/專案</code>、<code>git@主機:擁有者/專案</code>）；<code>http://</code> 只接受 <code>gitea_url</code> 那台。網址裡不要放帳號或 token：Gitea 的 http(s) 網址由引擎帶 <code>GITEA_TOKEN</code>（見下面「Gitea issue 串接」）。</li>
+        <li><b>順便做的事</b>：加進 <code>prd_repo_allowlist</code>（工作流程、對話操作也選得到）；<code>repo_auto_ingest</code>（預設開）時同時登錄成知識庫來源，在背景讀取；repo 地圖寫在 <code>&lt;資料目錄&gt;/repo-maps/</code>，分析時發現 commit 變了會重建。</li>
+      </ul>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>詳情分頁</th><th>內容</th></tr></thead>
+        <tbody>
+          <tr><td>設定</td><td>網址、本機路徑（唯讀）、預設分支、PR 目標分支；機密：「只用本地模型（全域）」（跟著公司模式，見下面）；建置／測試／前置指令＋「重新偵測」；地圖狀態＋「重新產生」；問題單來源：「從 Gitea issue 自動接單」＋標籤（例 <code>loop</code>）、「留言回報進度」；危險區：移除 repo（只移除登錄和 repo 選單的項目，clone 留在磁碟上）。</td></tr>
+          <tr><td>檢查</td><td>見上一節。</td></tr>
+          <tr><td>圖資</td><td>連結的圖資 repo：名稱、張數、答案檔與格式、在機台上的快取狀態。「＋ 連結圖資 repo」：貼網址 → 偵測圖片資料夾、答案檔與格式 → 確認。</td></tr>
+          <tr><td>過去修法</td><td>這個 repo 修過什麼：日期、問題、改了哪些檔、結果（合併／退回）、模型；點一列開那張的結果頁。問題單合併、退回或放棄時自動記一筆，分析時會找相似的來參考。</td></tr>
+        </tbody>
+      </table></div>
+      <pre><code>loop repo import http://gitea.corp:3000/aoi/cf-aoi.git   # 和匯入對話框同一件事；印出每一步與 repo id
+loop repo list
+loop repo rm r_…                                          # 只移除登錄，clone 留著</code></pre>
+
+      <h3>機台</h3>
+      <p>機台是一台能用 SSH 登入、裝了 git 的電腦（Linux 或 Windows），repo 的檢查在上面跑，不需要 Docker。它和第 26b／26c 章的 GPU 沙盒主機（<code>exec_hosts</code>）是兩回事：沙盒主機照舊，在機台頁最下面摺疊的「GPU 沙盒主機（進階）」唯讀列出。</p>
+      <p>機台頁（<code>/machines.html</code>）是一張表：名稱 · SSH · 作業系統 · 標籤 · 狀態（● 正常 10 分鐘前／● 連不上／○ 未檢查）· 用它的 repo · ⋯。還沒有時寫「還沒有機台。加一台能 SSH 進去、裝了 git 的電腦。」</p>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>新增／編輯的欄位</th><th>說明</th></tr></thead>
+        <tbody>
+          <tr><td>名稱</td><td>小寫英數、<code>_</code>、<code>-</code>，最多 40 字，不能叫 <code>local</code> 或 <code>engine</code>。之後不能改名（檢查用名稱指到它）。</td></tr>
+          <tr><td>SSH 目標、埠</td><td><code>user@host</code>，或 <code>~/.ssh/config</code> 裡的別名。只用金鑰登入，引擎不會問密碼。</td></tr>
+          <tr><td>作業系統</td><td>Linux／Windows。不確定就留「自動」，第一次檢查時會記住。</td></tr>
+          <tr><td>Shell</td><td>檢查指令用哪種語法：自動（Linux＝bash、Windows＝PowerShell）／bash／PowerShell／cmd。</td></tr>
+          <tr><td>工作目錄</td><td>repo 複本與圖資放這裡：Linux 例 <code>/srv/loop</code>、Windows 例 <code>C:\loop</code>。只能用英數、<code>_</code>、<code>.</code>、<code>-</code>，不能有空白。</td></tr>
+          <tr><td>標籤、說明</td><td>標籤例 <code>cuda</code>、<code>aoi-v3</code>、<code>camera</code>；說明是給模型看的：這台有什麼。</td></tr>
+          <tr><td>取碼方式</td><td>自動（由檢查決定）／Gitea／由 Spark 傳檔，見下面。</td></tr>
+        </tbody>
+      </table></div>
+
+      <p><b>SSH 金鑰怎麼放</b>（在 Spark 上，用跑引擎的那個帳號）：</p>
+      <ol>
+        <li>還沒有金鑰就建一把：<code>ssh-keygen -t ed25519</code>；公鑰在 <code>~/.ssh/id_ed25519.pub</code>。</li>
+        <li><b>Linux 機台</b>：<code>ssh-copy-id user@host</code>（不是 22 埠就加 <code>-p 埠</code>），再手動 <code>ssh user@host</code> 一次，接受 host key。</li>
+        <li><b>Windows 機台</b>（內建的 OpenSSH Server）：一般帳號把公鑰加進 <code>C:\Users\&lt;帳號&gt;\.ssh\authorized_keys</code>。帳號屬於 Administrators 群組時，Windows 只讀 <code>C:\ProgramData\ssh\administrators_authorized_keys</code>，而且這個檔只能讓 Administrators 和 SYSTEM 存取：
+          <pre><code>icacls C:\ProgramData\ssh\administrators_authorized_keys /inheritance:r /grant "Administrators:F" /grant "SYSTEM:F"</code></pre>
+          一樣從 Spark 手動 <code>ssh</code> 一次，接受 host key。</li>
+      </ol>
+
+      <p><b>健康檢查</b>：機台頁的「檢查」，或 <code>loop machine check aoi-1</code>。每一行是 ✓ 正常、✗ 要處理，或 ⚠ 知道就好。結果存在機台上（機台頁的狀態欄）；作業系統、Shell、取碼方式還是「自動」的，會記住這次偵測到的值。</p>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>行</th><th>在看什麼</th><th>沒過時怎麼辦</th></tr></thead>
+        <tbody>
+          <tr><td>SSH 登入</td><td>能不能用金鑰登入，以及是什麼系統，例「aoi@aoi-1（Windows 11，PowerShell 5.1）」。機台設定寫的作業系統和實際不同，也會在這一行標出來。</td><td>「無法以金鑰登入…」：照上面放公鑰；「host key 還沒接受」：在 Spark 上手動 ssh 一次。</td></tr>
+          <tr><td>git</td><td>版本。</td><td>Linux：<code>sudo apt install git</code>。Windows：裝 Git for Windows（安裝時勾選加入 PATH），並登入 Gitea 一次讓 Credential Manager 記住。</td></tr>
+          <tr><td>Gitea</td><td>機台自己讀不讀得到 repo（在機台上跑 <code>git ls-remote</code>）。讀得到：「能讀 http://gitea.corp:3000（已存認證）」，取碼方式用 Gitea；讀不到：改用由 Spark 傳檔（較慢）。還沒有 repo 用這台時略過。</td><td>要讓機台自己抓：Linux 執行 <code>git config --global credential.helper store</code>，再手動 <code>git ls-remote &lt;網址&gt;</code> 一次，輸入帳號與 token；Windows 手動 <code>git ls-remote &lt;網址&gt;</code> 一次，讓 Git Credential Manager 記住登入。</td></tr>
+          <tr><td>工作目錄</td><td>可不可寫、還剩多少空間，例「C:\loop 可寫，剩 212 GB」。</td><td>Linux：<code>sudo mkdir -p /srv/loop &amp;&amp; sudo chown &lt;帳號&gt; /srv/loop</code>；Windows：建立 <code>C:\loop</code>，並給登入帳號寫入權限。</td></tr>
+          <tr><td>Python</td><td>版本。</td><td>⚠ 找不到也沒關係：圖資比對在引擎主機做。</td></tr>
+          <tr><td>GPU</td><td><code>nvidia-smi</code> 看到的 GPU。</td><td>⚠ 沒有的話，只有需要 GPU 的檢查會受影響。</td></tr>
+          <tr><td>repo 複本</td><td>每個用這台的 repo 在機台上的 commit 與時間，例「cf-aoi @ 3f2a1c（2 小時前）」。</td><td>還沒有：第一次跑檢查時會 clone。</td></tr>
+          <tr><td>圖資快取</td><td>圖資 repo 有沒有抓到這台。</td><td>還沒抓：第一次跑檢查時會抓。</td></tr>
+        </tbody>
+      </table></div>
+
+      <p><b>取碼方式：Gitea 還是由 Spark 傳檔</b></p>
+      <ul>
+        <li><b>Gitea</b>（機台讀得到 Gitea 時）：引擎先把任務分支推上 Gitea，機台在自己的複本 <code>&lt;工作目錄&gt;/repos/&lt;repo&gt;</code> 抓那個分支、強制切到要驗的 commit。建置產物留著，下次可以增量編譯。機台用它自己存的認證讀 Gitea，引擎<b>不會</b>把 <code>GITEA_TOKEN</code> 傳過去。</li>
+        <li><b>由 Spark 傳檔</b>（讀不到時）：引擎把 worktree 複製過去——Linux 用 rsync（被 <code>.gitignore</code> 的檔案不傳也不刪，建置產物留著），Windows 先清掉舊的複本再用 scp 整份傳。機台不必連 Gitea，但比較慢。</li>
+        <li>機台上的複本是 Loop 自己的，隨時會被強制切換；任何人的 checkout 都不會被動到。</li>
+      </ul>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>怎麼執行</th><th>Linux</th><th>Windows</th></tr></thead>
+        <tbody>
+          <tr><td>指令</td><td><code>bash -lc</code>，外面包 GNU <code>timeout</code>。</td><td>PowerShell（<code>-EncodedCommand</code>，輸出 UTF-8），用 <code>Start-Process</code>＋<code>WaitForExit</code> 計時；Shell 選 cmd 時改用 <code>cmd /c</code>。sshd 登入後預設給 cmd 還是 PowerShell 都沒關係。</td></tr>
+          <tr><td>逾時</td><td>exit 124（10 秒後還沒停就強制結束）。</td><td>連同子行程一起結束，exit 124。</td></tr>
+          <tr><td>輸出</td><td colspan="2">stdout＋stderr 合併，保留最後 20,000 字。</td></tr>
+          <tr><td>連不上</td><td colspan="2">exit 255，顯示「連不上 aoi-1」。</td></tr>
+          <tr><td>指令長度</td><td>20,000 字。</td><td>4,000 字（長的請寫成腳本檔再執行）。</td></tr>
+        </tbody>
+      </table></div>
+      <p>一台機台同一時間只跑一件事：兩張任務或一次試跑不會搶同一份複本。</p>
+      <pre><code>loop machine add aoi-1 --ssh aoi@aoi-1 --os windows --work-root 'C:\loop' --labels aoi-v3,camera --desc "AOI 產線同型機"
+loop machine check aoi-1      # 逐行 ✅／❌／⚠️；有 ❌ 時 exit code 1
+loop machine list             # 每台的設定與上次檢查結果</code></pre>
+
+      <h3>Gitea issue 串接</h3>
+      <p><b>準備</b>（只要一次）：</p>
+      <ol>
+        <li><code>loop config set gitea_url http://gitea.corp:3000</code>（一台 Gitea）。</li>
+        <li>在 Gitea 建一個 token，寫進 systemd 的環境檔 <code>~/.config/loop-engineering/env</code>：<code>GITEA_TOKEN=…</code>，再 <code>systemctl --user restart loop-engineering</code>。token 要能讀寫 repository、在 issue 留言、改標籤、關閉 issue、開 PR 與合併 PR。</li>
+        <li>token 只放在環境變數：clone、fetch、push 經 <code>GIT_ASKPASS</code>（<code>scripts/git-askpass-env.sh</code>）交給 git，不出現在指令列、不寫進 <code>.git/config</code>，也不會傳給機台。不要把它放進設定或網址。</li>
+        <li>要讓 issue 留言裡的連結點得開，設好 <code>LOOP_PUBLIC_URL</code>（第 8 章）。</li>
+      </ol>
+      <p><b>接單</b>：</p>
+      <ul>
+        <li><b>貼 issue 連結</b>：在問題單頁或對話裡貼 <code>…/aoi/cf-aoi/issues/12</code>。issue 的標題與內文帶進描述，附件圖變成截圖，任務的來源記成 <code>gitea:aoi/cf-aoi#12</code>。repo 要先匯入。</li>
+        <li><b>標籤自動接單</b>：在 Repo 設定打開「從 Gitea issue 自動接單」並填標籤（例 <code>loop</code>）。引擎每 <code>gitea_poll_interval_min</code> 分鐘（預設 10）掃一次開著、帶這個標籤的 issue；每個 issue 只會開一張問題單，並留言「Loop 已接單，正在分析」。是引擎去問 Gitea，不需要讓 Gitea 連回 Loop（不用開 webhook）；沒有任何 repo 設標籤時，輪詢完全不跑。</li>
+        <li>接進來的問題單照常分析，<b>要有人按「開始修」才會開始</b>（主管模式要主管核可）。</li>
+      </ul>
+      <p><b>回報的每一種留言</b>（只有從 issue 來的問題單會留言；同一種不會重複發）：</p>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>時機</th><th>留言內容</th></tr></thead>
+        <tbody>
+          <tr><td>接單（標籤自動接單時）</td><td>「Loop 已接單，正在分析。」＋分析卡連結。</td></tr>
+          <tr><td>分析好</td><td>「Loop 的分析」：類型、可能原因與位置（前 3 條）、驗收清單（勾選框），以及分析卡連結（可以在那裡調整、按「開始修」）。</td></tr>
+          <tr><td>開始修</td><td>「Loop 開始修了（模型：…）」，說明修好、檢查都過之後會在這裡貼 PR；附進度連結。</td></tr>
+          <tr><td>檢查結果</td><td>「檢查狀態：…」加上每項檢查 ✅／❌ 與 exit 的表格。<b>只有一則</b>，跟著進度就地更新。</td></tr>
+          <tr><td>PR</td><td>PR 連結；本地自評開著時附「改了什麼」；結果頁連結。</td></tr>
+          <tr><td>退回</td><td>「驗收退回修改，Loop 會在同一個分支接著改」＋你寫的意見（每次退回一則）。</td></tr>
+          <tr><td>合併完成</td><td>「已合併到 <code>main</code>」（任務的 base 分支）＋PR 連結。合併對話框勾了「在 Gitea 留言並關閉 issue #12」時，同時關閉 issue。</td></tr>
+        </tbody>
+      </table></div>
+      <p>每則留言最後標「Loop Engineering（本地模型，不經雲端）」。不想留言：全域關掉 <code>gitea_issue_comments</code>，或只關某個 repo 的「留言回報進度」。</p>
+      <p><b>合併走 Gitea PR</b>：匯入的 Gitea repo 在結果頁按「合併」，就是在 Gitea 上合併那個 PR（<code>gitea_merge_via_pr</code>，預設開），main 有沒有分支保護都能用。PR 的目標是 Repo 設定的「PR 目標分支」（沒填就是預設分支），內文附檢查結果與 Loop 的自評。不是從 Gitea 匯入的 repo（例如 Loop 自己）維持原本的 FF-only 併回（第 13 章）。</p>
+
+      <h3>準確度設定</h3>
+      <p>全部預設關，舊任務完全不受影響。在設定對話框的「修問題的準確度（問題單）」（左側欄齒輪），或用 <code>loop config set</code> 修改，最多 60 秒生效。找原因與位置、repo 地圖、過去修法，分析時一律會用；下面的旗標決定要不要<b>另外交給實作模型</b>，以及要不要多加護欄。</p>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>旗標</th><th>預設</th><th>做什麼</th></tr></thead>
+        <tbody>
+          <tr><td><code>failing_first</code></td><td>false</td><td><b>先失敗再修</b>：分析時試跑重現指令，必須失敗；派工前引擎在乾淨的 worktree 再跑一次，要是通過了就停在需要處理「重現指令在修改前就通過了」，不花任何算力。失敗的輸出放進 LOOP_TASK.md 的「重現輸出（修改前）」。</td></tr>
+          <tr><td><code>fix_attempts</code></td><td>（空）</td><td><b>自己修幾次</b>：空＝驗證沒過時和中斷續跑共用 <code>max_resumes</code>（和以前一樣）；填數字＝驗證沒過時另外計這麼多次修正，中斷續跑照舊用 <code>max_resumes</code>。</td></tr>
+          <tr><td><code>fix_escalation</code></td><td>（空）</td><td><b>修不好換模型</b>：<code>local:&lt;id&gt;</code>，逗號分隔（id 見 <code>loop local list</code>）。<code>fix_attempts</code> 用完就依序換下一個本地模型，在同一個分支冷啟動；LOOP_RESUME_CONTEXT.md 帶著每一次失敗的紀錄，並交代「前一個模型試過…，請換一個做法」。清單用完才停在需要處理。要先設 <code>fix_attempts</code> 才會自動換；結果頁的「再試一次（換模型）」不受這個限制。</td></tr>
+          <tr><td><code>local_self_review</code></td><td>false</td><td><b>本地自評</b>：驗證通過後，本地模型看 diff 與檢查結果，寫出「改了什麼／為什麼／風險／範圍外的改動」，放在結果頁與 PR 內文，也記進過去修法。失敗不擋任何事。</td></tr>
+          <tr><td><code>repo_map_inject</code></td><td>false</td><td>把 repo 地圖（語言比例、目錄、進入點、建置與測試指令、最多 3,000 個符號）放進 LOOP_TASK.md 的「Repo 地圖」，截到 <code>repo_map_budget_chars</code>（8000）字。</td></tr>
+          <tr><td><code>fix_ledger_inject</code></td><td>false</td><td>把這個 repo 過去類似的修法（最多 5 筆）放進 LOOP_TASK.md。</td></tr>
+          <tr><td><code>domain_routing</code></td><td>false</td><td><b>依領域挑模型</b>：依評比與快篩的戰績，挑這個領域最好的本地模型（分析卡寫出理由）。任務自己指定的模型仍然優先。</td></tr>
+          <tr><td><code>intake_vision</code></td><td>auto</td><td>截圖怎麼讀：<code>auto</code>＝載入的模型能看圖就讓它讀，不能就用 <code>intake_ocr_cmd</code>，都沒有就標「截圖未辨識」；<code>model</code>／<code>ocr</code> 只用其中一種；<code>off</code> 不讀。模型能不能看圖，Loop 從模型權重的設定自動判斷。</td></tr>
+          <tr><td><code>intake_ocr_cmd</code></td><td>（空）</td><td>OCR 指令，<code>{file}</code> 是截圖路徑，例 <code>tesseract {file} - -l eng+chi_tra</code>。要先在 Spark 上安裝 tesseract 與繁體中文語言包。</td></tr>
+        </tbody>
+      </table></div>
+      <p><b>建議組合</b>：</p>
+      <ul>
+        <li><b>剛開始</b>：全部維持預設。分析卡照樣有原因與位置、重現方式、驗收清單。</li>
+        <li><b>repo 有可靠的重現指令或測試</b>：開 <code>failing_first</code>。重現指令在修改前就通過，代表重現不了，這時停下來最省。</li>
+        <li><b>交給本地模型修</b>：開 <code>local_self_review</code>（結果頁與 PR 有自評可看）和 <code>repo_map_inject</code>；過去修法累積幾筆之後，再開 <code>fix_ledger_inject</code>。</li>
+        <li><b>一個模型修不好就換</b>：<code>fix_attempts</code> 填一個小數字，<code>fix_escalation</code> 列一兩個本地模型。每換一次模型都要重新載入 vLLM（100 GB 級模型約 6 分鐘，第 26 章），建議配合 <code>local_task_window</code> 在夜間跑。</li>
+        <li><b><code>domain_routing</code></b>：等評比或快篩在你的領域累積足夠場次再開；少於 3 場的推薦只能當參考（第 26 章）。</li>
+      </ul>
+
+      <h3>公司模式：只用本地模型</h3>
+      <p>一個開關：<code>cloud_llm_allowed=false</code>（設定對話框「機密」→「公司模式：所有步驟只用本地模型」，或 <code>loop config set cloud_llm_allowed false</code>）。關掉之後，公司的程式碼與描述不會送到任何雲端模型。預設 <code>true</code>，和以前一樣。</p>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>步驟</th><th>公司模式下</th></tr></thead>
+        <tbody>
+          <tr><td>分析、截圖辨識、本地自評</td><td>本來就只用本地模型。</td></tr>
+          <tr><td>實作（任務的模型）</td><td>任務、<code>default_model</code> 或 <code>route_*</code> 指到雲端模型（sonnet、opus…）時，派工改用目前載入的本地模型（沒有載入就用第一個啟用的），事件記一筆「公司模式：模型 … 改用本地模型 …」。模型設定也不能再改成雲端模型。依領域挑模型時，「做得到但不如雲端」的本地模型也會被選。</td></tr>
+          <tr><td>規劃器（拆成多個任務）</td><td>改用本地模型（<code>planner_backend</code> 視同 <code>local</code>）。</td></tr>
+          <tr><td>LLM 評審（驗證模式 <code>llm</code>）</td><td>改用本地模型（<code>llm_judge_backend</code> 視同 <code>local</code>）；判不出來照舊轉人工。</td></tr>
+          <tr><td>知識蒸餾</td><td>改用本地模型（<code>knowledge_distill_backend</code>）；設成 <code>off</code> 就不蒸餾。</td></tr>
+          <tr><td>評比評審</td><td><code>bench_judge_model</code> 可以設成 <code>local:&lt;id&gt;</code>，由載入的本地模型評（比雲端評審弱）。</td></tr>
+          <tr><td>任務結束時的缺口審查（gap review）</td><td>不跑，由本地自評補上。</td></tr>
+          <tr><td>請雲端複核，以及其他一定要用雲端模型的功能</td><td><b>拒絕</b>並說明：「公司模式：只用本地模型（cloud_llm_allowed=false），這個功能需要雲端模型」。</td></tr>
+        </tbody>
+      </table></div>
+      <p>不開公司模式，也可以個別把 <code>planner_backend</code>、<code>llm_judge_backend</code> 設成 <code>local</code>，把 <code>knowledge_distill_backend</code> 設成 <code>local</code> 或 <code>off</code>。</p>
+
+      <h3>角色：自己排，或主管核可</h3>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th><code>approval_mode</code></th><th>分析卡的按鈕</th><th>之後</th></tr></thead>
+        <tbody>
+          <tr><td><code>self</code>（預設）：自己排、自己驗收</td><td>開始修</td><td>直接排入。</td></tr>
+          <tr><td><code>manager</code>：主管核可後 Loop 才開始</td><td>送出核可（主管自己開的單還是「開始修」）</td><td>問題單變成<b>待核可</b>，頁面顯示「已送出，等 ○○ 核可後才會開始」與「撤回」；主管核可之後才排入。</td></tr>
+        </tbody>
+      </table></div>
+      <ul>
+        <li><b>待核可卡片</b>：出現在總覽與對話頁右欄「需要你處理」原有的<b>待核可</b>群組：「待核可（開工）」· 標題 · 「○○ 想請 Loop 修這個；看分析卡再核可」。每個人都有「看分析卡」；只有主管有「核可」，其他人看到的是「等主管核可」。送出時另外推播一則（ntfy）。</li>
+        <li><b>退回</b>：主管可以寫原因退回，單子留在草稿，原因顯示在分析卡的「Loop 還不確定」。</li>
+        <li><b>主管是誰</b>：<code>manager_users</code>，逗號分隔的 <code>ts:&lt;登入&gt;</code>、<code>name:&lt;名字&gt;</code>、<code>local</code>。建議只放 <code>ts:</code>（Tailscale 驗證過的）；<code>name:</code> 開頭的名字任何人都能自己填。</li>
+        <li><b>開工核可和驗收核可是兩件事</b>：這裡核可的是「可以開始修」；修完之後、合併之前的核可（第 26d 章）另外記錄，互不影響。</li>
+      </ul>
+
+      <h3>結果頁</h3>
+      <p>就是原本的驗收頁（<code>/task.html?id=…</code>，第 26d 章），改成 PR 頁的樣子。標頭：標題 · 狀態 · <code>cf-aoi @ main</code> · 「PR #34」「issue #12」連結 · 第 N 次嘗試 · 模型。分頁：<b>結果</b> · <b>程式碼</b> · <b>試跑</b> · <b>需求</b>（唯讀的分析卡＋需求文件）。「結果」分頁由上而下：</p>
+      <ol>
+        <li><b>結論色塊</b>：綠「4 項檢查都過，重現測試從紅變綠」／紅「沒過：單元測試（aoi-1）」／藍「正在跑檢查 2/4：單元測試」。</li>
+        <li><b>Loop 的自評</b>：改了什麼、為什麼、風險、範圍外的改動（<code>local_self_review</code> 關著時，這裡寫沒有自評）。</li>
+        <li><b>檢查清單</b>：<code>✓ 建置 · aoi-1 · 41 s · 看紀錄</code>、<code>✓ 重現 · 修前 ✗ → 修後 ✓</code>、<code>✓ 圖資回歸 · 正確率 98.7% → 99.0% · 5.1 s → 4.9 s · 看每張</code>、<code>✗ 單元測試 · exit 1 · 看紀錄</code>。「看紀錄」開抽屜，看輸出的最後一段。</li>
+        <li><b>圖資回歸檢視器</b>（有跑圖資回歸時）：總數、正確（修前→修後）、變好、變差、沒輸出；「只看變化」；表格 <code>案例 · 輸入圖 · 期望 · 修前 · 修後 · 結果</code>，點一列左右對照（輸入圖、軟體有輸出時的覆蓋圖、差異）。</li>
+        <li><b>嘗試記錄</b>：每次嘗試一行，例 <code>第 1 次 · qwen3-coder-next · 沒過 單元測試 · 12 分</code> … <code>第 3 次 · glm53-flash · 通過</code>。</li>
+      </ol>
+      <p>固定在下方的動作列：</p>
+      <ul>
+        <li><b>合併</b>：匯入的 Gitea repo 走 Gitea PR 合併；對話框裡可以勾「在 Gitea 留言並關閉 issue #12」（只有從 issue 來的單才有）。</li>
+        <li><b>退回修改…</b>：寫一句話（「寫下要改什麼，Loop 會在同一個分支接著改」），任務回到佇列；從 issue 來的單會在 issue 留言。</li>
+        <li><b>交給同事…</b>：把這張單交給另一個人，並留一則紀錄。</li>
+        <li><b>再試一次（換模型）</b>：紅燈時出現。換成 <code>fix_escalation</code> 的下一個本地模型（或你挑的），在同一個分支冷啟動重新排入；前一個模型的提交留著，失敗紀錄寫進 LOOP_RESUME_CONTEXT.md。清單裡沒有下一個時會說「沒有下一個模型可以換」。</li>
+      </ul>
+      <p>試跑、人工驗收清單、下載 zip／發佈到 Gitea，照第 26d 章。</p>
+
+      <h3>常見問題</h3>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>看到</th><th>原因與處理</th></tr></thead>
+        <tbody>
+          <tr><td>「請 Loop 分析」是灰的</td><td>描述不到 10 個字，或還沒選 repo。</td></tr>
+          <tr><td>匯入時說 http:// 不接受，或網址裡不要放帳號</td><td><code>gitea_url</code> 沒設，或網址不是那台 Gitea；網址裡的帳號與 token 拿掉（token 放 <code>GITEA_TOKEN</code>）。</td></tr>
+          <tr><td>分析沒有完成</td><td>按「重試」。本地模型沒載入時，分析卡只用規則產生並標出來；也可以「改成手動填寫」。</td></tr>
+          <tr><td>截圖未辨識</td><td>目前的模型不能看圖，也沒有設 <code>intake_ocr_cmd</code>。截圖照樣附給實作模型。</td></tr>
+          <tr><td>停在需要處理：「重現指令在修改前就通過了」</td><td><code>failing_first</code> 開著，重現指令在沒改過的程式上就通過了：重現方式不對。改分析卡的重現方式，再開始修。</td></tr>
+          <tr><td>檢查「連不上 aoi-1」（exit 255）</td><td>SSH 登不進去：到機台頁按「檢查」，看 SSH 登入那一行。</td></tr>
+          <tr><td>檢查逾時（exit 124）</td><td>超過那項檢查的逾時（預設 20 分鐘）：把逾時調長，或看指令是不是在等視窗或輸入。</td></tr>
+          <tr><td>健康檢查的 Gitea 那行讀不到</td><td>取碼會改用由 Spark 傳檔（能用，比較慢）。要讓機台自己抓，照那一行寫的指令存好認證。</td></tr>
+          <tr><td>「沒有下一個模型可以換」</td><td><code>fix_escalation</code> 是空的，或已經換到最後一個：在設定加本地模型。</td></tr>
+          <tr><td>issue 上沒有留言</td><td>這張不是從 issue 來的、<code>gitea_issue_comments</code> 或 repo 的「留言回報進度」關著，或 <code>GITEA_TOKEN</code> 權限不夠。看任務事件。</td></tr>
+          <tr><td>貼了標籤卻沒接單</td><td>repo 沒有設這個標籤、issue 已經關了，或 <code>gitea_url</code>／<code>GITEA_TOKEN</code> 沒設。輪詢每 <code>gitea_poll_interval_min</code> 分鐘一次。</td></tr>
+        </tbody>
+      </table></div>
+      <p>API（給整合用）：</p>
+      <ul>
+        <li>問題單：<code>POST /api/tickets</code>、<code>GET /api/tickets?mine=1</code>、<code>GET|PATCH /api/tickets/:id</code>、<code>POST /api/tickets/:id/analyse</code>、<code>/start</code>、<code>/approve-start</code>、<code>/reject-start</code>、<code>/cancel</code>、<code>POST /api/tickets/resolve-link</code>、<code>GET /api/tickets/:id/images/:n</code>、<code>GET /api/tickets/:id/plan</code></li>
+        <li>Repo：<code>GET /api/repos</code>、<code>POST /api/repos/import</code>（回 202 與匯入工作，<code>GET /api/repos/import/:jobId</code> 看進度）、<code>GET|PATCH|DELETE /api/repos/:id</code>、<code>POST /api/repos/:id/redetect</code>、<code>GET /api/repos/:id/fixes</code></li>
+        <li>檢查：<code>/api/repos/:id/checks</code>、<code>POST /api/checks/:id/trial</code>、<code>POST /api/checks/:id/baseline</code>、<code>GET /api/checks/:id/runs</code></li>
+        <li>機台：<code>GET|POST /api/machines</code>、<code>GET|PATCH|DELETE /api/machines/:name</code>、<code>POST /api/machines/:name/check</code>（清單另外附唯讀的 GPU 沙盒主機 <code>sandbox_hosts</code>）</li>
+        <li>換模型重試：<code>POST /api/tasks/:id/escalate</code>（<code>{model?}</code>；不給就用 <code>fix_escalation</code> 的下一個）</li>
+      </ul>
     </section>
 
     <section id="newtask">

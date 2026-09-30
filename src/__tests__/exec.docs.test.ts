@@ -122,3 +122,25 @@ describe('the manual documents the one app frame, 模型快篩 and two Sparks', 
     for (const s of ['模型快篩', 'loop bench screen', '/api/benchmarks/screen', 'sg_…', '兩台 Spark', 'launch-cluster.sh stop', 'CLUSTER_NODES', 'cluster_only']) expect(m, s).toContain(s);
   });
 });
+
+describe('the manual documents the 問題單 flow', () => {
+  const manual = () => fs.readFileSync(path.join(__dirname, '..', '..', 'docs', '操作說明.html'), 'utf8');
+  const chapter = (m: string) => {
+    const start = m.indexOf('<section id="tickets">');
+    return start < 0 ? '' : m.slice(start, m.indexOf('</section>', start));
+  };
+
+  it('chapter 5b sits between 5a and 6, is in the TOC, and covers 問題單, 分析卡, 檢查, 機台 and 公司模式', () => {
+    const m = manual();
+    expect(m).toContain('<section id="tickets">');
+    expect(m).toContain('href="#tickets"');
+    expect(m.indexOf('<section id="redesign">')).toBeLessThan(m.indexOf('<section id="tickets">'));
+    expect(m.indexOf('<section id="tickets">')).toBeLessThan(m.indexOf('<section id="newtask">'));
+    const c = chapter(m);
+    for (const s of ['問題單', '分析卡', '檢查', '機台', '公司模式']) expect(c, s).toContain(s);
+    // the four steps, the pages they happen on, and what an engineer sets up once
+    for (const s of ['/fix.html', '/repos.html', '/machines.html', '/task.html', '開始修', '送出核可', '試跑一次', '設為基準', '紅→綠', '圖資回歸', '命令列入口', 'administrators_authorized_keys', 'GITEA_TOKEN', '再試一次（換模型）']) {
+      expect(c, s).toContain(s);
+    }
+  });
+});
