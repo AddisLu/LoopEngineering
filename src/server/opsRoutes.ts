@@ -15,7 +15,8 @@ import type { ChatCtx } from '../chatops/types.js';
  *  - the card's 確認執行／取消 buttons, and its status refresh (the chat identity owns the action);
  *  - the tool list and tool calls for mcp/loop-ops-mcp.mjs, the forwarder that gives tools like
  *    Claude Code the same operations. Those callers are `ext:<name>` identities with their own
- *    conversation; they may only read unless ops_external_enabled, and confirming needs the code.
+ *    conversation; they may only read unless ops_external_enabled AND the connection itself (its
+ *    Tailscale login, or `local` on this machine) is in ops_allowed_users; confirming needs the code.
  * Everything is off (404) unless ops_chat_enabled.
  */
 
@@ -53,6 +54,14 @@ function externalConversation(db: Database.Database, user: { key: string; label:
 
 export function registerOpsRoutes(app: FastifyInstance, db: Database.Database, opts: OpsRouteOptions = {}): void {
   const identity = opts.identity ?? ((req: FastifyRequest) => identityOf(req));
+  /** who the connection itself is (Tailscale login, or `local`) — the forwarder's name is only a label */
+  const transportKey = (req: FastifyRequest): string | null => {
+    try {
+      return identity(req).user_key;
+    } catch {
+      return null;
+    }
+  };
   const gens = () => getGenerationRegistry(db);
   const deps = (): OpsToolDeps => ({ isRunning: (id) => gens().isRunning(id), otherAnswers: (except) => gens().runningCount(except), ...opts.deps });
   const on = () => getBool(db, 'ops_chat_enabled', false);
@@ -114,7 +123,7 @@ export function registerOpsRoutes(app: FastifyInstance, db: Database.Database, o
     if (!on()) return reply.code(404).send(OFF);
     const user = externalUser(req);
     // listing only: a stand-in answer so the write tools are described (they never run from here)
-    const allowed = getBool(db, 'ops_external_enabled', false);
+    const allowed = getBool(db, 'ops_external_enabled', false) && opsAllowedFor(db, transportKey(req));
     const chat = allowed ? { messageId: '', conversationId: '', userKey: user.key, label: user.label } : null;
     const tools = opsTools(db, { userKey: user.key, conversationId: null, chat, allowed, mode: 'external' });
     return { allowed, tools: toOpenAiTools(tools).map((t) => ({ name: t.function.name, description: t.function.description, inputSchema: t.function.parameters })) };
@@ -125,17 +134,25 @@ export function registerOpsRoutes(app: FastifyInstance, db: Database.Database, o
     const name = (req.params as { name: string }).name;
     const args = (req.body ?? {}) as Record<string, unknown>;
     if (typeof args !== 'object' || Array.isArray(args)) return reply.code(400).send({ error: '參數必須是 JSON 物件' });
-    const allowed = getBool(db, 'ops_external_enabled', false);
     const write = (OPS_WRITE_TOOLS as readonly string[]).includes(name);
-    if (write && !allowed) {
+    const allowed = getBool(db, 'ops_external_enabled', false) && opsAllowedFor(db, transportKey(req));
+    if (write && !getBool(db, 'ops_external_enabled', false)) {
       return reply.code(403).send({ error: '外部工具目前只能查詢（ops_external_enabled=false）；要讓它準備和執行操作，請在設定打開 ops_external_enabled' });
+    }
+    if (write && !allowed) {
+      return reply.code(403).send({ error: `這個連線的身分（${transportKey(req) ?? '不明'}）不在 ops_allowed_users，外部工具只能查詢` });
     }
     const user = externalUser(req);
     const conversationId = externalConversation(db, user);
-    // each write call is its own "answer" in the caller's conversation: an action belongs to one
-    const chat: ChatCtx | null = write
-      ? { messageId: appendMessage(db, conversationId, user.key, { role: 'assistant', content: `（loop-ops：${name}）` }).id, conversationId, userKey: user.key, label: `${user.label}（外部工具）` }
-      : null;
+    // each write call is its own turn in the caller's conversation: what the tool sent (a person
+    // approved this very call in that tool) is what it "said" — URLs and commands are checked
+    // against it — and an action belongs to the answer row that follows
+    let chat: ChatCtx | null = null;
+    if (write) {
+      appendMessage(db, conversationId, user.key, { role: 'user', content: `（loop-ops：${name}）${JSON.stringify(args)}` });
+      const anchor = appendMessage(db, conversationId, user.key, { role: 'assistant', content: `（loop-ops：${name}）` });
+      chat = { messageId: anchor.id, conversationId, userKey: user.key, label: `${user.label}（外部工具）` };
+    }
     const tools = opsTools(db, { userKey: user.key, conversationId, chat, allowed, mode: 'external', deps: deps() });
     const def = tools.find((t) => t.name === name);
     if (!def) return reply.code(404).send({ error: `沒有這個工具：${name}` });

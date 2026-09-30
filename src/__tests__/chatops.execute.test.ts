@@ -10,6 +10,7 @@ import { appendMessage, createConversation } from '../chat/store.js';
 import { createBenchmark, getBenchmark } from '../benchmark/store.js';
 import { createPending, getActionById } from '../chatops/actions.js';
 import { prepareAction, prepareBenchmark } from '../chatops/prepareOps.js';
+import { factsFrom, prepareWork } from '../chatops/prepare.js';
 import { confirmButton, confirmTyped, getOpsRunner, type ExecDeps } from '../chatops/execute.js';
 import type { ChatCtx } from '../chatops/types.js';
 
@@ -74,6 +75,16 @@ describe('task actions from the chat', () => {
     expect(await prepareAction(db, turn('中止'), { action: 'abort', target: arm })).toMatchObject({ ok: false, missing: [{ question: expect.stringContaining('取消評比 b_x') }] });
   });
 
+  it('退回修改 shows the whole note that will be appended to the goal', async () => {
+    const turn = chat();
+    const id = mk('review', { merge_status: 'pending' });
+    const note = `請改用逾時十秒${'，並補上測試'.repeat(40)}`;
+    const p = await prepareAction(db, turn('退回修改'), { action: 'request_changes', target: id, note });
+    if (!p.ok) throw new Error(JSON.stringify(p.missing));
+    expect(p.action.summary).toContain(`- 意見：${note}`);
+    expect(await prepareAction(db, turn('退回修改'), { action: 'request_changes', target: id, note: 'x'.repeat(1200) })).toMatchObject({ ok: false, missing: [{ fact: 'note' }] });
+  });
+
   it('a task that moved on since the preparation is left alone', async () => {
     const turn = chat();
     const id = mk('running');
@@ -84,6 +95,27 @@ describe('task actions from the chat', () => {
     const r = await confirmTyped(db, turn(`確認 ${p.action.code}`), undefined, never, deps);
     expect(r).toMatchObject({ ok: true, action: { status: 'failed', result: { detail: expect.stringContaining('狀態已經變了（running → attention）') } } });
     expect(getTask(db, id)?.status).toBe('attention');
+  });
+});
+
+describe('new work from the chat', () => {
+  it('an unchanged draft is submitted on the verdict it was prepared with — even when the review is required', async () => {
+    setSetting(db, 'prd_require_llm', 'true');
+    setSetting(db, 'prd_repo_allowlist', repo);
+    // recipes from an empty dir: no real recipe files, no docker probe
+    setSetting(db, 'local_vllm_repo', fs.mkdtempSync(path.join(os.tmpdir(), 'loop-recipes-')));
+    fs.writeFileSync(path.join(repo, 'package.json'), JSON.stringify({ scripts: { test: 'node -e 0' } }));
+    execFileSync('git', ['add', '-A'], { cwd: repo });
+    execFileSync('git', ['commit', '-qm', 'pkg'], { cwd: repo });
+    const turn = chat();
+    let reviews = 0;
+    const reviewExec = async () => (reviews++, '{"ok":true,"missing":[],"questions":[],"risk_notes":[]}');
+    const facts = factsFrom({ kind: 'bugfix', title: '登入逾時要顯示錯誤', expected: '網路慢時十秒內顯示錯誤訊息並可以重試', repro: '把網路限速到 2G 後按登入，畫面永遠轉圈', repo: path.basename(repo) })!;
+    const p = await prepareWork(db, turn('登入會卡住，請修'), facts, { reviewExec });
+    if (!p.ok) throw new Error(JSON.stringify(p.missing));
+    expect(reviews).toBe(1);
+    const r = await confirmTyped(db, turn('確認'), undefined, never, { ...deps, reviewExec: async () => { throw new Error('reviewed twice'); } });
+    expect(r).toMatchObject({ ok: true, action: { status: 'done', result: { detail: expect.stringContaining('並排入') } } });
   });
 });
 
@@ -146,6 +178,23 @@ describe('the runner', () => {
     release();
     await getOpsRunner().idle();
     expect(getActionById(db, a.id)).toMatchObject({ status: 'done', result: { detail: 'pulled' } });
+  });
+
+  it('a model switch clicked on the card while its answer is still written waits for that answer', async () => {
+    const turn = chat();
+    const loaded: string[] = [];
+    const mm = { state: () => ({ loaded: 'a', wanted: 'a', status: 'ready' as const, since: null, error: null }), ensureLoaded: (id: string) => (loaded.push(id), 'switching' as const) };
+    db.prepare("INSERT INTO local_models (id, display_name, recipe, served_model_id, enabled) VALUES ('b', 'B', 'b', 'org/b', 1)").run();
+    const t1 = turn('切到 b');
+    const a = createPending(db, t1, { kind: 'model', op: 'switch_model', target: 'b', params: { id: 'b' }, expect: null, summary: '切到 b', risk: 'normal', speed: 'deferred' });
+    let streaming = true;
+    const r = await confirmButton(db, a.id, USER, { modelManager: mm, dockerProbe: () => true, hubDir: repo, otherAnswers: () => (streaming ? 1 : 0), isRunning: (id) => streaming && id === t1.messageId });
+    expect(r).toMatchObject({ ok: true, action: { status: 'running' }, message: expect.stringContaining('這則回答結束後') });
+    expect(getActionById(db, a.id)!.status).toBe('running');
+    streaming = false;
+    await getOpsRunner().runDeferred(t1.messageId);
+    // it ran when the answer ended (the empty weight cache is what stops it here)
+    expect(getActionById(db, a.id)).toMatchObject({ status: 'failed', result: { detail: expect.stringContaining('權重') } });
   });
 
   it('a model switch waits until the answer that confirmed it has finished, and not while others write', async () => {

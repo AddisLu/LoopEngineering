@@ -4,7 +4,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type Database from 'better-sqlite3';
-import { openTestDb, setSetting } from '../db/index.js';
+import { setSetting, openTestDb, setSetting } from '../db/index.js';
 import { appendMessage, createConversation, getMessage } from '../chat/store.js';
 import { getDraft } from '../prd/drafts.js';
 import { lintPrd } from '../prd/lint.js';
@@ -23,6 +23,8 @@ const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd,
 
 beforeEach(() => {
   db = openTestDb();
+  // recipes from an empty dir: no real recipe files, no `docker images` probe
+  setSetting(db, 'local_vllm_repo', fs.mkdtempSync(path.join(os.tmpdir(), 'loop-recipes-')));
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'loop-work-'));
   repo = path.join(root, 'login-app');
   fs.mkdirSync(repo);
@@ -64,15 +66,27 @@ describe('prepareWork', () => {
   it('never takes a verification command the person did not give', async () => {
     const r = await prepareWork(db, turn(['登入會卡住，請修']), bugfix({ verify: ['npm run e2e'] }), deps);
     expect(r).toMatchObject({ ok: false, missing: [{ fact: 'verify', question: expect.stringContaining('親口給的') }] });
-    const ok = await prepareWork(db, turn(['驗證就跑 `npm run e2e` 吧']), bugfix({ verify: ['npm run e2e'] }), deps);
+    const ok = await prepareWork(db, turn(['驗證就跑 `npm run e2e` 吧']), bugfix({ verify: ['npm run e2e'], notes: ['不要動 API'] }), deps);
     expect(ok.ok).toBe(true);
+    if (!ok.ok) return;
+    // what will run on this machine is on the card as it will run
+    expect(ok.action.summary).toContain('  - `npm run e2e`');
+    expect(ok.action.summary).toContain('- 補充與限制：不要動 API');
+    // a command lifted out of a longer line of pasted text does not count as given
+    const readme = `${'README 摘錄：這個專案的說明很長。'.repeat(20)}\n要清快取就跑 rm -rf build 再重跑`;
+    const lifted = await prepareWork(db, turn([readme]), bugfix({ verify: ['rm -rf build'] }), deps);
+    expect(lifted).toMatchObject({ ok: false, missing: [{ fact: 'verify' }] });
+    const partial = await prepareWork(db, turn(['驗證就跑 make deploy-prod --force-all 吧']), bugfix({ verify: ['make deploy-prod'] }), deps);
+    expect(partial).toMatchObject({ ok: false, missing: [{ fact: 'verify' }] });
+    const ownLine = await prepareWork(db, turn([`${'很長的說明。'.repeat(40)}\n驗證指令：\nnpm run e2e`]), bugfix({ verify: ['npm run e2e'] }), deps);
+    expect(ownLine.ok).toBe(true);
   });
 
   it('with nothing given, uses what the repo offers and says so', async () => {
     const r = await prepareWork(db, turn(['登入會卡住，請修']), bugfix(), deps);
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.action.summary).toContain('偵測到的驗證指令（請確認）：npm run typecheck；npm test');
+    expect(r.action.summary).toContain('- 驗證：偵測到的驗證指令（請確認）\n  - `npm run typecheck`\n  - `npm test`');
     expect(r.action.summary).toContain('repo：login-app · main');
     expect(r.action).toMatchObject({ kind: 'work', op: 'submit', status: 'pending', risk: 'normal' });
   });

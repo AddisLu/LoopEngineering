@@ -16,6 +16,8 @@ let db: Database.Database;
 let repo: string;
 beforeEach(() => {
   db = openTestDb();
+  // recipes from an empty dir: no real recipe files, no `docker images` probe
+  setSetting(db, 'local_vllm_repo', fs.mkdtempSync(path.join(os.tmpdir(), 'loop-recipes-')));
   repo = fs.mkdtempSync(path.join(os.tmpdir(), 'loop-views-'));
   fs.mkdirSync(path.join(repo, '.git'));
 });

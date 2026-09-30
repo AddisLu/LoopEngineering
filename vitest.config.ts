@@ -13,6 +13,8 @@ export default defineConfig({
       // Neutralize any ambient API token so buildApp({ apiToken: null }) really
       // means "no auth" — keeps the REST tests hermetic across dev shells.
       LOOP_API_TOKEN: '',
+      // local model weights are looked up here: an empty cache, never the machine's real one
+      HF_HOME: path.join(TEST_DATA, 'hf'),
     },
     testTimeout: 20_000,
     hookTimeout: 20_000,

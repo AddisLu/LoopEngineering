@@ -1,3 +1,6 @@
+import path from 'node:path';
+import os from 'node:os';
+import fs from 'node:fs';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import type Database from 'better-sqlite3';
@@ -101,9 +104,20 @@ describe('the loop-ops forwarder', () => {
     expect((await app.inject({ method: 'POST', url: '/api/ops/tools/nope', headers: ext, payload: {} })).statusCode).toBe(404);
   });
 
+  it('enabled, but the connection itself is not listed: still read-only', async () => {
+    on();
+    setSetting(db, 'ops_external_enabled', 'true');
+    // this request comes from localhost with no Tailscale login: `local`, not in ops_allowed_users
+    expect((await app.inject({ method: 'GET', url: '/api/ops/tools', headers: ext })).json()).toMatchObject({ allowed: false });
+    const r = await app.inject({ method: 'POST', url: '/api/ops/tools/ops_prepare_action', headers: ext, payload: { action: 'queue', target: draft().id } });
+    expect(r.statusCode).toBe(403);
+    expect(r.json().error).toContain('local');
+  });
+
   it('enabled: prepare, then confirm with the code — as its own identity, never the person\'s', async () => {
     on();
     setSetting(db, 'ops_external_enabled', 'true');
+    setSetting(db, 'ops_allowed_users', `${MY_KEY},local`);
     expect((await app.inject({ method: 'GET', url: '/api/ops/tools', headers: ext })).json().tools.map((t: { name: string }) => t.name)).toEqual([...OPS_TOOL_NAMES]);
     const t = draft();
     const p = (await app.inject({ method: 'POST', url: '/api/ops/tools/ops_prepare_action', headers: ext, payload: { action: 'queue', target: t.id } })).json();
@@ -121,5 +135,9 @@ describe('the loop-ops forwarder', () => {
     expect(owner).toEqual({ user_key: 'ext:claude code', user_label: 'Claude Code（外部工具）' });
     const note = db.prepare("SELECT detail FROM task_events WHERE task_id = ? AND kind = 'note' ORDER BY id DESC LIMIT 1").get(t.id) as { detail: string };
     expect(note.detail).toContain('對話操作（Claude Code（外部工具））');
+    // what the tool sent is what it said: a clone URL passed in the call is accepted as given
+    setSetting(db, 'git_clone_root', fs.mkdtempSync(path.join(os.tmpdir(), 'loop-clone-root-')));
+    const c = (await app.inject({ method: 'POST', url: '/api/ops/tools/git_prepare', headers: ext, payload: { op: 'clone', url: 'https://github.com/rapidsai/cucim' } })).json();
+    expect(c).toMatchObject({ ok: true, action: { status: 'pending', summary: expect.stringContaining('https://github.com/rapidsai/cucim') } });
   });
 });

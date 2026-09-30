@@ -259,9 +259,11 @@ export async function prepareAction(
     }
     const why = spec.extra?.(db, t);
     if (why) return no('state', why);
+    // the note is appended to the task's goal: the card shows all of it, so it is capped at what a card can show
     const note = str(args.note, 4000);
     if (action === 'request_changes' && note.length < 4) return no('note', '要退回修改什麼？寫下要改的地方');
-    const summary = [`${spec.verb} ${t.id}「${t.title}」`, `- 現在：${TASK_WORD[t.status] ?? t.status}${t.merge_status ? `（${t.merge_status}）` : ''}`, ...(spec.note?.(t) ? [`- ${spec.note(t)}`] : []), ...(note ? [`- 意見：${note.slice(0, 200)}`] : [])].join('\n');
+    if (note.length > 1000) return no('note', '修改意見太長（上限 1000 字）；請精簡成要改的重點');
+    const summary = [`${spec.verb} ${t.id}「${t.title}」`, `- 現在：${TASK_WORD[t.status] ?? t.status}${t.merge_status ? `（${t.merge_status}）` : ''}`, ...(spec.note?.(t) ? [`- ${spec.note(t)}`] : []), ...(note ? [`- 意見：${note}`] : [])].join('\n');
     const pending = createPending(db, chat, {
       kind: 'task',
       op: action,

@@ -178,11 +178,12 @@ export function createPending(db: Database.Database, chat: ChatCtx, p: Prepared,
 /** ops_show on a pending action shows it again: the person may now confirm in the next turn. */
 export function markPresented(db: Database.Database, id: string, chat: ChatCtx, now: Date = new Date()): void {
   const msg = message(db, chat.messageId);
-  if (!msg || msg.conversation_id !== chat.conversationId) return;
+  if (!msg || msg.conversation_id !== chat.conversationId || msg.invalid_at) return;
   const ttl = Math.max(1, getNum(db, 'ops_confirm_ttl_min', 30));
+  // only ever forward, to a live answer: never back onto an older or regenerated one
   db.prepare(
-    "UPDATE ops_actions SET presented_msg_id = ?, presented_ord = ?, expires_at = ? WHERE id = ? AND conversation_id = ? AND user_key = ? AND status = 'pending'",
-  ).run(chat.messageId, msg.ord, sqliteTime(new Date(now.getTime() + ttl * 60_000)), id, chat.conversationId, chat.userKey);
+    "UPDATE ops_actions SET presented_msg_id = ?, presented_ord = ?, expires_at = ? WHERE id = ? AND conversation_id = ? AND user_key = ? AND status = 'pending' AND presented_ord <= ?",
+  ).run(chat.messageId, msg.ord, sqliteTime(new Date(now.getTime() + ttl * 60_000)), id, chat.conversationId, chat.userKey, msg.ord);
 }
 
 /**

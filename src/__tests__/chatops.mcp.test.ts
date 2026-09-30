@@ -50,6 +50,9 @@ describe.skipIf(!sdkResolvable)('mcp/loop-ops-mcp.mjs over stdio → engine API'
       expect(refused).toMatchObject({ isError: true, content: [{ text: expect.stringContaining('ops_external_enabled') }] });
 
       setSetting(db, 'ops_external_enabled', 'true');
+      // the forwarder runs on this machine: its connection is `local`, which must be listed too
+      expect((await client.listTools()).tools.map((x) => x.name)).toEqual([...OPS_READ_TOOLS]);
+      setSetting(db, 'ops_allowed_users', 'local');
       expect((await client.listTools()).tools.map((x) => x.name)).toEqual([...OPS_TOOL_NAMES]);
       const p = (await client.callTool({ name: 'ops_prepare_action', arguments: { action: 'queue', target: t.id } })) as CallResult;
       const code = /動作 ([A-Z0-9]{3})：pending/.exec(p.content[0]!.text)?.[1];

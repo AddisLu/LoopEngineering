@@ -148,6 +148,8 @@ export async function prepareWork(db: Database.Database, chat: ChatCtx, facts: W
       model: chosen,
       verify_plan_id: v.v.plan?.id ?? null,
       coding_tool: t.flow === 'epic' ? 'plan' : 'claude-code',
+      // the gate's verdict on exactly this markdown: confirming an unchanged draft reuses it
+      check,
     },
     expect: { md_sha: sha(markdown) },
     summary,

@@ -8,7 +8,7 @@ import { OpsActionError, STATUS_WORD, actionView, cancelAction, findAction, getA
 import { findView, overviewView, showView, standingsView, templatesView, type TemplateTopic, type View, type ViewDeps } from './views.js';
 import { factsFrom, prepareWork, type PrepareDeps, type PrepareOutcome } from './prepare.js';
 import { ACTION_NAMES, prepareAction, prepareBenchmark, type OpsPrepDeps } from './prepareOps.js';
-import { fetchOrigin, prepareGit, repoStatus, runGit, statusLine, type GitOpsDeps } from './git.js';
+import { fetchOrigin, prepareGit, repoBusy, repoStatus, runGit, statusLine, withRepoLock, type GitOpsDeps } from './git.js';
 import { confirmTyped, confirmWithCode, type ConfirmOutcome, type ExecDeps } from './execute.js';
 import { resolveRepo } from './compose.js';
 import { link } from './format.js';
@@ -160,6 +160,7 @@ export function opsExecDeps(db: Database.Database, d: OpsToolDeps = {}): ExecDep
   return {
     git: (x, a) => runGit(x, a, d.git ?? {}),
     otherAnswers: d.otherAnswers,
+    isRunning: d.isRunning,
     ...(d.prep?.hubDir ? { hubDir: d.prep.hubDir } : {}),
     ...d.exec,
     modelManager: d.exec?.modelManager ?? getModelManager(db),
@@ -274,15 +275,23 @@ export function opsTools(db: Database.Database, o: OpsToolsOptions): ToolDef[] {
         }
         if (!repos.length) return { ok: true, text: '可以改的 repo 清單是空的。要抓新的 repo，請使用者貼網址，再用 git_prepare op=clone 準備。', summary: '沒有 repo' };
         repos = repos.slice(0, 8);
-        const refresh = args.refresh === true;
-        const errs = refresh ? (await Promise.all(repos.map(async (r) => ({ r, e: await fetchOrigin(db, r.path, gitDeps) })))).filter((x) => x.e) : [];
+        // a fetch writes refs: only for people who may operate, under the repo's lock, and never
+        // while the engine verifies or merges a task there
+        const refresh = args.refresh === true && o.allowed;
+        const errs = refresh
+          ? (
+              await Promise.all(
+                repos.map(async (r) => ({ r, e: repoBusy(db, r.path) ?? (await withRepoLock(r.path, () => fetchOrigin(db, r.path, gitDeps))) })),
+              )
+            ).filter((x) => x.e)
+          : [];
         const st = await Promise.all(repos.map((r) => repoStatus(db, r.path, gitDeps)));
         const text = [
           '| repo | 分支 | 和遠端 | 工作區 | 最後 commit |',
           '|---|---|---|---|---|',
           ...st.map(statusLine),
           ...(errs.length ? ['', `抓不到 origin：${errs.map((x) => `${x.r.name}（${x.e}）`).join('；')}`] : []),
-          ...(refresh ? [] : ['', '（沒有先向 origin 抓；要最新的遠端狀態就帶 refresh=true）']),
+          ...(refresh ? [] : ['', args.refresh === true ? '（只有可以操作的人能先向 origin 抓；這是本機記得的狀態）' : '（沒有先向 origin 抓；要最新的遠端狀態就帶 refresh=true）']),
         ].join('\n');
         return { ok: true, text, summary: `${st.length} 個 repo${refresh ? '（已抓 origin）' : ''}` };
       },

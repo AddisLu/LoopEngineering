@@ -5,7 +5,7 @@ import { getTask } from '../tasks.js';
 import { getPlan, listPlans, type VerifyPlan } from '../plans/store.js';
 import type { Task } from '../types.js';
 import type { VerifySource } from './templates.js';
-import { unsaid } from './provenance.js';
+import { unsaidCommands } from './provenance.js';
 
 /**
  * Where a new piece of work's verification comes from — never from the chat model's imagination.
@@ -117,16 +117,19 @@ export function chooseVerification(
   const given = (o.verify ?? []).map((c) => String(c).trim()).filter(Boolean);
   if (given.length) {
     if (!o.allowed.includes('user')) return { ok: false, question: '這類工作要用驗證方案來驗證' };
-    const missing = unsaid(o.said, given);
+    const missing = unsaidCommands(o.said, given);
     if (missing.length) {
-      return { ok: false, question: `驗證指令要是你親口給的，我不能自己寫：「${missing.join('」「')}」你沒有說過——要用哪個指令驗證？（或指定驗證方案）` };
+      return {
+        ok: false,
+        question: `驗證指令要是你親口給的，我不能自己寫：「${missing.join('」「')}」你沒有說過——要用哪個指令驗證？請把指令單獨一行、或用 \`反引號\` 包起來貼上（或指定驗證方案）`,
+      };
     }
     return { ok: true, v: { source: 'user', commands: given, plan: null, task: null, setup: detectSetup(o.repo), note: '驗證指令是你給的' } };
   }
   if (o.allowed.includes('detected')) {
     const detected = detectVerify(o.repo);
     if (detected.length) {
-      return { ok: true, v: { source: 'detected', commands: detected, plan: null, task: null, setup: detectSetup(o.repo), note: `偵測到的驗證指令（請確認）：${detected.join('；')}` } };
+      return { ok: true, v: { source: 'detected', commands: detected, plan: null, task: null, setup: detectSetup(o.repo), note: '偵測到的驗證指令（請確認）' } };
     }
   }
   return { ok: true, v: { source: 'none', commands: [], plan: null, task: null, setup: null, note: '' } };

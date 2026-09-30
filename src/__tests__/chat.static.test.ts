@@ -57,10 +57,16 @@ describe('模型對話 scripts', () => {
     expect(js).toContain('/api/ops/actions/${encodeURIComponent(v.id)}/confirm');
     expect(js).toContain('/api/ops/actions/${encodeURIComponent(v.id)}/cancel');
     expect(js).toContain("el('pre', 'sum', v.summary || '')"); // verbatim, never the model's retelling
-    const src = /const SAFE_URL = (\/.+\/i);/.exec(read('chat-md.js'))![1]!;
-    const safe = new Function(`return ${src}`)() as RegExp;
-    for (const ok of ['https://github.com/x', 'http://127.0.0.1:4711/', '/task.html?id=t_1', '/benchmarks.html#b=b_1']) expect(safe.test(ok), ok).toBe(true);
-    for (const bad of ['//evil.example/x', '/\\evil.example', 'javascript:alert(1)', 'data:text/html,x', 'task.html']) expect(safe.test(bad), bad).toBe(false);
+    const md = read('chat-md.js');
+    const safe = new Function(`return ${/const SAFE_URL = (\/.+\/i);/.exec(md)![1]!}`)() as RegExp;
+    const site = new Function(`return ${/const SITE_URL = (\/.+\/);/.exec(md)![1]!}`)() as RegExp;
+    for (const ok of ['https://github.com/x', 'http://127.0.0.1:4711/']) expect(safe.test(ok), ok).toBe(true);
+    // site pages link only in answers written with the ops tools; everything else is as before
+    for (const rel of ['/task.html?id=t_1', '/benchmarks.html#b=b_1']) expect([safe.test(rel), site.test(rel)], rel).toEqual([false, true]);
+    for (const bad of ['//evil.example/x', '/\\evil.example', 'javascript:alert(1)', 'data:text/html,x', 'task.html']) expect(safe.test(bad) || site.test(bad), bad).toBe(false);
+    expect(md).toContain('(siteLinks && SITE_URL.test(m[8]))');
+    expect(js).toContain('renderMarkdown(answer(), final, { siteLinks: usedOps(a.toolRounds) })');
+    expect(read('share.js')).not.toContain('siteLinks');
   });
 
   it('remembers each rail state under its loop_shell_* key, in the file that owns that rail', () => {

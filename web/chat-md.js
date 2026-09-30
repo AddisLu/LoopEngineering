@@ -9,8 +9,11 @@ import { el } from './shell.js';
  */
 
 // ---- markdown → DOM nodes built one by one (model output is untrusted) -----------
-// http(s), or a page of this site ('/task.html?id=…' from 對話操作) — never '//host' or '/\\host'
-const SAFE_URL = /^(?:https?:\/\/|\/(?![\/\\]))/i;
+const SAFE_URL = /^https?:\/\//i;
+// a page of this site ('/task.html?id=…'): only in answers written with the 對話操作 tools, whose
+// links the engine wrote — never '//host' or '/\\host' (both leave the site)
+const SITE_URL = /^\/(?![\/\\])/;
+let siteLinks = false;
 const INLINE =
   /(`+)([\s\S]*?[^`])\1(?!`)|\*\*([^*]+?)\*\*|__([^_\s][^_]*?)__|~~([^~]+?)~~|\*([^*\s][^*]*?)\*|\[([^\]]+)\]\(([^)\s]+)\)|(https?:\/\/[^\s<>)）」]+)/g;
 
@@ -44,7 +47,7 @@ function inline(text, parent) {
       inline(m[6], i);
       parent.append(i);
     } else if (m[7]) {
-      if (SAFE_URL.test(m[8])) link(m[8], parent, m[7]);
+      if (SAFE_URL.test(m[8]) || (siteLinks && SITE_URL.test(m[8]))) link(m[8], parent, m[7]);
       else parent.append(document.createTextNode(m[0]));
     } else if (m[9]) link(m[9], parent);
     last = re.lastIndex;
@@ -107,7 +110,17 @@ function renderList(lines, start, parent, final) {
   return i;
 }
 
-export function renderMarkdown(src, final) {
+export function renderMarkdown(src, final, opts = {}) {
+  const outer = siteLinks;
+  siteLinks = Boolean(opts.siteLinks) || outer;
+  try {
+    return renderBlocks(src, final);
+  } finally {
+    siteLinks = outer;
+  }
+}
+
+function renderBlocks(src, final) {
   const root = document.createDocumentFragment();
   const lines = src.replace(/\r\n?/g, '\n').split('\n');
   let i = 0;

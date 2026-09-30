@@ -107,6 +107,8 @@ describe('clone URLs', () => {
     const turn = chat();
     const url = `file://${origin}`;
     expect(await prepareGit(db, turn('幫我抓 repo'), { op: 'clone', url }, d)).toMatchObject({ ok: false, missing: [{ fact: 'url', question: expect.stringContaining('你貼過的') }] });
+    // the prefix of a longer URL the person pasted is not what they pasted
+    expect(await prepareGit(db, turn(`看看 ${url}-fork 這個`), { op: 'clone', url }, d)).toMatchObject({ ok: false, missing: [{ fact: 'url' }] });
     const a = await prepared(turn, `幫我抓 ${url}`, { op: 'clone', url });
     expect(a).toMatchObject({ kind: 'git', op: 'clone', target: 'origin', risk: 'normal', speed: 'slow' });
     const r = await runGit(db, a, d);
@@ -202,6 +204,57 @@ describe('push', () => {
     const theirs = git(origin, 'rev-parse', 'main');
     expect(await runGit(db, a, d)).toMatchObject({ ok: false, detail: expect.stringContaining('不會 force') });
     expect(git(origin, 'rev-parse', 'main')).toBe(theirs);
+  });
+});
+
+describe('exactly what was prepared', () => {
+  it('a branch named like an option or a force marker is refused, and push never takes a bare name', async () => {
+    const turn = chat();
+    const sha = commit(work, 'c.txt', 'mine\n', 'mine');
+    git(work, 'update-ref', 'refs/heads/+main', sha);
+    git(work, 'update-ref', 'refs/heads/--force', sha);
+    for (const b of ['+main', '--force', 'a:b', '../x']) expect(await question(turn, { op: 'push', repo: 'app', branch: b }), b).toContain('不是可以用的分支名稱');
+    // even an action forged past the preparer cannot force: the runner checks the name again
+    const forged = { ...(await prepared(turn, 'push', { op: 'push', repo: 'app' })) };
+    forged.params = { ...(forged.params as object), branch: '+main' };
+    commit(other, 'b.txt', 'two\n', 'theirs');
+    git(other, 'push', '-q', 'origin', 'main');
+    const theirs = git(origin, 'rev-parse', 'main');
+    expect(await runGit(db, forged, d)).toMatchObject({ ok: false });
+    expect(git(origin, 'rev-parse', 'main')).toBe(theirs);
+  });
+
+  it('push sends the prepared commit only; a commit added since is not pushed', async () => {
+    const turn = chat();
+    commit(work, 'c.txt', 'mine\n', 'listed');
+    const a = await prepared(turn, 'push', { op: 'push', repo: 'app' });
+    commit(work, 'd.txt', 'later\n', 'not listed');
+    expect(await runGit(db, a, d)).toMatchObject({ ok: false, detail: expect.stringContaining('又動過了') });
+    expect(git(origin, 'rev-parse', 'main')).not.toBe(git(work, 'rev-parse', 'HEAD'));
+  });
+
+  it('pull moves to the commit the preparation listed, even if origin moved on since', async () => {
+    const turn = chat();
+    const first = commit(other, 'b.txt', 'two\n', 'first');
+    git(other, 'push', '-q', 'origin', 'main');
+    const a = await prepared(turn, 'pull', { op: 'pull', repo: 'app' });
+    commit(other, 'e.txt', 'three\n', 'second, after the preparation');
+    git(other, 'push', '-q', 'origin', 'main');
+    git(work, 'fetch', '-q', 'origin');
+    expect(await runGit(db, a, d)).toMatchObject({ ok: true });
+    expect(git(work, 'rev-parse', 'HEAD')).toBe(first);
+  });
+
+  it('a clone never removes a directory it did not make', async () => {
+    const turn = chat();
+    const url = `file://${origin}`;
+    const a = await prepared(turn, `抓 ${url}`, { op: 'clone', url });
+    const dest = path.join(root, 'repos', 'origin');
+    fs.mkdirSync(dest, { recursive: true });
+    fs.writeFileSync(path.join(dest, 'keep.txt'), 'someone else\'s');
+    expect(await runGit(db, a, d)).toMatchObject({ ok: false, detail: expect.stringContaining('已經存在') });
+    expect(fs.readFileSync(path.join(dest, 'keep.txt'), 'utf8')).toBe("someone else's");
+    expect(fs.readdirSync(path.join(root, 'repos'))).toEqual(['origin']);
   });
 });
 

@@ -4,7 +4,7 @@ import { logEvent } from '../db/index.js';
 import { getTask } from '../tasks.js';
 import type { Task } from '../types.js';
 import { getDraft } from '../prd/drafts.js';
-import { checkPrd, linkSubmittedDraft, submitPrd } from '../prd/intake.js';
+import { linkSubmittedDraft, submitPrd, type PrdCheck } from '../prd/intake.js';
 import type { PrdReviewExec } from '../prd/review.js';
 import { createSpike, type SpikeDeps } from '../spike/create.js';
 import { cancelBenchmark, createBenchmark, getBenchmark, type NewBenchmarkInput } from '../benchmark/store.js';
@@ -42,6 +42,8 @@ export interface ExecDeps extends LocalGuardDeps {
   modelManager?: Pick<ModelManager, 'state' | 'ensureLoaded'>;
   /** answers still being written, other than the one given */
   otherAnswers?: (exceptId?: string) => number;
+  /** is this answer still being written? (the card's button can be pressed mid-answer) */
+  isRunning?: (messageId: string) => boolean;
   /** git actions (src/chatops/git.ts) register here so this module has no git of its own */
   git?: (db: Database.Database, a: OpsAction) => Promise<ActionResult>;
   /** how long confirm waits for a job before answering 「已開始」 */
@@ -65,7 +67,16 @@ function drifted(a: OpsAction, t: Task | undefined): string | null {
 }
 
 async function runWork(db: Database.Database, a: OpsAction, deps: ExecDeps): Promise<ActionResult> {
-  const p = a.params as { draft_id?: string; model?: string | null; verify_plan_id?: string | null; coding_tool?: 'claude-code' | 'plan'; name?: string; goal?: string; urls?: string[] };
+  const p = a.params as {
+    draft_id?: string;
+    model?: string | null;
+    verify_plan_id?: string | null;
+    coding_tool?: 'claude-code' | 'plan';
+    name?: string;
+    goal?: string;
+    urls?: string[];
+    check?: PrdCheck;
+  };
   const who = a.user_label ?? a.user_key;
   if (a.op === 'spike') {
     const { task, repo_path } = createSpike(
@@ -87,8 +98,9 @@ async function runWork(db: Database.Database, a: OpsAction, deps: ExecDeps): Pro
   if (draft.status === 'submitted') return { ok: false, detail: `這份草稿已經送出過了${draft.task_id ? `（${draft.task_id}）` : ''}` };
   const markdown = draft.markdown;
   const unchanged = a.md_sha != null && sha(markdown) === a.md_sha;
-  // reviewed when it was prepared; edited on /flow.html since → the full check again
-  const precheck = unchanged ? await checkPrd(db, markdown, { exec: async () => null }) : undefined;
+  // reviewed when it was prepared (that verdict is kept with the action); edited on /flow.html
+  // since → the full check again, local model review included
+  const precheck = unchanged && p.check?.ok ? p.check : undefined;
   const r = await submitPrd(db, markdown, {
     exec: deps.reviewExec,
     precheck,
@@ -345,8 +357,13 @@ export async function confirmButton(db: Database.Database, idOrCode: string, use
   if (!check.ok) return { ok: false, message: check.reason, action: check.action };
   const a = check.action;
   if (!claim(db, a.id, { msgId: null, by: 'button' })) return { ok: false, message: `動作 ${a.code} 已經在執行或處理過了`, action: getActionById(db, a.id) ?? a };
-  // a click comes after the answer ended, so even a model switch can go now
-  const after = await getOpsRunner().start(db, getActionById(db, a.id)!, deps);
+  const claimed = getActionById(db, a.id)!;
+  // the card shows while its answer is still streaming: a model switch clicked then waits for it
+  if (a.speed === 'deferred' && deps.isRunning?.(a.presented_msg_id)) {
+    getOpsRunner().defer(db, a.presented_msg_id, claimed, deps);
+    return { ok: true, action: claimed, message: `好，這則回答結束後就開始：${a.summary.split('\n')[0]}` };
+  }
+  const after = await getOpsRunner().start(db, claimed, deps);
   return { ok: true, action: after, message: outcomeLine(after) };
 }
 

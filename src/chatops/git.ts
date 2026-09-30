@@ -154,6 +154,14 @@ export function cloneRoot(db: Database.Database, d: GitOpsDeps = {}): string {
   return d.cloneRoot ?? expand(getSetting(db, 'git_clone_root') || path.join(process.env.HOME ?? '', 'Addis', 'repos'));
 }
 
+/**
+ * A branch as the person names it — never an option (`--force`), a force marker (`+main`), a
+ * refspec (`a:b`) or anything git would not accept as a branch. `origin/main` is fine (merge).
+ */
+const BRANCH_RE = /^(?![-+./])(?!.*(?:\.\.|@\{|\/\/|\/\.|\.lock(?:\/|$)|[./]$))[A-Za-z0-9._/-]{1,200}$/;
+export const validBranch = (b: string): boolean => BRANCH_RE.test(b);
+const badBranch = (b: string) => no('branch', `「${b}」不是可以用的分支名稱`);
+
 const repoNameOf = (url: string): string =>
   (url.replace(/\/+$/, '').split(/[/:]/).pop() ?? '')
     .replace(/\.git$/, '')
@@ -215,7 +223,8 @@ export async function prepareGit(db: Database.Database, chat: ChatCtx, args: Rec
       op: 'pull',
       target: st.name,
       params: { repo, branch: st.branch, upstream: st.upstream },
-      expect: { head: await tryGit(db, d, repo, ['rev-parse', 'HEAD']) },
+      // exactly these commits: the run fast-forwards to this sha, it does not fetch again
+      expect: { head: await tryGit(db, d, repo, ['rev-parse', 'HEAD']), upstream: await tryGit(db, d, repo, ['rev-parse', st.upstream]) },
       summary: [`把 ${st.name} 的 ${st.branch} 快轉到 ${st.upstream}（落後 ${st.behind} 個 commit）`, ...(incoming ? incoming.split('\n').map((l) => `- ${l}`) : [])].join('\n'),
       risk: 'normal',
       speed: 'slow',
@@ -226,6 +235,7 @@ export async function prepareGit(db: Database.Database, chat: ChatCtx, args: Rec
   if (op === 'push') {
     const branch = str(args.branch, 200) || st.branch;
     if (!branch) return no('branch', '要推哪個分支？');
+    if (!validBranch(branch)) return badBranch(branch);
     const local = await tryGit(db, d, repo, ['rev-parse', '--verify', `refs/heads/${branch}`]);
     if (!local) return no('branch', `${st.name} 沒有 ${branch} 這個分支`);
     const remote = await tryGit(db, d, repo, ['rev-parse', '--verify', `refs/remotes/origin/${branch}`]);
@@ -256,6 +266,8 @@ export async function prepareGit(db: Database.Database, chat: ChatCtx, args: Rec
   const into = str(args.into, 200) || st.branch;
   if (!from) return no('branch', '要把哪個分支合併進來？（例：origin/main 或 feature-x）');
   if (!into) return no('into', '要合併到哪個分支？');
+  if (!validBranch(from)) return badBranch(from);
+  if (!validBranch(into)) return badBranch(into);
   const fromSha = await tryGit(db, d, repo, ['rev-parse', '--verify', `${from}^{commit}`]);
   const intoSha = await tryGit(db, d, repo, ['rev-parse', '--verify', `refs/heads/${into}`]);
   if (!fromSha) return no('branch', `${st.name} 找不到 ${from}`);
@@ -309,13 +321,17 @@ export async function runGit(db: Database.Database, a: OpsAction, d: GitOpsDeps 
     if (fs.existsSync(dest)) return { ok: false, detail: `${dest} 已經存在` };
     fs.mkdirSync(path.dirname(dest), { recursive: true });
     return withRepoLock(dest, async () => {
+      if (fs.existsSync(dest)) return { ok: false, detail: `${dest} 已經存在` };
+      // clone beside the destination and rename: a failure only ever removes what it made itself
+      const tmp = `${dest}.cloning-${Date.now().toString(36)}`;
       try {
-        await gitAsync(path.dirname(dest), ['clone', '--', url, dest], {
+        await gitAsync(path.dirname(dest), ['clone', '--', url, tmp], {
           timeoutMs: d.cloneTimeoutMs ?? Math.max(30, getNum(db, 'ops_git_clone_timeout_sec', 900)) * 1000,
           allowProtocols: d.allowFileUrls ? 'https:ssh:file' : 'https:ssh',
         });
+        fs.renameSync(tmp, dest);
       } catch (err) {
-        fs.rmSync(dest, { recursive: true, force: true });
+        fs.rmSync(tmp, { recursive: true, force: true });
         return { ok: false, detail: `抓不下來：${(err as Error).message}` };
       }
       addToAllowlist(db, dest);
@@ -331,7 +347,8 @@ export async function runGit(db: Database.Database, a: OpsAction, d: GitOpsDeps 
     const busy = repoBusy(db, repo);
     if (busy) return { ok: false, detail: busy };
     try {
-      const res = a.op === 'pull' ? await pull(db, d, repo, p) : a.op === 'push' ? await push(db, d, repo, p) : await merge(db, d, repo, p);
+      const expect = (a.expect ?? {}) as Record<string, unknown>;
+      const res = a.op === 'pull' ? await pull(db, d, repo, p, expect) : a.op === 'push' ? await push(db, d, repo, p, expect) : await merge(db, d, repo, p);
       if (res.ok && a.op !== 'push' && isEngineRepo(repo)) setSetting(db, 'self_update_pending', 'true');
       return res;
     } catch (err) {
@@ -340,27 +357,34 @@ export async function runGit(db: Database.Database, a: OpsAction, d: GitOpsDeps 
   });
 }
 
-async function pull(db: Database.Database, d: GitOpsDeps, repo: string, p: Record<string, unknown>): Promise<ActionResult> {
+/** Fast-forward to exactly the commit the preparation listed — no second fetch, nothing newer. */
+async function pull(db: Database.Database, d: GitOpsDeps, repo: string, p: Record<string, unknown>, expect: Record<string, unknown>): Promise<ActionResult> {
   const st = await repoStatus(db, repo, d);
   if (st.branch !== p.branch) return { ok: false, detail: `${st.name} 現在在 ${st.branch ?? 'detached'}，不是準備時的 ${String(p.branch)}，沒有 pull` };
   if (st.dirty.length) return { ok: false, detail: `${st.name} 有未提交的修改，沒有 pull` };
-  const before = await git(db, d, repo, ['rev-parse', '--short', 'HEAD']);
-  await git(db, d, repo, ['pull', '--ff-only']);
-  const after = await git(db, d, repo, ['rev-parse', '--short', 'HEAD']);
-  return { ok: true, detail: before === after ? `${st.name} 已經是最新` : `${st.name} 的 ${st.branch} 已快轉：${before} → ${after}` };
+  const head = await git(db, d, repo, ['rev-parse', 'HEAD']);
+  const target = typeof expect.upstream === 'string' ? expect.upstream : null;
+  if (!target || head !== expect.head) return { ok: false, detail: `${st.name} 的 ${st.branch} 在準備之後又動過了，沒有 pull；請重新準備` };
+  await git(db, d, repo, ['merge', '--ff-only', target]);
+  const [before, after] = [head.slice(0, 7), (await git(db, d, repo, ['rev-parse', '--short', 'HEAD']))];
+  return { ok: true, detail: `${st.name} 的 ${st.branch} 已快轉：${before} → ${after}` };
 }
 
-async function push(db: Database.Database, d: GitOpsDeps, repo: string, p: Record<string, unknown>): Promise<ActionResult> {
+/** Push exactly the prepared commit, as an explicit refspec: never a force, never a newer tip. */
+async function push(db: Database.Database, d: GitOpsDeps, repo: string, p: Record<string, unknown>, expect: Record<string, unknown>): Promise<ActionResult> {
   const branch = String(p.branch);
-  const args = p.setUpstream ? ['push', '-u', 'origin', branch] : ['push', 'origin', branch];
+  if (!validBranch(branch)) return { ok: false, detail: `「${branch}」不是可以用的分支名稱` };
+  const local = await tryGit(db, d, repo, ['rev-parse', '--verify', `refs/heads/${branch}`]);
+  if (!local || local !== expect.local) return { ok: false, detail: `${branch} 在準備之後又動過了（commit 不一樣），沒有推；請重新準備` };
   try {
-    await git(db, d, repo, args);
+    await git(db, d, repo, ['push', 'origin', `${local}:refs/heads/${branch}`]);
   } catch (err) {
     const msg = (err as Error).message;
     if (/non-fast-forward|fetch first|rejected/i.test(msg)) return { ok: false, detail: `遠端有新的 commit，沒有推（不會 force）；先 pull 或 merge 再推` };
     throw err;
   }
-  return { ok: true, detail: `${path.basename(repo)} 的 ${branch} 已推到 origin` };
+  if (p.setUpstream) await tryGit(db, d, repo, ['branch', `--set-upstream-to=origin/${branch}`, branch]);
+  return { ok: true, detail: `${path.basename(repo)} 的 ${branch} 已推到 origin（${local.slice(0, 7)}）` };
 }
 
 async function merge(db: Database.Database, d: GitOpsDeps, repo: string, p: Record<string, unknown>): Promise<ActionResult> {

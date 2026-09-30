@@ -120,13 +120,21 @@ export const composeWork = (form: WebPrdForm): string => composePrd(form);
 export function workSummary(o: WorkPlanInput & { form: WebPrdForm; draftUrl: string; spends: boolean }): string {
   const t = WORK_TEMPLATES[o.facts.kind];
   const v = o.verification;
-  const steps = o.form.verify.commands.length;
+  const commands = o.form.verify.commands.filter(Boolean);
+  const setup = o.form.scope.setup.filter(Boolean);
   const metrics = o.form.verify.metrics.filter(Boolean);
+  const notes = (o.facts.notes ?? []).map(oneLine).filter(Boolean);
+  const parts = o.facts.kind === 'epic' ? (o.facts.parts ?? []).map(oneLine).filter(Boolean) : [];
+  // everything that will run on this machine is shown as it will run: the person confirms what they see
   const lines = [
     `開一張「${t.label}」${t.flow === 'epic' ? '（AI 會拆成依序執行的子任務）' : '任務'}：${o.form.change.title}`,
     `- repo：${o.repo.name} · ${o.branch}`,
     `- 模型：${o.model ? modelName(o.model) : '預設模型'}${o.spends ? '（雲端，會花訂閱額度）' : o.model?.startsWith('local:') ? '（本地，不花額度）' : ''}`,
-    `- 驗證：${v.note || '（人工核可）'}${steps ? `，${steps} 步` : ''}${metrics.length ? `；門檻 ${metrics.join('、')}` : ''}`,
+    `- 驗證：${v.note || '（人工核可）'}${metrics.length ? `；門檻 ${metrics.join('、')}` : ''}`,
+    ...commands.map((c) => `  - \`${c}\``),
+    ...(setup.length ? [`- 前置指令：${setup.map((c) => `\`${c}\``).join('；')}`] : []),
+    ...(parts.length ? [`- 拆成：${parts.join('；')}`] : []),
+    ...(notes.length ? [`- 補充與限制：${notes.join('；')}`] : []),
     `- 驗收：${o.form.acceptance[0] ?? '—'}${o.form.acceptance.length > 1 ? `（共 ${o.form.acceptance.length} 條）` : ''}`,
   ];
   const manual = o.form.verify.manual.filter((m) => (typeof m === 'string' ? m : m.then));

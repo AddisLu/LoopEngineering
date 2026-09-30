@@ -581,6 +581,8 @@ const TOOL_LABEL = {
   ops_overview: '狀況總覽', ops_find: '找任務／評比', ops_show: '查看', ops_standings: '模型戰績', ops_templates: '範本', git_status: 'git 狀態',
   ops_prepare_work: '準備工作', ops_prepare_benchmark: '準備評比', ops_prepare_action: '準備動作', git_prepare: '準備 git', ops_confirm: '確認執行', ops_cancel: '取消動作',
 };
+// an answer written with the 對話操作 tools may link this site's pages (the engine wrote those links)
+const usedOps = (rounds) => (rounds || []).some((r) => (r.calls || []).some((c) => /^(ops|git)_/.test(c.name || '')));
 const toolIcon = (name) => TOOL_ICON[name] || (name.startsWith('mcp__') ? '🧩' : '🛠');
 const toolLabel = (name) => TOOL_LABEL[name] || (name.startsWith('mcp__') ? name.slice(5).replace('__', '.') : name);
 function renderTools(a, rounds, saved = false) {
@@ -792,7 +794,7 @@ async function generate(a, { thinking, cont, mode, resume = false }) {
   const paint = (final) => {
     const stick = nearBottom();
     try {
-      a.body.replaceChildren(renderMarkdown(answer(), final));
+      a.body.replaceChildren(renderMarkdown(answer(), final, { siteLinks: usedOps(a.toolRounds) }));
     } catch (e) {
       // never lose an answer to a rendering bug — fall back to plain text
       a.body.textContent = answer();
@@ -1306,7 +1308,7 @@ function replayMsg(m) {
     v.body.textContent = m.content;
     v.text = m.content;
   } else {
-    v.body.replaceChildren(renderMarkdown(m.content, true));
+    v.body.replaceChildren(renderMarkdown(m.content, true, { siteLinks: usedOps(m.tools) }));
     if (m.reasoning) {
       v.think.hidden = false;
       v.thinkText.textContent = m.reasoning;

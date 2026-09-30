@@ -65,6 +65,26 @@ describe('classifyReply: only a plain yes counts', () => {
     ['幫我確認一下現在的狀況', false],
     ['開一場新的評比', false],
     ['好的，另外再幫我把第二張任務也排進去然後通知我', false],
+    // every word must be a yes-word or a particle (the review's counter-examples)
+    ['確認 PV9', false],
+    ['執行 t_9', false],
+    ['google it', false],
+    ['我是 Addis', false],
+    ['book', false],
+    ['行李', false],
+    ['對方', false],
+    ['yes b_12', false],
+    ['okay, merge b_2', false],
+    ['謝謝', false],
+    ['好的', true],
+    ['是的', true],
+    ['執行吧', true],
+    ['go ahead', true],
+    ['yes please', true],
+    ['對，就這樣', true],
+    ['沒問題，請執行', true],
+    ['確認K7Q', true],
+    ['#k7q 好', true],
   ])('%s → %s', (text, yes) => {
     expect(classifyReply(text, 'K7Q').affirmative).toBe(yes);
   });
@@ -98,6 +118,23 @@ describe('the typed confirm', () => {
     markPresented(db, a.id, t3);
     const t4 = turn('確認');
     expect(checkTypedConfirm(db, t4, undefined, never).ok).toBe(true);
+  });
+
+  it('showing again only moves forward, and never onto a regenerated answer', () => {
+    const { c, turn } = convo();
+    const t1 = turn('把 t_1 排入');
+    const a = createPending(db, t1, prep());
+    const t2 = turn('再看一次');
+    markPresented(db, a.id, t2);
+    const shown = (id: string) => (db.prepare('SELECT presented_msg_id AS m FROM ops_actions WHERE id = ?').get(id) as { m: string }).m;
+    expect(shown(a.id)).toBe(t2.messageId);
+    markPresented(db, a.id, t1); // back to the older answer: ignored
+    expect(shown(a.id)).toBe(t2.messageId);
+    const t3 = turn('再一次');
+    db.prepare("UPDATE chat_messages SET invalid_at = datetime('now') WHERE id = ?").run(t3.messageId);
+    markPresented(db, a.id, t3); // a regenerated (invalidated) answer: ignored
+    expect(shown(a.id)).toBe(t2.messageId);
+    void c;
   });
 
   it('refuses a reply that is not a plain yes, and a high-risk action without its code', () => {
