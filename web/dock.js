@@ -186,8 +186,11 @@ function actionButton(e, data) {
     b.textContent = `建置映像（${e.container}）`;
     b.onclick = () => startJob('build', e.recipe, e.name);
   }
+  // one download or build at a time; a switch only restarts vLLM and runs beside either
+  const queued = busy && e.action !== 'switch';
   const held = benchHolds() && e.action === 'switch';
-  if (busy || switching || held) b.disabled = true;
+  if (queued || switching || held) b.disabled = true;
+  if (queued) b.title = '已有下載或建置在跑，等它結束';
   if (held) b.title = `評比使用中：${benchBusy.title}`;
   return b;
 }

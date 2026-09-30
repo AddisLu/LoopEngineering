@@ -302,6 +302,8 @@ describe('chat-first shell', () => {
     expect(js).toContain('window.confirm'); // a switch takes minutes and kills the chat meanwhile
     expect(js).toContain('還有回答正在產生'); // and never mid-answer
     expect(js).toContain("e.action === 'switch'"); // one action per row, decided server-side
+    // a 13-hour download must not lock switching: only a second job waits for the first
+    expect(js).toContain("const queued = busy && e.action !== 'switch';");
   });
 
   it('only declares a JSON body when it sends one', () => {
