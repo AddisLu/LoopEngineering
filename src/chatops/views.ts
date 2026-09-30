@@ -8,7 +8,7 @@ import { taskHistory } from '../orchestrator/history.js';
 import { humanNote } from '../benchmark/attempts.js';
 import { benchmarkMatrix, benchmarkRecommendations, getBenchmark, listBenchmarks, type BenchmarkArmView } from '../benchmark/store.js';
 import { listBuiltin } from '../benchmark/source.js';
-import { listPlans } from '../plans/store.js';
+import { getPlan, listPlans } from '../plans/store.js';
 import { listJobRepos } from '../plans/job.js';
 import { listLocalModels } from '../local/models.js';
 import { annotateLocalModel, type LocalGuardDeps } from '../local/guard.js';
@@ -296,9 +296,24 @@ function actionShow(a: OpsAction): View {
   return { markdown: out.join('\n'), data: { action: v }, links: a.result?.links ?? [] };
 }
 
-/** One task (t_…), benchmark (b_…) or 對話操作 action (oa_… or its code). */
+/** A 驗證方案: what it runs, where, and the bar it sets. */
+function planShow(db: Database.Database, id: string): View | null {
+  const p = getPlan(db, id);
+  if (!p) return null;
+  const out = [`## ${p.id} ${p.name}`, `repo：${p.repo_path ? p.repo_path.split('/').pop() : '任何 repo'}｜機台：${p.host || '這台'}｜領域：${p.domain}`];
+  if (p.description) out.push(p.description.slice(0, 200));
+  out.push(`步驟：${p.steps.slice(0, 3).map((x) => `\`${x}\``).join('；')}${p.steps.length > 3 ? `（共 ${p.steps.length} 步）` : ''}`);
+  out.push(`門檻：${p.metrics || '驗證指令全部成功'}`);
+  const counts = [p.protected_paths.length ? `保護路徑 ${p.protected_paths.length} 條` : '', p.artifacts.length ? `產出物 ${p.artifacts.length} 項` : '', p.dataset_root ? `圖資在 ${p.dataset_root}` : '', p.manual_checks.length ? `人工清單 ${p.manual_checks.length} 項` : ''].filter(Boolean);
+  if (counts.length) out.push(counts.join('｜'));
+  out.push(`你可以說：「用驗證方案 ${p.name} 開一件新工作」、「用 ${p.name} 開一場評比」`);
+  return { markdown: out.join('\n'), data: { plan: { id: p.id, name: p.name } }, links: [link.plan(p.id)] };
+}
+
+/** One task (t_…), benchmark (b_…), 驗證方案 (vp_…) or 對話操作 action (oa_… or its code). */
 export function showView(db: Database.Database, id: string, o: { userKey?: string | null; conversationId?: string | null } = {}): View | null {
   const key = String(id ?? '').trim();
+  if (key.startsWith('vp_')) return planShow(db, key);
   if (key.startsWith('t_')) {
     const t = getTask(db, key);
     return t ? taskShow(db, t) : null;

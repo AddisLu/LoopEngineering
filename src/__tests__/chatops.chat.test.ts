@@ -150,6 +150,9 @@ describe('on: who gets which tools', () => {
     const r = await ask(conversation(), '現在狀況？');
     expect(r.names).toEqual([...OPS_TOOL_NAMES]);
     expect(r.system).not.toContain('你目前只能查詢');
+    // the manual comes after the tail that invites diagrams, so its rules are the last word
+    expect(r.system.indexOf(OPS_PROMPT)).toBeGreaterThan(r.system.indexOf('SVG'));
+    for (const rule of ['先呼叫查詢工具', '不要沿用前面回答', '呼叫 ops_cancel，然後只回一句話', '只能照抄工具結果', '不要畫圖']) expect(OPS_PROMPT, rule).toContain(rule);
     expect((await ask(conversation(), '調參', { mode: 'tune' })).first.tools).toBeUndefined();
   });
 
@@ -195,7 +198,7 @@ describe('two turns: prepare, then the person confirms', () => {
     // the next question hears what happened
     const t3 = await ask(conv, '好了嗎？');
     expect(t3.system).toContain(`最近的動作 ${a.code}`);
-    expect(t3.system).not.toContain('待確認的動作');
+    expect(t3.system).not.toContain('本對話有一個待確認的動作');
   });
 
   it('a high-risk action needs its code; the refusal shows it again so 「確認 CODE」 works next', async () => {

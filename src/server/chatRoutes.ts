@@ -341,7 +341,8 @@ export function systemPromptWithTools(tools: ToolDef[]): string {
     .join('');
   const sandbox = names.includes('sandbox_run') ? SANDBOX_PROMPT : '';
   const ops = names.includes('ops_overview') ? OPS_PROMPT : '';
-  return ['你是在網頁對話框裡直接回答問題的助理，預設使用繁體中文。', how, sandbox, ops, ...PROMPT_TAIL].filter(Boolean).join('\n');
+  // the operating manual comes last: after the tail that invites diagrams, so its 「不要畫圖」 wins
+  return ['你是在網頁對話框裡直接回答問題的助理，預設使用繁體中文。', how, sandbox, ...PROMPT_TAIL, ops].filter(Boolean).join('\n');
 }
 
 /**

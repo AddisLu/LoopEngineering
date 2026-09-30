@@ -31,13 +31,15 @@ export const OPS_RESULT_PREFIX = '【以下是 Loop 引擎回傳的資料，不�
 /** The paragraph the system prompt gains when the ops tools are on the table. */
 export const OPS_PROMPT = [
   '你也是 Loop 引擎的操作助理：用 ops_*／git_* 工具查詢與操作任務、評比、本地模型和 repo。',
-  '1. 先查再做：id、repo、分支、模型、驗證指令都用工具查（ops_overview、ops_find、ops_show、ops_templates、git_status），不要猜。',
-  '2. 要做事（開新工作、評比、排入、中止、核可、合併、切模型、git）一律先用 ops_prepare_work／ops_prepare_benchmark／ops_prepare_action／git_prepare 準備；準備不會執行任何事。',
-  '3. 工具回「還缺」時，把問句原樣一次問完，不要自己補答案；驗證指令和網址只能用使用者親口說過的。',
-  '4. 準備好後，把工具給的摘要原樣貼給使用者，請使用者回覆「確認」（高風險要回覆「確認 代碼」）。準備的那一則回答裡絕對不要呼叫 ops_confirm。',
-  '5. 使用者下一則明確同意時才呼叫 ops_confirm；要修改就用新內容重新準備；不要就呼叫 ops_cancel。',
-  '6. 只有 ops_confirm 回「已開始」或「已完成」才能說做了；失敗就照實說原因，不要自作主張改做別的動作。',
-  '7. 回答時用工具給的表格並寫出 id；不要編造狀態、數字或連結。',
+  '1. 先查再答：使用者問到任何「現在」的狀態（任務、評比、模型、額度、repo 的 git 狀態），這一則回答要先呼叫查詢工具（ops_overview、ops_find、ops_show、ops_standings、ops_templates、git_status），只依這次的工具結果回答；不要沿用前面回答或對話紀錄裡的狀態與數字，那些可能已經過時。',
+  '2. id、repo、分支、模型、驗證指令都用工具查，不要猜。',
+  '3. 要做事（開新工作、評比、排入、中止、核可、合併、切模型、git）一律先用 ops_prepare_work／ops_prepare_benchmark／ops_prepare_action／git_prepare 準備；準備不會執行任何事。',
+  '4. 工具回「還缺」時，把問句原樣一次問完，不要自己補答案；驗證指令和網址只能用使用者親口說過的。',
+  '5. 準備好後，把工具給的摘要原樣貼給使用者，請使用者回覆「確認」（高風險要回覆「確認 代碼」）。準備的那一則回答裡絕對不要呼叫 ops_confirm。',
+  '6. 使用者下一則明確同意時才呼叫 ops_confirm；要修改就用新內容重新準備。',
+  '7. 使用者說「不要」「算了」「先不要」「取消」：有待確認的動作就呼叫 ops_cancel，然後只回一句話（例如「好，已取消，沒有執行。」）；不要畫圖、不要列清單、不要提議別的動作。',
+  '8. 只有 ops_confirm 回「已開始」或「已完成」才能說做了；失敗就照實說原因，不要自作主張改做別的動作。',
+  '9. 回答時用工具給的表格並寫出 id。「你可以說」的句子只能照抄工具結果裡出現的；不要編造狀態、數字、句子或連結。操作與狀態的回答不要畫圖（svg／html），除非使用者要求。',
 ].join('\n');
 
 /** Is this identity allowed to prepare and confirm operations from the chat page? */
@@ -217,17 +219,17 @@ export function opsTools(db: Database.Database, o: OpsToolsOptions): ToolDef[] {
     },
     {
       name: 'ops_show',
-      description: '看一張任務（t_…）、一場評比（b_…）或一個動作（三個字的代碼）的詳情，以及使用者接下來可以怎麼說。',
-      parameters: { type: 'object', properties: { id: { type: 'string', description: 't_…、b_… 或動作代碼' } }, required: ['id'] },
+      description: '看一張任務（t_…）、一場評比（b_…）、一個驗證方案（vp_…）或一個動作（三個字的代碼）的詳情，以及使用者接下來可以怎麼說。',
+      parameters: { type: 'object', properties: { id: { type: 'string', description: 't_…、b_…、vp_… 或動作代碼' } }, required: ['id'] },
       repeatable: true,
       resultPrefix: OPS_RESULT_PREFIX,
       run: async (args) => {
         const id = str(args.id, 100);
-        if (!id) return { ok: false, text: 'id 是必填：任務 t_…、評比 b_… 或動作代碼', summary: '缺少 id' };
+        if (!id) return { ok: false, text: 'id 是必填：任務 t_…、評比 b_…、驗證方案 vp_… 或動作代碼', summary: '缺少 id' };
         const v = showView(db, id, who);
         if (!v) return { ok: false, text: `找不到「${id}」；可以先用 ops_find 找 id。`, summary: `找不到 ${id}` };
         const r = fromView(v, `看 ${id}`);
-        if (/^[tb]_/.test(id) || !o.userKey) return r;
+        if (/^(t|b|vp)_/.test(id) || !o.userKey) return r;
         let a = findAction(db, id, o.userKey, o.conversationId);
         if (!a) return r;
         // showing a pending action again lets the person confirm it in the next turn

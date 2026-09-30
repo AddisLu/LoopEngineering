@@ -79,4 +79,5 @@ export const link = {
   bench: (id: string) => ({ title: `${id} 評比`, url: `/benchmarks.html#b=${encodeURIComponent(id)}` }),
   draft: (id: string) => ({ title: '工作流程草稿', url: `/flow.html?draft=${encodeURIComponent(id)}` }),
   board: () => ({ title: '總覽', url: '/board.html' }),
+  plan: (id: string) => ({ title: `${id} 驗證方案`, url: `/plans.html#${encodeURIComponent(id)}` }),
 };

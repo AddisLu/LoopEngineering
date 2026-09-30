@@ -105,6 +105,19 @@ describe('find and show', () => {
   });
 });
 
+describe('a 驗證方案 by its id', () => {
+  it('shows what it runs, the bar it sets, and links the plan', async () => {
+    const { createPlan } = await import('../plans/store.js');
+    const p = createPlan(db, { name: 'CCL 量尺', repo_path: '/r/cf-aoi-ccl', steps: ['bash run_bench.sh'], metrics: 'correct == 1; max_ms <= 10', protected_paths: ['bench/**'], manual_checks: [], domain: 'cuda' } as never, 'test');
+    const v = showView(db, p.id)!;
+    expect(v.markdown).toContain(`## ${p.id} CCL 量尺`);
+    expect(v.markdown).toContain('`bash run_bench.sh`');
+    expect(v.markdown).toContain('門檻：correct == 1; max_ms <= 10');
+    expect(v.links).toEqual([{ title: `${p.id} 驗證方案`, url: `/plans.html#${p.id}` }]);
+    expect(showView(db, 'vp_nope')).toBeNull();
+  });
+});
+
 describe('standings and templates', () => {
   it('standings say plainly when nothing has been judged; templates list every topic', () => {
     expect(standingsView(db).markdown).toContain('還沒有評完的評比');
