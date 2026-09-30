@@ -13,6 +13,7 @@ import {
   latestRun,
   bumpResume,
   listRunsForTask,
+  getTask,
 } from '../tasks.js';
 import { readUsage } from '../token/usage.js';
 import { estimatePct } from '../token/accounting.js';
@@ -51,6 +52,7 @@ import { describeExecHosts, resolveExecTarget } from '../exec/hosts.js';
 import { evaluateAcceptance, extractMetrics, formatAcceptance, formatSpecs, parseAcceptance, parseProtected, protectedViolations, type MetricSpec, type MetricsReport } from './acceptance.js';
 import { cloudAllowed, isCloudModel, localFallbackModel } from '../local/backend.js';
 import { benchmarkRecommendations } from '../benchmark/store.js';
+import { runSelfReview } from '../review/selfReview.js';
 
 /**
  * MCP servers a local-model task may use (mcp_servers_json), with the runtime env the chat page
@@ -487,6 +489,10 @@ export async function runTask(
   setStatus(db, task.id, 'verifying', { run_id: run.id });
   const verifyOutcome = await runVerifyPipeline(db, task, worktreePath, run.id, task.base_branch);
   if (verifyOutcome === 'fail') return; // already routed to blocked/attention inside the pipeline
+  // 本地自評 (local_self_review, off by default): a local model summarises the diff for the reviewer
+  if (getBool(db, 'local_self_review', false) && !isGeneric && !isMock) {
+    await runSelfReview(db, task, worktreePath, task.base_branch, run.id).catch(() => null);
+  }
   let manualVerify = verifyOutcome === 'manual';
   // 產出物: take them now, before the close-out can reclaim the worktree
   if (!isMock && !isGeneric) await collectTaskArtifacts(db, task, run.id, worktreePath);
@@ -972,7 +978,7 @@ async function tryCreatePr(
     const giteaUrl = (getSetting(db, 'gitea_url') ?? '').trim();
     const prUrl = await createPr(worktreePath, branch, task.title, {
       base: task.base_branch,
-      body: giteaUrl ? prBody(task, getRun(db, runId), worktreePath) : undefined,
+      body: giteaUrl ? prBody(getTask(db, task.id) ?? task, getRun(db, runId), worktreePath) : undefined,
       gitea: giteaUrl ? { url: giteaUrl, token: process.env.GITEA_TOKEN ?? '' } : null,
       onError: (msg) => logEvent(db, { task_id: task.id, run_id: runId, kind: 'note', detail: msg }),
     });

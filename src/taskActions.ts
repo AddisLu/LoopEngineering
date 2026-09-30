@@ -9,6 +9,7 @@ import { pruneTaskArtifacts } from './git/worktree.js';
 import { removeTrialWorkspace } from './review/review.js';
 import { collectDistillMaterial, runDistiller, type DistillExec } from './knowledge/distill.js';
 import type { Task } from './types.js';
+import { recordFix } from './repo/ledger.js';
 
 /**
  * The task transitions the REST routes (board, CLI, MCP) and 對話操作 (src/chatops) share. Each
@@ -133,6 +134,8 @@ export function closeTask(db: Database.Database, id: string, o: { distillExec?: 
   const t = need(db, id);
   // collect BEFORE cleanupWorktree destroys the worktree HANDOFF.md lives in
   const material = collectDistillMaterial(db, t);
+  // 過去修法: a ticket's outcome, while its shas still resolve (only tasks of an imported repo)
+  recordFix(db, t, t.merge_status === 'merged' ? 'merged' : 'abandoned');
   setStatus(db, id, 'closed', { detail: 'closed via api' });
   cleanupWorktree(db, t);
   removeTrialWorkspace(t);

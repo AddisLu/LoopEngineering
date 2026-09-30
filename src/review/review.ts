@@ -20,6 +20,7 @@ import { datasetPath, getPlan, planSteps } from '../plans/store.js';
 import { changedFiles, codeRefFor, readSource, type ChangedFile } from './code.js';
 import { latestArtifacts, packageZip, type ArtifactManifest } from './artifacts.js';
 import { parseSteps, type Task, type TaskRun } from '../types.js';
+import { recordFix } from '../repo/ledger.js';
 
 /**
  * 驗收頁 (web/task.html): everything a person needs to decide whether a task's result is good —
@@ -305,6 +306,7 @@ export async function approveTask(
   }
   db.prepare("UPDATE tasks SET approved_by = ?, approved_at = datetime('now') WHERE id = ?").run(by, task.id);
   logEvent(db, { task_id: task.id, kind: 'note', detail: `核可（${by}）：${detail}` });
+  recordFix(db, getTask(db, task.id) ?? task, 'merged');
   return { merged, detail };
 }
 
@@ -323,6 +325,7 @@ export function requestChanges(db: Database.Database, task: Task, feedback: stri
   db.prepare(
     `UPDATE tasks SET goal = ?, merge_status = NULL, approved_by = NULL, approved_at = NULL, checklist_json = NULL, resume_count = 0 WHERE id = ?`,
   ).run(goal, task.id);
+  recordFix(db, task, 'returned');
   removeTrialWorkspace(task);
   setStatus(db, task.id, 'queued', { detail: `退回修改（${by}）：${fb.slice(0, 200)}` });
   return getTask(db, task.id)!;

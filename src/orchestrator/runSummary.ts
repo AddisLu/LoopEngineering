@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Task, TaskRun } from '../types.js';
 import type { MetricsReport } from './acceptance.js';
+import { readSelfReview, renderSelfReview } from '../review/selfReview.js';
 
 /**
  * What a run's last verification found (task_runs.verify_json / metrics_json, written by
@@ -77,6 +78,8 @@ export function prBody(task: Task, run: TaskRun | null | undefined, worktree: st
   }
   const manual = readVerifyMd(worktree);
   if (manual) out.push('## 人工驗收（VERIFY.md）', '', manual, '');
+  const self = readSelfReview(task);
+  if (self) out.push(renderSelfReview(self).replace(/^### /, '## '), '');
   const publicUrl = (process.env.LOOP_PUBLIC_URL || '').replace(/\/$/, '');
   if (publicUrl) out.push(`**驗收頁**（程式碼、試跑、人工驗收、交付）：${publicUrl}/task.html?id=${encodeURIComponent(task.id)}`, '');
   out.push('---', `Loop 任務 \`${task.id}\` · 模型 ${task.model ?? '（預設）'}${run ? ` · run \`${run.id}\`（第 ${run.attempt} 次）` : ''}`);
