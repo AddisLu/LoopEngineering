@@ -53,6 +53,7 @@ import { evaluateAcceptance, extractMetrics, formatAcceptance, formatSpecs, pars
 import { cloudAllowed, isCloudModel, localFallbackModel } from '../local/backend.js';
 import { benchmarkRecommendations } from '../benchmark/store.js';
 import { runSelfReview } from '../review/selfReview.js';
+import { attachmentsFor, repoMapFor, similarFixesFor } from '../intake/context.js';
 
 /**
  * MCP servers a local-model task may use (mcp_servers_json), with the runtime env the chat page
@@ -288,6 +289,10 @@ export async function runTask(
     discipline: disciplineOn,
     mcpServers: taskMcp?.servers,
     exec: withSandbox ? { image: sandbox.image, timeoutSec: sandbox.timeoutSec, maxTimeoutSec: sandbox.maxTimeoutSec, hosts: describeExecHosts(db) } : null,
+    // 問題單: screenshots, repo map and past fixes (each null for a task that is not a ticket)
+    attachments: attachmentsFor(task),
+    repoMap: repoMapFor(db, task),
+    similarFixes: similarFixesFor(db, task),
   });
   if (!isMock && !isGeneric) {
     // Keep engine-written artifacts out of the task branch/PR: exclude them locally

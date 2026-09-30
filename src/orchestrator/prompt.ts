@@ -72,6 +72,13 @@ export function writeTaskFile(
       /** where `run` can go (src/exec/hosts.ts describeExecHosts); absent/local-only = no list */
       hosts?: Array<{ name: string; description: string; data: Array<{ source: string; target: string }>; default: boolean }>;
     } | null;
+    /** 問題單 flow — each null/absent = no section, so every other task's LOOP_TASK.md is unchanged */
+    attachments?: Array<{ path: string; text: string }> | null;
+    repoMap?: string | null;
+    similarFixes?: string | null;
+    reproBefore?: string | null;
+    /** human lines for the repo's checks (src/checks/render.ts describeChecks) */
+    checks?: string[] | null;
   },
 ): string {
   const steps = parseSteps(task);
@@ -134,16 +141,37 @@ export function writeTaskFile(
       execHostsBlock(extras.exec.hosts)
     : '';
   const disciplineBlock = extras?.discipline ? DISCIPLINE_BLOCK : '';
+  const attachmentsBlock = extras?.attachments?.length
+    ? `\n## 附件（截圖）\n回報問題的人附了這些截圖（可以用讀檔工具打開）；下面是引擎辨識出的畫面文字：\n` +
+      extras.attachments.map((a, i) => `- 圖 ${i + 1}：\`${a.path}\`${a.text ? `\n  ${a.text.trim().split('\n').slice(0, 12).join('\n  ')}` : '（沒有辨識出文字）'}`).join('\n') +
+      '\n'
+    : '';
+  const repoMapBlock = extras?.repoMap
+    ? `\n## Repo 地圖（引擎產生，先看這個再決定讀哪些檔案）\n${extras.repoMap.replace(/^# .*\n/, '').trim()}\n`
+    : '';
+  const fixesBlock = extras?.similarFixes
+    ? `\n## 這個 repo 過去類似的修法（參考，不一定適用）\n${extras.similarFixes}\n`
+    : '';
+  const reproBlock = extras?.reproBefore
+    ? `\n## 重現輸出（修改前，引擎在乾淨的分支上跑的）\n這個問題目前確實會發生；修好之後同一個指令必須通過。\n\`\`\`\n${extras.reproBefore.trim().slice(-3000)}\n\`\`\`\n`
+    : '';
+  const checkLines = extras?.checks?.length ? extras.checks : null;
+  const stepsList = checkLines
+    ? [...checkLines, ...steps.filter((s) => !s.startsWith('check:')).map((s) => `- \`${s}\``)].join('\n')
+    : steps.map((s) => `- \`${s}\``).join('\n') || '- (none)';
+  const checksRule = checkLines
+    ? '\n- 驗收檢查由引擎執行（標明機台的在那台機台上跑）；你在本地能跑的（建置、測試、重現）自己先跑到綠再結束。'
+    : '';
   const body = `# Loop task: ${task.title}
 
 ## Goal
 ${task.goal}
-${knowledgeBlock}${ragBlock}${askBlock}${execBlock}
+${attachmentsBlock}${knowledgeBlock}${ragBlock}${repoMapBlock}${fixesBlock}${askBlock}${execBlock}
 ## Plan
 ${planContent(task)}
-
+${reproBlock}
 ## Verification steps (must all pass before you finish)
-${steps.map((s) => `- \`${s}\``).join('\n') || '- (none)'}
+${stepsList}
 ${acceptanceBlock}${metricsBlock}${protectedBlock}${artifactsBlock}
 ## Rules
 - Only modify files needed for this task; do not touch anything outside its scope.
@@ -151,7 +179,7 @@ ${acceptanceBlock}${metricsBlock}${protectedBlock}${artifactsBlock}
 - Maintain a \`HANDOFF.md\` at the repo root with sections: Done / TODO / Key decisions / How to resume. Update AND commit it before any long or risky step, so a resumed run can pick up exactly where you left off if you are interrupted near the usage limit.
 - If a \`LOOP_RESUME_CONTEXT.md\` is present, a previous attempt was interrupted or its verification failed — read it FIRST and continue from there instead of starting over.
 - Before finishing, run the verification steps yourself and fix until they pass.
-- If you cannot complete the task, clearly explain the blocker and stop — do not force a workaround.${manualRule}
+- If you cannot complete the task, clearly explain the blocker and stop — do not force a workaround.${manualRule}${checksRule}
 ${disciplineBlock}`;
   fs.writeFileSync(file, body);
   return file;
