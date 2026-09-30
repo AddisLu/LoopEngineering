@@ -221,6 +221,27 @@ export function recordCheck(db: Database.Database, name: string, lines: CheckLin
   return getMachine(db, name);
 }
 
+/** Repos whose checks run on this machine (repos.machine), for the health check's Gitea and clone probes. */
+export function reposUsingMachine(db: Database.Database, name: string): Array<{ name: string; remoteUrl: string }> {
+  try {
+    const rows = db.prepare('SELECT name, remote_url FROM repos WHERE machine = ? AND enabled = 1 ORDER BY name').all(name) as Array<{ name: string; remote_url: string }>;
+    return rows.map((r) => ({ name: r.name, remoteUrl: r.remote_url }));
+  } catch {
+    return [];
+  }
+}
+
+/** 圖資 a dataset check on this machine needs cached there. */
+export function datasetsUsingMachine(db: Database.Database, name: string): Array<{ name: string }> {
+  try {
+    return db
+      .prepare('SELECT DISTINCT d.name AS name FROM datasets d JOIN checks c ON c.dataset_id = d.id WHERE c.machine = ? AND c.enabled = 1 ORDER BY d.name')
+      .all(name) as Array<{ name: string }>;
+  } catch {
+    return [];
+  }
+}
+
 /** The stored check lines, or null when the machine was never checked (or the JSON is unreadable). */
 export function lastCheckOf(m: Pick<Machine, 'last_check_json'>): CheckLine[] | null {
   if (!m.last_check_json) return null;
