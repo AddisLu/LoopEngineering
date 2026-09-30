@@ -12,5 +12,3 @@ export interface PrdKindPreset {
   acceptance: string[];
 }
 export const KINDS: Record<PrdKindKey, PrdKindPreset>;
-export const MODULE_DOMAIN: Record<string, string>;
-export const METHOD_NOTES: Record<string, string>;

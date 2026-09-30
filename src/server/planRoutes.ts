@@ -8,7 +8,7 @@ import { describeExecHosts, getExecHost, LOCAL_HOST, realHostExec, setHostIds, t
 import { checkSandbox, type CheckLine } from '../exec/check.js';
 import { sandboxSettings } from '../exec/sandbox.js';
 import { execRoot } from '../exec/workspace.js';
-import { checkJob, JobError, listJobRepos, submitJob, type JobInput } from '../plans/job.js';
+import { listJobRepos } from '../plans/job.js';
 import { resolvePrdModel } from '../prd/intake.js';
 import type { PrdReviewExec } from '../prd/review.js';
 import { listLocalModels } from '../local/models.js';
@@ -115,25 +115,8 @@ export function registerPlanRoutes(app: FastifyInstance, db: Database.Database, 
     }
   });
 
-  // ---- 新工作 ----
-  const jobInput = (body: unknown): JobInput => {
-    const b = (body ?? {}) as Record<string, unknown>;
-    return {
-      repo_path: str(b.repo_path) ?? '',
-      base_branch: str(b.base_branch) ?? '',
-      title: str(b.title) ?? '',
-      symptom: str(b.symptom) ?? '',
-      expected: str(b.expected) ?? '',
-      files: Array.isArray(b.files) ? b.files.map(String) : [],
-      plan_id: str(b.plan_id) ?? '',
-      dataset: str(b.dataset),
-      model: str(b.model),
-      complexity: b.complexity === 'S' || b.complexity === 'L' ? b.complexity : 'M',
-      notes: str(b.notes),
-    };
-  };
-
-  // what the 新工作 page offers: the software (with branches), who can do the work, when it runs
+  // ---- 新工作流程 ----
+  // what 新工作流程 and 對話操作 offer: the software (with branches), who can do the work, when it runs
   app.get('/api/jobs/options', async () => {
     let defaultModel: string | null = null;
     try {
@@ -148,29 +131,6 @@ export function registerPlanRoutes(app: FastifyInstance, db: Database.Database, 
       local_task_window: getSetting(db, 'local_task_window') ?? '',
       morning_report_time: getSetting(db, 'morning_report_time') ?? '',
     };
-  });
-
-  // 送出前檢查: the PRD this job becomes, through the gate (rules + the local model's review)
-  app.post('/api/jobs/check', async (req, reply) => {
-    try {
-      return await checkJob(db, jobInput(req.body), { exec: opts.reviewExec });
-    } catch (err) {
-      if (err instanceof JobError) return reply.code(400).send({ error: err.message });
-      throw err;
-    }
-  });
-
-  app.post('/api/jobs', async (req, reply) => {
-    try {
-      const { markdown, result } = await submitJob(db, jobInput(req.body), { exec: opts.reviewExec });
-      if (!result.ok) return reply.code(422).send({ error: '需求還有沒寫清楚的地方', check: result.check, markdown });
-      if (result.kind !== 'task') return reply.code(500).send({ error: 'unexpected benchmark' });
-      logEvent(db, { task_id: result.task.id, kind: 'note', detail: `新工作（${who(req)}）：${result.task.title}` });
-      return reply.code(201).send({ task: result.task, gate: result.gate, markdown });
-    } catch (err) {
-      if (err instanceof JobError) return reply.code(400).send({ error: err.message });
-      throw err;
-    }
   });
 
   // 檢查機台與圖資: the `loop exec check` probe against the plan's machine, then its 圖資 listing

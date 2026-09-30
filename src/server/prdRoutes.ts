@@ -8,7 +8,7 @@ import { checkPrd, linkSubmittedDraft, submitPrd, PrdInputError } from '../prd/i
 import { BenchmarkInputError } from '../benchmark/store.js';
 import type { PrdReviewExec } from '../prd/review.js';
 import { parsePrdToForm } from '../prd/compose.js';
-import { allowedRoots, probeRepo, resolveAllowed, statPath, type GitExec } from '../prd/repo.js';
+import { allowedRoots, resolveAllowed } from '../prd/repo.js';
 import { createDraft, deleteDraft, getDraft, listDrafts, updateDraft, PrdDraftError } from '../prd/drafts.js';
 import { draftAcceptance, suggestFiles, type AssistDeps } from '../prd/assist.js';
 import { IdentityError, identityOf, type ChatIdentity } from './identity.js';
@@ -20,7 +20,6 @@ export interface PrdRouteOptions {
   search?: AssistDeps['search'];
   localChat?: AssistDeps['localChat'];
   identity?: (req: FastifyRequest) => ChatIdentity;
-  git?: GitExec;
 }
 
 // src/server -> repo root in tsx, dist/server -> repo root when built
@@ -110,39 +109,6 @@ export function registerPrdRoutes(app: FastifyInstance, db: Database.Database, o
       if (err instanceof PrdInputError || err instanceof BenchmarkInputError) return reply.code(400).send({ error: err.message });
       throw err;
     }
-  });
-
-  // ---- repo facts for step ① / image-set checks for step ③ ----------------------
-  // Both answer with names and counts only; both refuse anything outside the allowed roots.
-  const resolve = (raw: unknown, reply: FastifyReply): string | null => {
-    const p = text(raw).trim();
-    if (!p) {
-      reply.code(400).send({ error: 'path is required' });
-      return null;
-    }
-    const real = resolveAllowed(p, allowedRoots(db));
-    if (!real) {
-      // a relative path can never be inside an allowed root — say "not allowed", not "not found"
-      if (path.isAbsolute(p) && !fs.existsSync(p)) reply.code(404).send({ error: `路徑不存在：${p}` });
-      else reply.code(403).send({ error: '這個路徑不在允許清單裡：只能用已登錄的知識來源 repo，或加到 prd_repo_allowlist' });
-      return null;
-    }
-    return real;
-  };
-
-  app.get('/api/prd/repo', async (req, reply) => {
-    if (!enabled()) return off(reply);
-    const dir = resolve((req.query as { path?: unknown }).path, reply);
-    if (!dir) return reply;
-    if (!fs.statSync(dir).isDirectory()) return reply.code(400).send({ error: '不是目錄' });
-    return probeRepo(db, dir, opts.git);
-  });
-
-  app.get('/api/prd/stat', async (req, reply) => {
-    if (!enabled()) return off(reply);
-    const p = resolve((req.query as { path?: unknown }).path, reply);
-    if (!p) return reply;
-    return statPath(p);
   });
 
   // ---- drafts ----------------------------------------------------------------------

@@ -8,58 +8,31 @@ const WEB_DIR = path.join(__dirname, '..', '..', 'web');
 const read = (f: string) => fs.readFileSync(path.join(WEB_DIR, f), 'utf8');
 
 /**
- * The PRD wizard page. Same rules as the chat shell: every id a script looks up exists, nothing
- * is rendered as markup, and the composer stays a pure module.
+ * The PRD helpers 工作流程 and 對話操作 share (the five-step 精靈 page is gone; /prd.html opens
+ * 工作流程). Same rules as the chat shell: nothing is rendered as markup, and the composer stays a
+ * pure module.
  */
-describe('PRD 精靈 page (now /prd-classic.html; /prd.html opens 工作流程)', () => {
-  it('is a module page on the shared shell, with a way back to the conversation', () => {
-    const page = read('prd-classic.html');
-    expect(page).toContain('/theme-boot.js');
-    expect(page).toContain('/styles.css');
-    expect(page).toContain('/shell.css');
-    expect(page).toMatch(/type="module" src="\/prd\.js"/);
-    expect(page).toContain('回到對話');
-    expect(page).toContain('/board.html');
-    for (const n of [1, 2, 3, 4, 5]) expect(page).toContain(`id="step-${n}"`);
-  });
-
-  it('every element id prd.js looks up exists in prd.html', () => {
-    const page = read('prd-classic.html');
-    const js = read('prd.js');
-    const ids = new Set<string>();
-    for (const m of js.matchAll(/\$\('([\w-]+)'\)/g)) ids.add(m[1] as string);
-    for (const m of js.matchAll(/setText\('([\w-]+)'/g)) ids.add(m[1] as string);
-    expect(ids.size).toBeGreaterThan(40);
-    const missing = [...ids].filter((id) => !page.includes(`id="${id}"`));
-    expect(missing, `ids used by prd.js but absent from prd-classic.html: ${missing.join(', ')}`).toEqual([]);
-  });
-
-  it('renders nothing as markup and keeps the composer free of the DOM', () => {
-    for (const f of ['prd.js', 'prd-compose.js', 'prd-kinds.js']) expect(read(f), f).not.toMatch(/innerHTML/);
+describe('PRD helpers (prd-compose / prd-kinds)', () => {
+  it('render nothing as markup and keep the composer free of the DOM', () => {
+    for (const f of ['prd-compose.js', 'prd-kinds.js']) expect(read(f), f).not.toMatch(/innerHTML/);
     const compose = read('prd-compose.js');
     expect(compose).not.toMatch(/\bdocument\b|\bwindow\b|\bfetch\(/);
     // the one sentence every image set travels with
     expect(compose).toContain('僅引用路徑，禁止複製');
-    expect(read('prd-classic.html')).toContain('禁止複製');
   });
 
-  it('the chat shell only links into the wizard and lists drafts — no second form to drift', () => {
+  it('the chat shell only links into 工作流程 and lists drafts — no second form to drift', () => {
     const index = read('index.html');
     expect(index).toContain('id="prd-new"');
     expect(index).toContain('id="prd-drafts"');
     expect(index).toContain('href="/flow.html"');
     // old links (chat answers, bookmarks) still land somewhere: /prd.html forwards to 工作流程, ?draft= kept
     expect(read('prd.html')).toContain("location.replace('/flow.html' + location.search + location.hash)");
+    expect(read('prd.html')).not.toContain('prd-classic');
+    expect(read('job.html')).not.toContain('job-classic');
     const dock = read('dock.js');
     expect(dock).not.toContain("$('prd-md')");
     expect(dock).not.toContain("$('prd-check')");
     expect(dock).toContain("api('/api/prd/drafts");
-  });
-
-  it('an untitled draft is named after what it is about', () => {
-    const js = fs.readFileSync(path.join(WEB_DIR, 'prd.js'), 'utf8');
-    // every draft used to be saved as "未命名 PRD", so three of them looked identical in the dock
-    expect(js).toContain('function draftTitle()');
-    expect(js).toContain('title: draftTitle()');
   });
 });

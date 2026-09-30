@@ -13,9 +13,6 @@ import { verifiedShas } from '../review/code.js';
 import { collectArtifacts } from '../review/artifacts.js';
 import { removeTrialWorkspace } from '../review/review.js';
 import type { SandboxResult } from '../exec/sandbox.js';
-import { lintPrd } from '../prd/lint.js';
-import { composeJobPrd } from '../plans/job.js';
-import { createPlan } from '../plans/store.js';
 
 let db: Database.Database;
 let app: FastifyInstance;
@@ -237,8 +234,8 @@ describe('驗收頁', () => {
   });
 });
 
-describe('新工作', () => {
-  function jobFixture() {
+describe('新工作流程 options', () => {
+  it('offers the allow-listed repos with their branches', async () => {
     const repo = dir('jobrepo');
     git(repo, 'init', '-q', '-b', 'main');
     git(repo, 'config', 'user.email', 't@t');
@@ -248,74 +245,10 @@ describe('新工作', () => {
     git(repo, 'commit', '-qm', 'x');
     git(repo, 'branch', 'feature/bright');
     setSetting(db, 'prd_repo_allowlist', repo);
-    const plan = createPlan(db, {
-      name: '亮缺陷判型 — 標準圖集',
-      repo_path: fs.realpathSync(repo),
-      host: 'aoi-gpu',
-      steps: ['cmake --build build -j', 'python3 scripts/eval/run.py --gallery {dataset}'],
-      dataset_root: '/datasets',
-      dataset_default: '20260615',
-      metrics: 'detection_rate >= 0.98; miss == 0',
-      protected_paths: 'scripts/eval/**',
-      artifacts: 'build/cfaoi_ip',
-      manual_checks: ['上機台跑一次選定的圖集'],
-      domain: 'cuda',
-    });
-    return { repo: fs.realpathSync(repo), plan };
-  }
-  const job = (repo: string, planId: string, over: Record<string, unknown> = {}) => ({
-    repo_path: repo,
-    base_branch: 'feature/bright',
-    title: '修正 X 區亮缺陷判型',
-    symptom: 'X 區的亮缺陷被判成髒污',
-    expected: '改好後判成亮缺陷，其他判型不變',
-    plan_id: planId,
-    dataset: '20260701',
-    ...over,
-  });
-
-  it('the PRD it becomes passes the gate as written, with everything the plan says', () => {
-    const { repo, plan } = jobFixture();
-    const md = composeJobPrd(job(repo, plan.id), plan, repo, '/datasets/20260701', [
-      'sandbox@aoi-gpu: cmake --build build -j',
-      'sandbox@aoi-gpu: python3 scripts/eval/run.py --gallery /datasets/20260701',
-    ]);
-    const r = lintPrd(md, { exists: () => true });
-    expect(r.missing).toEqual([]);
-    expect(r.fields.verify_mode).toEqual(['command', 'manual']);
-    expect(r.fields.acceptance_metrics).toBe('detection_rate >= 0.98; miss == 0');
-    expect(r.fields.protected_paths).toEqual(['scripts/eval/**']);
-    expect(r.fields.artifacts).toEqual(['build/cfaoi_ip']);
-    expect(r.fields.manual_checks).toEqual(['上機台跑一次選定的圖集']);
-    expect(r.fields.base_branch).toBe('feature/bright');
-  });
-
-  it('options, check, submit: the task carries the plan, its machine and a human sign-off', async () => {
-    const { repo, plan } = jobFixture();
-    const reviewing = buildApp({ db, apiToken: null, mcpPool: null, prdReviewExec: async () => '{"ok":true,"missing":[],"questions":[],"risk_notes":[]}' });
-    try {
-      const opts = (await reviewing.inject({ method: 'GET', url: '/api/jobs/options' })).json();
-      expect(opts.repos).toEqual([expect.objectContaining({ path: repo, name: path.basename(repo), branches: ['feature/bright', 'main'] })]);
-      const outside = await reviewing.inject({ method: 'POST', url: '/api/jobs/check', payload: job('/etc', plan.id) });
-      expect(outside.statusCode).toBe(400);
-      expect(outside.json().error).toContain('允許的 repo');
-      const vague = await reviewing.inject({ method: 'POST', url: '/api/jobs/check', payload: job(repo, plan.id, { symptom: '壞了', expected: '好' }) });
-      expect(vague.json().error).toContain('至少 15 個字');
-      const check = (await reviewing.inject({ method: 'POST', url: '/api/jobs/check', payload: job(repo, plan.id) })).json();
-      expect(check.check.ok).toBe(true);
-      expect(check.markdown).toContain('sandbox@aoi-gpu: python3 scripts/eval/run.py --gallery /datasets/20260701');
-      const created = await reviewing.inject({ method: 'POST', url: '/api/jobs', headers: as('呂侑儒'), payload: job(repo, plan.id) });
-      expect(created.statusCode).toBe(201);
-      const t = getTask(db, created.json().task.id)!;
-      expect(t.status).toBe('queued');
-      expect(t.verify_plan_id).toBe(plan.id);
-      expect(t.verify_mode).toBe('command,manual');
-      expect(t.artifacts).toBe('build/cfaoi_ip');
-      expect(t.protected_paths).toBe('scripts/eval/**');
-      expect(t.base_branch).toBe('feature/bright');
-      expect(JSON.parse(t.verification_steps)).toEqual(['sandbox@aoi-gpu: cmake --build build -j', 'sandbox@aoi-gpu: python3 scripts/eval/run.py --gallery /datasets/20260701']);
-    } finally {
-      await reviewing.close();
-    }
+    const opts = (await app.inject({ method: 'GET', url: '/api/jobs/options' })).json();
+    expect(opts.repos).toEqual([expect.objectContaining({ path: fs.realpathSync(repo), name: path.basename(repo), branches: ['feature/bright', 'main'] })]);
+    // the old 新工作 form's endpoints went with it
+    expect((await app.inject({ method: 'POST', url: '/api/jobs/check', payload: {} })).statusCode).toBe(404);
+    expect((await app.inject({ method: 'POST', url: '/api/jobs', payload: {} })).statusCode).toBe(404);
   });
 });

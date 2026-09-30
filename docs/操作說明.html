@@ -362,7 +362,7 @@
 
     <section id="redesign">
       <h2><span class="num">05a</span>介面改版：總覽・工作流程・評比</h2>
-      <div class="note tip"><span class="ic">🧭</span><span><b>2026-09-30 改版。</b>任務看板、PRD 精靈與新工作、評比三個頁面改成同一套版面：左側欄切換頁面，任務畫成節點與連線（借鏡 n8n），評比先看圖、表格收起來。舊網址都還能用：<code>/prd.html</code> 轉到工作流程（<code>?draft=</code> 會帶過去）、<code>/job.html</code> 轉到「新工作流程」（<code>?title=&amp;symptom=&amp;expected=</code> 會帶過去）；五步驟精靈與四步驟新工作仍在 <code>/prd-classic.html</code>、<code>/job-classic.html</code>。設計稿在 Claude Design「Loop 介面改版：總覽・工作流程・評比」。</span></div>
+      <div class="note tip"><span class="ic">🧭</span><span><b>2026-09-30 改版。</b>任務看板、PRD 精靈與新工作、評比三個頁面改成同一套版面：左側欄切換頁面，任務畫成節點與連線（借鏡 n8n），評比先看圖、表格收起來。舊網址都還能用：<code>/prd.html</code> 轉到工作流程（<code>?draft=</code> 會帶過去）、<code>/job.html</code> 轉到「新工作流程」（<code>?title=&amp;symptom=&amp;expected=</code> 會帶過去）。舊版的五步驟精靈與四步驟新工作已經移除。設計稿在 Claude Design「Loop 介面改版：總覽・工作流程・評比」。</span></div>
 
       <h3>左側欄</h3>
       <p>對話・總覽・工作流程・評比・驗證方案・知識星圖・晨報；底部是 5 小時用量小圓環（<code>GET /api/usage</code>，每分鐘更新）、設定（開總覽的排程設定）、深淺色切換。手機上變成底部四顆：總覽・工作流程・評比・對話。</p>
@@ -1916,7 +1916,7 @@ loop verify-plan datasets &lt;方案 id&gt;     # 人員會看到的圖資清單
       </table></div>
       <p>API（給整合用）：</p>
       <ul>
-        <li><code>GET /api/jobs/options</code>、<code>POST /api/jobs/check</code>、<code>POST /api/jobs</code></li>
+        <li><code>GET /api/jobs/options</code>（可選的軟體與分支、模型；新工作流程送出走 <code>POST /api/prd</code>）</li>
         <li><code>GET|POST|PUT|DELETE /api/verify-plans</code>、<code>GET /api/verify-plans/:id/datasets</code>、<code>POST /api/verify-plans/:id/check</code></li>
         <li><code>GET /api/tasks/:id/review</code>、<code>/code/file</code>、<code>/code/diff</code></li>
         <li><code>POST /api/tasks/:id/checks</code>、<code>/approve</code>、<code>/request-changes</code>、<code>/trials</code>、<code>/release</code></li>

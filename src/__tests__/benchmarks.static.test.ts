@@ -76,19 +76,16 @@ describe('benchmarks page + local model board wiring: static assets', () => {
     expect(js).toContain('要填 Repo 路徑');
   });
 
-  it('a PRD draft can be deleted from the dock and from the wizard', () => {
+  it('a PRD draft can be deleted from the dock and from 工作流程', () => {
     const dock = fs.readFileSync(path.join(WEB_DIR, 'dock.js'), 'utf8');
     expect(dock).toMatch(/\/api\/prd\/drafts\/.*method: 'DELETE'|method: 'DELETE'/);
     expect(dock).toContain('mini-del');
     expect(dock).not.toMatch(/innerHTML/);
     expect(fs.readFileSync(path.join(WEB_DIR, 'shell.css'), 'utf8')).toContain('.mini-row');
-    // the five-step wizard lives on as /prd-classic.html (/prd.html now opens 工作流程)
-    const html = fs.readFileSync(path.join(WEB_DIR, 'prd-classic.html'), 'utf8');
-    expect(html).toContain('id="draft-delete"');
-    const js = fs.readFileSync(path.join(WEB_DIR, 'prd.js'), 'utf8');
-    expect(js).toContain("method: 'DELETE'");
+    const js = fs.readFileSync(path.join(WEB_DIR, 'flow.js'), 'utf8');
+    expect(js).toMatch(/api\(`\/api\/prd\/drafts\/\$\{encodeURIComponent\(d\.id\)\}`, 'DELETE'\)/);
     // deleting a submitted draft must not read as deleting its task
-    expect(js).toContain('已經建立的任務不會被刪除');
+    expect(js).toContain('已建立的任務不會被刪除');
   });
 
   it('a benchmark can be cancelled or deleted from its detail page', () => {
@@ -129,18 +126,8 @@ describe('benchmarks page + local model board wiring: static assets', () => {
     for (const id of ['bench-running', 'bench-models', 'bench-list', 'bench-new']) expect(html).toContain(`id="${id}"`);
   });
 
-  it('the PRD wizard can send a PRD to a benchmark instead of one task', () => {
-    const html = fs.readFileSync(path.join(WEB_DIR, 'prd-classic.html'), 'utf8');
-    expect(html).toContain('id="bench-pick"');
-    expect(html).toContain('id="bench-models"');
-    expect(html).toContain('id="bench-judges"');
-    const js = fs.readFileSync(path.join(WEB_DIR, 'prd.js'), 'utf8');
-    expect(js).toContain('benchmark_models');
-    expect(js).toContain('judge_models');
-    // the old code read r.task.id unconditionally and threw on a benchmark response
-    expect(js).toContain('if (r.benchmark)');
-    expect(js).not.toMatch(/innerHTML/);
-    // and 工作流程: two or more models on the AI 實作 node make the same benchmark
+  it('工作流程 can send a PRD to a benchmark instead of one task', () => {
+    // two or more models on the AI 實作 node make a benchmark
     const flow = fs.readFileSync(path.join(WEB_DIR, 'flow.js'), 'utf8');
     expect(flow).toContain('benchmark_models: models');
     expect(flow).toContain("r.kind === 'benchmark'");

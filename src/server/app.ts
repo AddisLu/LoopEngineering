@@ -129,11 +129,10 @@ export interface AppOptions {
   benchSource?: BenchmarkRouteOptions['source'];
   /** Test-only injection point for the PRD gate's local-model review (zero GPU). */
   prdReviewExec?: PrdReviewExec;
-  /** Test-only seams for the PRD wizard endpoints (knowledge search, local model, identity, git). */
+  /** Test-only seams for the PRD endpoints (knowledge search, local model, identity). */
   prdSearch?: PrdRouteOptions['search'];
   prdLocalChat?: PrdRouteOptions['localChat'];
   prdIdentity?: PrdRouteOptions['identity'];
-  prdGit?: PrdRouteOptions['git'];
   /** Test-only injection point for 模型對話 的使用者辨識 (see src/server/identity.ts). */
   chatIdentity?: ChatRouteOptions['identity'];
   /** Test injection for 對話操作 (src/chatops): preparer, runner and git dependencies. */
@@ -591,7 +590,6 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
     search: opts.prdSearch,
     localChat: opts.prdLocalChat,
     identity: opts.prdIdentity,
-    git: opts.prdGit,
   });
   // MCP bridge for the chat page: servers from mcp_servers_json, secrets injected at spawn
   const mcpPool =

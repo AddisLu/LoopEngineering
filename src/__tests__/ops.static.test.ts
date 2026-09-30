@@ -8,7 +8,6 @@ const read = (f: string) => fs.readFileSync(path.join(WEB, f), 'utf8');
 
 describe('operator pages: 新工作 / 驗收 / 驗證方案', () => {
   const pages = [
-    ['job-classic.html', 'job.js'],
     ['task.html', 'task.js'],
     ['plans.html', 'plans.js'],
   ] as const;
@@ -24,7 +23,7 @@ describe('operator pages: 新工作 / 驗收 / 驗證方案', () => {
   });
 
   it('render with textContent only (cheap XSS guard) and share ops.js / ops.css', () => {
-    for (const js of ['ops.js', 'job.js', 'task.js', 'plans.js']) expect(read(js), js).not.toMatch(/innerHTML|outerHTML|insertAdjacentHTML|document\.write/);
+    for (const js of ['ops.js', 'task.js', 'plans.js']) expect(read(js), js).not.toMatch(/innerHTML|outerHTML|insertAdjacentHTML|document\.write/);
     for (const [html, js] of pages) {
       const h = read(html);
       expect(h, html).toContain('/theme-boot.js');

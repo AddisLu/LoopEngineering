@@ -1,5 +1,5 @@
 /**
- * Change-type presets for the PRD wizard. Picking a kind fills empty fields only — it never
+ * Change-type presets for 工作流程 and 對話操作. Picking a kind fills empty fields only — it never
  * overwrites what the engineer already typed. Everything here is a hint or a default the gate
  * will still check; the actual verification tooling lives in the repo (cf-aoi: control_test.py,
  * compare_results.py, scripts/verify_*.py).
@@ -61,15 +61,4 @@ export const KINDS = {
     constraints: ['輸出結果必須與修改前 bit-exact 一致'],
     acceptance: ['Given 同一組 20 張圖 When 修改前後各跑 3 次 Then p95 從 N ms 降到 ≤ M ms（填數字）'],
   },
-};
-
-/** module → default domain for the gate's 領域 field */
-export const MODULE_DOMAIN = { ip: 'cuda', control: 'csharp', grab: 'cpp', tools: 'cpp', shared: 'cpp', scripts: 'python', docs: 'other' };
-
-/** what the engine does with each verification method — shown next to the checkboxes */
-export const METHOD_NOTES = {
-  cmd: '每行是一個獨立的 shell 指令，在 worktree 根目錄執行；非 0 就算失敗；每步逾時 10 分鐘。',
-  dataset: '只以路徑引用圖集，禁止複製；指令會啟動 IP offline-tcp、逐張送圖、再和期望結果比對（compare_results.py：幾何完全一致、GL_Mean 在容差內）。誤判率／漏檢門檻寫進驗收標準，由評審或人工判定。需要 GPU。',
-  manual: '任務會停在「待人工驗證」；模型會在 repo 根寫 VERIFY.md，照著逐條檢查後再按合併。',
-  llm: '雲端 claude -p 依驗收標準看 diff（會花 token）；判斷不了時自動改為人工。',
 };

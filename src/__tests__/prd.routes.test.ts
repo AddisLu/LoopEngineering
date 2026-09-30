@@ -114,12 +114,11 @@ describe('/api/prd', () => {
   });
 });
 
-describe('prd page: static assets', () => {
+describe('PRD pages: static assets', () => {
   const WEB = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'web');
-  it('exists, is linked from the board, and never uses innerHTML', () => {
-    expect(fs.readFileSync(path.join(WEB, 'prd-classic.html'), 'utf8')).toContain('/prd.js');
+  it('/prd.html forwards to 工作流程 (linked from the chat), and the shared helpers never use innerHTML', () => {
     expect(fs.readFileSync(path.join(WEB, 'prd.html'), 'utf8')).toContain("location.replace('/flow.html'");
-    for (const f of ['prd.js', 'prd-compose.js', 'prd-kinds.js']) expect(fs.readFileSync(path.join(WEB, f), 'utf8'), f).not.toMatch(/innerHTML/);
+    for (const f of ['prd-compose.js', 'prd-kinds.js']) expect(fs.readFileSync(path.join(WEB, f), 'utf8'), f).not.toMatch(/innerHTML/);
     expect(fs.readFileSync(path.join(WEB, 'index.html'), 'utf8')).toMatch(/href="\/flow\.html"/);
   });
 });

@@ -6,12 +6,12 @@ import { getSetting } from '../db/index.js';
 import { listSources } from '../knowledge/ingest/sources.js';
 
 /**
- * What the PRD wizard is allowed to learn about a repo on this host.
+ * What the pages are allowed to learn about a repo on this host.
  *
- * Deliberately shallow: top-level directory names, git branch names, which build/test conventions
- * are present, and *counts* of images / result files under a path. Never file listings, never
- * file contents — the wizard runs in a browser that anyone on the tailnet can open, and the
- * repos hold production images and baseline results that must not leave the machine.
+ * Deliberately shallow: top-level directory names, git branch names and which build/test
+ * conventions are present. Never file listings, never file contents — the pages run in a browser
+ * that anyone on the tailnet can open, and the repos hold production images and baseline results
+ * that must not leave the machine.
  *
  * Every path is realpath'ed and must sit inside an allowed root: an enabled git/folder knowledge
  * source, or an entry of the prd_repo_allowlist setting.
@@ -36,15 +36,6 @@ export interface RepoProbe {
   host_capabilities: string[];
 }
 
-export interface PathStat {
-  exists: boolean;
-  kind: 'dir' | 'file' | null;
-  /** png/tif/tiff/bmp/jpg files directly inside (capped) */
-  images: number;
-  /** *_ResultInfo.json files directly inside */
-  result_json: number;
-}
-
 /** `git <args>` in `cwd`; throws on failure. Injected by tests. */
 export type GitExec = (args: string[], cwd: string) => string;
 
@@ -52,8 +43,6 @@ const defaultGit: GitExec = (args, cwd) =>
   execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] });
 
 const SKIP_DIRS = new Set(['node_modules', 'build', 'dist', 'output', '__pycache__', 'target', 'bin', 'obj']);
-const IMAGE_RE = /\.(png|tiff?|bmp|jpe?g)$/i;
-const COUNT_CAP = 10000;
 
 const realpathOrNull = (p: string): string | null => {
   try {
@@ -63,7 +52,7 @@ const realpathOrNull = (p: string): string | null => {
   }
 };
 
-/** Roots the wizard may read: enabled git/folder sources plus the allow-list setting. */
+/** Roots the pages may read: enabled git/folder sources plus the allow-list setting. */
 export function allowedRoots(db: Database.Database): string[] {
   const roots = new Set<string>();
   for (const s of listSources(db).filter((s) => s.enabled)) {
@@ -157,23 +146,4 @@ export function probeRepo(db: Database.Database, dir: string, git: GitExec = def
     },
     host_capabilities: caps,
   };
-}
-
-/** Counts only — the point is "is this the image set I meant", not what is in it. */
-export function statPath(p: string): PathStat {
-  let st: fs.Stats;
-  try {
-    st = fs.statSync(p);
-  } catch {
-    return { exists: false, kind: null, images: 0, result_json: 0 };
-  }
-  if (!st.isDirectory()) return { exists: true, kind: 'file', images: 0, result_json: 0 };
-  let images = 0;
-  let resultJson = 0;
-  for (const name of fs.readdirSync(p)) {
-    if (IMAGE_RE.test(name)) images++;
-    else if (/_ResultInfo\.json$/i.test(name)) resultJson++;
-    if (images >= COUNT_CAP) break;
-  }
-  return { exists: true, kind: 'dir', images, result_json: resultJson };
 }
