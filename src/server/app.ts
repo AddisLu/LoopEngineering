@@ -50,6 +50,8 @@ import { registerBenchmarkRoutes, type BenchmarkRouteOptions } from './benchmark
 import type { BenchJudgeExec } from '../benchmark/judge.js';
 import { registerPrdRoutes, type PrdRouteOptions } from './prdRoutes.js';
 import { registerChatRoutes, type ChatRouteOptions } from './chatRoutes.js';
+import { registerOpsRoutes } from './opsRoutes.js';
+import type { OpsToolDeps } from '../chatops/tools.js';
 import { registerExecRoutes } from './execRoutes.js';
 import { registerPlanRoutes, type PlanRouteOptions } from './planRoutes.js';
 import { registerReviewRoutes } from './reviewRoutes.js';
@@ -134,6 +136,8 @@ export interface AppOptions {
   prdGit?: PrdRouteOptions['git'];
   /** Test-only injection point for 模型對話 的使用者辨識 (see src/server/identity.ts). */
   chatIdentity?: ChatRouteOptions['identity'];
+  /** Test injection for 對話操作 (src/chatops): preparer, runner and git dependencies. */
+  opsDeps?: OpsToolDeps;
   /** Test-only: stands in for `docker run` behind the chat's GPU 沙盒 tools and POST /api/exec/run. */
   sandboxRun?: ChatRouteOptions['sandboxRun'];
   /** test injection: ssh behind 驗證方案 圖資 listing */
@@ -613,7 +617,8 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
   app.addHook('onClose', async () => {
     await mcpPool?.close();
   });
-  registerChatRoutes(app, db, { identity: opts.chatIdentity, toolFetch: opts.chatToolFetch, toolLookup: opts.chatToolLookup, mcpPool, sandboxRun: opts.sandboxRun });
+  registerChatRoutes(app, db, { identity: opts.chatIdentity, toolFetch: opts.chatToolFetch, toolLookup: opts.chatToolLookup, mcpPool, sandboxRun: opts.sandboxRun, opsDeps: opts.opsDeps });
+  registerOpsRoutes(app, db, { identity: opts.chatIdentity, deps: opts.opsDeps });
   registerExecRoutes(app, db, { run: opts.sandboxRun });
   registerPlanRoutes(app, db, { hostExec: opts.planHostExec, check: opts.planCheck, reviewExec: opts.prdReviewExec });
   registerReviewRoutes(app, db, { sandboxRun: opts.sandboxRun, releaseFetch: opts.releaseFetch, releaseToken: opts.releaseToken, identity: opts.chatIdentity });

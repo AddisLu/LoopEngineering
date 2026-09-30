@@ -143,6 +143,17 @@ export function opsPromptTail(db: Database.Database, o: { userKey: string | null
   return out.length ? `\n${out.join('\n')}` : '';
 }
 
+/** What a confirmed action runs with: git from git.ts, the local model manager, the answers registry. */
+export function opsExecDeps(db: Database.Database, d: OpsToolDeps = {}): ExecDeps {
+  return {
+    git: (x, a) => runGit(x, a, d.git ?? {}),
+    otherAnswers: d.otherAnswers,
+    ...(d.prep?.hubDir ? { hubDir: d.prep.hubDir } : {}),
+    ...d.exec,
+    modelManager: d.exec?.modelManager ?? getModelManager(db),
+  };
+}
+
 export function opsTools(db: Database.Database, o: OpsToolsOptions): ToolDef[] {
   const d = o.deps ?? {};
   const mode = o.mode ?? 'chat';
@@ -150,13 +161,7 @@ export function opsTools(db: Database.Database, o: OpsToolsOptions): ToolDef[] {
   const viewDeps: ViewDeps = { localState, ...d.view };
   const prepDeps = { localState, ...d.prep };
   const gitDeps = d.git ?? {};
-  const execDeps = (): ExecDeps => ({
-    git: (x, a) => runGit(x, a, gitDeps),
-    otherAnswers: d.otherAnswers,
-    ...(d.prep?.hubDir ? { hubDir: d.prep.hubDir } : {}),
-    ...d.exec,
-    modelManager: d.exec?.modelManager ?? getModelManager(db),
-  });
+  const execDeps = () => opsExecDeps(db, d);
   const who = { userKey: o.userKey, conversationId: o.conversationId };
   const guard = async (what: string, fn: (chat: ChatCtx) => Promise<ToolResult>): Promise<ToolResult> => {
     if (!o.chat) return { ok: false, text: '這個對話沒有存起來，不能準備或執行操作。', summary: '不能操作' };

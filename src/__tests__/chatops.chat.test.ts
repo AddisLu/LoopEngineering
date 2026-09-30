@@ -43,6 +43,7 @@ const pool = {
   callTool: async () => ({ text: '', isError: false }),
 } as unknown as McpPool;
 
+const usage = () => ({ session: { percent: 12, resetsAt: null }, weekly: { percent: 30, resetsAt: null }, source: 'cache' as const, error: null });
 async function build(extra: Partial<ChatRouteOptions> = {}) {
   if (app) await app.close();
   app = Fastify();
@@ -53,7 +54,8 @@ async function build(extra: Partial<ChatRouteOptions> = {}) {
       bodies.push(init?.body ? JSON.parse(String(init.body)) : {});
       return new Response(script.shift() ?? say('好的'), { headers: { 'content-type': 'text/event-stream' } });
     },
-    opsDeps: { exec: { waitMs: 3000 } },
+    // never the live usage endpoint
+    opsDeps: { exec: { waitMs: 3000 }, view: { usage: usage as never }, prep: { usage: usage as never } },
     ...extra,
   });
   await app.ready();
@@ -221,7 +223,7 @@ describe('two turns: prepare, then the person confirms', () => {
     const t1 = await ask(conv, '切到 b');
     createPending(db, { messageId: t1.messageId!, conversationId: conv, userKey: USER, label: '本機' }, { kind: 'model', op: 'switch_model', target: 'b', params: { id: 'b' }, expect: null, summary: '切到 b', risk: 'normal', speed: 'deferred' });
     const loaded: string[] = [];
-    await build({ opsDeps: { exec: { waitMs: 3000, modelManager: { state: () => ({ loaded: 'qwen38-flash', wanted: 'qwen38-flash', status: 'ready', since: null, error: null }), ensureLoaded: (id: string) => (loaded.push(id), 'switching') } } } });
+    await build({ opsDeps: { view: { usage: usage as never }, prep: { usage: usage as never }, exec: { waitMs: 3000, modelManager: { state: () => ({ loaded: 'qwen38-flash', wanted: 'qwen38-flash', status: 'ready', since: null, error: null }), ensureLoaded: (id: string) => (loaded.push(id), 'switching') } } } });
     script = [call('ops_confirm', {}), say('這則回答結束後切換。')];
     const t2 = await ask(conv, '確認');
     expect(t2.rounds[0]!.calls[0]).toMatchObject({ ok: true, summary: expect.stringContaining('這則回答結束後') });
