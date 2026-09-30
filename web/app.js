@@ -7,7 +7,6 @@
   const TOKEN = localStorage.getItem('loop_token') || '';
   const authHeaders = TOKEN ? { Authorization: `Bearer ${TOKEN}` } : {};
 
-  const RING_C = 2 * Math.PI * 18; // ring circumference (r=18)
 
   // 5 columns: 'verifying' is a sub-state of an active run (folded into Running) — so
   // the whole lifecycle fits one screen without horizontal scroll.
@@ -79,66 +78,8 @@
     catch (e) { alert('刪除失敗：' + e); return false; }
   }
 
-  // ---- theme (the 總覽 frame's rail owns the toggle; a page with its own button still works) ----
-  const themeBtn = $('theme-btn');
-  function currentMode() {
-    return document.documentElement.getAttribute('data-mode') === 'dark' ? 'dark' : 'light';
-  }
-  function paintThemeBtn() {
-    // show the glyph of the mode you'd switch TO
-    const dark = currentMode() === 'dark';
-    themeBtn.textContent = dark ? '☀' : '☾';
-    themeBtn.setAttribute('aria-label', dark ? '切換至淺色佈景' : '切換至深色佈景');
-  }
-  if (themeBtn) {
-    themeBtn.onclick = () => {
-      const next = currentMode() === 'dark' ? 'light' : 'dark';
-      document.documentElement.setAttribute('data-mode', next);
-      try { localStorage.setItem('loop_mode', next); } catch (e) {}
-      paintThemeBtn();
-    };
-    paintThemeBtn();
-  }
-
-  // ---- usage / topbar --------------------------------------------------
-  function usageState(pct) {
-    return pct >= 90 ? 'danger' : pct >= 70 ? 'warn' : 'ok';
-  }
-  function setRing(id, pctId, pct) {
-    const wrap = $(id);
-    if (!wrap) return; // 總覽 shows usage in its KPI strip and the rail instead
-    const p = Math.max(0, Math.min(100, Number(pct) || 0));
-    const fill = wrap.querySelector('.fill');
-    fill.style.strokeDasharray = `${(p / 100) * RING_C} ${RING_C}`;
-    wrap.setAttribute('data-state', usageState(p));
-    $(pctId).textContent = `${Math.round(pct)}%`;
-  }
-
-  // The rings show the last reading either way; this says when it is not a live one, and why.
-  function usageNote(err) {
-    if (!err) return null;
-    if (/login expired|not logged in|auth-expired/i.test(err)) return '這台的 Claude 登入已過期，用量沿用舊讀數 — 請在主機執行 claude 重新登入';
-    if (/cooldown|rate-limited/i.test(err)) return '用量 API 冷卻中（429 退避），沿用上次讀數';
-    return '用量讀不到，沿用上次讀數';
-  }
-
+  // ---- scheduler state and the 本地模型 chip (usage lives in the KPI strip and the rail) ----
   function renderTop(s) {
-    setRing('ring-session', 'session-pct', s.usage.session);
-    setRing('ring-weekly', 'weekly-pct', s.usage.weekly);
-
-    const note = $('usage-note');
-    if (note) {
-      const msg = usageNote(s.usage.error);
-      note.hidden = !msg;
-      note.textContent = msg || '–';
-      note.title = s.usage.error || '用量讀取狀態';
-      note.setAttribute('data-state', /登入/.test(msg || '') ? 'danger' : 'warn');
-    }
-
-    if ($('resets')) $('resets').querySelector('.tick-v').textContent = fmtDur(s.usage.sessionResetsInMin);
-    if ($('policy')) $('policy').querySelector('.tick-v').textContent =
-      `${s.policy.window === 'night' ? '夜間' : '日間'} · ${s.policy.sessionMax}%`;
-
     const state = $('sched-state');
     if (state) {
       state.classList.toggle('paused', !!s.paused);
@@ -147,23 +88,6 @@
     if ($('pause-btn')) $('pause-btn').textContent = s.paused ? '恢復排程' : '暫停排程';
 
     if ($('self-update-badge')) $('self-update-badge').hidden = !s.self_update_pending;
-
-    const fc = s.forecast;
-    if (fc && $('forecast-chip')) {
-      const verdictState = { plenty: 'ok', some: 'warn', tight: 'danger', full: 'danger' };
-      const chip = $('forecast-chip');
-      chip.setAttribute('data-state', verdictState[fc.verdict] || 'ok');
-      const bk = Math.round(fc.weekly_backlog_pct);
-      const head = Math.round(fc.weekly_headroom);
-      const cap = fc.capacity_more_M;
-      const now = Math.round(s.usage.weekly);
-      const max = Math.round(s.policy.weeklyMax);
-      // Compact, unambiguous label (no bare "剩 X%" that reads like current usage);
-      // full explanation in the tooltip.
-      chip.textContent = bk > 0 ? `Backlog · weekly +${bk}% · 還可加~${cap}` : `Backlog 空 · 還可加~${cap}`;
-      chip.title =
-        `待處理任務預計再吃 weekly ${bk}%（目前 ${now}% / 上限 ${max}%）→ 跑完後距上限還剩 ${head}%，約可再加 ${cap} 個 M 任務`;
-    }
 
     // 本地模型 chip: shown once local models are on (or vLLM is doing something anyway).
     const lc = s.local;
@@ -550,98 +474,6 @@
       createBtn.disabled = false;
     }
   });
-
-  // ---- voice intake: record -> /api/voice/intake -> prefill #new-form ------------------
-  const voiceBtn = $('voice-btn');
-  const voiceStatus = $('voice-status');
-  let voiceRecorder = null;
-  let voiceStream = null;
-  let voiceChunks = [];
-
-  function pickVoiceMime() {
-    const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/mp4;codecs=mp4a.40.2', 'audio/ogg'];
-    for (const c of candidates) {
-      if (window.MediaRecorder && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(c)) return c;
-    }
-    return '';
-  }
-  function extFromMime(mime) {
-    if (!mime) return 'webm';
-    if (mime.includes('mp4')) return 'mp4';
-    if (mime.includes('ogg')) return 'ogg';
-    return 'webm';
-  }
-
-  async function startVoiceRecording() {
-    voiceStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    const mimeType = pickVoiceMime();
-    voiceChunks = [];
-    voiceRecorder = new MediaRecorder(voiceStream, mimeType ? { mimeType } : undefined);
-    voiceRecorder.ondataavailable = (e) => { if (e.data && e.data.size) voiceChunks.push(e.data); };
-    voiceRecorder.onstop = onVoiceStop;
-    voiceRecorder.start();
-    voiceBtn.classList.add('recording');
-    voiceBtn.textContent = '⏹';
-    voiceStatus.hidden = false;
-    voiceStatus.textContent = '錄音中…再按一次停止';
-  }
-
-  function stopVoiceRecording() {
-    if (voiceRecorder && voiceRecorder.state !== 'inactive') voiceRecorder.stop();
-    if (voiceStream) voiceStream.getTracks().forEach((t) => t.stop());
-    voiceBtn.classList.remove('recording');
-    voiceBtn.textContent = '🎤';
-  }
-
-  async function onVoiceStop() {
-    const mimeType = (voiceRecorder && voiceRecorder.mimeType) || 'audio/webm';
-    const blob = new Blob(voiceChunks, { type: mimeType });
-    if (!blob.size) { voiceStatus.textContent = '沒有錄到聲音，請再試一次'; return; }
-    voiceBtn.disabled = true;
-    voiceStatus.textContent = '上傳並轉錄中…';
-    try {
-      const fd = new FormData();
-      fd.append('audio', blob, `voice.${extFromMime(mimeType)}`);
-      const r = await fetch('/api/voice/intake', { method: 'POST', headers: authHeaders, body: fd });
-      const body = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(body.error || r.statusText);
-      applyVoiceResult(body.transcript, body.fields);
-      voiceStatus.textContent = '✓ 已帶入表單，請確認後建立';
-    } catch (err) {
-      voiceStatus.textContent = '語音處理失敗：' + err.message;
-    } finally {
-      voiceBtn.disabled = false;
-    }
-  }
-
-  function applyVoiceResult(transcript, fields) {
-    const form = $('new-form');
-    const set = (name, value) => {
-      const input = form.elements.namedItem(name);
-      if (input && value != null && value !== '') input.value = value;
-    };
-    if (fields) {
-      set('title', fields.title);
-      set('goal', fields.goal);
-      if (Array.isArray(fields.verify_steps) && fields.verify_steps.length) {
-        set('verification_steps', fields.verify_steps.join(', '));
-      }
-      set('repo_path', fields.repo_path);
-      set('environment', fields.environment);
-      if (fields.coding_tool) set('coding_tool', fields.coding_tool);
-      if (fields.complexity) set('complexity', fields.complexity);
-      syncRepoRow();
-    } else {
-      set('title', (transcript || '').slice(0, 60) || '語音建立的任務');
-      set('goal', transcript);
-    }
-  }
-
-  voiceBtn.onclick = () => {
-    if (voiceRecorder && voiceRecorder.state === 'recording') { stopVoiceRecording(); return; }
-    voiceStatus.hidden = false;
-    startVoiceRecording().catch((err) => { voiceStatus.textContent = '無法使用麥克風：' + err.message; });
-  };
 
   // ---- settings panel (day/night thresholds etc.) ----------------------
   const settingsDialog = $('settings-dialog');

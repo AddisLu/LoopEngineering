@@ -75,15 +75,15 @@ async function capture(view, btn) {
  * plain draft task. All idempotent on the server (one task or draft per answer).
  */
 const INTENTS = [
-  ['fix', '軟體修正', '機況／判錯／crash — 帶著症狀與參考資料進 PRD 精靈，改現有程式'],
-  ['feature', '功能或效能', '要多一個功能，或要更快 — 進 PRD 精靈'],
+  ['fix', '軟體修正', '機況／判錯／crash — 帶著症狀與參考資料進工作流程，改現有程式'],
+  ['feature', '功能或效能', '要多一個功能，或要更快 — 進工作流程'],
   ['spike', '驗證新技術／套件', '在 ~/Addis/spikes 開一個新 repo，裝起來跑 demo、寫 REPORT.md'],
   ['todo', '待辦／純紀錄', '只留一張草稿任務，內容就是這則回答'],
 ];
 const KIND_OPTS = [['algo', '演算法／判定規則'], ['bugfix', '程式錯誤'], ['feature', '功能新增'], ['perf', '效能']];
 
 function linkDraft(btn, draftId) {
-  btn.textContent = 'PRD 草稿 ↗';
+  btn.textContent = '工作流程草稿 ↗';
   btn.classList.add('done');
   btn.disabled = false;
   btn.onclick = () => window.open(`/flow.html?draft=${encodeURIComponent(draftId)}`, '_blank', 'noopener');
@@ -116,7 +116,7 @@ async function repoOptions(hint) {
     o.value = u;
     sel.append(o);
   }
-  const manual = el('option', null, '（在精靈裡再選）');
+  const manual = el('option', null, '（在工作流程裡再選）');
   manual.value = '';
   sel.append(manual);
   sel.value = hint && uris.includes(hint) ? hint : uris[0] || '';
@@ -158,7 +158,7 @@ async function openTaskChooser(view, s) {
   const symptom = textInput(s.fix ? s.fix.symptom : '', '現況／症狀');
   const expected = textInput(s.fix ? s.fix.expected : '', '期望行為');
   fixBox.append(field('改動類型', kindSel), field('Repo', repoSel), field('現況／症狀', symptom), field('期望行為', expected));
-  if (s.sources && s.sources.length) fixBox.append(el('p', 'dialog-hint', `會帶入 ${Math.min(5, s.sources.length)} 個參考來源到精靈的範圍段落`));
+  if (s.sources && s.sources.length) fixBox.append(el('p', 'dialog-hint', `會帶入 ${Math.min(5, s.sources.length)} 個參考來源到工作流程的範圍段落`));
   dlg.append(fixBox);
 
   // spike
@@ -198,7 +198,7 @@ async function openTaskChooser(view, s) {
   menu.append(cancel, go);
   dlg.append(menu);
 
-  const NOTE = { fix: '開精靈 ↗', feature: '開精靈 ↗', spike: '建立 spike', todo: '建立待辦' };
+  const NOTE = { fix: '開工作流程 ↗', feature: '開工作流程 ↗', spike: '建立 spike', todo: '建立待辦' };
   function choose(key) {
     intent = key;
     for (const [k, c] of cards) c.classList.toggle('on', k === key);
@@ -212,7 +212,7 @@ async function openTaskChooser(view, s) {
   if (!s.prd_gate_enabled) {
     for (const k of ['fix', 'feature']) {
       cards.get(k).disabled = true;
-      cards.get(k).title = 'PRD 精靈未啟用（prd_gate_enabled）';
+      cards.get(k).title = '工作流程未啟用（prd_gate_enabled）';
     }
     if (intent === 'fix' || intent === 'feature') choose('todo');
   }
@@ -252,7 +252,7 @@ function applyTaskResult(view, r) {
     view.draftId = r.draft.id;
     if (btn) linkDraft(btn, r.draft.id);
     if (!r.existing) window.open(r.url, '_blank', 'noopener');
-    toast(r.existing ? '這則回答已經有一份 PRD 草稿' : '已開 PRD 草稿，精靈在新分頁', 'ok', { text: '開精靈 ↗', href: r.url });
+    toast(r.existing ? '這則回答已經有一份工作流程草稿' : '已開工作流程草稿（新分頁）', 'ok', { text: '開工作流程 ↗', href: r.url });
     return;
   }
   view.taskId = r.task.id;

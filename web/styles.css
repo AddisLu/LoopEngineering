@@ -131,7 +131,6 @@ body {
 }
 
 .muted { color: var(--text-3); font-size: 12.5px; }
-.tnum { font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1; }
 
 :focus-visible {
   outline: 2px solid var(--accent);
@@ -171,9 +170,6 @@ body {
 
 .btn.sm { padding: 5px 11px; font-size: 12.5px; }
 
-/* enlarge the dialog's inline mic button's hit area without changing its visual size */
-#voice-btn.icon-btn { width: 44px; height: 42px; font-size: 18px; }
-
 /* destructive ghost — abort / delete read as destructive */
 .btn.danger-ghost {
   color: var(--danger);
@@ -207,27 +203,7 @@ body {
   line-height: 1;
 }
 
-.icon-btn {
-  width: 36px; height: 34px;
-  padding: 0;
-  display: inline-flex; align-items: center; justify-content: center;
-  font-size: 16px; line-height: 1;
-}
-
-/* ---- Topbar ------------------------------------------------ */
-.topbar {
-  position: sticky; top: 0; z-index: 20;
-  flex: 0 0 auto;
-  display: flex; align-items: center; flex-wrap: wrap;
-  gap: 16px 24px;
-  padding: 12px 24px;
-  background: color-mix(in srgb, var(--surface) 88%, transparent);
-  -webkit-backdrop-filter: saturate(1.4) blur(10px);
-  backdrop-filter: saturate(1.4) blur(10px);
-  border-bottom: 1px solid var(--border);
-  box-shadow: var(--shadow-1);
-}
-
+/* ---- brand (the share page's own top bar) ---------------------------- */
 .brand { display: flex; align-items: center; gap: 11px; flex-shrink: 0; }
 .brand-mark {
   width: 20px; height: 20px; border-radius: 6px;
@@ -242,50 +218,6 @@ body {
   color: var(--text-3); font-weight: 500;
 }
 
-/* usage gauges */
-.gauges { display: flex; align-items: center; gap: 22px; }
-.ring { position: relative; width: 42px; height: 42px; display: grid; place-items: center; }
-.ring svg { display: block; }
-.ring .track { fill: none; stroke: var(--surface-sunk); stroke-width: 5; }
-.ring .fill {
-  fill: none; stroke: var(--ok); stroke-width: 5; stroke-linecap: round;
-  stroke-dasharray: 0 113;
-  transition: stroke-dasharray 500ms cubic-bezier(.4,0,.2,1), stroke 300ms ease;
-}
-.ring[data-state="warn"] .fill { stroke: var(--warn); }
-.ring[data-state="danger"] .fill { stroke: var(--danger); }
-.ring-label { position: absolute; inset: 0; display: grid; place-items: center; }
-.ring-label b {
-  font-family: var(--mono);
-  font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums;
-  letter-spacing: -0.4px; color: var(--text);
-}
-.ring[data-state="warn"] .ring-label b { color: var(--warn); }
-.ring[data-state="danger"] .ring-label b { color: var(--danger); }
-.ring-cap {
-  position: absolute; bottom: -14px; left: 50%; transform: translateX(-50%);
-  font-size: 10.5px; letter-spacing: 0.3px; text-transform: uppercase;
-  color: var(--text-3);
-}
-
-/* reset + policy ticks with hairline separators */
-.ticks { display: flex; align-items: stretch; gap: 16px; margin-left: 4px; }
-.tick {
-  display: flex; flex-direction: column; gap: 3px;
-  padding-left: 16px; border-left: 1px solid var(--hairline);
-}
-.tick:first-child { border-left: 0; padding-left: 0; }
-.tick-k {
-  font-size: 10.5px; letter-spacing: 0.04em; text-transform: uppercase;
-  color: var(--text-3);
-}
-.tick-v {
-  font-size: 13px; font-weight: 600; color: var(--text);
-  white-space: nowrap;
-}
-
-.controls { margin-left: auto; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-
 .state {
   display: inline-flex; align-items: center; gap: 7px;
   font-size: 13px; color: var(--text-2); white-space: nowrap;
@@ -298,13 +230,6 @@ body {
 .state.paused .s-dot {
   background: var(--warn);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 22%, transparent);
-}
-
-.badge.self-update {
-  font-size: 12px; font-weight: 600; white-space: nowrap;
-  padding: 3px 9px; border-radius: 999px;
-  color: var(--warn); background: var(--warn-soft);
-  border: 1px solid color-mix(in srgb, var(--warn) 30%, transparent);
 }
 
 /* live / SSE indicator — 3 states: connecting / live / down */
@@ -537,9 +462,6 @@ body {
   overflow: hidden; text-overflow: ellipsis;
 }
 .chip.mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
-/* why the usage rings are not live (login expired / 429 cooldown / network); hidden when they are */
-.chip.usage-note[data-state="warn"] { color: var(--warn, #b45309); background: var(--warn-soft, rgba(245, 158, 11, .14)); }
-.chip.usage-note[data-state="danger"] { color: var(--danger, #b91c1c); background: var(--danger-soft, rgba(239, 68, 68, .14)); }
 .chip.cx { font-weight: 600; color: var(--text); }
 .chip.tool { max-width: 150px; }
 .chip.working { color: var(--st-running); border-color: color-mix(in srgb, var(--st-running) 30%, transparent); }
@@ -547,10 +469,6 @@ body {
 .chip.merged  { color: var(--ok); background: var(--ok-soft); border-color: color-mix(in srgb, var(--ok) 30%, transparent); }
 .chip.pending { color: var(--warn); background: var(--warn-soft); border-color: color-mix(in srgb, var(--warn) 30%, transparent); }
 
-.chip.forecast { font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; max-width: 100%; white-space: normal; }
-.chip.forecast[data-state="ok"]     { color: var(--ok);     background: var(--ok-soft);     border-color: color-mix(in srgb, var(--ok) 30%, transparent); }
-.chip.forecast[data-state="warn"]   { color: var(--warn);   background: var(--warn-soft);   border-color: color-mix(in srgb, var(--warn) 30%, transparent); }
-.chip.forecast[data-state="danger"] { color: var(--danger); background: var(--danger-soft); border-color: color-mix(in srgb, var(--danger) 30%, transparent); }
 .chip .spin {
   width: 7px; height: 7px; border-radius: 50%;
   background: currentColor;
@@ -652,7 +570,6 @@ dialog[open] { animation: dlg-in 160ms cubic-bezier(.2,0,.2,1); }
   to   { opacity: 1; transform: none; }
 }
 dialog h3 { margin: 0 0 16px; font-weight: 600; font-size: 17px; display: flex; align-items: center; gap: 10px; }
-.icon-btn.recording { color: var(--on-accent); background: var(--danger); border-color: transparent; animation: pulse 1.1s ease-in-out infinite; }
 dialog label {
   display: flex; flex-direction: column; gap: 5px;
   font-size: 12px; color: var(--text-2); margin-bottom: 12px;
@@ -730,13 +647,6 @@ dialog menu { display: flex; justify-content: flex-end; gap: 10px; margin: 18px 
 
 /* ---- Responsive ------------------------------------------- */
 @media (max-width: 720px) {
-  .topbar { padding: 12px 16px; gap: 10px 14px; }
-  .gauges { gap: 16px; }
-  .controls { margin-left: 0; width: 100%; gap: 8px; }
-  .controls .btn { font-size: 12.5px; padding: 6px 10px; }
-  .ticks { margin-left: 0; }
-  /* forecast chip: own full-width line, wraps instead of overflowing the viewport */
-  .chip.forecast { order: 5; flex-basis: 100%; width: 100%; text-align: center; }
   /* friendlier than an 84vw horizontal snap: stack the columns vertically */
   .board {
     flex-direction: column;
@@ -1096,93 +1006,6 @@ dialog menu { display: flex; justify-content: flex-end; gap: 10px; margin: 18px 
   .gdock { width: min(250px, calc(100vw - 32px)); max-height: 42vh; top: 12px; left: 12px; }
   .gcontrols { right: 12px; bottom: 12px; }
   .ghint { display: none; }
-}
-
-/* ---- Metrics dashboard (autonomous velocity) --------------- */
-.days-select-wrap {
-  display: flex; align-items: center; gap: 6px;
-  font-size: 12.5px; color: var(--text-2);
-}
-.days-select {
-  font: inherit; font-size: 13px;
-  padding: 5px 8px;
-  border-radius: var(--r-sm);
-  border: 1px solid var(--border-2);
-  background: var(--surface-2);
-  color: var(--text);
-}
-
-.metrics {
-  flex: 1 1 auto;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  padding: 24px;
-  max-width: 960px;
-  margin: 0 auto;
-  width: 100%;
-  overflow-y: auto;
-}
-
-.stat-tiles {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: 12px;
-}
-.stat-tile {
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: var(--r);
-  padding: 14px 16px;
-  box-shadow: var(--shadow-1);
-}
-.stat-value { font-size: 22px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
-.stat-label { margin-top: 4px; font-size: 12px; color: var(--text-3); }
-
-.chart-card {
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: var(--r);
-  padding: 16px;
-  box-shadow: var(--shadow-1);
-}
-.chart-title { font-size: 14px; font-weight: 600; color: var(--text); margin: 0 0 10px; }
-
-.trend-svg, .throughput-svg { width: 100%; height: auto; display: block; }
-.trend-axis { stroke: var(--border-2); stroke-width: 1; }
-.trend-line { fill: none; stroke-width: 2; }
-.trend-session { stroke: var(--accent); }
-.trend-weekly { stroke: var(--st-attention); }
-.throughput-bar { fill: var(--accent); }
-
-.funnel-row {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
-  gap: 10px;
-}
-.funnel-step {
-  text-align: center;
-  background: var(--surface-sunk);
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
-  padding: 10px 8px;
-}
-.funnel-count { font-size: 18px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
-.funnel-label { margin-top: 4px; font-size: 11.5px; color: var(--text-3); }
-
-.discipline-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
-.discipline-table th, .discipline-table td {
-  text-align: right;
-  padding: 6px 8px;
-  border-bottom: 1px solid var(--border);
-  font-variant-numeric: tabular-nums;
-}
-.discipline-table th:first-child, .discipline-table td:first-child { text-align: left; }
-.discipline-table th { color: var(--text-3); font-weight: 500; }
-
-@media (max-width: 720px) {
-  .metrics { padding: 16px; }
 }
 
 /* ---- Motion preferences ----------------------------------- */

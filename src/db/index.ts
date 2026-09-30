@@ -168,7 +168,7 @@ function migrate(db: Database.Database): void {
   ]);
   // 上網／工具: the tool rounds (name, args, outcome, source URLs) behind an answer
   add('chat_messages', [['tools_json', 'TEXT']]);
-  // 轉成任務 → PRD 精靈: the wizard draft an answer became (task_id follows once it is submitted)
+  // 轉成任務 → 工作流程: the draft an answer became (task_id follows once it is submitted)
   add('chat_messages', [['draft_id', 'TEXT']]);
   // benchmark redesign: where the question came from, several judges, and the model to switch
   // back to once the arms are done

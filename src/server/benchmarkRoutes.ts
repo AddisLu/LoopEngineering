@@ -146,7 +146,7 @@ export function registerBenchmarkRoutes(
         const me = identityOf(req);
         const draft = ref ? getDraft(db, me.user_key, ref) : null;
         if (!draft) return reply.code(404).send({ error: `找不到草稿：${ref ?? ''}` });
-        if (!draft.markdown.trim()) return reply.code(400).send({ error: '這份草稿還沒有內容——先在精靈按「檢查」' });
+        if (!draft.markdown.trim()) return reply.code(400).send({ error: '這份草稿還沒有內容——先在工作流程把需求寫好，按「檢查」' });
         const busy = activeBenchmark(db);
         if (busy) throw new BenchmarkInputError(`已經有一個評比在跑：「${busy.title}」。等它跑完，或先按「取消評比」。`);
         const r = await submitPrd(db, draft.markdown, { exec: opts.prdReviewExec, benchmark_models: models, judge_models: judges.length ? judges : undefined });

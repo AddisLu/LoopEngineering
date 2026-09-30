@@ -1035,7 +1035,7 @@ export function registerChatRoutes(app: FastifyInstance, db: Database.Database, 
     try {
       if (intent === 'fix' || intent === 'feature' || intent === 'perf') {
         if (!getBool(db, 'prd_gate_enabled', false)) {
-          return reply.code(409).send({ error: 'PRD 精靈未啟用（loop config set prd_gate_enabled true）；或改選「待辦」' });
+          return reply.code(409).send({ error: '工作流程未啟用（loop config set prd_gate_enabled true）；或改選「待辦」' });
         }
         const kinds: PrdKind[] = ['algo', 'bugfix', 'feature', 'perf'];
         const kind = kinds.includes(b.kind as PrdKind) ? (b.kind as PrdKind) : intent === 'fix' ? 'algo' : intent;
