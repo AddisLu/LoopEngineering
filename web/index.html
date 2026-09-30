@@ -83,17 +83,19 @@
 
         <aside class="dock" id="dock" aria-label="工作面板">
           <div class="dock-inner">
+            <div class="seg dock-tabs" role="tablist" aria-label="工作面板">
+              <button type="button" role="tab" id="act-tasks" aria-controls="pane-tasks" aria-selected="false" title="需要你處理（Alt+1）">需要你處理<span class="badge" id="act-tasks-badge" hidden></span></button>
+              <button type="button" role="tab" id="act-tune" aria-controls="pane-tune" aria-selected="false" title="調參（Alt+2）">調參</button>
+              <button type="button" role="tab" id="act-kb" aria-controls="pane-kb" aria-selected="false" title="知識庫（Alt+3）">知識庫</button>
+              <button type="button" role="tab" id="act-model" aria-controls="pane-model" aria-selected="false" title="模型與機台（Alt+4）">模型</button>
+            </div>
+
             <div class="dock-pane" id="pane-tasks" role="tabpanel" aria-labelledby="act-tasks" hidden>
               <div class="pane-top">
                 <a class="btn sm" href="/board.html">開啟總覽 ↗</a>
-                <a class="btn sm" href="/board.html#new">＋ 新增 task</a>
+                <a class="btn sm primary" href="/flow.html#new">＋ 新工作流程</a>
               </div>
-              <div class="card">
-                <h2>任務狀態</h2>
-                <div class="counts" id="task-counts"></div>
-                <p class="hint" id="sched-note">連線中…</p>
-              </div>
-              <div class="task-list" id="task-list"></div>
+              <div class="inbox" id="dock-inbox"><p class="hint">連線中…</p></div>
             </div>
 
             <div class="dock-pane" id="pane-tune" role="tabpanel" aria-labelledby="act-tune" hidden>
@@ -102,11 +104,11 @@
               </div>
               <div class="card">
                 <h2>智慧調整參數</h2>
-                <p class="hint">描述機台症狀，模型會先查 CF-AOI 知識庫，再給出可調的檔案與參數。<b>只產生建議，不會改機台</b>；建議可一鍵轉成 Loop 任務。</p>
+                <p class="hint">描述機台症狀，模型會先查 CF-AOI 知識庫，再給出可調的檔案與參數。<b>只產生建議，不會改機台</b>；要做成任務，用回答底下的「轉成任務」。</p>
                 <form id="tune-form">
                   <textarea id="tune-symptom" rows="4" placeholder="例：ROI 邊緣常把正常紋路判成刮傷"></textarea>
                   <input id="tune-scope" placeholder="機台／模組（可留空，例：IP 瑕疵偵測）" autocomplete="off" />
-                  <div class="prd-actions"><button class="btn sm primary" type="submit" id="tune-submit">產生建議</button></div>
+                  <div class="card-actions"><button class="btn sm primary" type="submit" id="tune-submit">產生建議</button></div>
                 </form>
                 <p class="hint" id="tune-status">還沒有產生建議</p>
               </div>
@@ -114,8 +116,7 @@
               <div class="card" id="tune-latest" hidden>
                 <h2>最新建議</h2>
                 <div id="tune-latest-body"></div>
-                <div class="prd-actions">
-                  <button class="btn sm primary" type="button" id="tune-to-task">轉成任務</button>
+                <div class="card-actions">
                   <button class="btn sm" type="button" id="tune-show">在對話中查看</button>
                 </div>
               </div>
@@ -146,31 +147,9 @@
                 </form>
                 <div id="rag-results"></div>
               </div>
-              <div class="card">
-                <h2>快速記一筆</h2>
-                <form id="capture-form">
-                  <input id="capture-title" placeholder="標題（可留空）" autocomplete="off" />
-                  <textarea id="capture-body" rows="4" placeholder="要記進知識庫的內容…"></textarea>
-                  <button class="btn sm primary" type="submit" id="capture-btn">存進知識庫</button>
-                </form>
-                <p class="hint" id="capture-note">寫進 vault 來源並立刻建立索引，之後對話就查得到。</p>
-              </div>
             </div>
 
-            <div class="dock-pane" id="pane-prd" role="tabpanel" aria-labelledby="act-prd" hidden>
-              <div class="pane-top">
-                <a class="btn sm primary" id="prd-new" href="/flow.html#new">新工作流程 ↗</a>
-                <button class="btn sm" type="button" id="prd-refresh">重新整理</button>
-              </div>
-              <div class="card">
-                <h2>工作流程</h2>
-                <p class="hint">把「改哪套軟體、改什麼、怎麼驗證」畫成一條流程：需求 → AI 實作 → 驗證 → 門檻 → 合併；點節點填內容，通過閘門才變成 Loop 任務。</p>
-                <h3>最近的草稿</h3>
-                <div id="prd-drafts"></div>
-              </div>
-            </div>
-
-            <div class="dock-pane" id="pane-model" role="tabpanel" aria-labelledby="act-model">
+            <div class="dock-pane" id="pane-model" role="tabpanel" aria-labelledby="act-model" hidden>
               <section class="card" id="model-switch">
                 <h2>使用中 <span class="hint" id="spark-count"></span></h2>
                 <p class="hint" id="switch-state">讀取中…</p>
@@ -203,9 +182,7 @@
                 <div class="model-list" id="model-list"></div>
               </details>
               <p class="hint">切換會重新啟動 vLLM，期間無法對話，通常要幾分鐘。下載與建置在背景跑，不影響目前的模型。</p>
-            </div>
-
-            <div class="dock-pane" id="pane-status" role="tabpanel" aria-labelledby="act-status" hidden>
+              <h3 class="pane-sub">機台狀況</h3>
               <section class="card">
                 <h2>這次回答</h2>
                 <div class="tiles">
@@ -263,71 +240,8 @@
                 </dl>
               </section>
             </div>
-
-            <div class="dock-pane" id="pane-bench" role="tabpanel" aria-labelledby="act-bench" hidden>
-              <div class="pane-top">
-                <a class="btn sm" href="/benchmarks.html">開啟完整評比頁 ↗</a>
-                <a class="btn sm primary" id="bench-new" href="/benchmarks.html#new">＋ 新評比</a>
-              </div>
-              <section class="card" id="bench-running" hidden>
-                <h2>進行中的評比</h2>
-                <p class="job-title" id="bench-running-title"></p>
-                <div class="bar"><span class="fill job" id="bench-running-bar"></span></div>
-                <p class="hint" id="bench-running-meta"></p>
-              </section>
-
-              <section class="card">
-                <h2>模型戰績</h2>
-                <p class="hint">同一份題目交給多個模型各做一次，雲端評審看 diff 打分。</p>
-                <div id="bench-models"></div>
-              </section>
-
-              <section class="card">
-                <h2>最近的評比</h2>
-                <div id="bench-list"></div>
-              </section>
-            </div>
           </div>
         </aside>
-
-        <nav class="activity" id="activity-bar" role="tablist" aria-orientation="vertical" aria-label="工作面板" data-open="true">
-          <button class="act" type="button" id="act-tasks" role="tab" aria-controls="pane-tasks" aria-selected="false" title="任務（Alt+1）">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6.5h3.2M4 12h3.2M4 17.5h3.2"/><path d="M10.5 6.5H20M10.5 12H20M10.5 17.5H20"/></svg>
-            <span class="lbl">任務</span>
-            <span class="badge" id="act-tasks-badge" hidden></span>
-          </button>
-          <button class="act" type="button" id="act-tune" role="tab" aria-controls="pane-tune" aria-selected="false" title="調參（Alt+2）">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 5v5M5 14v5M12 5v3M12 12v7M19 5v9M19 18v1"/><path d="M3 12h4M10 10h4M17 16h4"/></svg>
-            <span class="lbl">調參</span>
-            <span class="badge" id="act-tune-badge" hidden></span>
-          </button>
-          <button class="act" type="button" id="act-kb" role="tab" aria-controls="pane-kb" aria-selected="false" title="知識庫（Alt+3）">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4H19v16H5.5A1.5 1.5 0 0 1 4 18.5z"/><path d="M8 4v16M11 8.5h5M11 12h5"/></svg>
-            <span class="lbl">知識庫</span>
-            <span class="badge" id="act-kb-badge" hidden></span>
-          </button>
-          <button class="act" type="button" id="act-prd" role="tab" aria-controls="pane-prd" aria-selected="false" title="PRD（Alt+4）">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3.5h7.5L18 8v12.5H6z"/><path d="M13.5 3.5V8H18"/><path d="M9 12h6M9 15.5h6"/></svg>
-            <span class="lbl">PRD</span>
-            <span class="badge" id="act-prd-badge" hidden></span>
-          </button>
-          <span class="sep" aria-hidden="true"></span>
-          <button class="act" type="button" id="act-model" role="tab" aria-controls="pane-model" aria-selected="false" title="模型（Alt+5）">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="7.5" y="7.5" width="9" height="9" rx="1.5"/><path d="M10 4v3.5M14 4v3.5M10 16.5V20M14 16.5V20M4 10h3.5M4 14h3.5M16.5 10H20M16.5 14H20"/></svg>
-            <span class="lbl">模型</span>
-            <span class="badge" id="act-model-badge" hidden></span>
-          </button>
-          <button class="act" type="button" id="act-status" role="tab" aria-controls="pane-status" aria-selected="false" title="機台狀況（Alt+6）">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 16a8 8 0 0 1 16 0"/><path d="M12 16l4-5"/><path d="M4 20h16"/><circle cx="12" cy="16" r="1.2"/></svg>
-            <span class="lbl">機台</span>
-            <span class="badge" id="act-status-badge" hidden></span>
-          </button>
-          <button class="act" type="button" id="act-bench" role="tab" aria-controls="pane-bench" aria-selected="false" title="Benchmark（Alt+7）">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h16"/><path d="M7 20v-6M12 20V6M17 20v-9"/></svg>
-            <span class="lbl">評比</span>
-            <span class="badge" id="act-bench-badge" hidden></span>
-          </button>
-        </nav>
       </main>
     </div>
 

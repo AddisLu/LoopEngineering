@@ -278,7 +278,9 @@ svg.fedges path.fail { stroke: var(--danger); }
 .hovbar button.danger { color: #f3b2ab; }
 
 /* ---- inbox ---------------------------------------------------------------- */
-.inbox { width: 340px; flex: 0 0 auto; display: flex; flex-direction: column; gap: 12px; padding: 16px; border-left: 1px solid var(--border); background: var(--surface); overflow-y: auto; }
+/* 需要你處理 (web/inbox.js): the cards style any .inbox; 總覽 docks it as a right column */
+.inbox { display: flex; flex-direction: column; gap: 12px; }
+aside.inbox { width: 340px; flex: 0 0 auto; padding: 16px; border-left: 1px solid var(--border); background: var(--surface); overflow-y: auto; }
 .inbox h2 { margin: 0; font-size: 15px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
 .inbox h2 .count { font-size: 12px; font-weight: 700; padding: 1px 8px; border-radius: 999px; background: var(--text); color: var(--surface); }
 .inbox article { padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); cursor: pointer; }
@@ -480,7 +482,7 @@ table.tbl .num { font-variant-numeric: tabular-nums; white-space: nowrap; }
   .app-top h1 { font-size: 16px; }
   .app-top .btn { padding: 6px 10px; }
   .kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); padding: 12px; gap: 8px; }
-  .inbox { width: auto; border-left: 0; }
+  aside.inbox { width: auto; border-left: 0; }
   .ndv-cols { grid-template-columns: minmax(0, 1fr); overflow-y: auto; }
   .ndv-col { overflow: visible; }
   .app-body { padding: 14px 12px 32px; }

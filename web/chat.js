@@ -28,10 +28,11 @@ const histRail = rail({
 });
 // The dock (which panel, open or closed) belongs to dock.js — this file only needs to know
 // whether a panel that shows /api/chat/stats is on screen, so the 1 s poll can stop otherwise.
-// Two panels read that payload: 機台 (speed, memory, GPU) and 知識庫 (documents / chunks /
-// sources) — leaving 知識庫 out left its counters stuck on “–” for anyone who never opened 機台.
+// Two panels read that payload: 模型 (its 機台 part: speed, memory, GPU) and 知識庫 (documents /
+// chunks / sources) — leaving 知識庫 out left its counters stuck on “–” for anyone who never
+// opened the other.
 const paneOpen = (id) => !$(id).hidden && (phone() ? drawer.isOpen() : !shellMain.classList.contains('dock-collapsed'));
-const statsVisible = () => paneOpen('pane-status') || paneOpen('pane-kb');
+const statsVisible = () => paneOpen('pane-model') || paneOpen('pane-kb');
 
 // On a phone there is no width to hand back, so the same markup moves into the shared drawer
 // (shell.js `drawer`); the dock does the same in dock.js. Closing returns both.
@@ -48,7 +49,7 @@ $('rail-toggle').onclick = () => {
 // dock.js tells us when 模型 becomes the visible panel, so it is never stale on arrival
 document.addEventListener('loop-tab', (e) => {
   const d = e.detail || {};
-  if (d.open && (d.tab === 'status' || d.tab === 'kb')) refreshStats();
+  if (d.open && (d.tab === 'model' || d.tab === 'kb')) refreshStats();
 });
 $('drawer-close').onclick = closeDrawer;
 $('drawer-scrim').onclick = closeDrawer;
@@ -205,8 +206,8 @@ let statsAt = 0;
 async function refreshStats() {
   if (statsInFlight) return;
   if (!statsVisible() && !busyNow) return; // panel hidden and idle — nothing to paint
-  // only the 機台 tiles need a per-second refresh; the knowledge counters barely move
-  if (!busyNow && !paneOpen('pane-status') && Date.now() - statsAt < 5000) return;
+  // only the 模型 tab's machine tiles need a per-second refresh; the knowledge counters barely move
+  if (!busyNow && !paneOpen('pane-model') && Date.now() - statsAt < 5000) return;
   statsInFlight = true;
   statsAt = Date.now();
   try {
@@ -227,14 +228,14 @@ refreshStats();
 setInterval(refreshStats, 1000);
 
 /**
- * The topbar chip is always on screen, but refreshStats() only runs while 機台／知識庫 is open or
+ * The topbar chip is always on screen, but refreshStats() only runs while 模型／知識庫 is open or
  * an answer is streaming (GET /api/chat/stats costs two vLLM calls plus nvidia-smi). With every
  * panel closed the chip used to sit on its placeholder text 「連線中…」 forever. The board SSE
  * already carries the model state, so paint from that and let the poll overwrite it when it runs.
  */
 const LOCAL_STATE = { ready: '模型就緒', starting: '模型啟動中…', idle: '模型未載入', error: '模型錯誤' };
 onBoard((s) => {
-  if (busyNow || paneOpen('pane-status')) return; // the authoritative poll is already painting
+  if (busyNow || paneOpen('pane-model')) return; // the authoritative poll is already painting
   const l = s && s.local;
   if (!l) return;
   const svc = $('svc-state');

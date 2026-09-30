@@ -1,25 +1,24 @@
-import { $, api, boardState, drawer, el, fmtInt, onBoard, phone, rail, setText, store, stored, toast, when } from './shell.js';
+import { $, api, boardState, drawer, el, onBoard, phone, rail, setText, store, stored, toast, when } from './shell.js';
 import { parseTuneMarkdown } from './chat-md.js';
+import { awaiting, needsYou, paintInbox } from './inbox.js';
 
 /**
  * Right-hand dock: the light-touch view of everything that is not the conversation.
  *
- * Deliberately shallow. Anything that needs a real form or a decision links out to its own page
- * (/board.html, /brain.html, /flow.html, /benchmarks.html) rather than re-implementing it here —
- * the board's task detail alone is 140 lines of nine actions, and two copies would drift.
- * textContent only; task titles and PRD output are untrusted text.
+ * Four tabs: 需要你處理 (the same cards as 總覽, web/inbox.js), 調參, 知識庫, 模型 (with the
+ * machine's speed, memory and GPU). Deliberately shallow: anything that needs a real form or a
+ * decision links out to its own page (/board.html, /brain.html, /flow.html, /task.html) rather
+ * than re-implementing it here — two copies would drift. textContent only; task titles and model
+ * output are untrusted text.
  */
 
 // This module owns the whole dock: which panel is selected AND whether the panel is open.
 // Splitting those two across files is what produced "the ▤ button does nothing" earlier.
 const TABS = [
-  ['tasks', '任務'],
+  ['tasks', '需要你處理'],
   ['tune', '調參'],
   ['kb', '知識庫'],
-  ['prd', 'PRD'],
   ['model', '模型'],
-  ['status', '機台'],
-  ['bench', 'Benchmark'],
 ];
 const LABEL = Object.fromEntries(TABS);
 const actId = (tab) => `act-${tab}`;
@@ -27,9 +26,11 @@ const paneId = (tab) => `pane-${tab}`;
 
 const shellMain = $('shell-main');
 const dockInner = document.querySelector('.dock-inner');
-// tolerate the ids this used to store ('tab-model')
-// first visit lands on 任務 (what needs you today); afterwards the last-used panel is remembered
+// tolerate the ids this used to store ('tab-model', and the 機台 / PRD / 評比 panels that are gone)
+// first visit lands on 需要你處理 (what needs you today); afterwards the last-used panel is remembered
+const MOVED = { status: 'model', prd: 'tasks', bench: 'tasks' };
 let active = (stored('loop_shell_tab') || 'tasks').replace(/^tab-/, '');
+active = MOVED[active] || active;
 if (!TABS.some(([tab]) => tab === active)) active = 'tasks';
 let dockRail = null; // built in the init block at the end — rail() paints as it constructs
 
@@ -53,18 +54,15 @@ function paintTabs() {
     $(paneId(tab)).hidden = !on;
   }
   const open = isOpen();
-  $('activity-bar').dataset.open = String(open);
   $('dock-toggle').setAttribute('aria-expanded', String(open));
-  // the task list and the suggestion table want more room than a stats column does
-  shellMain.classList.toggle('dock-wide', active === 'tasks' || active === 'tune');
-  if (open && active === 'bench') loadBenchmarks();
+  // the suggestion table wants more room than a column of cards does
+  shellMain.classList.toggle('dock-wide', active === 'tune');
   if (open && active === 'tasks' && boardState()) paintTasks(boardState());
   if (open && active === 'tune') loadTuneHistory();
-  if (open && active === 'prd') loadPrdDrafts();
   document.dispatchEvent(new CustomEvent('loop-tab', { detail: { tab: active, open } }));
 }
 
-/** Clicking the icon that is already showing collapses the panel; anything else switches to it. */
+/** Clicking the tab that is already showing collapses the panel; anything else switches to it. */
 function select(tab) {
   if (tab === active && isOpen()) return setOpen(false);
   active = tab;
@@ -80,96 +78,32 @@ document.addEventListener('keydown', (e) => {
   // e.code, not e.key: Alt+digit types a symbol on macOS
   if (!e.altKey || e.ctrlKey || e.metaKey) return;
   if (document.querySelector('dialog[open]')) return;
-  const m = /^Digit([1-7])$/.exec(e.code);
+  const m = /^Digit([1-4])$/.exec(e.code);
   if (!m) return;
   e.preventDefault();
   select(TABS[Number(m[1]) - 1][0]);
 });
 
-// ---- 任務 ------------------------------------------------------------------
-// Fed by the single board SSE connection in shell.js — the same snapshot /board.html renders.
-const GROUPS = [
-  ['attention', '要你處理'],
-  ['review', '待結案'],
-  ['running', '執行中'],
-  ['verifying', '驗證中'],
-  ['queued', '排隊中'],
-  ['blocked', '卡住'],
-  ['ready', '就緒'],
-  ['draft', '草稿'],
-];
-
-function countsStrip(counts) {
-  const box = el('div', 'counts');
-  for (const [status, label] of GROUPS) {
-    const n = counts[status] || 0;
-    if (!n) continue;
-    const c = el('span', `count s-${status}`);
-    c.append(el('b', null, String(n)), el('span', null, label));
-    box.append(c);
-  }
-  if (!box.childElementCount) box.append(el('span', 'hint', '目前沒有進行中的任務'));
-  return box;
-}
-
-function taskCard(card) {
-  const a = el('a', `mini-card s-${card.status}`);
-  a.href = `/board.html#task=${encodeURIComponent(card.id)}`;
-  a.title = card.goal || card.title;
-  a.append(el('div', 't', card.title));
-  const meta = el('div', 'm');
-  const bits = [
-    card.complexity,
-    card.model || null,
-    card.est_pct ? `~${card.est_pct}%` : null,
-    card.merge_status === 'merged' ? '已合併' : card.merge_status === 'pending' ? '待合併' : null,
-    card.updated_at ? when(card.updated_at) : null,
-  ].filter(Boolean);
-  for (const b of bits) meta.append(el('span', 'chip', b));
-  a.append(meta);
-  return a;
-}
-
-// Why the usage numbers are not a live reading (null when they are) — same wording as the board.
-function usageNote(err) {
-  if (!err) return null;
-  if (/login expired|not logged in|auth-expired/i.test(err)) return '這台的 Claude 登入已過期，用量沿用舊讀數 — 請在主機執行 claude 重新登入';
-  if (/cooldown|rate-limited/i.test(err)) return '用量 API 冷卻中（429 退避），沿用上次讀數';
-  return '用量讀不到，沿用上次讀數';
-}
+// ---- 需要你處理 ------------------------------------------------------------
+// The same cards as 總覽 (web/inbox.js), fed by the single board SSE connection in shell.js —
+// the snapshot /board.html renders. Details open on 總覽; one-click actions run from here.
+const inboxAct = (path) =>
+  api(path, { method: 'POST', body: '{}' })
+    .then(() => toast('已送出', 'ok'))
+    .catch((err) => toast(`沒有成功：${err.message}`, 'bad'));
 
 function paintTasks(s) {
-  $('task-counts').replaceChildren(countsStrip(s.counts || {}));
-  const note = [];
-  if (s.paused) note.push('排程已暫停');
-  if (s.self_update_pending) note.push('引擎更新排隊中');
-  if (s.usage) note.push(`session ${Math.round(s.usage.session)}% · weekly ${Math.round(s.usage.weekly)}%`);
-  const why = s.usage ? usageNote(s.usage.error) : null;
-  if (why) note.push(why);
-  $('sched-note').textContent = note.join(' · ') || '排程執行中';
-
-  const cards = Array.isArray(s.cards) ? s.cards : [];
-  const list = $('task-list');
-  const out = [];
-  for (const [status, label] of GROUPS) {
-    const group = cards.filter((c) => c.status === status);
-    if (!group.length) continue;
-    out.push(el('h3', null, `${label}（${group.length}）`));
-    for (const c of group) out.push(taskCard(c));
-  }
-  if (!out.length) out.push(el('p', 'hint', '看板上沒有待辦的任務。可以從對話裡的建議直接開一張。'));
-  list.replaceChildren(...out);
+  paintInbox($('dock-inbox'), s, { act: inboxAct });
 }
 
 onBoard((s) => {
   const wasBench = benchBusy && benchBusy.id;
   benchBusy = s.benchmark || null;
-  setText('act-bench-badge', benchBusy ? `${benchBusy.arms_done}/${benchBusy.arm_count}` : '');
-  $('act-bench-badge').hidden = !benchBusy;
   if ((benchBusy && benchBusy.id) !== wasBench && catalogData) paintCatalog(catalogData);
-  const needsYou = (s.counts || {}).attention || 0;
-  setText('act-tasks-badge', needsYou ? String(needsYou) : '');
-  $('act-tasks-badge').hidden = !needsYou;
+  // the badge counts what the list shows: needs you, or waits for your 核可 / 結案
+  const need = (s.cards || []).filter((c) => needsYou(c) || awaiting(c)).length;
+  setText('act-tasks-badge', need ? String(need) : '');
+  $('act-tasks-badge').hidden = !need;
   if (!$('pane-tasks').hidden) paintTasks(s);
 });
 
@@ -484,148 +418,6 @@ $('rag-form').addEventListener('submit', async (e) => {
   }
 });
 
-$('capture-form').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const body = $('capture-body').value.trim();
-  if (!body) return;
-  const btn = $('capture-btn');
-  btn.disabled = true;
-  try {
-    const r = await api('/api/capture', {
-      method: 'POST',
-      body: JSON.stringify({ title: $('capture-title').value.trim() || undefined, body, tags: ['chat'] }),
-    });
-    $('capture-title').value = '';
-    $('capture-body').value = '';
-    toast(`已存進知識庫：${r.filename}`, 'ok');
-  } catch (err) {
-    toast(`存不進去：${err.message}`, 'bad');
-  } finally {
-    btn.disabled = false;
-  }
-});
-
-// ---- PRD -------------------------------------------------------------------
-// 工作流程 lives on /flow.html (it needs the width); this pane is the way in and the way back
-// to a half-written draft.
-const STEP_LABEL = ['', '改哪套軟體', '要改什麼', '怎麼驗證', '範圍與限制', '預覽與送出'];
-
-function draftRow(d) {
-  const wrap = el('div', 'mini-row');
-  const a = el('a', 'mini-card');
-  a.href = d.status === 'submitted' && d.task_id ? `/flow.html?task=${encodeURIComponent(d.task_id)}` : `/flow.html?draft=${encodeURIComponent(d.id)}`;
-  a.append(el('div', 't', d.title));
-  const m = el('div', 'm');
-  m.append(el('span', 'chip', d.status === 'submitted' ? `已建任務 ${d.task_id || ''} ↗` : `第 ${d.step} 步 · ${STEP_LABEL[d.step] || ''}`));
-  m.append(el('span', 'chip', when(d.updated_at)));
-  a.append(m);
-  const del = el('button', 'mini-del', '✕');
-  del.type = 'button';
-  del.title = '刪除這份草稿';
-  del.setAttribute('aria-label', `刪除草稿 ${d.title}`);
-  // a submitted draft's task lives on its own; deleting the draft only clears this list
-  del.onclick = async () => {
-    const extra = d.status === 'submitted' ? '（已建立的任務不會被刪除）' : '';
-    if (!window.confirm(`刪除草稿「${d.title}」？${extra}`)) return;
-    del.disabled = true;
-    try {
-      await api(`/api/prd/drafts/${encodeURIComponent(d.id)}`, { method: 'DELETE' });
-      toast('草稿已刪除', 'ok');
-      loadPrdDrafts();
-    } catch (err) {
-      del.disabled = false;
-      toast(`刪不掉：${err.message}`, 'bad');
-    }
-  };
-  wrap.append(a, del);
-  return wrap;
-}
-
-async function loadPrdDrafts() {
-  const box = $('prd-drafts');
-  try {
-    const { drafts } = await api('/api/prd/drafts?limit=5');
-    if (!drafts.length) return box.replaceChildren(el('p', 'hint', '還沒有草稿。按「開新的 PRD」開始。'));
-    box.replaceChildren(...drafts.map(draftRow));
-  } catch (err) {
-    box.replaceChildren(el('p', 'hint', err.status === 404 ? 'PRD 閘門未啟用：loop config set prd_gate_enabled true' : err.message));
-  }
-}
-$('prd-refresh').onclick = loadPrdDrafts;
-
-// ---- Benchmark --------------------------------------------------------------
-// The dashboard view: which model actually wins, what is running right now, and the last few
-// runs. Everything deeper (picking a question, models and judges) lives on /benchmarks.html.
-let benchTimer = null;
-const BENCH_STATUS = { running: '進行中', judging: '評分中', judged: '已評分', judge_failed: '評分失敗', cancelled: '已取消' };
-const CONSENSUS = { unanimous: '評審一致', split: '評審分歧', single: '單一評審' };
-
-function benchRow(b) {
-  const a = el('a', 'bench-row');
-  a.href = `/benchmarks.html#b=${encodeURIComponent(b.id)}`;
-  a.append(el('span', 't', b.title));
-  const meta = el('span', 'm');
-  meta.append(el('span', `chip ${b.status === 'judged' ? 'ok' : b.status === 'judge_failed' ? 'bad' : ''}`, BENCH_STATUS[b.status] || b.status));
-  if (b.winner_label) meta.append(el('span', 'chip', `勝：${b.winner_label}`));
-  if (b.consensus && b.status === 'judged') meta.append(el('span', 'chip', CONSENSUS[b.consensus] || b.consensus));
-  meta.append(el('span', 'chip', `${b.models.length} 個模型`));
-  if (b.judges && b.judges.length > 1) meta.append(el('span', 'chip', `${b.judges.length} 位評審`));
-  meta.append(el('span', 'chip', when(b.created_at)));
-  a.append(meta);
-  return a;
-}
-
-function paintBenchSummary(data) {
-  // 進行中
-  const run = data.running;
-  $('bench-running').hidden = !run;
-  if (run) {
-    setText('bench-running-title', run.title);
-    const pctDone = run.arm_count ? Math.round((100 * run.arms_done) / run.arm_count) : 0;
-    $('bench-running-bar').style.width = `${pctDone}%`;
-    setText('bench-running-meta', `${BENCH_STATUS[run.status] || run.status} · ${run.arms_done}/${run.arm_count} 組完成 · ${run.models.join('、')}`);
-  }
-
-  // 模型戰績
-  const box = $('bench-models');
-  if (!data.models.length) {
-    box.replaceChildren(el('p', 'hint', '還沒有評分完成的評比。'));
-  } else {
-    const rows = [el('div', 'score-row head')];
-    rows[0].append(el('span', 'n', '模型'), el('span', 's', '勝/場'), el('span', 's', '平均'), el('span', 's', '驗證'));
-    for (const m of data.models) {
-      const r = el('div', 'score-row');
-      r.append(
-        el('span', 'n', m.label),
-        el('span', 's', `${m.wins}/${m.n}`),
-        el('span', 's', m.avg_score == null ? '–' : m.avg_score.toFixed(1)),
-        el('span', 's', `${Math.round(m.verify_pass_rate * 100)}%`),
-      );
-      rows.push(r);
-    }
-    box.replaceChildren(...rows);
-  }
-
-  // 最近
-  const list = $('bench-list');
-  list.replaceChildren(...(data.recent.length ? data.recent.map(benchRow) : [el('p', 'hint', '還沒有評比。點「＋ 新評比」開始。')]));
-
-  // while something is running the panel follows it (arms take minutes each)
-  if (benchTimer) clearInterval(benchTimer);
-  benchTimer = null;
-  if (run && !$('pane-bench').hidden) benchTimer = setInterval(() => (!$('pane-bench').hidden ? loadBenchmarks() : clearInterval(benchTimer)), 10000);
-}
-
-async function loadBenchmarks() {
-  try {
-    paintBenchSummary(await api('/api/benchmarks/summary'));
-  } catch (err) {
-    $('bench-list').replaceChildren(
-      el('p', 'hint', /404/.test(err.message) ? '評比模式未啟用：loop config set benchmark_enabled true' : `讀不到評比：${err.message}`),
-    );
-  }
-}
-
 // ---- 智慧調整參數 -------------------------------------------------------------
 // The panel drives the ordinary conversation: it asks chat.js to send the question (loop-ask),
 // chat.js reports back when the answer is saved (loop-answer). Neither module imports the other.
@@ -664,8 +456,6 @@ function paintTuneLatest() {
   meta.append(el('span', 'chip', `${card.suggestions.length} 筆建議`));
   out.push(meta);
   body.replaceChildren(...out);
-  $('tune-to-task').disabled = !tuneLatest.messageId;
-  $('tune-to-task').textContent = tuneLatest.messageId ? '轉成任務' : '未存進歷史，無法轉任務';
   box.hidden = false;
 }
 
@@ -711,24 +501,6 @@ document.addEventListener('loop-answer', (e) => {
   loadTuneHistory();
 });
 
-$('tune-to-task').onclick = async () => {
-  if (!tuneLatest || !tuneLatest.messageId) return;
-  const btn = $('tune-to-task');
-  btn.disabled = true;
-  try {
-    const r = await api(`/api/chat/messages/${tuneLatest.messageId}/task`, { method: 'POST', body: JSON.stringify({ intent: 'todo' }) });
-    btn.textContent = `已建任務 ${r.task.id} ↗`;
-    toast(r.existing ? `這則建議已經開過任務 ${r.task.id}` : `已建立草稿任務 ${r.task.id}（還沒排程）`, 'ok', {
-      text: '在看板打開 ↗',
-      href: `/board.html#task=${r.task.id}`,
-    });
-    loadTuneHistory();
-  } catch (err) {
-    btn.disabled = false;
-    toast(`建立任務失敗：${err.message}`, 'bad');
-  }
-};
-
 const openInChat = (conversationId, messageId) =>
   document.dispatchEvent(new CustomEvent('loop-open', { detail: { conversationId, messageId } }));
 
@@ -772,7 +544,7 @@ async function loadTuneHistory() {
 $('tune-refresh').onclick = loadTuneHistory;
 
 // ---- init -------------------------------------------------------------------
-// Last on purpose. paintTabs() may call loadBenchmarks()/paintTasks(), and both read state
+// Last on purpose. paintTabs() may call paintTasks()/loadTuneHistory(), and both read state
 // declared above; running it any earlier is a temporal-dead-zone crash that silently kills
 // every handler below the crash (the tabs still switch, nothing behind them works).
 dockRail = rail({

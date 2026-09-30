@@ -43,7 +43,7 @@ describe('benchmarks page + local model board wiring: static assets', () => {
     const html = fs.readFileSync(path.join(WEB_DIR, 'index.html'), 'utf8');
     // the links used to sit at the bottom of the scrolling panel, below the content
     expect(html).not.toContain('pane-foot');
-    for (const pane of ['pane-tasks', 'pane-tune', 'pane-kb', 'pane-prd', 'pane-bench']) {
+    for (const pane of ['pane-tasks', 'pane-tune', 'pane-kb']) {
       const start = html.indexOf(`id="${pane}"`);
       const slice = html.slice(start, html.indexOf('<div class="dock-pane"', start + 1));
       expect(slice, `${pane} has no top button row`).toContain('class="pane-top"');
@@ -76,12 +76,9 @@ describe('benchmarks page + local model board wiring: static assets', () => {
     expect(js).toContain('要填 Repo 路徑');
   });
 
-  it('a PRD draft can be deleted from the dock and from 工作流程', () => {
+  it('a PRD draft is listed and deleted in one place: 工作流程 (the chat keeps no second list)', () => {
     const dock = fs.readFileSync(path.join(WEB_DIR, 'dock.js'), 'utf8');
-    expect(dock).toMatch(/\/api\/prd\/drafts\/.*method: 'DELETE'|method: 'DELETE'/);
-    expect(dock).toContain('mini-del');
-    expect(dock).not.toMatch(/innerHTML/);
-    expect(fs.readFileSync(path.join(WEB_DIR, 'shell.css'), 'utf8')).toContain('.mini-row');
+    expect(dock).not.toContain('/api/prd/drafts');
     const js = fs.readFileSync(path.join(WEB_DIR, 'flow.js'), 'utf8');
     expect(js).toMatch(/api\(`\/api\/prd\/drafts\/\$\{encodeURIComponent\(d\.id\)\}`, 'DELETE'\)/);
     // deleting a submitted draft must not read as deleting its task
@@ -115,15 +112,12 @@ describe('benchmarks page + local model board wiring: static assets', () => {
     expect(js).toContain('has_markdown');
   });
 
-  it('the dock shows the dashboard in Chinese, not raw enum values', () => {
+  it('the chat keeps no 評比 panel of its own (評比 has its page), but says when a benchmark holds the GPU', () => {
     const dock = fs.readFileSync(path.join(WEB_DIR, 'dock.js'), 'utf8');
-    expect(dock).toContain('/api/benchmarks/summary');
-    expect(dock).toContain("judged: '已評分'");
-    // b.status used to be rendered straight into a chip
-    expect(dock).not.toMatch(/chip', b\.status/);
-    expect(dock).toContain('評比使用中');
+    expect(dock).not.toContain('/api/benchmarks/summary');
+    expect(dock).toContain('評比使用中'); // the model switcher waits for the benchmark
     const html = fs.readFileSync(path.join(WEB_DIR, 'index.html'), 'utf8');
-    for (const id of ['bench-running', 'bench-models', 'bench-list', 'bench-new']) expect(html).toContain(`id="${id}"`);
+    for (const id of ['pane-bench', 'bench-running', 'bench-models', 'bench-list']) expect(html).not.toContain(`id="${id}"`);
   });
 
   it('工作流程 can send a PRD to a benchmark instead of one task', () => {

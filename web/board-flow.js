@@ -6,6 +6,7 @@
 import { $, fill, h, icon, dur, hhmm, tsMs, modelName, isLocal, popMenu } from './frame.js';
 import { createCanvas } from './flow/canvas.js';
 import { layered, grid, stackGroups } from './flow/layout.js';
+import { awaiting, manualMode, needsYou, paintInbox as paintInboxInto, why } from './inbox.js';
 
 const Board = () => window.Board;
 
@@ -15,8 +16,6 @@ const stored = (k) => window.Ops.stored(k);
 // ---- how a task reads ----------------------------------------------------------------------------
 const RUNNING = new Set(['running', 'verifying']);
 const WAITING = new Set(['queued', 'blocked', 'ready']);
-const needsYou = (c) => c.status === 'attention' || (c.status === 'draft' && c.gate && !c.gate.ok) || (c.status === 'review' && c.merge_status === 'conflict');
-const awaiting = (c) => c.status === 'review' && c.merge_status !== 'conflict';
 const today = (s) => {
   const t = tsMs(s);
   return Number.isFinite(t) && new Date(t).toDateString() === new Date().toDateString();
@@ -25,25 +24,6 @@ const recent = (s, hours) => {
   const t = tsMs(s);
   return Number.isFinite(t) && Date.now() - t < hours * 3600_000;
 };
-const manualMode = (c) => String(c.verify_mode || '').split(',').map((m) => m.trim()).includes('manual');
-
-/** why a task stopped, in a few words */
-function why(c) {
-  const d = String(c.fail_detail || '').split('\n')[0];
-  if (!d) return '';
-  let m = /^verify failed \(resumable (\d+)\/(\d+)\) at: (.*)$/.exec(d);
-  if (m) return `沒過${m[3] === '驗收指標' ? '驗收門檻' : `「${m[3]}」`}，自動續跑 ${m[1]}/${m[2]}`;
-  m = /^verify failed at: (.*)$/.exec(d);
-  if (m) return `驗證沒過：${m[1] === '驗收指標' ? '驗收門檻未達' : m[1]}`;
-  if (/^watchdog timeout/.test(d)) return '執行逾時';
-  if (/^setup_cmd failed/.test(d)) return '準備環境失敗';
-  if (/aborted/.test(d)) return '被中止';
-  m = /^interrupted: (\w+)/.exec(d);
-  if (m) return m[1] === 'breaker' ? '額度保護暫停，會自動續跑' : m[1] === 'window' ? '時段外暫停，會自動續跑' : '暫停，會自動續跑';
-  if (/^resume limit/.test(d)) return '續跑次數用完';
-  if (/held by user/.test(d)) return '你把它轉成待確認';
-  return d.slice(0, 60);
-}
 
 function subText(c) {
   switch (c.status) {
@@ -562,66 +542,15 @@ function setFilter(f) {
   paintAll();
 }
 
-// ---- inbox ----------------------------------------------------------------------------------------------------
+// ---- inbox (web/inbox.js, shared with the chat's right panel) -------------------------------------------------
 function paintInbox() {
-  const box = $('inbox');
-  const items = [];
   const B = Board();
-  const focusBtn = (c) => h('a', { href: '#', onclick: (e) => { e.preventDefault(); setView('canvas'); requestAnimationFrame(() => canvas.focus(c.id)); } }, '在畫布上看');
-  for (const c of snap.cards) {
-    if (c.status === 'attention') {
-      items.push({ order: 0, el: h('article.need', { onclick: () => B.openDetail(c.id) }, h('div.kind', null, icon('bang', { sw: 2.4 }), '需要處理'), h('div.ttl', null, nodeTitle(c)), h('div.why', null, why(c) || '執行出了問題，worktree 還在，等你決定'), h('div.acts', null, h('button.btn.primary.sm', { type: 'button', onclick: (e) => { e.stopPropagation(); B.act(`/api/tasks/${c.id}/resume`); } }, '續跑'), h('button.btn.sm', { type: 'button', onclick: (e) => { e.stopPropagation(); B.openDetail(c.id); } }, '看原因'), focusBtn(c))) });
-    } else if (c.status === 'review' && c.merge_status === 'conflict') {
-      items.push({ order: 1, el: h('article.need.bad', { onclick: () => B.openDetail(c.id) }, h('div.kind', null, icon('merge'), '合併衝突'), h('div.ttl', null, nodeTitle(c)), h('div.why', null, '已建一張解衝突任務；它結案後再合併'), h('div.acts', null, h('a.btn.primary.sm', { href: `/task.html?id=${encodeURIComponent(c.id)}`, onclick: (e) => e.stopPropagation() }, '去驗收'), focusBtn(c))) });
-    } else if (c.status === 'draft' && c.gate && !c.gate.ok) {
-      items.push({ order: 3, el: h('article.need', { onclick: () => B.openDetail(c.id) }, h('div.kind', null, icon('doc'), '草稿缺資料'), h('div.ttl', null, nodeTitle(c)), h('div.why', null, `缺：${(c.gate.missing || []).map((m) => String(m).split(/[ (]/)[0]).join('、')}`), h('div.acts', null, h('a.btn.primary.sm', { href: `/flow.html#new?title=${encodeURIComponent(c.title || '')}&expected=${encodeURIComponent(c.goal || '')}`, onclick: (e) => e.stopPropagation() }, '用工作流程補齊'), focusBtn(c))) });
-    } else if (awaiting(c)) {
-      const merged = c.merge_status === 'merged';
-      const manual = c.merge_status === 'pending' && manualMode(c);
-      items.push({
-        order: 2,
-        el: h(
-          'article',
-          { onclick: () => (location.href = `/task.html?id=${encodeURIComponent(c.id)}`) },
-          h('div.kind', null, icon(merged ? 'check' : 'eye'), merged ? '已合併，待結案' : manual ? '待人工核可' : '待核可'),
-          h('div.ttl', null, nodeTitle(c)),
-          h('div.why', null, merged ? '結案後會釋放依賴它的下一步，並整理知識' : manual ? '驗證過了，照清單看過一遍再核可（核可就會合併）' : '驗證過了，看一眼結果再合併'),
-          h('div.acts', null, merged ? h('button.btn.primary.sm', { type: 'button', onclick: (e) => { e.stopPropagation(); B.act(`/api/tasks/${c.id}/close`); } }, '結案') : h('a.btn.primary.sm', { href: `/task.html?id=${encodeURIComponent(c.id)}`, onclick: (e) => e.stopPropagation() }, '去驗收'), focusBtn(c)),
-        ),
-      });
-    }
-  }
-  items.sort((a, b) => a.order - b.order);
-  const next = h('div.next', null, h('b', null, '接下來'));
-  const nextLine = (st, text) => next.appendChild(h('div', null, h('span.dot', { dataset: { st } }), h('span', null, text)));
-  if (snap.paused) nextLine('blocked', '排程已暫停：不會開始新的任務');
-  else if (snap.reason) nextLine('queued', schedWhy(snap.reason));
-  for (const c of snap.cards.filter((x) => x.status === 'blocked').slice(0, 3)) nextLine('blocked', `${nodeTitle(c)}：${why(c) || '等續跑'}`);
-  const q = snap.cards.filter((x) => x.status === 'queued');
-  if (q.length) nextLine('queued', `排隊中 ${q.length} 個：${q.slice(0, 2).map(nodeTitle).join('、')}${q.length > 2 ? '…' : ''}`);
-  if (snap.local && (snap.local.enabled || snap.local.inflight)) nextLine(snap.local.status === 'error' ? 'failed' : 'running', `本地模型：${snap.local.loaded ? modelName(snap.local.loaded) : '未載入'}${snap.local.inflight ? ` · 執行中 ${snap.local.inflight}` : ''}`);
-  if (snap.benchmark && snap.benchmark.mode === 'screen') nextLine('running', `模型快篩「${String(snap.benchmark.title).replace(/^快篩：/, '')}」進行中：一題一題跑，不評分`);
-  else if (snap.benchmark) nextLine('running', `評比「${snap.benchmark.title}」：${snap.benchmark.arms_done}/${snap.benchmark.arm_count} 組完成，全部完成後一組一組量測再評分`);
-  if (next.children.length === 1) next.appendChild(h('div', null, h('span.sub', null, '沒有排隊或等續跑的任務。')));
-  fill(box,
-    h('h2', null, '需要你處理', h('span.count', null, String(items.length))),
-    ...(items.length ? items.map((i) => i.el) : [h('p.empty-s', null, '目前沒有要你處理的事。')]),
-    next,
-  );
-}
-
-/** the scheduler's last reason ("session 82% >= 65%", …) in words */
-function schedWhy(r) {
-  let m = /session (\d+)% >= (\d+)%/.exec(r);
-  if (m) return `5 小時用量 ${m[1]}% 已到門檻 ${m[2]}%，等額度回補再派工`;
-  m = /weekly (\d+)% >= (\d+)%/.exec(r);
-  if (m) return `本週用量 ${m[1]}% 已到門檻 ${m[2]}%，等額度回補再派工`;
-  if (/idle|no queued|nothing/i.test(r)) return '沒有排隊的任務';
-  if (/no fitting candidate/i.test(r)) {
-    return snap && snap.cards.some((c) => c.status === 'queued') ? '排隊的任務目前放不進額度或時段，等回補' : '沒有排隊的任務';
-  }
-  if (/concurrency|max_concurrency/i.test(r)) return '同時執行數已滿，等手上的做完';
-  return `排程：${r}`;
+  paintInboxInto($('inbox'), snap, {
+    title: nodeTitle,
+    open: (c) => B.openDetail(c.id),
+    act: (path) => B.act(path),
+    focus: (c) => h('a', { href: '#', onclick: (e) => { e.preventDefault(); setView('canvas'); requestAnimationFrame(() => canvas.focus(c.id)); } }, '在畫布上看'),
+  });
 }
 
 // ---- list view ------------------------------------------------------------------------------------------------

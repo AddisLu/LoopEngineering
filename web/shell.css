@@ -51,13 +51,11 @@
 main.shell {
   --rail-w: 262px;
   --dock-w: 380px;
-  /* the icon bar is its own track and is NEVER zeroed: whatever happens to the panel, the way
-     back to it stays on screen */
-  --act-w: 44px;
+  /* collapsing either side never hides the way back: both toggles live in the top bar */
   flex: 1 1 auto; min-height: 0; width: 100%;
   padding: 12px 14px;
   display: grid;
-  grid-template-columns: var(--rail-w) minmax(0, 1fr) var(--dock-w) var(--act-w);
+  grid-template-columns: var(--rail-w) minmax(0, 1fr) var(--dock-w);
   gap: 12px; align-items: stretch;
   transition: grid-template-columns .26s cubic-bezier(.2, .7, .2, 1);
 }
@@ -301,31 +299,14 @@ dialog.save-dialog .dialog-foot { display: flex; justify-content: flex-end; }
 .chip.toggle[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 600; }
 .chip.toggle:disabled { opacity: .5; cursor: not-allowed; }
 
-/* ---- activity bar: one icon per panel, always on screen ------------------- */
-.activity {
-  display: flex; flex-direction: column; align-items: center; gap: 3px;
-  min-width: 44px; padding: 6px 0;
-  background: var(--surface); border: 1px solid var(--border); border-radius: var(--r);
-}
-.act {
-  position: relative; width: 38px; height: 46px; flex: 0 0 auto;
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
-  border: 0; background: none; color: var(--text-3);
-  border-radius: var(--r-sm); cursor: pointer;
-}
-.act svg { width: 20px; height: 20px; }
-.act .lbl { font-size: 10px; line-height: 1; }
-.act:hover { color: var(--text); background: var(--surface-sunk); }
-.act[aria-selected="true"] { color: var(--accent); background: var(--accent-soft); }
-/* panel collapsed: keep a marker on the active icon so it is obvious what will reopen */
-.activity[data-open="false"] .act[aria-selected="true"] { background: none; box-shadow: inset 3px 0 0 var(--accent); }
-.act .badge {
-  position: absolute; top: 3px; right: 3px;
+/* ---- the dock's tabs (frame.css .seg), badge on 需要你處理 --------------------- */
+.dock-tabs { display: flex; margin: 12px 12px 0; flex: 0 0 auto; }
+.dock-tabs button { flex: 1 1 0; display: inline-flex; align-items: center; justify-content: center; gap: 5px; }
+.dock-tabs .badge {
   min-width: 16px; height: 16px; padding: 0 4px; box-sizing: border-box;
-  font-size: 10px; line-height: 16px; font-variant-numeric: tabular-nums;
+  font-size: 10px; line-height: 16px; font-variant-numeric: tabular-nums; font-weight: 700;
   border-radius: 999px; background: var(--st-attention); color: var(--on-accent);
 }
-.activity .sep { width: 24px; height: 1px; background: var(--border); margin: 4px 0; flex: 0 0 auto; }
 
 /* ---- right dock ---------------------------------------------------------- */
 .dock-inner {
@@ -403,9 +384,6 @@ main.shell.dock-wide .dock-inner { min-width: 460px; }
   .conv-title { max-width: 46vw; }
   main.shell { display: flex; flex-direction: column; padding: 8px; gap: 8px; }
   aside.rail, aside.dock { display: none; }
-  .activity { flex: 0 0 auto; order: -1; flex-direction: row; justify-content: space-around; padding: 2px 4px; min-width: 0; }
-  .act { width: auto; flex: 1 1 auto; height: 42px; }
-  .activity .sep { display: none; }
   .convo { height: auto; flex: 1 1 auto; min-height: 0; padding: 10px; }
   .rail-inner, .dock-inner { min-width: 0; border: 0; padding: 0; }
   .msg.user { max-width: 92%; }
@@ -421,53 +399,7 @@ main.shell.dock-wide .dock-inner { min-width: 460px; }
   .toast { animation: none; }
 }
 
-/* ---- dock: 任務 ----------------------------------------------------------- */
-.counts { display: flex; flex-wrap: wrap; gap: 6px; }
-.counts .count {
-  display: inline-flex; align-items: baseline; gap: 5px;
-  font-size: 12px; color: var(--text-2);
-  background: var(--surface-sunk); border: 1px solid var(--border);
-  border-radius: 999px; padding: 4px 10px;
-}
-.counts .count b { font-size: 14px; font-family: var(--mono); color: var(--text); }
-.counts .count.s-attention b { color: var(--st-attention); }
-.counts .count.s-review    b { color: var(--st-review); }
-.counts .count.s-running   b { color: var(--st-running); }
-.counts .count.s-blocked   b { color: var(--st-blocked); }
-
-.task-list { display: flex; flex-direction: column; gap: 6px; }
-.task-list h3 { font-size: 12px; margin: 10px 0 2px; color: var(--text-3); font-weight: 600; }
-.task-list h3:first-child { margin-top: 0; }
-.mini-card {
-  display: flex; flex-direction: column; gap: 6px;
-  padding: 9px 11px; text-decoration: none; color: inherit;
-  background: var(--surface-2); border: 1px solid var(--border);
-  border-left: 3px solid var(--rail, var(--border-2)); border-radius: var(--r-sm);
-}
-.mini-card:hover { background: var(--surface-sunk); border-left-color: var(--accent); }
-.mini-card .t { font-size: 13px; font-weight: 500; line-height: 1.4; }
-.mini-card .m { display: flex; flex-wrap: wrap; gap: 4px; }
-.mini-card .m .chip { font-size: 11px; padding: 3px 7px; }
-.mini-card.s-draft     { --rail: var(--st-draft); }
-.mini-card.s-ready     { --rail: var(--st-ready); }
-.mini-card.s-queued    { --rail: var(--st-queued); }
-.mini-card.s-blocked   { --rail: var(--st-blocked); }
-.mini-card.s-running   { --rail: var(--st-running); }
-.mini-card.s-verifying { --rail: var(--st-verifying); }
-.mini-card.s-review    { --rail: var(--st-review); }
-.mini-card.s-attention { --rail: var(--st-attention); }
-
-/* a row that carries a card plus one small side action (PRD drafts) */
-.mini-row { display: flex; align-items: stretch; gap: 6px; }
-.mini-row .mini-card { flex: 1 1 auto; min-width: 0; }
-.mini-row .mini-del {
-  flex: 0 0 auto; width: 30px; font: inherit; font-size: 13px; line-height: 1; cursor: pointer;
-  color: var(--text-3); background: transparent; border: 1px solid var(--border); border-radius: var(--r-sm);
-}
-.mini-row .mini-del:hover { color: var(--danger, #c33); border-color: var(--danger, #c33); }
-.mini-row .mini-del:disabled { opacity: .5; cursor: default; }
-
-/* ---- dock: 知識庫 / PRD / Benchmark --------------------------------------- */
+/* ---- dock: forms, 知識庫 hits, the 模型 tab's 機台 part ------------------------ */
 .dock-pane form { display: flex; flex-direction: column; gap: 7px; }
 .dock-pane input[type="text"], .dock-pane input:not([type]), .dock-pane input[type="search"], .dock-pane textarea {
   width: 100%; box-sizing: border-box; font: inherit; font-size: 13px;
@@ -475,39 +407,14 @@ main.shell.dock-wide .dock-inner { min-width: 460px; }
   border: 1px solid var(--border); background: var(--bg); color: var(--text);
 }
 .dock-pane textarea { resize: vertical; line-height: 1.5; }
-#prd-md { font-family: var(--mono); font-size: 12px; }
-.prd-actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 9px; }
-.prd-queue { display: flex; align-items: center; gap: 6px; font-size: 12.5px; margin-top: 7px; }
-#prd-result { margin-top: 10px; font-size: 13px; }
-#prd-result .ok { color: var(--ok); font-weight: 600; }
-#prd-result ul { margin: 4px 0 0; padding-left: 20px; }
-#prd-result li { margin: 3px 0; line-height: 1.5; }
+.card-actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 9px; }
+.dock-pane h3.pane-sub { margin: 6px 2px -4px; font-size: 12px; color: var(--text-3); }
 .rag-hit { margin-top: 7px; font-size: 12.5px; }
 .rag-hit summary { cursor: pointer; font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; }
 .rag-hit pre {
   white-space: pre-wrap; font-size: 12px; margin: 5px 0 0; max-height: 220px; overflow: auto;
   background: var(--surface-sunk); border-radius: var(--r-sm); padding: 8px 10px;
 }
-.bench-row {
-  display: flex; flex-direction: column; gap: 5px; margin-top: 7px;
-  padding: 8px 10px; text-decoration: none; color: inherit;
-  background: var(--surface-sunk); border-radius: var(--r-sm);
-}
-.bench-row:hover { background: var(--bg-2); }
-.bench-row .t { font-size: 13px; font-weight: 500; }
-.bench-row .m { display: flex; flex-wrap: wrap; gap: 4px; }
-.bench-row .chip.ok { color: var(--ok); background: var(--ok-soft); }
-.bench-row .chip.bad { color: var(--danger); }
-.score-row {
-  display: grid; grid-template-columns: 1fr 52px 44px 44px; gap: 6px; align-items: baseline;
-  padding: 5px 8px; border-radius: var(--r-sm); font-size: 12.5px;
-}
-.score-row:nth-child(odd) { background: var(--surface-sunk); }
-.score-row.head { font-weight: 600; color: var(--text-3); font-size: 11.5px; background: none; }
-.score-row .n { overflow-wrap: anywhere; }
-.score-row .s { text-align: right; font-variant-numeric: tabular-nums; }
-#bench-running .bar .fill.job { background: var(--accent); }
-#bench-new { float: right; font-weight: 400; text-decoration: none; }
 
 /* ---- per-message action bar ------------------------------------------------ */
 /* Hidden until the message is hovered or focused: a wall of buttons under every turn makes the

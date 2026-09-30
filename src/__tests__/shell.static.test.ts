@@ -42,15 +42,12 @@ describe('chat-first shell', () => {
       'send-btn',
       'dock',
       'dock-toggle',
-      'activity-bar',
       'act-tasks',
       'act-tune',
       'act-kb',
-      'act-prd',
       'act-model',
-      'act-status',
-      'act-bench',
       'pane-tasks',
+      'dock-inbox',
       'pane-tune',
       'tune-form',
       'tune-symptom',
@@ -58,12 +55,10 @@ describe('chat-first shell', () => {
       'tune-submit',
       'tune-status',
       'tune-latest',
-      'tune-to-task',
       'tune-show',
       'tune-history',
       'tune-refresh',
       'pane-kb',
-      'pane-prd',
       'pane-model',
       'model-switch',
       'switch-state',
@@ -75,8 +70,6 @@ describe('chat-first shell', () => {
       'model-reco-list',
       'model-all',
       'model-list',
-      'pane-status',
-      'pane-bench',
       'svc-state',
       'help-menu',
       'term-toggle',
@@ -103,7 +96,7 @@ describe('chat-first shell', () => {
 
   it('hands the width back to the answer: collapsible grid tracks and no capped reading column', () => {
     const css = read('shell.css');
-    expect(css).toContain('grid-template-columns: var(--rail-w) minmax(0, 1fr) var(--dock-w) var(--act-w)');
+    expect(css).toContain('grid-template-columns: var(--rail-w) minmax(0, 1fr) var(--dock-w);');
     expect(css).toContain('main.shell.rail-collapsed');
     expect(css).toContain('main.shell.dock-collapsed');
     // the old chat page squeezed the conversation between a fixed cap and two永久欄
@@ -184,20 +177,27 @@ describe('chat-first shell', () => {
     }
   });
 
-  it('keeps the way back to every panel on screen, whatever the panel is doing', () => {
+  it('four dock tabs, and the way back to the dock stays on screen whatever it is doing', () => {
     const page = read('index.html');
-    // outside aside#dock on purpose: neither collapsing the panel (--dock-w: 0) nor lending
-    // .dock-inner to the phone drawer can take the icons away
-    const dockEnd = page.indexOf('</aside>', page.indexOf('id="dock"'));
-    expect(page.indexOf('id="activity-bar"')).toBeGreaterThan(dockEnd);
-    for (const tab of ['tasks', 'tune', 'kb', 'prd', 'model', 'bench']) {
-      expect(page).toMatch(new RegExp(`id="act-${tab}"[^>]*role="tab"`));
+    const dockStart = page.indexOf('id="dock"');
+    const dockEnd = page.indexOf('</aside>', dockStart);
+    for (const tab of ['tasks', 'tune', 'kb', 'model']) {
       expect(page).toMatch(new RegExp(`id="act-${tab}"[^>]*aria-controls="pane-${tab}"`));
+      expect(page.indexOf(`id="act-${tab}"`)).toBeGreaterThan(dockStart);
+      expect(page.indexOf(`id="act-${tab}"`)).toBeLessThan(dockEnd);
     }
-    expect(page).toContain('aria-orientation="vertical"');
-    const css = read('shell.css');
-    expect(css).toContain('--act-w: 44px');
-    expect(css).not.toContain('.dock-tab'); // the text tab strip is gone
+    expect(page).not.toContain('activity-bar'); // the icon column is gone
+    for (const gone of ['pane-prd', 'pane-bench', 'pane-status', 'capture-form', 'tune-to-task']) expect(page, gone).not.toContain(gone);
+    // collapsing the dock (--dock-w: 0) or lending .dock-inner to the phone drawer cannot take
+    // the toggle away: it is in the frame's top bar, outside the dock
+    expect(page.indexOf('id="dock-toggle"')).toBeLessThan(dockStart);
+    expect(page.slice(0, page.indexOf('</header>'))).toContain('id="dock-toggle"');
+    // 需要你處理 is 總覽's inbox (one module), with 開啟總覽 and ＋ 新工作流程 on top
+    const tasks = page.slice(page.indexOf('id="pane-tasks"'), page.indexOf('id="pane-tune"'));
+    expect(tasks).toContain('href="/board.html"');
+    expect(tasks).toContain('href="/flow.html#new"');
+    expect(read('dock.js')).toContain("from './inbox.js'");
+    expect(read('board-flow.js')).toContain("from './inbox.js'");
   });
 
   it('keeps the dock collapsible on every tab, and initialises the dock after its state exists', () => {
@@ -209,12 +209,14 @@ describe('chat-first shell', () => {
     const js = read('dock.js');
     // the first paint reads `let` state declared throughout the module; calling it any earlier is a
     // temporal-dead-zone crash that silently disables every handler after it
-    for (const decl of ['let benchTimer', 'let switching', 'let jobTimer', 'let catalogData', 'let benchBusy', 'let tuneLatest', 'let tuneBusy', 'let dockRail']) {
+    for (const decl of ['let switching', 'let jobTimer', 'let catalogData', 'let benchBusy', 'let tuneLatest', 'let tuneBusy', 'let dockRail']) {
       expect(js.lastIndexOf('paintTabs();'), decl).toBeGreaterThan(js.indexOf(decl));
     }
     // Alt+digit types a symbol on macOS — the shortcut must read e.code
     expect(js).toContain('e.code');
-    expect(js).toContain('Digit([1-7])'); // seven panels since 模型／機台 split
+    expect(js).toContain('Digit([1-4])'); // four tabs
+    // a tab remembered from before (機台 / PRD / 評比) opens its new home instead of nothing
+    expect(js).toContain("const MOVED = { status: 'model', prd: 'tasks', bench: 'tasks' }");
     // one owner for the panel: selection and open/closed both live here now
     expect(js).toContain('loop_shell_dock');
     // one drawer owner: both rails borrow shell.js's drawer, nobody moves nodes by hand
@@ -223,25 +225,25 @@ describe('chat-first shell', () => {
     expect(read('chat.js')).not.toContain("$('drawer-body')");
   });
 
-  it('keeps model switching and machine status on separate icons', () => {
+  it('the 模型 tab switches the model and shows the machine (speed, memory, GPU) below it', () => {
     const page = read('index.html');
     const slice = (id: string) => {
       const start = page.indexOf(`id="${id}"`);
       const end = page.indexOf('<div class="dock-pane"', start + 1);
       return page.slice(start, end === -1 ? undefined : end);
     };
-    // the response/memory/GPU tiles live under 機台 now, not under the switcher
-    expect(slice('pane-status')).toContain('id="r-ttft"');
-    expect(slice('pane-status')).toContain('id="mem-bar"');
-    expect(slice('pane-model')).not.toContain('id="r-ttft"');
-    expect(page).toContain('title="機台狀況（Alt+6）"');
-    expect(page).toContain('title="Benchmark（Alt+7）"');
-    // chat.js polls /api/chat/stats only while a panel that shows it is open — 機台 (tiles) or
+    const model = slice('pane-model');
+    expect(model.indexOf('id="model-list"')).toBeLessThan(model.indexOf('機台狀況'));
+    expect(model.indexOf('機台狀況')).toBeLessThan(model.indexOf('id="r-ttft"'));
+    expect(model).toContain('id="mem-bar"');
+    expect(model).toContain('id="gpu-util"');
+    expect(page).toContain('title="模型與機台（Alt+4）"');
+    // chat.js polls /api/chat/stats only while a panel that shows it is open — 模型 (tiles) or
     // 知識庫 (documents/chunks/sources); leaving 知識庫 out stuck its counters on “–”
     const chat = read('chat.js');
-    expect(chat).toContain("paneOpen('pane-status')");
+    expect(chat).toContain("paneOpen('pane-model')");
     expect(chat).toContain("paneOpen('pane-kb')");
-    expect(chat).not.toContain("'pane-model'");
+    expect(chat).not.toContain("'pane-status'");
     // the switcher is built on the catalog (every recipe on disk), with background jobs
     const dock = read('dock.js');
     expect(dock).toContain('/api/local/catalog');
