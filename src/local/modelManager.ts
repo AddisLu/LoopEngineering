@@ -209,7 +209,10 @@ export class ModelManager {
     this.lastRefresh = this.d.now();
     const served = await this.servedModelId();
     if (this.switching) return; // a switch started while we were probing — it owns state now
-    const match = served ? listLocalModels(this.db).find((m) => m.served_model_id === served) : undefined;
+    // one model can have two recipes (one Spark, two Sparks) serving the same id: the one known to be
+    // loaded stays loaded — picking the first match flipped the record to the other recipe
+    const candidates = served ? listLocalModels(this.db).filter((m) => m.served_model_id === served) : [];
+    const match = candidates.find((m) => m.id === this.st.loaded) ?? candidates[0];
     if (match) {
       if (!(this.st.status === 'ready' && this.st.loaded === match.id)) {
         this.set({ loaded: match.id, wanted: match.id, status: 'ready', error: null });
@@ -252,14 +255,20 @@ export class ModelManager {
 
   private async switchTo(id: string): Promise<void> {
     const model = getLocalModel(this.db, id);
+    // what serves now, as far as we know — read before the state says 'starting'
+    const prev = this.st.status === 'ready' ? this.st.loaded : null;
     // synchronous up to the first await: the very next tick already sees 'starting'
     this.set({ wanted: id, loaded: null, status: 'starting', error: null });
     if (!model || !model.enabled) return this.fail(id, `unknown or disabled local model '${id}'`);
     const started = this.d.now();
     logEvent(this.db, { kind: 'note', detail: `local model: switching to ${id} (${model.recipe})` });
 
-    // Already serving it (started by hand, or engine restarted)? Adopt without a 6-minute restart.
-    if ((await this.servedModelId()) === model.served_model_id) return this.ready(id, started);
+    // Already serving it (started by hand, or engine restarted)? Adopt without a 6-minute restart —
+    // unless it runs under another recipe of the same model: one Spark and two Sparks serve the same
+    // id, and adopting there left the one-Spark container claiming to be the two-Spark model.
+    const prevModel = prev && prev !== id ? getLocalModel(this.db, prev) : undefined;
+    const otherRecipe = !!prevModel && prevModel.recipe !== model.recipe;
+    if (!otherRecipe && (await this.servedModelId()) === model.served_model_id) return this.ready(id, started);
     if (!this.d.isCached(model.served_model_id)) {
       return this.fail(id, `weights not downloaded: ${model.served_model_id} (run hf-download.sh first)`);
     }

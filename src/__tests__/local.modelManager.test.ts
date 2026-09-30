@@ -128,6 +128,28 @@ describe('two Sparks', () => {
     fs.rmSync(repo, { recursive: true, force: true });
   });
 
+  it('the same model on one Spark and on two: switching between them relaunches, and a check keeps the one loaded', async () => {
+    clearRecipeCache();
+    const repo = clusterSetup(2);
+    fs.writeFileSync(path.join(repo, 'recipes', 'qwen-cluster.yaml'), `model: ${QWEN}\ncluster_only: true\ncommand: vllm serve x\n`);
+    db.prepare("INSERT INTO local_models (id, display_name, recipe, served_model_id, enabled) VALUES ('qwen-cluster', 'Qwen ×2', 'qwen-cluster', ?, 1)").run(QWEN);
+    // the one-Spark qwen38-flash is serving
+    setSetting(db, 'local_model_status', 'ready');
+    setSetting(db, 'local_model_loaded', 'qwen38-flash');
+    const h = harness({ served: [QWEN] });
+    const launched: Array<{ recipe: string; cluster: boolean }> = [];
+    const mm = new ModelManager(db, { ...h.deps, launch: (_r, recipe, _l, o) => (launched.push({ recipe, cluster: o?.cluster ?? false }), { pid: 1, onExit: () => {} }) });
+    mm.ensureLoaded('qwen-cluster');
+    await mm.waitForSwitch();
+    // the same served id, another recipe: it really relaunched, across the cluster
+    expect(launched).toEqual([{ recipe: 'qwen-cluster', cluster: true }]);
+    expect(mm.state()).toMatchObject({ status: 'ready', loaded: 'qwen-cluster' });
+    // a background check sees the same served id and keeps the recipe it knows is loaded
+    await mm.reconcile();
+    expect(mm.state().loaded).toBe('qwen-cluster');
+    fs.rmSync(repo, { recursive: true, force: true });
+  });
+
   it('one Spark: exactly as before — no cluster launch, no remote stop', async () => {
     clearRecipeCache();
     const repo = clusterSetup(1);
