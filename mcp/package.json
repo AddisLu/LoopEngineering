@@ -3,13 +3,14 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "MCP servers for Loop Engineering: task creation/management (stdio), read-only SSoT search (HTTP), read-only filesystem, GitHub via gh.",
+  "description": "MCP servers for Loop Engineering: task creation/management (stdio), read-only SSoT search (HTTP), read-only filesystem, GitHub via gh; 對話操作 forwarder (loop-ops).",
   "bin": {
     "loop-mcp": "./loop-mcp.mjs",
     "loop-ssot-mcp": "./loop-ssot-mcp.mjs",
     "loop-fs-mcp": "./loop-fs-mcp.mjs",
     "loop-gh-mcp": "./loop-gh-mcp.mjs",
-    "loop-exec-mcp": "./loop-exec-mcp.mjs"
+    "loop-exec-mcp": "./loop-exec-mcp.mjs",
+    "loop-ops-mcp": "./loop-ops-mcp.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0"

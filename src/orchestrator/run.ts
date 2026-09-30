@@ -54,7 +54,7 @@ import { evaluateAcceptance, extractMetrics, formatAcceptance, formatSpecs, pars
  * would inject — read-only fs roots, Loop's own API. A bad setting means no servers, not a
  * failed dispatch.
  */
-function mcpServersForTask(db: Database.Database, runId?: string): McpServerCfg[] {
+export function mcpServersForTask(db: Database.Database, runId?: string): McpServerCfg[] {
   let servers: McpServerCfg[];
   try {
     const apiUrl = `http://127.0.0.1:${process.env.LOOP_PORT || 4711}`;
@@ -65,8 +65,9 @@ function mcpServersForTask(db: Database.Database, runId?: string): McpServerCfg[
   } catch {
     servers = [];
   }
-  // GPU 執行沙盒: only the engine's own per-run server may carry this name
-  servers = servers.filter((s) => s.name !== EXEC_SERVER);
+  // GPU 執行沙盒: only the engine's own per-run server may carry this name. 對話操作 (loop-ops) is
+  // for people, never for a coding agent: an agent that can confirm actions would skip the person.
+  servers = servers.filter((s) => s.name !== EXEC_SERVER && s.name !== 'loop-ops' && !(s.command ?? []).some((c) => /loop-ops-mcp\.mjs$/.test(String(c))));
   const exec = runId ? execServerForTask(db, runId) : null;
   return exec ? [...servers, exec] : servers;
 }

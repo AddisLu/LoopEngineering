@@ -29,8 +29,14 @@ const OFF = { error: '對話操作沒有開（ops_chat_enabled=false）' };
 
 /** The forwarder's caller: `ext:<name>` — never the same key as a person on the chat page. */
 function externalUser(req: FastifyRequest): { key: string; label: string } {
-  const raw = req.headers[EXT_HEADER];
-  const name = String(Array.isArray(raw) ? raw[0] : raw ?? '')
+  const raw = String((Array.isArray(req.headers[EXT_HEADER]) ? req.headers[EXT_HEADER][0] : req.headers[EXT_HEADER]) ?? '');
+  let decoded = raw;
+  try {
+    decoded = decodeURIComponent(raw); // headers are latin1: the forwarder percent-encodes the name
+  } catch {
+    /* not encoded */
+  }
+  const name = decoded
     .replace(/[\u0000-\u001f\u007f]/g, '')
     .replace(/\s+/g, ' ')
     .trim()
