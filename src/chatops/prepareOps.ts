@@ -149,7 +149,9 @@ export async function prepareBenchmark(db: Database.Database, chat: ChatCtx, arg
     config.acceptance_metrics || steps != null
       ? `- 驗證：${steps != null ? `${steps} 步` : '沿用來源'}${config.acceptance_metrics ? `；門檻 ${String(config.acceptance_metrics)}` : ''}${config.protected_paths ? `；保護路徑 ${String(config.protected_paths).split(',').length} 條` : ''}`
       : '- 驗證：沿用來源的驗證',
-    `- 預估：本地模型一次只能跑一個（切換 ${Math.max(0, locals.length - 1)} 次，每次約 6 分）；每組每次最多 ${perArm} 分（本地加倍）`,
+    locals.length
+      ? `- 預估：本地模型一次只能跑一個（切換 ${Math.max(0, locals.length - 1)} 次，每次約 6 分）；每組每次最多 ${perArm} 分（本地加倍）`
+      : `- 預估：雲端各組同時跑，每組每次最多 ${perArm} 分`,
     `- 會花訂閱額度的雲端呼叫：參賽 ${clouds.length} 組＋評審 ${judgesFinal.length} 位`,
     '- 確認後所有組別立刻排入',
   ].join('\n');

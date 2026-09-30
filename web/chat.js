@@ -654,7 +654,8 @@ function actionCard(view, saved) {
     card.append(head, el('pre', 'sum', v.summary || ''));
     const res = v.status === 'pending' ? null : (v.result && v.result.detail) || v.error;
     if (res) card.append(el('div', 'res', res));
-    if (msg && msg !== res) card.append(el('div', 'msg-line', msg));
+    // the button's reply matters only when there is no result to show (refused, still running)
+    if (msg && !res) card.append(el('div', 'msg-line', msg));
     if (v.result && v.result.links && v.result.links.length) {
       const ul = el('ul');
       for (const l of v.result.links) {

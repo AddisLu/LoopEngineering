@@ -87,8 +87,20 @@ function actionLinks(a: OpsAction): ToolSource[] {
 
 const fromView = (v: View, summary: string): ToolResult => ({ ok: true, text: v.markdown, summary, ...(v.links.length ? { sources: v.links.slice(0, 6) } : {}) });
 
-/** A preparer's outcome as the model reads it: the questions to ask, or the summary to paste. */
+/** The action verbs as the person says them (the card's one-line summary). */
+const ACTION_WORD: Record<string, string> = {
+  queue: '排入', abort: '中止', resume: '續跑', restart: '重來', abandon: '放棄', hold: '轉待確認', approve: '核可', merge: '合併',
+  request_changes: '退回修改', close: '結案', delete: '刪除', cancel_benchmark: '取消評比', rejudge: '重新評分', baseline: '重量基準', switch_model: '切換模型',
+};
+/** Facts a preparer reports when the thing cannot be done now — a reason to tell, not a question to ask. */
+const REFUSALS = new Set(['state', 'busy']);
+
+/** A preparer's outcome as the model reads it: the questions to ask, the reason it cannot be done, or the summary to paste. */
 function prepared(p: PrepareOutcome, what: string, mode: 'chat' | 'external'): ToolResult {
+  if (!p.ok && p.missing.length && p.missing.every((m) => REFUSALS.has(m.fact))) {
+    const why = p.missing.map((m) => m.question).join('；');
+    return { ok: true, text: `沒有準備任何動作：${why}\n照實告訴使用者原因和可以怎麼做；不要改用別的動作繞過。`, summary: `不能${what.replace(/^準備/, '')}：${why.slice(0, 60)}` };
+  }
   if (!p.ok) {
     const qs = p.missing.map((m, i) => `${i + 1}. ${m.question}`);
     return {
@@ -350,7 +362,11 @@ export function opsTools(db: Database.Database, o: OpsToolsOptions): ToolDef[] {
       resultPrefix: OPS_RESULT_PREFIX,
       run: (args) =>
         guard('準備動作', async (chat) =>
-          prepared(await prepareAction(db, chat, args, { ...prepDeps, otherAnswersRunning: () => d.otherAnswers?.(chat.messageId) ?? 0 }), `準備 ${str(args.action, 20)}`, mode),
+          prepared(
+            await prepareAction(db, chat, args, { ...prepDeps, otherAnswersRunning: () => d.otherAnswers?.(chat.messageId) ?? 0 }),
+            `準備${ACTION_WORD[str(args.action, 20)] ?? str(args.action, 20)}`,
+            mode,
+          ),
         ),
     },
     {
@@ -368,7 +384,7 @@ export function opsTools(db: Database.Database, o: OpsToolsOptions): ToolDef[] {
         required: ['op'],
       },
       resultPrefix: OPS_RESULT_PREFIX,
-      run: (args) => guard('準備 git', async (chat) => prepared(await prepareGit(db, chat, args, gitDeps), `準備 git ${str(args.op, 10)}`, mode)),
+      run: (args) => guard('準備 git', async (chat) => prepared(await prepareGit(db, chat, args, gitDeps), `準備 git ${str(args.op, 10)}`.trim(), mode)),
     },
     {
       name: 'ops_confirm',
