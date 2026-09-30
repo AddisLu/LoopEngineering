@@ -18,6 +18,8 @@
       #sched-state .s-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--st-running); display: inline-block; }
       #sched-state.paused .s-dot { background: var(--st-blocked); }
       #sched-state { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+      /* narrow laptops: the pause button says the state (暫停排程 / 恢復排程) */
+      @media (max-width: 1100px) { #sched-state { display: none; } }
       #local-chip[data-state="warn"] { color: var(--warn); }
       #local-chip[data-state="danger"] { color: var(--danger); }
       .canvas-wrap { position: relative; flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; }
@@ -44,7 +46,7 @@
         </div>
         <span class="grow"></span>
         <label class="top-search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M11 4.5a6.5 6.5 0 1 0 0 13a6.5 6.5 0 1 0 0-13" /><path d="M16 16l4.5 4.5" /></svg><input type="search" id="search" aria-label="搜尋任務" placeholder="搜尋任務、模型、repo" /></label>
-        <span class="chip-s hide-sm" id="local-chip" data-state="ok" hidden title="本地模型（vLLM）狀態">–</span>
+        <span class="chip-s hide-md" id="local-chip" data-state="ok" hidden title="本地模型（vLLM）狀態">–</span>
         <span id="self-update-badge" class="chip-s info" hidden>引擎更新排隊中</span>
         <span class="sched hide-sm">
           <span id="sched-state" class="state"><span class="s-dot"></span><span class="s-text">–</span></span>

@@ -913,6 +913,14 @@ async function loadTasks() {
   };
 }
 
+// drafts are kept per person: a new 你是 means another list
+document.addEventListener('ops:who', () => {
+  if (!$('view-new').hidden) {
+    draftState.ref = draftState.source === 'draft' ? null : draftState.ref;
+    loadDrafts().then(paintEstimate);
+  }
+});
+
 async function loadDrafts() {
   const sel = $('draft-select');
   fill(sel, h('option', null, '（選一份草稿）'));

@@ -151,7 +151,13 @@ async function startView() {
   kindCards.push(h('button.tcard.dashed', { type: 'button', onclick: () => $('paste-dialog').showModal() }, h('b', null, '貼上 PRD'), h('span.d', null, 'Markdown 轉成流程')));
   fill($('kinds'), ...kindCards);
 
-  // recent drafts
+  await paintRecentDrafts();
+
+  $('create').onclick = createFromStart;
+}
+
+/** 最近的草稿 — kept per person (你是), so painted again when the name changes */
+async function paintRecentDrafts() {
   try {
     const { drafts } = await api('/api/prd/drafts?limit=8');
     const row = (d) => {
@@ -185,8 +191,6 @@ async function startView() {
     if (e.status === 404) notice('PRD 閘門沒有開（prd_gate_enabled=false）：工作流程要靠它檢查需求。可以用 loop config set prd_gate_enabled true 打開，或先用總覽的「新增單一任務（進階）」。');
     fill($('drafts'), h('p.empty-s', null, '讀不到草稿。'));
   }
-
-  $('create').onclick = createFromStart;
 }
 
 async function createFromStart() {
@@ -1415,6 +1419,32 @@ $('log-collapse').onclick = () => {
 document.addEventListener('pointerdown', (e) => {
   const pop = $('issues-pop');
   if (!pop.hidden && !pop.contains(e.target) && !e.target.closest('#top-actions')) pop.hidden = true;
+});
+
+// 你是 changed. Drafts are kept per person: the one open here becomes the new person's (a copy — the
+// old name keeps its own), or every autosave after this would 404; the start view lists theirs.
+document.addEventListener('ops:who', async () => {
+  if (!$('view-start').hidden) return paintRecentDrafts();
+  if ($('view-editor').hidden || !draft || !form) return;
+  clearTimeout(saveTimer);
+  const body = { title: form.change.title || '未命名工作流程', form, markdown: composePrd(form), step: 1 };
+  try {
+    draft = await api(`/api/prd/drafts/${encodeURIComponent(draft.id)}`, 'PUT', body); // already theirs
+  } catch (e) {
+    if (e.status !== 404) {
+      $('save-state').textContent = `儲存失敗：${e.message}`;
+      return;
+    }
+    try {
+      draft = await api('/api/prd/drafts', 'POST', body);
+      history.replaceState(null, '', `${location.pathname}?draft=${encodeURIComponent(draft.id)}${location.hash}`);
+      window.Ops.toast('這份草稿存到你的名下了（原本名字下的那份還在）');
+    } catch (e2) {
+      $('save-state').textContent = `儲存失敗：${e2.message}`;
+      return;
+    }
+  }
+  $('save-state').textContent = `草稿已自動儲存 · ${hhmm(new Date().toISOString())}`;
 });
 
 // =============================== route =======================================================

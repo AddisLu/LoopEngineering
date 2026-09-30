@@ -225,7 +225,7 @@ export function mountRail(active, o = {}) {
     btn.click();
   };
   nav.appendChild(settings);
-  const theme = h('button.ibtn', { type: 'button' });
+  const theme = h('button.ibtn.theme', { type: 'button' });
   const paintTheme = () => {
     const dark = document.documentElement.getAttribute('data-mode') === 'dark';
     theme.replaceChildren(icon(dark ? 'sun' : 'moon', { sw: 1.8 }));
@@ -263,9 +263,12 @@ export function mountWho(el = document.getElementById('ops-who')) {
 
 /** A small popup menu anchored under `anchor`; items: [label, onClick] | 'hr' | [label, href, 'link'] */
 export function popMenu(anchor, items) {
-  document.querySelectorAll('.menu-pop').forEach((m) => m.remove());
+  // only the menus this function made: a page's own (總覽's ⋯, #more-menu) is hidden, never removed —
+  // removing it left its button throwing on every click and settings out of reach until a reload
+  document.querySelectorAll('.menu-pop[data-pop]').forEach((m) => m.remove());
+  document.querySelectorAll('.menu-pop:not([data-pop])').forEach((m) => (m.hidden = true));
   const r = anchor.getBoundingClientRect();
-  const m = h('div.menu-pop', { role: 'menu' });
+  const m = h('div.menu-pop', { role: 'menu', 'data-pop': '' });
   for (const it of items) {
     if (it === 'hr') {
       m.appendChild(h('hr'));

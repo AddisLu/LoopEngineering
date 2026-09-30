@@ -335,4 +335,19 @@ describe('chat-first shell', () => {
       expect(exists(f), `${f} should have been removed`).toBe(false);
     }
   });
+
+  it('the 需要你處理 count stays on screen when the panel is closed, and the dock wires its snapshot last', () => {
+    const page = read('index.html');
+    const toggle = page.slice(page.indexOf('id="dock-toggle"'), page.indexOf('</button>', page.indexOf('id="dock-toggle"')));
+    expect(toggle).toContain('id="dock-badge"');
+    const js = read('dock.js');
+    expect(js).toContain("$('dock-badge').hidden = !needCount || isOpen();");
+    // onBoard delivers a snapshot already in hand at once: it must not run before the lets it reads
+    expect(js.indexOf('onBoard(onSnapshot);')).toBeGreaterThan(js.indexOf('let benchBusy'));
+    expect(js.indexOf('onBoard(onSnapshot);')).toBeGreaterThan(js.lastIndexOf('paintTabs();') - 1);
+    // 歷史建議 are per person too
+    expect(js).toContain("document.addEventListener('ops:who'");
+    // on a phone the chat's toasts clear the frame's bottom bar
+    expect(read('shell.css')).toContain('.toasts { left: 12px; right: 12px; bottom: 76px;');
+  });
 });

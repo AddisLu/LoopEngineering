@@ -302,7 +302,9 @@ dialog.save-dialog .dialog-foot { display: flex; justify-content: flex-end; }
 /* ---- the dock's tabs (frame.css .seg), badge on 需要你處理 --------------------- */
 .dock-tabs { display: flex; margin: 12px 12px 0; flex: 0 0 auto; }
 .dock-tabs button { flex: 1 1 0; display: inline-flex; align-items: center; justify-content: center; gap: 5px; }
-.dock-tabs .badge {
+#dock-toggle { position: relative; overflow: visible; } /* .btn clips; the badge sits on its corner */
+#dock-toggle .badge { position: absolute; top: -5px; right: -5px; }
+.dock-tabs .badge, #dock-toggle .badge {
   min-width: 16px; height: 16px; padding: 0 4px; box-sizing: border-box;
   font-size: 10px; line-height: 16px; font-variant-numeric: tabular-nums; font-weight: 700;
   border-radius: 999px; background: var(--st-attention); color: var(--on-accent);
@@ -389,7 +391,7 @@ main.shell.dock-wide .dock-inner { min-width: 460px; }
   .msg.user { max-width: 92%; }
   .msg .body { font-size: 15px; }
   iframe.artifact { height: 340px; }
-  .toasts { left: 12px; right: 12px; bottom: 12px; max-width: none; }
+  .toasts { left: 12px; right: 12px; bottom: 76px; max-width: none; } /* above the frame's 64px bottom bar */
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -55,6 +55,7 @@ function paintTabs() {
   }
   const open = isOpen();
   $('dock-toggle').setAttribute('aria-expanded', String(open));
+  paintNeedBadge();
   // the suggestion table wants more room than a column of cards does
   shellMain.classList.toggle('dock-wide', active === 'tune');
   if (open && active === 'tasks' && boardState()) paintTasks(boardState());
@@ -96,16 +97,28 @@ function paintTasks(s) {
   paintInbox($('dock-inbox'), s, { act: inboxAct });
 }
 
-onBoard((s) => {
+// How many things wait for you — what the list shows: needs you, or waits for your 核可 / 結案. On the
+// tab, and on the top bar's panel toggle while the panel is closed (below 1280px it starts closed,
+// and on a phone it is a drawer: the count must not live only inside it).
+let needCount = 0;
+function paintNeedBadge() {
+  const text = needCount ? String(needCount) : '';
+  setText('act-tasks-badge', text);
+  $('act-tasks-badge').hidden = !needCount;
+  setText('dock-badge', text);
+  $('dock-badge').hidden = !needCount || isOpen();
+  $('dock-toggle').title = needCount ? `顯示或收起右側面板（需要你處理 ${needCount}）` : '顯示或收起右側面板';
+}
+
+/** Registered in the init block, after every `let` it reads: a snapshot already in hand is delivered at once. */
+function onSnapshot(s) {
   const wasBench = benchBusy && benchBusy.id;
   benchBusy = s.benchmark || null;
   if ((benchBusy && benchBusy.id) !== wasBench && catalogData) paintCatalog(catalogData);
-  // the badge counts what the list shows: needs you, or waits for your 核可 / 結案
-  const need = (s.cards || []).filter((c) => needsYou(c) || awaiting(c)).length;
-  setText('act-tasks-badge', need ? String(need) : '');
-  $('act-tasks-badge').hidden = !need;
+  needCount = (s.cards || []).filter((c) => needsYou(c) || awaiting(c)).length;
+  paintNeedBadge();
   if (!$('pane-tasks').hidden) paintTasks(s);
-});
+}
 
 // ---- 模型切換 ---------------------------------------------------------------
 // One model fits the GPU at a time, and a switch restarts vLLM (minutes, chat unavailable), so
@@ -542,6 +555,12 @@ async function loadTuneHistory() {
 }
 
 $('tune-refresh').onclick = loadTuneHistory;
+// 歷史建議 are kept per person: a new 你是 means another list, and the latest one was the old person's
+document.addEventListener('ops:who', () => {
+  tuneLatest = null;
+  paintTuneLatest();
+  if (!$('pane-tune').hidden) loadTuneHistory();
+});
 
 // ---- init -------------------------------------------------------------------
 // Last on purpose. paintTabs() may call paintTasks()/loadTuneHistory(), and both read state
@@ -555,4 +574,5 @@ dockRail = rail({
   defaultOpen: window.innerWidth >= 1280,
 });
 paintTabs();
+onBoard(onSnapshot);
 loadModels();
