@@ -4,6 +4,7 @@ import { logEvent } from '../db/index.js';
 import { identityOf, IdentityError } from './identity.js';
 import { getRepo, listRepos, parseStack, RepoError, updateRepo, type Repo, type RepoPatch } from '../repo/store.js';
 import { getImportJob, importRepo, listImportJobs, redetectRepo, removeRepo, type ImportDeps } from '../repo/import.js';
+import { listFixes } from '../repo/ledger.js';
 
 /**
  * Repo registry + import (src/repo/*) for the Repo page (/repos.html, its own link):
@@ -14,6 +15,7 @@ import { getImportJob, importRepo, listImportJobs, redetectRepo, removeRepo, typ
  *   PATCH  /api/repos/:id             the editable columns (store.ts RepoPatch)
  *   DELETE /api/repos/:id             row + allowlist entry; the clone stays on disk
  *   POST   /api/repos/:id/redetect    re-run the branch / command / stack detection
+ *   GET    /api/repos/:id/fixes       過去修法 (src/repo/ledger.ts), newest first; ?limit= 1–200 (default 50)
  */
 export interface RepoRouteOptions {
   /** test injection: file:// origins, a temp clone root, a recorded ingest */
@@ -92,6 +94,15 @@ export function registerRepoRoutes(app: FastifyInstance, db: Database.Database, 
     if (!r) return reply.code(404).send({ error: '沒有這個 repo' });
     logEvent(db, { kind: 'note', detail: `repo 移除登錄：${r.name}（${id}）by ${who(req)}` });
     return { ok: true, local_path: r.local_path };
+  });
+
+  // the Repo page's 過去修法 tab: what was fixed in this repo, where, how it ended
+  app.get('/api/repos/:id/fixes', async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    if (!getRepo(db, id)) return reply.code(404).send({ error: '沒有這個 repo' });
+    const n = Number((req.query as { limit?: string }).limit);
+    const limit = Number.isInteger(n) && n > 0 ? Math.min(n, 200) : 50;
+    return { fixes: listFixes(db, id, limit) };
   });
 
   app.post('/api/repos/:id/redetect', async (req, reply) => {
