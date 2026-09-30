@@ -108,7 +108,7 @@
 </header>
 <main>
   <h1>一個對話框，整台 Spark 都在後面</h1>
-  <p class="lead">進站就是對話。查資料、看模型、開 shell、寫需求、下任務、比模型——都從這裡出發，右邊一排圖示切面板，鍵盤 <kbd>Alt</kbd>+數字直達。每張卡右下角有「完整說明」的對應章節。</p>
+  <p class="lead">進站就是對話。查資料、看模型、開 shell、寫需求、下任務、比模型——都從這裡出發。每一頁都是同一套版面：左邊一排圖示換頁，右欄四個分頁用 <kbd>Alt</kbd>+數字直達。每張卡右下角有「完整說明」的對應章節。</p>
 
   <div class="grid">
 
@@ -131,34 +131,40 @@
           <text x="30" y="146" class="muted">首字 0.3 s · 26 tok/s · 全程在本機，不花 token</text>
         </g>
       </svg></div>
-      <p>回答完全在這台 Spark 上產生。勾著「引用知識庫」時，先檢索 CF-AOI 程式碼與文件，句尾標 [n] 出處。答到一半切到看板再回來也不會斷——伺服器會繼續寫，回來自動接著播。</p>
+      <p>回答完全在這台 Spark 上產生。勾著「引用知識庫」時，先檢索 CF-AOI 程式碼與文件，句尾標 [n] 出處。答到一半切到總覽再回來也不會斷——伺服器會繼續寫，回來自動接著播。</p>
       <div class="how"><b>做法</b>：輸入問題 → <kbd>Shift</kbd>+<kbd>Enter</kbd>。可 <kbd>Ctrl</kbd>+<kbd>V</kbd> 貼截圖；答完可「重答」「存檔」「存進知識庫」「轉成任務」「請雲端複核」。<b>存檔</b>會列出這則回答做得出來的東西：Markdown、HTML、PDF、<b>簡報 .pptx</b>，還有它畫的每張 SVG 與每段程式碼。<b>→ 完整說明第 26 章</b></div>
     </section>
 
-    <!-- 2 icon bar -->
+    <!-- 2 frame -->
     <section class="step">
-      <h2><span class="n">2</span>右側圖示列：七個面板</h2>
+      <h2><span class="n">2</span>左邊換頁，右欄四個分頁</h2>
       <div class="fig" aria-hidden="true"><svg viewBox="0 0 400 175">
-        <rect x="14" y="10" width="300" height="155" rx="12" class="card"/>
-        <rect x="330" y="10" width="56" height="155" rx="12" class="card"/>
-        <rect x="336" y="14" width="44" height="22" rx="7" class="accs loop" style="animation: cycle 9s infinite"/>
+        <rect x="14" y="10" width="56" height="155" rx="12" class="card"/>
+        <rect x="20" y="14" width="44" height="22" rx="7" class="accs loop" style="animation: cycle 9s infinite"/>
         <g class="muted" font-size="10" text-anchor="middle">
-          <text x="358" y="29">任務</text><text x="358" y="53">調參</text><text x="358" y="77">知識庫</text><text x="358" y="101">PRD</text><text x="358" y="125">模型</text><text x="358" y="149">機台</text><text x="358" y="171">評比</text>
+          <text x="42" y="29">對話</text><text x="42" y="53">總覽</text><text x="42" y="77">工作流程</text><text x="42" y="101">評比</text><text x="42" y="125">方案</text><text x="42" y="149">星圖</text><text x="42" y="171">晨報</text>
         </g>
+        <rect x="80" y="10" width="306" height="155" rx="12" class="card"/>
+        <text x="92" y="30" font-weight="700">新對話</text><text x="310" y="30" class="muted" font-size="10">你是 小王</text>
+        <rect x="92" y="48" width="112" height="18" rx="9" class="blues"/><text x="100" y="61" font-size="10">RDMA 為什麼掉幀？</text>
+        <rect x="92" y="74" width="112" height="10" rx="4" class="accs"/><rect x="92" y="90" width="90" height="10" rx="4" class="accs"/>
+        <rect x="214" y="42" width="166" height="20" rx="7" fill="var(--sunk)"/>
+        <rect x="216" y="44" width="58" height="16" rx="5" class="accs"/>
+        <g font-size="10"><text x="221" y="56" class="acc" font-weight="700">需要你處理</text><text x="281" y="56" class="muted">調參</text><text x="309" y="56" class="muted">知識庫</text><text x="346" y="56" class="muted">模型</text></g>
         <g class="loop" style="animation: paneIn 9s infinite">
-          <rect x="30" y="26" width="104" height="20" rx="8" class="accs"/><text x="38" y="40" class="acc" font-weight="700">開啟完整看板 ↗</text>
-          <rect x="140" y="26" width="74" height="20" rx="8" class="card" stroke-width="1"/><text x="148" y="40">＋ 新增 task</text>
-          <rect x="30" y="56" width="180" height="26" rx="8" class="blues"/><text x="38" y="73">調參建議：ROI 邊緣誤判</text>
-          <rect x="30" y="90" width="140" height="26" rx="8" class="oks"/><text x="38" y="107">RDMA 收圖改 SEND/RECV</text>
+          <rect x="214" y="70" width="166" height="38" rx="8" class="card"/>
+          <text x="222" y="85" font-size="10" class="acc" font-weight="700">需要處理</text><text x="222" y="100" font-size="10">ROI 邊緣誤判 · 驗證沒過</text>
+          <rect x="214" y="114" width="166" height="38" rx="8" class="blues"/>
+          <text x="222" y="129" font-size="10" class="blue" font-weight="700">待核可</text><text x="222" y="144" font-size="10">RDMA 收圖改 SEND/RECV</text>
         </g>
       </svg></div>
-      <p>任務／調參／知識庫／PRD ─ 模型／機台／評比。每個面板<b>最上面一排就是按鈕</b>：開完整頁、新增一筆。點圖示切換，再點同一個收起。</p>
-      <div class="how"><b>快捷鍵</b>：<kbd>Alt</kbd>+<kbd>1</kbd>～<kbd>7</kbd>；<kbd>☰</kbd> 收左欄、<kbd>▤</kbd> 收右欄，兩邊都收起時對話幾乎全螢幕。<b>→ 完整說明第 26 章</b></div>
+      <p>每一頁都是同一套版面：左邊一排圖示換頁（對話・總覽・工作流程・評比・驗證方案・知識星圖・晨報），上方標題列有「你是 ○○」。對話頁的右欄只有四個分頁：<b>需要你處理</b>（和總覽同一套卡片）、調參、知識庫、模型（下半部是機台狀況）。點正在看的分頁會收起右欄。</p>
+      <div class="how"><b>快捷鍵</b>：<kbd>Alt</kbd>+<kbd>1</kbd>～<kbd>4</kbd> 切右欄分頁；<kbd>☰</kbd> 收對話紀錄、<kbd>▤</kbd> 收右欄，兩邊都收起時對話幾乎全螢幕。<b>→ 完整說明第 5 章</b></div>
     </section>
 
     <!-- 3 models -->
     <section class="step">
-      <h2><span class="n">3</span>模型面板：下載 → 建置 → 切換</h2>
+      <h2><span class="n">3</span>模型分頁：下載 → 建置 → 切換</h2>
       <div class="fig" aria-hidden="true"><svg viewBox="0 0 400 175">
         <rect x="14" y="14" width="372" height="147" rx="12" class="card"/>
         <rect x="28" y="28" width="60" height="18" rx="9" class="accs"/><text x="38" y="41" class="acc" font-weight="700">小而快</text>
@@ -175,7 +181,7 @@
         <text x="220" y="136" class="muted">不影響正在服務的模型。</text>
       </svg></div>
       <p>列出 spark-vllm-docker 裡每一個配方，每列只有一個下一步：下載、建置、或切換。跑不動的會寫原因（要兩台 Spark、權重沒下載完）。</p>
-      <div class="how"><b>做法</b>：<kbd>Alt</kbd>+<kbd>5</kbd> → 按卡片上的按鈕。切換會重啟 vLLM（幾分鐘），先跳確認；工作卡的「看 log」直接開終端機分頁。機台狀態在 <kbd>Alt</kbd>+<kbd>6</kbd>。<b>→ 完整說明第 26 章</b></div>
+      <div class="how"><b>做法</b>：<kbd>Alt</kbd>+<kbd>4</kbd> → 按卡片上的按鈕。切換會重啟 vLLM（幾分鐘），先跳確認；工作卡的「看 log」直接開終端機分頁。記憶體、GPU、速度在同一個分頁的下半部「機台狀況」。<b>→ 完整說明第 26 章</b></div>
     </section>
 
     <!-- 4 tools -->
@@ -231,7 +237,7 @@
           <rect x="30" y="30" width="38" height="24" rx="6" class="card" stroke-width="1.5"/><text x="39" y="46" font-size="10" font-weight="700">Ctrl</text>
           <rect x="74" y="30" width="24" height="24" rx="6" class="card" stroke-width="1.5"/><text x="83" y="46" font-size="12" font-weight="700">`</text>
         </g>
-        <text x="110" y="46" class="muted">或頂欄 ⌨（只有白名單看得到）</text>
+        <text x="110" y="46" class="muted">或標題列 ⌨（只有白名單看得到）</text>
         <clipPath id="tclip"><rect x="14" y="70" width="372" height="91" rx="0"/></clipPath>
         <g clip-path="url(#tclip)">
           <g class="loop" style="animation: rise 7s infinite">
@@ -248,28 +254,28 @@
       <div class="how"><b>做法</b>：<kbd>Ctrl</kbd>+<kbd>`</kbd> 開關；＋ 開分頁、雙擊改名、拖上緣改高度。改完就 push 自己的 <code>desk/…</code> 分支。<b>→ 完整說明第 26a 章</b></div>
     </section>
 
-    <!-- 7 PRD -->
+    <!-- 7 工作流程 -->
     <section class="step">
-      <h2><span class="n">7</span>PRD 精靈：五步變成任務</h2>
+      <h2><span class="n">7</span>工作流程：需求畫成一條流程</h2>
       <div class="fig" aria-hidden="true"><svg viewBox="0 0 400 175">
         <rect x="14" y="14" width="372" height="147" rx="12" class="card"/>
         <g font-size="10" text-anchor="middle">
-          <circle cx="50" cy="50" r="12" class="acc loop" style="animation: dots 1.2s infinite alternate; animation-delay: 0s"/><text x="50" y="54" fill="#fff" font-weight="700">1</text><text x="50" y="76" class="muted">改哪套</text>
-          <circle cx="110" cy="50" r="12" class="acc loop" style="animation: dots 1.2s infinite alternate; animation-delay: .3s"/><text x="110" y="54" fill="#fff" font-weight="700">2</text><text x="110" y="76" class="muted">改什麼</text>
-          <circle cx="170" cy="50" r="12" class="acc loop" style="animation: dots 1.2s infinite alternate; animation-delay: .6s"/><text x="170" y="54" fill="#fff" font-weight="700">3</text><text x="170" y="76" class="muted">怎麼驗證</text>
-          <circle cx="230" cy="50" r="12" class="acc loop" style="animation: dots 1.2s infinite alternate; animation-delay: .9s"/><text x="230" y="54" fill="#fff" font-weight="700">4</text><text x="230" y="76" class="muted">範圍限制</text>
-          <circle cx="290" cy="50" r="12" class="acc loop" style="animation: dots 1.2s infinite alternate; animation-delay: 1.2s"/><text x="290" y="54" fill="#fff" font-weight="700">5</text><text x="290" y="76" class="muted">檢查送出</text>
+          <circle cx="50" cy="50" r="12" class="acc loop" style="animation: dots 1.2s infinite alternate; animation-delay: 0s"/><text x="50" y="54" fill="#fff" font-weight="700">1</text><text x="50" y="76" class="muted">需求</text>
+          <circle cx="110" cy="50" r="12" class="acc loop" style="animation: dots 1.2s infinite alternate; animation-delay: .3s"/><text x="110" y="54" fill="#fff" font-weight="700">2</text><text x="110" y="76" class="muted">AI 實作</text>
+          <circle cx="170" cy="50" r="12" class="acc loop" style="animation: dots 1.2s infinite alternate; animation-delay: .6s"/><text x="170" y="54" fill="#fff" font-weight="700">3</text><text x="170" y="76" class="muted">驗證</text>
+          <circle cx="230" cy="50" r="12" class="acc loop" style="animation: dots 1.2s infinite alternate; animation-delay: .9s"/><text x="230" y="54" fill="#fff" font-weight="700">4</text><text x="230" y="76" class="muted">驗收門檻</text>
+          <circle cx="290" cy="50" r="12" class="acc loop" style="animation: dots 1.2s infinite alternate; animation-delay: 1.2s"/><text x="290" y="54" fill="#fff" font-weight="700">5</text><text x="290" y="76" class="muted">人工核可</text>
         </g>
         <line x1="62" y1="50" x2="278" y2="50" class="line" stroke-width="2"/>
         <g class="loop" style="animation: slideRight 6s infinite">
           <rect x="40" y="100" width="150" height="40" rx="8" class="blues"/>
-          <text x="50" y="117" font-weight="700">PRD：ROI 邊緣誤判修正</text>
-          <text x="50" y="132" class="muted">圖集比對 · gpu · 人工驗收</text>
+          <text x="50" y="117" font-weight="700">ROI 邊緣誤判修正</text>
+          <text x="50" y="132" class="muted">驗證方案 · 門檻 · 人工清單</text>
         </g>
-        <g class="loop" style="animation: arrow 6s infinite"><text x="330" y="124" font-size="18" class="acc">✓</text><text x="300" y="150" class="muted">看板 · queued</text></g>
+        <g class="loop" style="animation: arrow 6s infinite"><text x="330" y="124" font-size="18" class="acc">✓</text><text x="300" y="150" class="muted">總覽 · 排隊中</text></g>
       </svg></div>
-      <p>從「修改軟體」的角度引導：原始碼在哪、症狀→期望、用測試指令／圖集比對／人工清單驗證。本地模型幫找檔案、寫驗收條件；過閘門才建任務。草稿存在伺服器，PRD 面板可以接著寫，不要的按 ✕ 刪掉。</p>
-      <div class="how"><b>做法</b>：<kbd>Alt</kbd>+<kbd>4</kbd> → 「開新的 PRD」。圖集只以路徑引用，絕不複製。<b>→ 完整說明第 26 章</b></div>
+      <p>一件工作就是一條流程：需求 → 準備環境 → AI 實作 → 驗證 → 驗收門檻 → 人工核可 → 合併。缺什麼那個節點就亮 ⚠；按「檢查」本地模型先讀一次，過閘門才開始執行。草稿存在伺服器，開始頁的「最近的草稿」可以接著寫或刪掉。</p>
+      <div class="how"><b>做法</b>：左邊「工作流程」或總覽的「＋ 新工作流程」。先挑一個驗證方案，驗證指令、門檻、人工清單一次帶好；圖集只以路徑引用，絕不複製。<b>→ 完整說明第 5a 章</b></div>
     </section>
 
     <!-- 8 tune -->
@@ -286,11 +292,11 @@
         <g class="loop" style="animation: pop2 6s infinite">
           <rect x="28" y="106" width="86" height="24" rx="8" class="oks"/><text x="40" y="122" class="ok" font-weight="700">轉成任務 →</text>
           <rect x="124" y="104" width="248" height="46" rx="8" class="card" stroke-width="1"/>
-          <text x="134" y="120" font-size="10">軟體修正（PRD 精靈）　驗證新技術（開 repo）</text>
+          <text x="134" y="120" font-size="10">軟體修正（工作流程）　驗證新技術（開 repo）</text>
           <text x="134" y="138" font-size="10">功能與效能　　　　　　待辦（只記一筆）</text>
         </g>
       </svg></div>
-      <p>只引用知識庫裡真的存在的檔名與參數，不會改機台。任何一則回答按「轉成任務」都會先問你要哪一種：軟體修正走 PRD 精靈、驗證新技術直接開一個新 repo 給它跑、待辦就只記一筆。</p>
+      <p>只引用知識庫裡真的存在的檔名與參數，不會改機台。任何一則回答按「轉成任務」都會先問你要哪一種：軟體修正與功能走工作流程、驗證新技術直接開一個新 repo 給它跑、待辦就只記一筆。</p>
       <div class="how"><b>做法</b>：<kbd>Alt</kbd>+<kbd>2</kbd> 填症狀產生建議，或在對話勾「調參建議」晶片。<b>→ 完整說明第 26 章</b></div>
     </section>
 
@@ -313,8 +319,8 @@
           <text x="28" y="152" class="muted">一次只跑一個評比；跑到一半可以按「取消評比」</text>
         </g>
       </svg></div>
-      <p>題目可以是看板任務、PRD 草稿、自己出題，或內建題庫。每個模型各開一張任務去做，雲端評審看 diff 與驗證結果匿名打分，多位評審會標「一致」或「分歧」。</p>
-      <div class="how"><b>做法</b>：<kbd>Alt</kbd>+<kbd>7</kbd> 看戰績 →「＋ 新評比」。花費只有評審那幾次雲端呼叫，送出前會先告訴你目前用量。<b>→ 完整說明第 26 章</b></div>
+      <p>題目可以是看板任務、工作流程草稿、自己出題，或內建題庫。每個模型各開一張任務去做，雲端評審看 diff 與驗證結果匿名打分，多位評審會標「一致」或「分歧」。新模型很多時先用<b>快篩</b>：勾幾個本地模型跑內建小題，不評分、不花額度，看誰值得進正式評比。</p>
+      <div class="how"><b>做法</b>：左邊「評比」→「＋ 新評比」，或「快篩」分頁勾模型；在對話說「快篩 gpt-oss-120b」也行。花費只有評審那幾次雲端呼叫，送出前會先告訴你目前用量。<b>→ 完整說明第 26 章</b></div>
     </section>
   </div>
 
@@ -322,17 +328,16 @@
     <h2>Demo 腳本（約 5 分鐘）</h2>
     <ol>
       <li><b>對話＋知識庫</b>：問「RDMA 收圖為什麼會掉幀？」→ 看 [n] 出處與速度。</li>
-      <li><b>不怕切頁</b>：答到一半按「任務看板」再回來，答案自己接上。</li>
-      <li><b>機台</b>：<kbd>Alt</kbd>+<kbd>6</kbd> 看記憶體、GPU、這次回答 tok/s。</li>
-      <li><b>模型</b>：<kbd>Alt</kbd>+<kbd>5</kbd> 三張推薦卡，指出哪一個現在可以切換、哪一個還缺什麼。</li>
+      <li><b>不怕切頁</b>：答到一半點左邊「總覽」再回來，答案自己接上。</li>
+      <li><b>模型與機台</b>：<kbd>Alt</kbd>+<kbd>4</kbd> 三張推薦卡，指出哪一個現在可以切換、哪一個還缺什麼；往下捲是記憶體、GPU、這次回答 tok/s。</li>
       <li><b>上網</b>：勾「上網／工具」，問「vLLM 最新正式版本？附來源」→ 工具卡 → 引用 GitHub。</li>
       <li><b>MCP</b>：同一晶片，問「用工具列出 cf-aoi 的 ip/ 目錄並說明」→ 🧩 loop-fs 卡。</li>
       <li><b>終端機</b>：<kbd>Ctrl</kbd>+<kbd>`</kbd>，第一行就寫出你自己的 worktree；跑 <code>nvidia-smi</code>，收起再開畫面還在。</li>
-      <li><b>轉成任務</b>：任一則回答按「轉成任務」→ 選「軟體修正」→ PRD 精靈五步 → 看板 queued。</li>
-      <li><b>評比</b>：<kbd>Alt</kbd>+<kbd>7</kbd> 看模型戰績，「＋ 新評比」示範選題目、參賽模型與評審。</li>
+      <li><b>轉成任務</b>：任一則回答按「轉成任務」→ 選「軟體修正」→ 工作流程草稿 → 檢查 → 開始執行 → 總覽排隊中。</li>
+      <li><b>評比</b>：左邊「評比」看模型戰績；「快篩」分頁示範用小題先驗模型，「＋ 新評比」示範選題目、參賽模型與評審。</li>
     </ol>
     <div class="keys">
-      <span><kbd>Shift</kbd>+<kbd>Enter</kbd> 送出</span><span><kbd>Alt</kbd>+<kbd>1</kbd>～<kbd>7</kbd> 面板</span><span><kbd>Ctrl</kbd>+<kbd>`</kbd> 終端機</span><span><kbd>Ctrl</kbd>+<kbd>V</kbd> 貼截圖</span><span><kbd>Esc</kbd> 關抽屜／選單</span>
+      <span><kbd>Shift</kbd>+<kbd>Enter</kbd> 送出</span><span><kbd>Alt</kbd>+<kbd>1</kbd>～<kbd>4</kbd> 右欄分頁</span><span><kbd>Ctrl</kbd>+<kbd>`</kbd> 終端機</span><span><kbd>Ctrl</kbd>+<kbd>V</kbd> 貼截圖</span><span><kbd>Esc</kbd> 關抽屜／選單</span>
     </div>
   </div>
   <footer>Loop Engineering · CF-AOI 維運大腦 · 全部在這台 DGX Spark 上，不經雲端、不花 token（雲端複核與評比評審除外）</footer>

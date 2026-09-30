@@ -282,7 +282,7 @@
       <p>在<b>主機終端機</b>執行（基於安全，token 不寫在本手冊內；此指令會印出可直接開的完整網址）：</p>
       <pre><code>echo "https://addis-b850m-ds3h.tailffdb68.ts.net/?token=$(grep '^LOOP_API_TOKEN=' ~/.config/loop-engineering/env | cut -d= -f2)"</code></pre>
 
-      <div class="note info"><span class="ic">📖</span><span><b>這份說明線上就看得到：</b><code>https://&lt;主機&gt;/docs/操作說明.html</code>，對話工作台左欄底部也有連結。</span></div>
+      <div class="note info"><span class="ic">📖</span><span><b>這份說明線上就看得到：</b><code>https://&lt;主機&gt;/docs/操作說明.html</code>，對話頁標題列的「？」裡也有連結。</span></div>
 
       <h3>步驟 2 — MacBook Air（已在 tailnet，免安裝）</h3>
       <ul>
@@ -307,37 +307,37 @@
 
     <section id="board">
       <h2><span class="num">05</span>對話工作台與任務看板</h2>
-      <div class="note tip"><span class="ic">🧭</span><span><b>2026-09 改版：入口換成對話。</b>根目錄 <code>/</code> 現在是「對話工作台」——左欄對話紀錄、中間和本地模型對話、右側工作面板（任務／調參／知識庫／PRD／模型／Benchmark）。
-      任務看板搬到 <code>/board.html</code>，從頂欄「任務看板 ↗」或右側「任務」面板的卡片點進去；舊書籤 <code>/chat.html</code> 會自動轉到新首頁（含 <code>?token=</code>）。
-      儀表板、Pipelines、報告 Deck、語音四個頁面已移除（API 與 CLI 全部保留），操作說明改由 <code>/docs/操作說明.html</code> 直接提供。</span></div>
+      <div class="note tip"><span class="ic">🧭</span><span><b>2026-09-30 起每一頁都是同一套版面。</b>左邊一排圖示切換頁面：對話・總覽・工作流程・評比・驗證方案・知識星圖・晨報，底部是 5 小時用量圓環、設定、深淺色。上方一條標題列放這頁的標題、分頁、狀態、主要按鈕，以及<b>「你是 ○○」</b>（勾選、核可、發佈、對話紀錄都記在這個名字下；用 Tailscale 登入時自動帶入）。手機（寬度 820px 以下）左側導覽變成底部分頁列：對話・總覽・工作流程・評比，外加你正在看的那一頁；驗證方案與晨報也在總覽的 ⋯ 裡，知識星圖在對話頁「知識庫」分頁的「開啟知識星圖」。舊書籤 <code>/chat.html</code>、<code>/prd.html</code>、<code>/job.html</code> 仍會轉到新位置（含 <code>?token=</code>）。分享頁（<code>/share.html#s_…</code>）刻意不放導覽。</span></div>
 
       <h3>對話工作台（<code>/</code>）</h3>
       <ul>
-        <li><b>最右邊一排圖示鈕永遠看得到</b>：由上而下是 任務／調參／知識庫／PRD ─ 模型／機台／評比。點一下切換面板、再點同一個收起；<b>Alt+1～7</b> 直接切換。面板收起時圖示仍在（亮著的那個留一道標記），所以「面板不見了、切不回來」不會發生。任務有待處理時，圖示右上角會出現數字。</li>
-        <li><b>三欄可收折</b>：頂欄 ☰ 收左欄、▤ 或點亮著的圖示收右側面板；兩邊都收起時對話區幾乎佔滿視窗（1920 寬螢幕實測 1868px）。收合狀態與上次看的面板記在瀏覽器（<code>loop_shell_rail</code>／<code>loop_shell_dock</code>／<code>loop_shell_tab</code>）。手機寬度左欄與面板都變成側滑抽屜，圖示列改成最上面一排。</li>
-        <li><b>右側面板</b>：<b>調參</b>＝智慧調整參數（見第 26 章）；<b>任務</b>＝看板的即時精簡版（同一條 SSE，計數＋依狀態分組的卡片，點卡直接開看板該張卡的細節）；<b>知識庫</b>＝文件／片段數、RAG 搜尋、快速記一筆；<b>PRD</b>＝開新的 PRD（五步精靈，見第 26 章）＋最近的草稿；<b>模型</b>＝切換、下載、建置映像（見第 26 章）；<b>機台</b>＝這次回答的速度、目前模型、記憶體、GPU；<b>評比</b>＝模型戰績與歷次評比（見第 26 章）。</li>
-        <li><b>對話標題</b>：頂欄標題點一下即可改名；「⋯」選單是<b>整段對話</b>的動作（匯出 Markdown／HTML、分享連結、刪除）。單獨存一則回答用該則下方的<b>「存檔」</b>。</li>
+        <li><b>標題列</b>：左邊 ☰ 收合對話紀錄、對話標題（點一下改名）、⋯（整段對話的動作：匯出 Markdown／HTML、分享連結、刪除）、模型狀態；右邊 你是 ○○、？ 說明（3 分鐘上手、完整操作說明、前置作業）、⌨ 終端機（有權限才出現）、▤ 收合右欄。</li>
+        <li><b>中間</b>：對話紀錄（可收合）｜對話。兩邊都收起時對話區幾乎佔滿視窗。對話紀錄依「你是」分開存放，換名字就換成那個人的清單。收合狀態與上次看的分頁記在瀏覽器（<code>loop_shell_rail</code>／<code>loop_shell_dock</code>／<code>loop_shell_tab</code>）。手機上對話紀錄與右欄都變成側滑抽屜。</li>
+        <li><b>右欄四個分頁</b>（<b>Alt+1～4</b>；點正在看的那個分頁會收起右欄，▤ 叫回來）：
+          <b>需要你處理</b>＝和總覽右側同一套卡片（需要處理、合併衝突、草稿缺資料、待核可、已合併待結案，最下面「接下來」），上方有「開啟總覽」與「＋ 新工作流程」，分頁上的數字就是卡片數；
+          <b>調參</b>＝智慧調整參數（見第 26 章）；
+          <b>知識庫</b>＝文件與片段數、RAG 搜尋；
+          <b>模型</b>＝推薦、切換、下載、建置映像，下面接著「機台狀況」：這次回答的速度、目前模型、記憶體、GPU。</li>
+        <li>回答底下的動作：<b>存檔</b>（單獨存這一則）、<b>轉成任務</b>、<b>存進知識庫</b>、<b>請雲端複核</b>、<b>建立分享連結</b> 等。</li>
       </ul>
+      <div class="note info"><span class="ic">🧹</span><span><b>這次拿掉的重複功能。</b>右欄的 PRD 草稿（改到工作流程頁的「最近的草稿」打開與刪除）、評比面板（評比頁的「每一場」「戰績」）、調參面板的「轉成任務」（做出來的草稿過不了入場審核，請用回答底下的）、知識庫面板的「快速記一筆」（用星圖的「擷取」或回答的「存進知識庫」）、總覽新增對話框的 🎤 語音與 mock／plan 工具選項，以及舊版五步驟 PRD 精靈、四步驟新工作兩頁。API 與 CLI 都還在。</span></div>
 
       <h3>任務看板（<code>/board.html</code>）</h3>
-      <p>透過 SSE 每秒推送完整狀態、即時更新，不需重整。<b>2026-09-30 起這頁叫「總覽」，預設是流程圖</b>（見<a href="#redesign">第 5a 章</a>）；下面描述的五欄卡片仍在「看板」分頁，頂欄的使用率、排程、設定等改到上方六格、左側欄與 ⋯ 選單。</p>
+      <p>透過 SSE 每秒推送完整狀態、即時更新，不需重整。<b>2026-09-30 起這頁叫「總覽」，預設是流程圖</b>（見<a href="#redesign">第 5a 章</a>）；下面描述的五欄卡片在「看板」分頁。</p>
 
-      <h3>頂欄</h3>
+      <h3>標題列與上方六格</h3>
       <div class="tbl-wrap">
       <table>
         <thead><tr><th>元件</th><th>說明</th></tr></thead>
         <tbody>
-          <tr><td>使用率雙環</td><td><b>session</b>／<b>weekly</b> 用量百分比；依門檻變色：&lt;70% 綠、≥70% 琥珀、≥90% 紅。</td></tr>
-          <tr><td>用量狀態提示</td><td>雙環旁的琥珀／紅色 chip，只在<b>讀數不是即時</b>時出現：<b>登入已過期</b>（紅，請在主機執行一次 <code>claude</code> 重新登入；引擎不會拿過期的 token 去打用量 API）、<b>API 冷卻中</b>（429 退避，與 TokenBar 共用同一份冷卻，到期前不會再發請求）、或<b>讀不到</b>（網路）。此時雙環與排程都沿用上一次成功的讀數。</td></tr>
-          <tr><td>SESSION 重置</td><td>距 session 窗重置的倒數。</td></tr>
-          <tr><td>POLICY</td><td>目前時段（日間／夜間）與該時段 session 門檻。</td></tr>
-          <tr><td>排程狀態</td><td>「排程執行中」或「已暫停」。</td></tr>
-          <tr><td>暫停排程 / 恢復排程</td><td>切換調度暫停（暫停時不派新工，執行中的不受影響）。</td></tr>
-          <tr><td>即時連線指示</td><td>三態：連線中（琥珀）／即時連線（綠）／重新連線…（琥珀）。</td></tr>
-          <tr><td>⚙ 設定</td><td>開啟排程設定面板，直接調整日夜門檻等（見第 8 章）；儲存後下一個 tick 生效、免重啟。Mac/手機皆可改。</td></tr>
-          <tr><td>☾ / ☀ 主題鈕</td><td>切換亮/暗佈景，記憶於 localStorage。</td></tr>
-          <tr><td>＋ 新增 task</td><td>開啟新增任務對話框。</td></tr>
-          <tr><td>Backlog 預估 chip</td><td><code>weekly +N%・剩 M%・可加~K</code>——待處理任務吃掉的 weekly 額度、剩餘可加碼空間、粗估還能加幾個 M 任務；依 verdict 變色（見第 17 章）。</td></tr>
+          <tr><td>流程圖／清單／看板</td><td>三種看法，選擇記在瀏覽器；手機預設清單。</td></tr>
+          <tr><td>搜尋</td><td>任務、模型、repo；按 <kbd>/</kbd> 聚焦。</td></tr>
+          <tr><td>本地模型</td><td>本地模型啟用（或 vLLM 有事在做）時出現：載入的模型、就緒／載入中／失敗、執行中幾個。</td></tr>
+          <tr><td>排程狀態、暫停排程／恢復排程</td><td>「排程執行中」或「已暫停」；暫停時不派新工，執行中的不受影響。</td></tr>
+          <tr><td>引擎更新排隊中</td><td>這個 repo 有新程式合併進來，引擎等閒下來會自己重建並重啟。</td></tr>
+          <tr><td>⋯</td><td>排程設定（日夜門檻等，見第 8 章；儲存後下一個 tick 生效）、清理結束的任務、新增單一任務（進階：產出檔案／部署這類工具，一般工作請用工作流程）、驗證方案、晨報。</td></tr>
+          <tr><td>＋ 新工作流程</td><td>開始一件新工作（<code>/flow.html#new</code>）。</td></tr>
+          <tr><td>上方六格</td><td>執行中／等候中／需要你處理／待核可／今日完成／用量。用量格是 5 小時與本週兩條，游標停著會說明待處理的任務預計再吃多少本週額度（見第 17 章）；讀數不是即時的（登入過期、429 冷卻中、讀不到）也寫在這裡，此時排程沿用上一次成功的讀數。</td></tr>
         </tbody>
       </table>
       </div>
@@ -362,10 +362,18 @@
 
     <section id="redesign">
       <h2><span class="num">05a</span>介面改版：總覽・工作流程・評比</h2>
-      <div class="note tip"><span class="ic">🧭</span><span><b>2026-09-30 改版。</b>任務看板、PRD 精靈與新工作、評比三個頁面改成同一套版面：左側欄切換頁面，任務畫成節點與連線（借鏡 n8n），評比先看圖、表格收起來。舊網址都還能用：<code>/prd.html</code> 轉到工作流程（<code>?draft=</code> 會帶過去）、<code>/job.html</code> 轉到「新工作流程」（<code>?title=&amp;symptom=&amp;expected=</code> 會帶過去）。舊版的五步驟精靈與四步驟新工作已經移除。設計稿在 Claude Design「Loop 介面改版：總覽・工作流程・評比」。</span></div>
+      <div class="note tip"><span class="ic">🧭</span><span><b>2026-09-30 改版。</b>任務看板、PRD 精靈與新工作、評比三個頁面先改成新版面：左側欄切換頁面，任務畫成節點與連線（借鏡 n8n），評比先看圖、表格收起來；同一天稍晚，對話、驗證方案、晨報、驗收、知識星圖也換上同一套（見第 5 章開頭）。舊網址都還能用：<code>/prd.html</code> 轉到工作流程（<code>?draft=</code> 會帶過去）、<code>/job.html</code> 轉到「新工作流程」（<code>?title=&amp;symptom=&amp;expected=</code> 會帶過去）。舊版的五步驟精靈與四步驟新工作已經移除。設計稿在 Claude Design「Loop 介面改版：總覽・工作流程・評比」。</span></div>
 
       <h3>左側欄</h3>
-      <p>對話・總覽・工作流程・評比・驗證方案・知識星圖・晨報；底部是 5 小時用量小圓環（<code>GET /api/usage</code>，每分鐘更新）、設定（開總覽的排程設定）、深淺色切換。手機上變成底部四顆：總覽・工作流程・評比・對話。</p>
+      <p>對話・總覽・工作流程・評比・驗證方案・知識星圖・晨報；底部是 5 小時用量小圓環（<code>GET /api/usage</code>，每分鐘更新）、設定（開總覽的排程設定）、深淺色切換。手機上變成底部分頁列：對話・總覽・工作流程・評比，外加你正在看的那一頁。</p>
+
+      <h3>其他頁面在同一套版面裡</h3>
+      <ul>
+        <li><b>驗證方案</b>（<code>/plans.html</code>）：「＋ 新增」在標題列；<code>/plans.html#vp_…</code> 直接打開那個方案（對話操作的「查看」就是連到這裡），找不到時會說。</li>
+        <li><b>晨報</b>（<code>/morning.html</code>）：時間範圍與重新整理在標題列。</li>
+        <li><b>驗收</b>（<code>/task.html?id=…</code>）：算在「總覽」底下，標題列是「總覽 › 任務名 狀態」，下面照舊是 結果／程式碼／試跑／需求 分頁。</li>
+        <li><b>知識星圖</b>（<code>/brain.html</code>）：擷取、推斷關聯、＋ 新增、清單都在標題列，星圖填滿其餘的畫面；左邊的篩選與右邊的清單抽屜照舊。</li>
+      </ul>
 
       <h3>總覽（<code>/board.html</code>）</h3>
       <ul>
@@ -413,7 +421,7 @@
 
     <section id="newtask">
       <h2><span class="num">06</span>新增任務與入場審核</h2>
-      <p>點頂欄「＋ 新增 task」填寫欄位。<b>入場審核（gate）</b>會逐項檢查；未通過的任務無法加入排程，卡片上會標紅缺項。</p>
+      <p>一般的工作請用<b>工作流程</b>（<code>/flow.html#new</code>，見第 5a 章）；要直接填任務欄位（產出檔案、部署這類工具），用總覽標題列 ⋯ →「新增單一任務（進階）」。<b>入場審核（gate）</b>會逐項檢查；未通過的任務無法加入排程，卡片上會標紅缺項。</p>
       <div class="tbl-wrap">
       <table>
         <thead><tr><th>欄位</th><th>必填</th><th>說明 / 審核規則</th></tr></thead>
@@ -534,7 +542,7 @@ npm run loop -- list --status review</code></pre>
       <h3>調度設定（存於 SQLite <code>settings</code> 表）</h3>
       <p>首次執行時由 <code>src/config.ts</code> 播種進 SQLite。門檻為 session/weekly 用量<b>百分比</b>。</p>
       <div class="note tip"><span class="ic">🎛️</span><span><b>兩種即時調整方式（免重啟）——排程器每個 tick 都重讀設定，所以最多 60 秒生效：</b><br>
-      1. <b>看板 ⚙ 面板</b>：頂欄點 ⚙ → 改日夜門檻 → 儲存（Mac/手機遠端可改）。<br>
+      1. <b>排程設定</b>：左側導覽的齒輪，或總覽 ⋯ →「排程設定」→ 改日夜門檻 → 儲存（Mac/手機遠端可改）。<br>
       2. <b>CLI</b>：<code>loop config set day_session_max 88</code>（或 <code>loop config list</code> 看全部）。<br>
       兩者共用同一份驗證（<code>src/settings.ts</code>）。<b>卡住不派工時</b>，通常就是用量已達當前時段門檻——把該時段上限調高即可解卡。</span></div>
       <div class="tbl-wrap">
@@ -740,7 +748,7 @@ systemctl --user disable loop-engineering</code></pre>
           <tr><td>Mac 完全連不上（連頁面都開不了）</td><td>Mac 端 Tailscale 未連線：確認選單列 Tailscale 為 <b>Connected</b>、登入 <code>addislyu@</code>。</td></tr>
           <tr><td>手機看不到裝置</td><td>手機需裝 Tailscale App 並登入同帳號、打開開關。</td></tr>
           <tr><td>看板打不開 / 服務掛了</td><td><code>systemctl --user status loop-engineering</code> 看狀態；<code>journalctl --user -u loop-engineering -e</code> 看錯誤。</td></tr>
-          <tr><td>任務一直不派工</td><td>可能已暫停（看頂欄），或用量已達門檻、或 runway 不足；<code>npm run loop -- status</code> 確認。</td></tr>
+          <tr><td>任務一直不派工</td><td>可能已暫停（看總覽標題列），或用量已達門檻、或 runway 不足；<code>npm run loop -- status</code> 確認。</td></tr>
           <tr><td>任務卡在 draft 無法入列</td><td>入場審核有缺項；卡片會標紅，或 <code>npm run loop -- gate &lt;id&gt;</code> 查明。</td></tr>
           <tr><td>想零成本試整條流程</td><td>用 <code>--tool mock</code> 建任務，會用 mock 介面走完 draft→review，不花 token。</td></tr>
           <tr><td>主機會睡著中斷</td><td>setup 已遮蔽 sleep 目標；<code>systemd-inhibit --list</code> 可查抑制器。</td></tr>
@@ -882,11 +890,11 @@ npm run loop -- add --title "Epic: 上線通知系統" \
 
     <section id="knowledge">
       <h2><span class="num">14</span>知識庫：越跑越聰明</h2>
-      <p>看板頂欄的「知識庫」開啟 <code>/brain.html</code>：這裡存放你的<b>長期環境／偏好／限制知識</b>（節點＋關聯），任務派工時自動注入 prompt，讓每個任務都遵守你的環境約束（例如「公司只能用 Windows 11 + Python 3.8.10」）。</p>
+      <p>左側導覽的「知識星圖」開啟 <code>/brain.html</code>：這裡存放你的<b>長期環境／偏好／限制知識</b>（節點＋關聯），任務派工時自動注入 prompt，讓每個任務都遵守你的環境約束（例如「公司只能用 Windows 11 + Python 3.8.10」）。</p>
       <h3>知識怎麼進來</h3>
       <ul>
         <li><b>MCP 一句話</b>：任何 Claude Code 對話說「記住：公司只能用 Python 3.8.10」→ <code>loop_remember</code> 入庫；<code>loop_recall</code> 搜尋、<code>loop_link</code> 建關聯。</li>
-        <li><b>知識庫頁（知識星圖）</b>：整頁就是一張<b>全螢幕沉浸式知識圖譜</b>——四大分類（策展／程式碼／OpenProject／筆記）各自成一片「星系」分區、以顏色與圖例（左側面板，含即時計數）標示；畫法是<b>星雲</b>：節點畫成小光點（大小依連線數），連線用加色疊加，交會處自然變亮，密的地方燒成白色，所以看得出結構而不是一片彩色圓點。右下角的<b>「立體」</b>可以切換成 WebGL 3D：同一份圖、同一組篩選與聚焦行為，改成可以旋轉的星系（拖曳轉動、滾輪遠近、Shift 或右鍵平移、點節點聚焦）。three.js 是<b>本機 vendor</b>（<code>web/lib/three/</code>，MIT，絕不連 CDN）且<b>延遲載入</b>——不按「立體」就不會下載。分類在 3D 是四面體方向而不是平面圓環（類別數少時的圓環會退化成一條直線）；點圖例可單獨聚焦某一類（或按數字鍵 1–4），懸停高亮鄰居、點節點聚焦展開、滾輪縮放、拖曳平移。頂欄「☰ 清單」滑出<b>管理抽屜</b>：搜尋（中文 FTS）／中文 kind 篩選／新增編輯／建關聯／草稿核可。來源與分類皆已中文化（如 <code>src_xxx</code> 顯示為 LoopEngineering／OpenProject／SSoT 筆記…）。</li>
+        <li><b>知識庫頁（知識星圖）</b>：標題列以下整片就是一張<b>沉浸式知識圖譜</b>——四大分類（策展／程式碼／OpenProject／筆記）各自成一片「星系」分區、以顏色與圖例（左側面板，含即時計數）標示；畫法是<b>星雲</b>：節點畫成小光點（大小依連線數），連線用加色疊加，交會處自然變亮，密的地方燒成白色，所以看得出結構而不是一片彩色圓點。右下角的<b>「立體」</b>可以切換成 WebGL 3D：同一份圖、同一組篩選與聚焦行為，改成可以旋轉的星系（拖曳轉動、滾輪遠近、Shift 或右鍵平移、點節點聚焦）。three.js 是<b>本機 vendor</b>（<code>web/lib/three/</code>，MIT，絕不連 CDN）且<b>延遲載入</b>——不按「立體」就不會下載。分類在 3D 是四面體方向而不是平面圓環（類別數少時的圓環會退化成一條直線）；點圖例可單獨聚焦某一類（或按數字鍵 1–4），懸停高亮鄰居、點節點聚焦展開、滾輪縮放、拖曳平移。標題列「清單」滑出<b>管理抽屜</b>：搜尋（中文 FTS）／中文 kind 篩選／新增編輯／建關聯／草稿核可。來源與分類皆已中文化（如 <code>src_xxx</code> 顯示為 LoopEngineering／OpenProject／SSoT 筆記…）。</li>
         <li><b>自動蒸餾</b>：任務結案時用 haiku 從 HANDOFF 萃取候選知識 →<b>草稿</b>（琥珀徽章），你在知識庫頁<b>核可後才會注入</b>（<code>knowledge_distill</code> 可關）。</li>
         <li><b>CLI</b>：<code>loop knowledge &lt;list|search|add|import|export|relate|preview|rescope&gt;</code>（<code>relate</code> 見本章「知識圖譜關聯」）。</li>
       </ul>
@@ -903,7 +911,7 @@ npm run loop -- add --title "Epic: 上線通知系統" \
       <h3>知識圖譜視覺化（Obsidian 式 [[wikilink]] ＋ 多跳 ＋ force-directed）</h3>
       <p>在節點 body（或 <code>~/SSoT</code> vault 裡的 markdown 檔）寫 <code>[[標題]]</code> 就會<b>自動建關聯</b>：節點對節點的 wikilink 直接變成一條 <code>links-to</code> 關聯（跟手動建的關聯一起顯示、可刪，但只要 body 裡還留著該 <code>[[wikilink]]</code>，下次存檔就會自動重建）；vault 裡的 markdown 檔本身會成為圖上的<b>文件節點</b>（方形，跟節點的圓形區分），連到它連結的節點或其他文件——這一段解析在每次 <code>loop ingest run</code> 之後全庫重跑一次，所以連結目標晚於連結本身被 ingest／新增也會在下一次自動接上。</p>
       <ul>
-        <li><b>開啟方式</b>：知識庫頁頂欄「🕸 圖譜」看整張圖；某節點列的「關聯」鈕則以該節點為中心開一張<b>多跳</b>鄰居圖（右上角「展開跳數」可調 1–6 跳）。</li>
+        <li><b>開啟方式</b>：知識星圖一打開就是整張圖；某節點列的「關聯」鈕則以該節點為中心開一張<b>多跳</b>鄰居圖（右上角「展開跳數」可調 1–6 跳）。</li>
         <li><b>操作</b>：拖曳空白處平移、滾輪縮放、拖曳節點喬位置、點一下節點（不拖曳）會即時向伺服器多要一跳鄰居併入目前的圖（既有節點位置不會被打斷）。</li>
         <li><b>篩選</b>：面板內有 kind 篩選、來源篩選（節點的 <code>source</code>／文件所屬的 ingest 來源）、標籤與 scope 關鍵字過濾，以及「顯示文件節點」開關（關掉只看策展知識，不看語料文件）。</li>
         <li><b>純 vanilla 實作</b>：整張圖是手刻 canvas 2D force-directed（<code>web/graph-layout.js</code> 純運算＋<code>web/brain.js</code> 畫面／互動），沒有外部圖表庫、沒有 CDN，符合看板一貫的 <code>textContent</code>-only（canvas 文字是像素，本來就不是 HTML，不會有注入風險）。</li>
@@ -912,7 +920,7 @@ npm run loop -- add --title "Epic: 上線通知系統" \
       <h3>知識圖譜關聯（auto-relate）：自動推斷節點間的關係</h3>
       <p>手動建關聯很容易越積越少——這功能用<b>混合策略</b>幫知識庫補關聯，同樣<b>草稿制</b>、永不自動核准：先用既有的向量索引（<code>vec_nodes</code>，<code>sqlite-vec</code>，cosine 距離）取每個節點嵌入空間裡最近的 5 個鄰居當候選配對（避免 N² 全配對），再用一次 haiku 呼叫幫候選配對判斷關係型別（<code>runs-on</code>／<code>constrains</code>／<code>deployed-at</code>／<code>uses</code>／<code>part-of</code>／<code>related</code>）並濾掉沒有實質關聯的配對——輸出的邊一律以<b>草稿關聯</b>入庫，跟既有邊（同來源、去向、關係型別）重複的一律略過，不會產生重複邊。</p>
       <ul>
-        <li><b>怎麼觸發</b>：知識庫頁頂欄「🔗 推斷關聯」鈕；或 CLI <code>loop knowledge relate [--limit N]</code>（<code>--limit</code> 控制單次最多評估幾組候選配對，離越近的配對優先，預設 20）；或 API <code>POST /api/knowledge/relate</code>。</li>
+        <li><b>怎麼觸發</b>：知識星圖標題列的「推斷關聯」；或 CLI <code>loop knowledge relate [--limit N]</code>（<code>--limit</code> 控制單次最多評估幾組候選配對，離越近的配對優先，預設 20）；或 API <code>POST /api/knowledge/relate</code>。</li>
         <li><b>怎麼審核</b>：知識庫頁「草稿關聯」區塊列出所有待審核的建議邊（來源／關係／去向＋理由），逐條「核可」或「退回」——核可後才會出現在圖譜與任務注入裡；退回不會刪除紀錄，只是不再視為待審。</li>
         <li><b>絕不自動生效</b>：草稿關聯在核可前<b>不會</b>出現在「🕸 圖譜」畫面，也<b>不會</b>被派工時的知識注入（<code>knowledgeContext</code>）當成一跳關聯使用——跟草稿節點的審核邏輯完全對稱。</li>
         <li><b>零 token 前提</b>：沒裝 <code>claude</code> CLI，或本節 session 用量已達 <code>hard_limit_pct</code>，都不會呼叫 LLM（也不會消耗嵌入運算）；沒有觸發前，圖譜與任務注入行為完全不變。</li>
@@ -967,7 +975,7 @@ loop ingest run &lt;source_id&gt;</code></pre>
       <p>不想手動開 Obsidian 建檔時，用<b>擷取</b>：寫一則 markdown 筆記進已登錄的 SSoT vault，並<b>立即索引</b>，馬上就能被 <code>loop_search</code> 搜到。跟第 14 章「＋ 新增」的策展知識節點是<b>完全分開的兩層</b>——擷取寫進語料層（<code>documents/chunks</code>），<b>不會</b>注入任何任務 prompt；要留一條「以後每個任務都要遵守」的長期事實，還是用 <code>loop_remember</code>／知識庫頁的「＋ 新增」。</p>
       <ul>
         <li><b>MCP</b>：<code>loop_capture</code>（<code>text</code> 必填，<code>title</code> 留白則取內文第一句，<code>tags</code> 選填）。</li>
-        <li><b>看板</b>：知識庫頁（<code>/brain.html</code>）頂欄「📥 擷取」開一個輕量對話框，寫完按「寫入」，成功後顯示新增了幾份文件／幾個片段。</li>
+        <li><b>網頁</b>：知識星圖（<code>/brain.html</code>）標題列的「擷取」開一個輕量對話框，寫完按「寫入」，成功後顯示新增了幾份文件／幾個片段。</li>
         <li><b>REST</b>：<code>POST /api/capture</code>（<code>{"body":"...","title":"...","tags":[...]}</code>）。</li>
         <li>寫入的目的地是<b>第一個已啟用的 <code>kind=vault</code> 來源</b>——先用 <code>loop ingest add --vault ~/SSoT</code> 登錄一個，擷取才有地方寫；沒登錄會回 400 錯誤說明原因。</li>
       </ul>
@@ -1037,7 +1045,7 @@ loop ingest run &lt;source_id&gt;</code></pre>
         <li><b>Session 是逐窗口的</b>（每 5 小時歸零一次）：<b>不</b>把 backlog 的 session 估計加總，只回報其中最大的單一任務估計（<code>largest_task_session_pct</code>）與是否塞得進一個 session 窗口（<code>largest_task_session_fits</code>，即 ≤ <code>hard_limit_pct − safety_reserve_pct</code>）。</li>
         <li><b>verdict</b>：依 <code>weekly_headroom</code>／<code>capacity_more_M</code> 分四級——<code>plenty</code>（餘裕多）／<code>some</code>（還加得下幾個）／<code>tight</code>（勉強擠得下）／<code>full</code>（額度已滿）。</li>
       </ul>
-      <p>四個入口都看得到同一份預估：看板頂欄 chip（見第 5 章）、<code>loop forecast</code> CLI（見第 7 章）、<code>GET /api/forecast</code>（見附錄）、以及 MCP 的 <code>loop_status</code>（見第 12 章）——問「Loop 還能加幾個任務？」它就會回。</p>
+      <p>四個入口都看得到同一份預估：總覽上方六格的用量格（游標停著，見第 5 章）、<code>loop forecast</code> CLI（見第 7 章）、<code>GET /api/forecast</code>（見附錄）、以及 MCP 的 <code>loop_status</code>（見第 12 章）——問「Loop 還能加幾個任務？」它就會回。</p>
       <div class="note info"><span class="ic">📐</span><span>只讀既有估計，不新增任何調度判斷——關掉這個功能（不呼叫它）對排程/預算行為零影響。</span></div>
     </section>
 
@@ -1099,7 +1107,7 @@ loop ingest run &lt;source_id&gt;</code></pre>
         <li><b>怎麼跑</b>：<code>loop pipeline run &lt;name&gt; --goal "…" --repo /path --base main [--env home] [--title "…"] [--verify "npm run typecheck,npm test"]</code>，或 <code>POST /api/pipelines/:name/run</code>，或 MCP 的 <code>loop_run_pipeline</code>。<code>goal</code>／<code>repo</code>／<code>base</code>／<code>verify</code> 由每個 stage <b>共用</b>（因為改的是同一份 code），各 stage 自己的 <code>verify_mode</code>／<code>environment</code>／<code>complexity</code> 則照模板固定。</li>
         <li><b>實體化</b>：依模板順序建出一串任務，用 <code>depends_on</code> 串成鏈，共享一個新的 <code>pipeline_id</code>（+ 各自的 <code>stage_name</code>，如 <code>implement</code>／<code>deploy-home</code>）；第一個 stage 通過 gate 就直接 <code>queued</code>，其餘留 <code>draft</code>，交給第 13 章既有的任務鏈機制依序放行。</li>
         <li><b>關卡＝既有驗證模式</b>：command stage 要跑過驗證指令；llm stage 要過 rubric（模板的 <code>rubric_hint</code> 會變成該任務的 <code>verify_rubric</code>）；deploy stage 走第 19 章的部署（環境是 <code>auto_deploy</code> 就自動部署，否則產出人工部署包）。<b>任一 stage 失敗</b>（<code>failed</code>）就停在原地——下一棒的 <code>depends_on</code> 判定為 <code>dep-failed</code>，永遠不會被自動派工，跟第 13 章第 3 節的任務鏈規則完全一樣，沒有另外發明失敗處理。</li>
-        <li><b>看板</b>：頂欄下方多一條 pipeline 進度列，例如「<code>feature: implement ✓ → review-gate ⏳ → deploy-home ○</code>」，點任一 stage 開該任務詳情；卡片本身也會多一顆「🚦 stage 名稱」徽章，詳情視窗列出整條 pipeline 各 stage 的狀態。</li>
+        <li><b>總覽</b>：「看板」分頁上方多一條 pipeline 進度列，例如「<code>feature: implement ✓ → review-gate ⏳ → deploy-home ○</code>」，點任一 stage 開該任務詳情；卡片本身也會多一顆「🚦 stage 名稱」徽章，詳情視窗列出整條 pipeline 各 stage 的狀態。</li>
         <li><b>自訂模板</b>：<code>loop pipeline list</code> 看目前有哪些；<code>loop pipeline import [file]</code>（不給檔案就重新匯入內建 <code>seed/pipelines/*.json</code>）或 <code>POST /api/pipelines/import</code> 批次匯入——壞掉的 stage（缺 name、<code>coding_tool</code> 不合法等）該筆會被拒絕並回報原因，不影響其他筆匯入成功。</li>
       </ul>
       <pre><code># CLI：用 ship 模板一次交付到兩個環境
@@ -1235,7 +1243,7 @@ npm run loop -- pipeline run ship \
         <li><b>選模型</b>：任務的 Model 選 <code>local:&lt;id&gt;</code>（新增任務對話框、<code>loop add --model local:qwen38-flash</code>、MCP <code>loop_add_task</code>），或把設定裡的 Coding 預設模型改成 <code>local:…</code>。</li>
         <li><b>執行</b>：引擎用 <code>opencode run --format json --auto</code> 驅動 vLLM 的 OpenAI 相容 API，走同一套 worktree、驗證、續跑與 Git 收尾。設定以 <code>OPENCODE_CONFIG_CONTENT</code> 帶入（不寫進 repo），並禁止 <code>git push</code>、<code>sudo</code>、網路抓取。</li>
         <li><b>不佔 Anthropic 額度</b>：本地任務略過 session／weekly 閘門與配額估算，斷路器也不會中斷它；另有自己的同時執行數上限。token 數照樣記錄在 <code>task_runs.tokens_in/out</code>。</li>
-        <li><b>換模型</b>：GPU 一次只放一個模型。排程優先跑「已載入模型」的任務；需要換時，會<b>等所有本地任務結束</b>才 <code>docker stop</code> 並用 <code>run-recipe.sh &lt;recipe&gt; --solo --earlyoom</code> 重新載入（100 GB 級模型約 6 分鐘，頂欄的「本地模型」標籤會顯示「載入中」）。權重還沒下載完整時會拒絕切換並推播，之後冷卻 <code>local_switch_retry_min</code> 分鐘再試。引擎重啟時會自動接手 vLLM 正在服務的模型。</li>
+        <li><b>換模型</b>：GPU 一次只放一個模型。排程優先跑「已載入模型」的任務；需要換時，會<b>等所有本地任務結束</b>才 <code>docker stop</code> 並用 <code>run-recipe.sh &lt;recipe&gt; --solo --earlyoom</code> 重新載入（100 GB 級模型約 6 分鐘，總覽標題列的「本地模型」標籤會顯示「載入中」；需要兩台的模型改用叢集模式，見下面的「兩台 Spark」）。權重還沒下載完整時會拒絕切換並推播，之後冷卻 <code>local_switch_retry_min</code> 分鐘再試。引擎重啟時會自動接手 vLLM 正在服務的模型。</li>
         <li><b>逾時</b>：本地解碼較慢，依複雜度的預設逾時會乘上 <code>local_timeout_multiplier</code>；任務自己指定的 timeout 不受影響。</li>
       </ul>
       <pre><code>loop config set local_models_enabled true
@@ -1244,18 +1252,11 @@ loop local load qwen38-flash    # 立即載入並等到就緒
 loop local stop                 # 停掉 vLLM、釋放 GPU
 loop add --title "…" --goal "…" --plan plan.md --repo . --verify "npm test" --model local:qwen38-flash</code></pre>
 
-      <h3>PRD 精靈（<code>/prd.html</code>）：從「修改軟體」出發的五步引導</h3>
-      <p>要讓模型改好軟體，PRD 必須講清楚三件事：<b>原始碼在哪</b>（repo／分支／模組）、<b>要改什麼</b>（症狀→期望、相關檔案）、<b>怎麼驗證</b>。精靈把這三件事拆成五步，每步都有「為什麼要填」的提示，右側即時顯示產生的 PRD；草稿自動存在伺服器（依使用者分開），對話工作台右側「PRD」面板列出最近的草稿可接著寫；不要的草稿按卡片右邊的 <b>✕</b> 就刪掉（精靈頁上方也有「刪除草稿」），已經建成任務的草稿刪掉後<b>任務仍然留著</b>。</p>
-      <ol>
-        <li><b>改哪套軟體</b>：先選改動類型（演算法修正／功能新增／錯誤修復／效能，會帶入預設的驗證方式與提示）；repo 從已登錄的知識來源選或手動填絕對路徑，系統會確認是不是 git、列出分支與頂層目錄（影響模組），並顯示本主機能力。</li>
-        <li><b>要改什麼</b>：標題、現況／症狀、期望行為、相關檔案。「用知識庫找」會把描述轉成關鍵字、在該 repo 的索引裡檢索，再由本地模型排序並說明理由（零 token）；勾選就加入。</li>
-        <li><b>怎麼驗證</b>（可複選）：<b>測試指令</b>（可從 repo 帶入 <code>npm test</code>、<code>ctest</code>、<code>scripts/verify_*.py</code> 等）；<b>圖集比對</b>（演算法修正用：輸入圖集目錄、期望結果、配方、門檻；系統產生一行比對指令——啟動 IP offline-tcp、逐張 <code>control_test.py</code>、再用 <code>compare_results.py</code> 與期望結果比對；「檢查」只回傳影像張數，<b>圖集永遠只以路徑引用、禁止複製</b>）；<b>人工驗收清單</b>（Given／When／Then，可按「AI 幫寫草稿」）。下方即時顯示這份 PRD 會用的 <code>verify_mode</code> 與 <code>requires</code>，本主機缺 GPU 時會警告。</li>
-        <li><b>範圍與限制</b>：非範圍、限制、領域（依模組自動帶）、複雜度、前置指令（建置／安裝，在花任何 token 前先跑）。</li>
-        <li><b>預覽與送出</b>：可直接改 Markdown（改了就不再與表單同步）；「檢查」＝規則檢查＋本地模型審查，完整顯示缺漏、提醒、審查問題與解析出的欄位；通過才能「建立任務」，建好後直接連到看板。</li>
-      </ol>
+      <h3>寫 PRD：工作流程（<code>/flow.html</code>）</h3>
+      <p>要讓模型改好軟體，PRD 必須講清楚三件事：<b>原始碼在哪</b>（repo／分支）、<b>要改什麼</b>（症狀→期望、相關檔案）、<b>怎麼驗證</b>。原本的五步驟「PRD 精靈」已經併進<b>工作流程</b>（見第 5a 章）：這三件事攤在需求、準備環境、驗證、驗收門檻、人工核可這幾個節點上，缺什麼那個節點就亮 ⚠。草稿自動存在伺服器（依「你是」分開），開始頁的「最近的草稿」可以接著寫或刪掉；已經建成任務的草稿刪掉後<b>任務仍然留著</b>。對話裡任一則回答按「轉成任務 → 軟體修正／功能或效能」，會帶著症狀與參考來源開一份工作流程草稿。</p>
       <div class="tbl-wrap">
       <table>
-        <thead><tr><th>精靈選項</th><th>PRD 段落</th><th>任務欄位</th><th>引擎行為</th></tr></thead>
+        <thead><tr><th>要的驗證</th><th>PRD 段落</th><th>任務欄位</th><th>引擎行為</th></tr></thead>
         <tbody>
           <tr><td>測試指令</td><td>驗證指令 fence</td><td><code>verification_steps</code>、<code>command</code></td><td>每行在 worktree 執行、非 0 失敗</td></tr>
           <tr><td>圖集比對</td><td>fence 單行＋圖集比對＋需求能力 gpu</td><td><code>verification_steps</code>、<code>requires</code></td><td>本機無 gpu → 拿掉 command 轉人工</td></tr>
@@ -1265,11 +1266,11 @@ loop add --title "…" --goal "…" --plan plan.md --repo . --verify "npm test" 
         </tbody>
       </table>
       </div>
-      <p>這五個段落都是<b>選填</b>：手寫的舊 PRD 行為完全不變。精靈與 API 的 repo 檢查只回傳目錄名、分支與數量，從不列出檔案或內容；可讀的根目錄＝已啟用的 git／folder 知識來源，加上 <code>prd_repo_allowlist</code>（絕對路徑，逗號分隔）。</p>
+      <p>這五個段落都是<b>選填</b>：手寫的舊 PRD 行為完全不變。可選的 repo＝已啟用的 git／folder 知識來源，加上 <code>prd_repo_allowlist</code>（絕對路徑，逗號分隔）；頁面只拿得到 repo 的名稱與分支，從不列出檔案或內容。</p>
 
       <h3>PRD 閘門：先把需求寫完整，再交給本地模型</h3>
       <ul>
-        <li><b>入口</b>：看板頂欄「PRD」頁（貼上 → 檢查 → 建立）、<code>loop prd check|submit &lt;檔案&gt;</code>、MCP <code>loop_prd_check</code> / <code>loop_prd_submit</code>。範本：頁面「載入範本」或 <code>loop prd template</code>，建議貼給 Opus／Fable 請它照這個格式寫。</li>
+        <li><b>入口</b>：工作流程（一步步填，或在開始頁「貼上 PRD」；按「檢查」→「開始執行」）、對話操作、<code>loop prd check|submit &lt;檔案&gt;</code>、MCP <code>loop_prd_check</code> / <code>loop_prd_submit</code>。範本：<code>loop prd template</code>，建議貼給 Opus／Fable 請它照這個格式寫。</li>
         <li><b>第一關（規則，必過）</b>：必須有標題、目標、範圍、非範圍、驗收標準、可執行的驗證指令、存在的 Repo 路徑與合法領域；還留著範本佔位文字（<code>&lt;…&gt;</code>、TODO、TBD、待補）一律擋下，並逐項列出缺什麼。</li>
         <li><b>第二關（本地模型審查，零 token）</b>：由目前載入的本地模型以「不能反問的實作者」角度讀 PRD，指出會讓它猜測或無法驗證的地方；它判定不可行時同樣擋下。模型沒有載入時預設只看第一關，設 <code>prd_require_llm=true</code> 則改為擋下。</li>
         <li><b>通過後</b>：PRD 原文存成任務的 plan，驗收標準成為驗收 rubric，任務以 <code>prd_default_model</code>（沒設時用 <code>local:…</code> 的 <code>default_model</code>）排入佇列；勾選多個模型則直接建成 Benchmark。</li>
@@ -1281,12 +1282,12 @@ loop prd submit my-feature.md --model local:qwen38-flash
 loop prd submit my-feature.md --bench-models local:qwen38-flash,local:qwen3-coder-next</code></pre>
 
       <h3>Benchmark：同一題交給多個模型各做一次</h3>
-      <p>對話頁的<b>評比</b>面板（圖示列最後一個，Alt+7）是儀表板：正在跑的評比、<b>模型戰績</b>（每個模型的勝場／參賽／平均分／驗證通過率）與最近幾次的結果；點任何一列就跳到 <code>/benchmarks.html#b=&lt;id&gt;</code> 看細節。按「＋ 新評比」進到建立流程。</p>
+      <p><b>評比頁</b>（<code>/benchmarks.html</code>，左側導覽的「評比」）有四個部分：<b>每一場</b>、<b>快篩</b>（見下一節）、<b>戰績</b>，以及單場的詳細頁（<code>#b=&lt;id&gt;</code>）。按標題列的「＋ 新評比」進到建立流程。</p>
       <ul>
         <li><b>① 題目</b>四種來源：
           <ul>
             <li><b>看板任務</b>（預設）：沿用那張任務的 repo、計畫與驗證指令；缺 repo 或計畫的任務會標「缺 …」，選了也不能送出。</li>
-            <li><b>PRD 草稿</b>：精靈寫好的草稿，送出前照樣過 PRD 閘門。</li>
+            <li><b>工作流程草稿</b>：工作流程寫好的草稿，送出前照樣過 PRD 閘門。</li>
             <li><b>自己出題</b>：看板上沒有這張任務、但臨時想比一題時用——填標題、目標、<b>現有 repo 的路徑</b>與驗證指令，系統照這份描述幫每個模型各開一張任務。表單沒有「計畫」欄位：系統會把這份題目本身寫成一份計畫檔（<code>plans/bench-*.md</code>）給每一組看，評比若被擋下來那份檔案也會一併刪掉。可以另外選一個<b>驗證方案</b>：驗證指令（依機台自動加上 <code>sandbox:</code>）、驗收指標、保護路徑、產出物與 setup 都照方案，repo 沒填就用方案的——每一組用同一把尺。</li>
             <li><b>內建題庫</b>（<code>seed/bench/*.json</code>，放在最後）：slugify、LRU cache、CSV 解析、token bucket、二值化＋連通元件、log 分析——練習用的中性小題，各自附 <code>tests/</code> 當驗收（<code>python3 -m unittest discover</code>）。每次評比會在 <code>spike_root/.bench/</code> 開一個<b>全新的 repo</b>（含自己的 bare origin），不碰任何現有專案。第一次試用評比、或只想比「純寫程式能力」時才用。</li>
           </ul>
@@ -1303,12 +1304,12 @@ loop prd submit my-feature.md --bench-models local:qwen38-flash,local:qwen3-code
         <li><b>④ 送出</b>前會估時間（切換本地模型的次數 × 每次幾分鐘 ＋ 各組實作 ＋ 評分），並列出<b>會花訂閱額度的次數</b>（雲端參賽組＋評審人數）與目前的 session／weekly 用量；用量偏高時會直接警告。</li>
         <li><b>一次只能有一個評比</b>：一台 Spark 只有一顆 GPU，兩個評比同時跑會互相搶模型，而且只有一個看得到。已經有評比在跑時，建立頁會直接說「已經有一個評比在跑：…」。</li>
         <li><b>取消與刪除</b>：詳細頁的「取消評比」會把還沒跑完的組別停掉並標成失敗，把機器讓出來；跑完之後可以「刪除這次評比」，只移除這次比較，<b>每個模型跑出來的任務會留在看板上</b>。若某一組的任務被刪掉，那一組就不列入評分（剩不到兩組時整個評比會標成已取消）。</li>
-        <li><b>執行</b>：每個模型是一張普通任務（標題 <code>[bench] …</code>），各自的 worktree、驗證與續跑，但<b>永遠不會合併</b>回 base branch。一台 Spark 一次只載入一個模型，所以本地組會輪流切換；評比進行中，對話頁的模型面板會顯示<b>「評比使用中」</b>並鎖住切換鈕，評分完成後自動<b>切回原本的模型</b>。</li>
+        <li><b>執行</b>：每個模型是一張普通任務（標題 <code>[bench] …</code>），各自的 worktree、驗證與續跑，但<b>永遠不會合併</b>回 base branch。一台 Spark 一次只載入一個模型，所以本地組會輪流切換；評比進行中，對話頁右欄的「模型」分頁會顯示<b>「評比使用中」</b>並鎖住切換鈕，評分完成後自動<b>切回原本的模型</b>。</li>
         <li><b>結果</b>：推播一次；評比頁的<b>模型 × 領域矩陣</b>累積<b>通過率</b>（有最終量測就看最終量測）、<b>一次就過率</b>、<b>平均第幾次才過</b>、<b>自己用 ncu 的比例</b>、平均分數、勝率、平均輸出 token 與耗時，可依<b>軟體類型</b>、本地／雲端、最低通過率、最少場數篩選。上方的<b>「各類工作建議的本地模型」</b>替每種軟體類型挑出通過率最高的本地模型（同分再比一次就過與評分），旁邊列最好的雲端模型當對照，並寫一句結論（可以交給本地、做得到但不如雲端、還做不來）；少於 3 場只能當參考。評比後 arm 的 worktree 會清掉，<code>loop/&lt;任務 id&gt;</code> 分支保留供檢視；之後重新評分也會沿用當時的量測與 diff。</li>
         <li><b>花費</b>：評審是一個 benchmark <b>唯一的 Anthropic 花費</b>（每位評審一次 <code>claude -p</code>），除非你讓雲端模型也參賽。用量達硬上限時會延後並標為「評分失敗」，可在詳細頁按「重新評分」或執行 <code>loop bench judge &lt;id&gt;</code>；<b>已評分的評比也可以重新評分</b>（會再花一次額度）。服務若在評分中途重啟，下一輪 tick 會自己把它接回去評完。</li>
-        <li><b>PRD 精靈</b>第⑤步的「實作模型」選「評比：多個模型各做一次」就能直接把同一份 PRD 送成評比。</li>
+        <li><b>工作流程</b>的 AI 實作節點選 2 個以上模型，就把同一份 PRD 送成評比。</li>
       </ul>
-      <p>API：<code>GET /api/benchmarks/summary</code>（儀表板）、<code>GET /api/benchmarks/builtin</code>（題庫）、<code>POST /api/benchmarks {source:{kind,ref}, models[], judge_models[], overrides?}</code>（<code>overrides</code> 另可帶 <code>verify_plan_id</code>、<code>dataset</code>、<code>acceptance_metrics</code>、<code>protected_paths</code>、<code>artifacts</code>、<code>verify_timeout_min</code>、<code>timeout_min</code>）、<code>GET /api/benchmarks/:id</code>（含每位評審的 <code>judgements</code>）、<code>GET /api/benchmarks/:id/report.md</code>（報告；<code>?inline=1</code> 直接顯示）、<code>GET /api/benchmarks/matrix?domain=&amp;kind=local|cloud&amp;min_n=&amp;min_pass=</code>、<code>GET /api/benchmarks/recommend</code>、<code>POST /api/benchmarks/:id/judge {judge_models?}</code>、<code>POST /api/benchmarks/:id/cancel</code>、<code>DELETE /api/benchmarks/:id</code>。</p>
+      <p>API：<code>GET /api/benchmarks/summary</code>（摘要）、<code>GET /api/benchmarks/builtin</code>（題庫）、<code>POST /api/benchmarks {source:{kind,ref}, models[], judge_models[], overrides?}</code>（<code>overrides</code> 另可帶 <code>verify_plan_id</code>、<code>dataset</code>、<code>acceptance_metrics</code>、<code>protected_paths</code>、<code>artifacts</code>、<code>verify_timeout_min</code>、<code>timeout_min</code>）、<code>GET /api/benchmarks/:id</code>（含每位評審的 <code>judgements</code>）、<code>GET /api/benchmarks/:id/report.md</code>（報告；<code>?inline=1</code> 直接顯示）、<code>GET /api/benchmarks/matrix?domain=&amp;kind=local|cloud&amp;min_n=&amp;min_pass=</code>、<code>GET /api/benchmarks/recommend</code>、<code>POST /api/benchmarks/:id/judge {judge_models?}</code>、<code>POST /api/benchmarks/:id/cancel</code>、<code>DELETE /api/benchmarks/:id</code>。</p>
       <pre><code>loop config set benchmark_enabled true
 loop bench add --title "matmul kernel" --goal "實作 tiled matmul" --repo ~/bench/cuda-toy \
   --verify "make test" --plan ~/bench/matmul-prd.md --domain cuda \
@@ -1322,6 +1323,17 @@ loop bench report &lt;id&gt; --out ccl.md               # Markdown 報告
 loop bench matrix --domain cuda --local --min-pass 0.5   # 哪些本地模型過得了 CUDA 題
 loop bench recommend                                  # 各類工作建議的本地模型</code></pre>
 
+      <h3>模型快篩：用小題先驗很多模型</h3>
+      <p>一場完整評比要好幾個小時；新模型很多、要一個一個驗時，先用<b>快篩</b>看它會不會寫程式、懂不懂工具，再決定要不要進正式評比。快篩<b>不評分、不做最終量測、不花訂閱額度</b>。</p>
+      <ul>
+        <li><b>怎麼開始</b>：評比頁的「快篩」分頁勾一個或多個本地模型，預設題目是內建題庫的 slugify、log-analyzer、csv-parser，每題上限 15 分鐘；也可以在對話說「快篩 gpt-oss-120b」，或 <code>loop bench screen --models local:a,local:b</code>。只有「模型」分頁登錄過的本地模型能快篩（第一次切換某個 recipe 就會登錄）。</li>
+        <li><b>怎麼跑</b>：每個「模型 × 題目」是一筆快篩，同一批共用一個 <code>sg_…</code> 編號。依模型分組、一題接一題跑，每個模型只切換一次；每題的時間從開始寫程式才算，切模型的時間不算，超時就結束那一題。</li>
+        <li><b>排隊</b>：快篩也遵守「一次一場」，會排在正在跑的評比後面；排程暫停時不會開始。整批跑完推播一次，並切回原本的模型。</li>
+        <li><b>看結果</b>：快篩分頁每批一張卡：每個模型每題「通過（第幾次）・幾分」或「沒過」與原因。總覽的流程圖把一批畫成「快篩 → 題1 → 題2 → 結果 x/y」。可以取消整批，跑完的批次可以刪除。</li>
+        <li><b>戰績</b>：快篩的通過率、第一次就過、時間會算進戰績；勝率、評審分數、兩兩對戰只看正式評比，互不干擾。戰績可以切「含快篩」；某個模型只有快篩結果時，推薦會寫「只有快篩結果」。</li>
+      </ul>
+      <p>API：<code>POST /api/benchmarks/screen {models[], questions?, budget_min?}</code>、<code>GET /api/benchmarks/screens</code>、<code>GET|DELETE /api/benchmarks/screens/:group</code>、<code>POST /api/benchmarks/screens/:group/cancel</code>、<code>GET /api/benchmarks/matrix?screens=false</code>（不含快篩）。CLI：<code>loop bench screen --models … [--questions slugify,csv-parser] [--budget 15]</code>、<code>loop bench screens</code>。</p>
+
       <table>
         <thead><tr><th>設定</th><th>預設</th><th>說明</th></tr></thead>
         <tbody>
@@ -1331,17 +1343,18 @@ loop bench recommend                                  # 各類工作建議的本
           <tr><td><code>local_switch_timeout_sec</code> / <code>local_switch_retry_min</code></td><td>900 / 10</td><td>等待模型就緒的上限秒數；載入失敗後的冷卻分鐘數。</td></tr>
           <tr><td><code>local_gap_review</code></td><td>false</td><td>本地任務是否也跑 Claude 缺口審查（會花 token）。</td></tr>
           <tr><td><code>local_vllm_repo</code> / <code>local_vllm_container</code> / <code>local_vllm_base_url</code></td><td>spark-vllm-docker / vllm_node / http://127.0.0.1:8000/v1</td><td>vLLM recipe 所在目錄、容器名稱、API 位址。</td></tr>
-          <tr><td><code>prd_gate_enabled</code></td><td>false</td><td>開啟 PRD 頁、API 與 <code>loop prd</code>。</td></tr>
+          <tr><td><code>prd_gate_enabled</code></td><td>false</td><td>開啟工作流程、PRD API 與 <code>loop prd</code>。</td></tr>
           <tr><td><code>prd_require_llm</code></td><td>false</td><td>本地模型無法審查時是否擋下（預設只靠規則檢查放行）。</td></tr>
           <tr><td><code>prd_default_model</code> / <code>local_chat_timeout_ms</code></td><td>（空）/ 180000</td><td>PRD 任務的實作模型；本地模型審查逾時。</td></tr>
           <tr><td><code>benchmark_enabled</code></td><td>false</td><td>開啟 Benchmark 頁、API 與自動評比。</td></tr>
           <tr><td><code>bench_judge_model</code></td><td>opus</td><td>評審模型：opus／fable／fable-5／sonnet。</td></tr>
           <tr><td><code>bench_diff_cap_chars</code> / <code>bench_judge_timeout_ms</code></td><td>8000 / 600000</td><td>每個 arm 給評審的 diff 上限；評審呼叫逾時。</td></tr>
           <tr><td><code>bench_final_measure</code></td><td>true</td><td>評分前一組一組重新量測各組的最終程式；排名與通過率以它為準。關掉就只看各組自己驗證的結果。</td></tr>
+          <tr><td><code>bench_screen_questions</code> / <code>bench_screen_budget_min</code></td><td>slugify,log-analyzer,csv-parser / 15</td><td>模型快篩預設的內建題目與每題時間上限（分鐘）。</td></tr>
         </tbody>
       </table>
-      <h3>模型面板：推薦、切換、下載與建置映像（圖示列第 5 個，Alt+5）</h3>
-      <p>面板列出 <code>spark-vllm-docker/recipes/</code> 裡<b>每一個 recipe</b>（不只註冊過的五個），並依<b>這台機器的現況</b>決定每一列唯一的下一步。一台 Spark 其實能跑二十來個 recipe，卡住的通常只是兩件事：權重還沒下載、或它們共用的容器映像 <code>vllm-node</code> 還沒建——這兩件都能在面板上一鍵完成，在背景跑、一次一件、<b>不影響正在服務的模型</b>。</p>
+      <h3>模型分頁：推薦、切換、下載與建置映像（對話頁右欄，Alt+4）</h3>
+      <p>分頁列出 <code>spark-vllm-docker/recipes/</code> 裡<b>每一個 recipe</b>（不只註冊過的五個），並依<b>這台機器的現況</b>決定每一列唯一的下一步。一台 Spark 其實能跑二十來個 recipe，卡住的通常只是兩件事：權重還沒下載、或它們共用的容器映像 <code>vllm-node</code> 還沒建——這兩件都能在面板上一鍵完成，在背景跑、一次一件、<b>不影響正在服務的模型</b>。</p>
       <div class="tbl-wrap">
       <table>
         <thead><tr><th>按鈕</th><th>什麼時候出現</th><th>做什麼</th></tr></thead>
@@ -1349,7 +1362,7 @@ loop bench recommend                                  # 各類工作建議的本
           <tr><td><b>切換</b></td><td>權重完整、映像已建、台數夠</td><td>先跳確認，再重啟 vLLM（幾分鐘、期間不能對話）。第一次切某個 recipe 會自動把它登錄進 <code>local_models</code>（id＝recipe 檔名），之後對話與 Benchmark 的模型清單也選得到。</td></tr>
           <tr><td><b>下載（≈NN GB）</b>／<b>續傳</b></td><td>權重不在 HF 快取，或下載到一半</td><td>背景跑 <code>uvx hf download &lt;model&gt;</code>（可續傳；大小來自 HF API，快取一天）。進度條顯示已下載 GB／總量與 log 最後一行，可取消——下載到一半的檔案留著，再按一次會續傳。</td></tr>
           <tr><td><b>建置 vllm-node</b></td><td>有模型已下載但映像沒建</td><td>只出現一次（上方提示卡，寫著幾個模型在等它）。<code>vllm-node</code>／<code>vllm-node-b12x</code> 其實是拉現成映像再 tag（約 24 GB：有線幾分鐘，這台走 Wi-Fi 實測約 5 MB/s、要 1 小時多）；<code>vllm-node-mxfp4</code> 要真的編譯，20～40 分鐘。跑的是 <code>run-recipe.sh &lt;recipe&gt; --solo --build-only</code>。</td></tr>
-          <tr><td>灰字</td><td>需要 2 台以上 Spark、配方缺 <code>model</code> 欄位、或 HF gated 模型（這台沒有 HF token）</td><td>不給按；第二台接上後 <code>loop config set local_spark_nodes 2</code> 即可。</td></tr>
+          <tr><td>灰字</td><td>需要 2 台以上 Spark、配方缺 <code>model</code> 欄位、或 HF gated 模型（這台沒有 HF token）</td><td>不給按；第二台接上後照下面的「兩台 Spark」設定。</td></tr>
         </tbody>
       </table>
       </div>
@@ -1359,31 +1372,47 @@ loop bench recommend                                  # 各類工作建議的本
       <p>回答產生中不給切換；切換後畫面每 5 秒回報狀態（starting／ready／error）與已經過的分鐘數，對話紀錄不受影響。工作狀態存在 <code>local_job_json</code>，引擎重啟後會依 pid 重新認領還在跑的下載；log 在 <code>&lt;data&gt;/logs/local-&lt;download|build&gt;-&lt;recipe&gt;-*.log</code>。CLI：<code>loop local download &lt;recipe&gt;</code>、<code>loop local build &lt;recipe&gt;</code>、<code>loop local jobs</code>。</p>
       <p>API：<code>GET /api/local/catalog</code>（每個 recipe 的 action／size／blocked_by＋images＋job）、<code>POST /api/local/catalog/:recipe/load</code>、<code>POST /api/local/jobs {kind: download|build, recipe}</code>（409 已有工作／507 磁碟不足）、<code>GET /api/local/jobs/current</code>、<code>POST /api/local/jobs/current/cancel</code>、<code>GET /api/local/jobs/current/log?lines=40</code>。</p>
 
+      <h3>兩台 Spark：跑一台放不下的大模型</h3>
+      <p>兩台 DGX Spark 用 200G 網路對接後，需要兩台的 recipe（配方裡寫 <code>cluster_only: true</code>）就能載入。Loop 的做法：</p>
+      <ul>
+        <li><b>啟動</b>：<code>local_spark_nodes</code> 是 2、而且配方需要兩台時，改用叢集模式 <code>run-recipe.sh &lt;recipe&gt; --earlyoom</code>（不加 <code>--solo</code>），節點由 vLLM repo 的 <code>.env</code> 決定。單機配方照舊用 <code>--solo</code>。</li>
+        <li><b>停止</b>：<code>local_spark_nodes</code> 是 2 時，每次切換模型或 <code>loop local stop</code> 都會先跑 <code>launch-cluster.sh stop</code> 把兩台的容器都停掉，再停本機，不會留一半在另一台佔記憶體。</li>
+        <li><b>擋下</b>：<code>local_spark_nodes</code> 還是 1 時，需要兩台的模型一律灰掉、伺服器也拒絕載入。</li>
+      </ul>
+      <p>設定步驟（第二台 spark-02 已完成基本設定、兩台用 200G 的 <code>enP2p1s0f0np0</code> 對接）：</p>
+      <ol>
+        <li><b>網路</b>：兩台的 200G 介面設固定 IP（這台 <code>192.168.177.11</code>，spark-02 <code>192.168.177.12</code>，MTU 9000），彼此 ping 得到。</li>
+        <li><b>SSH</b>：這台能免密碼 SSH 到 spark-02（<code>ssh-copy-id</code>）。</li>
+        <li><b>vLLM repo 的 <code>.env</code></b>：<code>CLUSTER_NODES=192.168.177.11,192.168.177.12</code>、<code>ETH_IF</code>、<code>IB_IF</code> 填 200G 介面與 RoCE 裝置名稱；<code>launch-cluster.sh --check-config</code> 要找到兩個節點。</li>
+        <li><b>映像與權重</b>：spark-02 也要有同一個容器映像與模型權重（同樣的 HF 快取路徑）。</li>
+        <li><b>告訴 Loop</b>：<code>loop config set local_spark_nodes 2</code>，然後在「模型」分頁切到一個兩台的模型；切回單機模型時，確認兩台的容器都停了。</li>
+      </ol>
+
       <h3>對話工作台（首頁 <code>/</code>）</h3>
       <ul>
         <li><b>入口</b>：網址根目錄就是對話（舊的 <code>/chat.html</code> 會自動轉過來，<code>?token=</code> 保留）。直接和 vLLM 目前載入的本地模型對話，不經雲端、不花 token；需要 <code>local_models_enabled=true</code> 且模型狀態為就緒。</li>
-        <li><b>速度</b>：每則回答下方標出首字延遲、輸出速度（tok/s）、輸出與讀入 token、總耗時；右側「模型」面板放大顯示，生成中另有服務端即時 tok/s。「思考模式」晶片會先推理再回答，較慢，思考過程可展開。</li>
-        <li><b>模型與記憶體</b>：右側「模型」面板顯示權重檔大小、量化格式、MoE 架構、最長上下文、MTP 推測解碼接受率；統一記憶體已用／總量與 vLLM 上限（<code>gpu_memory_utilization</code>）、KV 快取容量與使用率、GPU 溫度／功耗，每秒更新（面板收起或切到別的面板時停止查詢）。</li>
-        <li><b>對話紀錄</b>：存在伺服器、<b>依使用者分開</b>。身分優先取 Tailscale 注入的登入帳號，沒有就用左欄底部自填的名字（<code>x-loop-user</code>）。這是工作區分隔、<b>不是權限控管</b>：知道網址與 token 的人都看得到這台機器上的資料。可搜尋（中文兩字詞也搜得到）、改名、刪除；接續舊對話時只會把最近 <code>chat_context_turns</code>（預設 12）輪帶進模型，較早的內容留在畫面上並標示。</li>
+        <li><b>速度</b>：每則回答下方標出首字延遲、輸出速度（tok/s）、輸出與讀入 token、總耗時；右欄「模型」分頁的「機台狀況」放大顯示，生成中另有服務端即時 tok/s。「思考模式」晶片會先推理再回答，較慢，思考過程可展開。</li>
+        <li><b>模型與記憶體</b>：右欄「模型」分頁的「機台狀況」顯示權重檔大小、量化格式、MoE 架構、最長上下文、MTP 推測解碼接受率；統一記憶體已用／總量與 vLLM 上限（<code>gpu_memory_utilization</code>）、KV 快取容量與使用率、GPU 溫度／功耗，每秒更新（右欄收起或切到別的分頁時停止查詢）。</li>
+        <li><b>對話紀錄</b>：存在伺服器、<b>依使用者分開</b>。身分優先取 Tailscale 注入的登入帳號，沒有就用標題列「你是」填的名字（<code>x-loop-user</code>）。這是工作區分隔、<b>不是權限控管</b>：知道網址與 token 的人都看得到這台機器上的資料。可搜尋（中文兩字詞也搜得到）、改名、刪除；接續舊對話時只會把最近 <code>chat_context_turns</code>（預設 12）輪帶進模型，較早的內容留在畫面上並標示。</li>
         <li><b>逐則動作</b>：滑過訊息會出現按鈕——<b>重答</b>（丟掉這個回答重問，舊的軟刪除、順序不亂）、<b>編輯重問</b>（把問題放回輸入框，之後的內容一併移除）、<b>複製</b>、<b>存進知識庫</b>、<b>轉成任務</b>、<b>請雲端複核</b>。</li>
         <li><b>轉成任務會先問你要開哪一種</b>：按下去本地模型先判斷這段對話像哪種工作（<code>POST /api/chat/messages/:id/intent</code>，模型不在就用關鍵字），跳出小視窗讓你確認、改標題與欄位，再依選擇走不同出口：
           <div class="tbl-wrap"><table>
             <thead><tr><th>選項</th><th>什麼時候</th><th>去哪裡</th></tr></thead>
             <tbody>
-              <tr><td><b>軟體修正</b></td><td>機況、誤判／漏檢、crash、參數要調</td><td>開一份 <b>PRD 精靈草稿</b>（類型 演算法／錯誤、repo、症狀、期望、參考來源都先填好），精靈開在第 2 步；精靈送出後這則回答自動變成「已建任務」。</td></tr>
+              <tr><td><b>軟體修正</b></td><td>機況、誤判／漏檢、crash、參數要調</td><td>開一份 <b>工作流程草稿</b>（類型 演算法／錯誤、repo、症狀、期望、參考來源都先填好）；送出後這則回答自動變成「已建任務」。</td></tr>
               <tr><td><b>功能或效能</b></td><td>要多一個功能、要更快</td><td>同上，類型 功能新增／效能。</td></tr>
               <tr><td><b>驗證新技術／套件</b></td><td>回答介紹了某個 GitHub 專案、套件、論文</td><td>在 <code>spike_root</code>（預設 <code>~/Addis/spikes/&lt;名稱&gt;</code>）<b>開一個新 git repo</b>（含 README／PLAN.md 與自己的 bare origin），建一張任務：裝起來、跑最小 demo、寫 <code>REPORT.md</code>（驗證＝<code>test -s REPORT.md</code> ＋ 人工）。不碰現有專案。</td></tr>
               <tr><td><b>待辦／純紀錄</b></td><td>新聞彙整、報告、對比表</td><td>現行行為：一張草稿任務，內容就是這則回答。</td></tr>
             </tbody>
           </table></div>
-          同一則回答只會有一個去處（再按會回到同一份草稿或任務）；PRD 精靈未啟用時前兩項不能選。</li>
-        <li><b>智慧調整參數面板</b>（圖示列第 2 個，或 Alt+2）：填症狀（可加機台／模組，例「IP 瑕疵偵測」）→ 按「產生建議」，問題照樣走一般對話、回答出現在對話區，面板上方顯示<b>最新建議</b>（第一條建議的檔案、參數、目前值 → 建議值、風險）與「轉成任務」「在對話中查看」。下方<b>歷史建議</b>列出你在所有對話裡拿到的建議、對應任務與任務目前狀態，點一下就回到那段對話並捲到那一則（<code>GET /api/chat/tune/history</code>）。</li>
+          同一則回答只會有一個去處（再按會回到同一份草稿或任務）；工作流程（<code>prd_gate_enabled</code>）未啟用時前兩項不能選。</li>
+        <li><b>智慧調整參數</b>（右欄「調參」分頁，Alt+2）：填症狀（可加機台／模組，例「IP 瑕疵偵測」）→ 按「產生建議」，問題照樣走一般對話、回答出現在對話區，分頁上方顯示<b>最新建議</b>（第一條建議的檔案、參數、目前值 → 建議值、風險）與「在對話中查看」；要做成任務，用那則回答底下的「轉成任務」。下方<b>歷史建議</b>列出你在所有對話裡拿到的建議、對應任務與任務目前狀態，點一下就回到那段對話並捲到那一則（<code>GET /api/chat/tune/history</code>）。</li>
         <li><b>調參建議（輸入框晶片）</b>：打開「調參建議」晶片後描述症狀（例：ROI 邊緣常把正常紋路判成刮傷），模型會先查知識庫定位程式與參數，最後輸出一張建議表：檔案、參數、目前值、建議值、原因、風險、怎麼驗。<b>這只是建議，系統沒有任何寫入機台或設定檔的路徑</b>；按「轉成任務」會開一張 Loop <b>草稿</b>任務帶著整張表（<code>created_by=chat</code>、<code>verify_mode=manual</code>、goal 內明寫「不得自動套用到機台」），要不要排程仍由人決定。同一則回答重複按只會有一張任務（<code>source_ref=chat:&lt;messageId&gt;</code>）。</li>
         <li><b>存進知識庫</b>：把回答寫成 vault 筆記並立刻建索引，之後對話查得到；同一則回答只會存一次。需要先用 <code>loop ingest add --vault &lt;路徑&gt;</code> 登錄一個 vault 來源。</li>
         <li><b>請雲端複核</b>：把這則本地回答送給雲端高階模型複核（指出錯誤、補遺漏、給最終建議）。<b>預設關閉</b>（<code>chat_escalate_enabled=false</code>），因為這是頁面上唯一會離開本機、花訂閱額度的動作；開啟後仍受 <code>hard_limit_pct</code> 同一道預算閘門管制，逾時 <code>chat_escalate_timeout_ms</code>（預設 240 秒；實測一則短回答的複核約 112 秒。連線若先斷掉，複核仍會在背景完成並存起來，重新整理就看得到）。複核結果以雲端樣式另存一則訊息，<b>不會</b>被帶進後續提問的上下文。</li>
         <li><b>存檔（單則回答）</b>：每則回答下方的「存檔」列出<b>這一則實際產生的東西</b>：<b>Markdown</b>（模型原始文字）、<b>HTML</b>（排版後、只含這一則）、<b>列印／存成 PDF</b>（開瀏覽器列印，目的地選另存 PDF）、<b>簡報 .pptx</b>，以及每一段 <code>```</code> 區塊各自成檔——SVG 圖存 <code>.svg</code>、產生的網頁存 <code>.html</code>、程式碼依語言給副檔名。沒有圖就不會出現圖那一列。檔案一律下載到你的裝置，伺服器不留檔；要留在機器上請用「存進知識庫」。</li>
         <li><b>簡報（.pptx）怎麼來的</b>：回答的 markdown 在伺服器切成投影片（<code>src/chat/pptx.ts</code>：標題成頁、條列成點、markdown 表格成真表格、每段程式碼一頁、每張 SVG 轉圖一頁），再由 <code>scripts/answer_pptx.py</code> 用 python-pptx 畫成 16:9。<b>不是</b>第 25 章那條企業週報管線（那條要公司範本，版面不可自由生成）。需要一個裝了 python-pptx 的 python：設定 <code>office_python</code>（空白時依序退回 <code>report_pptx_python</code>、資料目錄下的 <code>office-venv/bin/python</code>、<code>python3</code>）。這台已指向 <code>office-venv</code>；沒有的話「簡報」那一列會變灰並寫出原因。上限：40 頁、每頁 7 點、程式碼 22 行、表格 12 列。</li>
-        <li><b>匯出與分享（整段對話）</b>：頂欄「⋯」可匯出 Markdown（伺服器產生，含出處與已轉任務／已存 KB 的註記）或 HTML（目前畫面）；「建立分享連結」會產生 <code>/share.html#s_…</code> 唯讀頁並複製到剪貼簿——網址裡的代碼就是憑證，任何拿到的人都看得到（不含圖片），可隨時「取消分享」立即失效。<code>chat_share_enabled=false</code> 可整個關掉。</li>
+        <li><b>匯出與分享（整段對話）</b>：標題列「⋯」可匯出 Markdown（伺服器產生，含出處與已轉任務／已存 KB 的註記）或 HTML（目前畫面）；「建立分享連結」會產生 <code>/share.html#s_…</code> 唯讀頁並複製到剪貼簿——網址裡的代碼就是憑證，任何拿到的人都看得到（不含圖片），可隨時「取消分享」立即失效。<code>chat_share_enabled=false</code> 可整個關掉。</li>
         <li><b>貼圖提問</b>：在頁面任何地方按 Ctrl+V 貼上截圖，或拖放、按「加入圖片」（一次最多 4 張，自動縮到長邊 1600 px）。圖片存在伺服器（<code>&lt;data&gt;/chat-images/</code>），資料庫只存路徑；回放的舊圖只供檢視，不會再送進模型。</li>
         <li><b>HTML / SVG 直接顯示</b>：回答以 Markdown 排版；<code>```html</code>、<code>```svg</code> 或整段 <code>&lt;svg&gt;</code> 寫完後直接顯示預覽（高度上限 2400px，可按「放大」用整個視窗看），可切換「原始碼」或複製。預覽跑在沙箱內，讀不到本頁與 API token，也不能連網（只允許載入 jsDelivr / cdnjs 的程式庫）。</li>
         <li><b>引用 CF-AOI 知識庫</b>：開啟後每個問題會先用混合檢索（全文＋bge-m3 向量）找出最相關的 8 段資料，放進提示讓模型依據回答並標出處編號 [1]、[2]。檢索前會先請本地模型把問題轉成 3–8 個關鍵字——因為全文索引把整句問題當成一個片語比對，口語問句幾乎搜不到，關鍵字才搜得到程式碼裡的名稱；回答下方可展開每則參考資料的檔案、行號與原文。知識庫沒有的內容模型會說沒找到。需要 <code>rag_enabled=true</code>。</li>
@@ -1403,8 +1432,8 @@ loop bench recommend                                  # 各類工作建議的本
           <tr><td><code>chat_share_enabled</code></td><td>true</td><td>分享連結（<code>/share.html</code>）。</td></tr>
           <tr><td><code>task_mcp_enabled</code></td><td>true</td><td>任務執行中可呼叫 <code>loop_recall</code>／<code>loop_search</code>（見第 14 章）。</td></tr>
           <tr><td><code>office_python</code></td><td>（空）</td><td>有 python-pptx 的 python，供「存檔 → 簡報」使用（見第 26 章）。</td></tr>
-          <tr><td><code>prd_repo_allowlist</code></td><td>（空）</td><td>PRD 精靈的 repo 選擇器／圖集檢查可讀的額外根目錄（絕對路徑 CSV）。</td></tr>
-          <tr><td><code>local_spark_nodes</code></td><td>1</td><td>這個部署有幾台 DGX Spark；模型切換清單依它決定哪些跑得動。</td></tr>
+          <tr><td><code>prd_repo_allowlist</code></td><td>（空）</td><td>工作流程與對話操作可選的 repo：已啟用的知識來源之外，再加的根目錄（絕對路徑 CSV）。</td></tr>
+          <tr><td><code>local_spark_nodes</code></td><td>1</td><td>這個部署有幾台 DGX Spark；模型切換清單依它決定哪些跑得動，設 2 時需要兩台的模型用叢集模式啟動（見「兩台 Spark」）。</td></tr>
           <tr><td><code>chat_tools_enabled</code> / <code>chat_search_url</code></td><td>false / http://127.0.0.1:8080</td><td>上網／工具（見 26a）：總開關與 SearXNG 位址。</td></tr>
           <tr><td><code>chat_mcp_enabled</code> / <code>mcp_servers_json</code> / <code>mcp_timeout_ms</code></td><td>true / 內建三個 / 30000</td><td>MCP bridge（見 26a）。</td></tr>
           <tr><td><code>terminal_enabled</code> / <code>terminal_allowed_users</code> / <code>terminal_idle_min</code> / <code>terminal_cwd</code></td><td>false / （空） / 30 / 這份 checkout</td><td>終端機（見 26a）；<code>terminal_cwd</code> 是新分頁的起始目錄。</td></tr>
@@ -1453,7 +1482,7 @@ loop bench recommend                                  # 各類工作建議的本
       </div>
       <p>server 起不來（例如還沒 <code>npm --prefix mcp ci</code>）時卡片會直接寫原因，其他工具照常。</p>
 
-      <h3>終端機（頂欄 ⌨，或 Ctrl+`）</h3>
+      <h3>終端機（對話頁標題列 ⌨，或 Ctrl+`）</h3>
       <ul>
         <li><b>誰看得到</b>：<code>terminal_enabled=true</code> 且你的身分在 <code>terminal_allowed_users</code>（CSV：<code>ts:&lt;Tailscale 登入&gt;</code>、<code>name:&lt;名字&gt;</code>（只有信任的 LAN 才用）、<code>local</code>）。其他人連按鈕都沒有；伺服器端也擋（404／403）。</li>
         <li><b>怎麼用</b>：底部抽屜、可拖高、多分頁（＋／✕、雙擊改名）。「收起」只是把抽屜藏起來，shell 還在；重新打開會接回原本的畫面。斷線自動重連。閒置 <code>terminal_idle_min</code>（30）分鐘自動關。</li>
@@ -1695,7 +1724,7 @@ loop config set morning_report_time 08:00        # 每天 08:00 經 ntfy 推播�
 loop morning                                    # 在終端機看同一份晨報（--hours 12、--json）</code></pre>
       <ul>
         <li>時段外不會開始新的本地模型任務，也不會為它們載入模型；已經在跑的會跑完。雲端模型的任務不受影響。看板的「排程設定」也可以改，留空＝任何時間。</li>
-        <li>晨報頁 <code>/morning.html</code> 在對話頁左欄和看板頂欄都有連結，把任務分成：要你處理、失敗、驗收通過、待人工驗收、中斷會自動續跑、執行中、還沒輪到。
+        <li>晨報頁 <code>/morning.html</code> 在左側導覽（晨報）與總覽的 ⋯ 都有連結，把任務分成：要你處理、失敗、驗收通過、待人工驗收、中斷會自動續跑、執行中、還沒輪到。
           <p>每個任務會列出：</p>
           <ul>
             <li>驗證步驟與失敗時的輸出</li>
@@ -1722,7 +1751,7 @@ loop morning                                    # 在終端機看同一份晨報
             <li>判定一定要經過 MIL 8.0 或 VB：需要一台 Windows 電腦，用「不經 Docker 的 SSH 模式」編譯和執行。這個模式<b>還沒做</b>。</li>
           </ul>
         </li>
-        <li><b>PRD 精靈頁面</b>還不會產生「驗收指標」「保護路徑」「主機」這三段。請手寫，或讓高階模型照 <code>loop_prd_template</code> 寫；<code>loop prd check</code> 和 <code>loop_prd_check</code> 都認得這三段。</li>
+        <li><b>工作流程</b>會從驗收門檻與準備環境節點產生「驗收指標」「保護路徑」兩段，「主機」由驗證方案帶入；手寫的 PRD 請照 <code>loop_prd_template</code> 寫，<code>loop prd check</code> 和 <code>loop_prd_check</code> 都認得這三段。</li>
         <li><b>量什麼、量得準不準，是人的責任</b>：圖集要能代表產線；評估程式和標準答案要事先驗證過，並列在保護路徑裡。</li>
       </ul>
 
@@ -1762,19 +1791,19 @@ loop morning                                    # 在終端機看同一份晨報
         <li><b>操作人員</b>：從瀏覽器連進來，說清楚要改什麼、挑驗證方案，早上看結果、自己試跑、確認沒問題再交付。</li>
         <li><b>工程師</b>：事先設定好驗證方案（在哪台機台、跑什麼、用哪些圖資、門檻多少），之後就不用每次參與。</li>
       </ul>
-      <p>操作人員用到的頁面都在對話頁左欄和任務看板上方：<b>新工作</b>、<b>晨報</b>、<b>驗收頁</b>、<b>驗證方案</b>。畫面設計稿在 Claude Design 的「Loop 操作介面重設計」。</p>
+      <p>操作人員用到的頁面都在左側導覽：<b>工作流程</b>（開新工作）、<b>晨報</b>、<b>驗證方案</b>；<b>驗收頁</b>從總覽、晨報或對話頁「需要你處理」點任務進去。</p>
 
       <h3>四個步驟</h3>
       <div class="tbl-wrap"><table>
         <thead><tr><th>步驟</th><th>頁面</th><th>做什麼</th></tr></thead>
         <tbody>
-          <tr><td>1 新工作</td><td><code>/job.html</code></td><td>
+          <tr><td>1 開新工作</td><td><code>/flow.html#new</code></td><td>
             <ol>
-              <li>選要改的軟體和分支。</li>
-              <li>用自己的話寫「現在哪裡不對」「改好後應該怎樣」。</li>
-              <li>挑驗證方案和圖資。</li>
-              <li>按「檢查需求」，本地模型會先讀一次，沒寫清楚的地方會列出來。</li>
-              <li>補好後按「送出」。</li>
+              <li>一兩句話寫要做什麼，選要改的軟體和分支。</li>
+              <li>挑驗證方案（圖資、門檻、人工驗收清單一起帶入），按「產生流程」。</li>
+              <li>在「需求」節點用自己的話寫「現在哪裡不對」「改好後應該怎樣」。</li>
+              <li>按「檢查」，本地模型會先讀一次，沒寫清楚的節點會亮 ⚠。</li>
+              <li>補好後按「開始執行」。</li>
             </ol>
           </td></tr>
           <tr><td>2 等結果</td><td><code>/morning.html</code></td><td>本地模型的工作在夜間時段執行。早上會推播晨報，點開就是晨報頁；從任務的驗收頁也能看到進度。</td></tr>
@@ -1794,15 +1823,15 @@ loop morning                                    # 在終端機看同一份晨報
           </td></tr>
         </tbody>
       </table></div>
-      <p>從新工作送出的任務一定要經過人核可：它的驗證方式固定包含人工驗收。所以就算自動驗收全部通過，程式也要等你按了核可才會併進分支。</p>
+      <p>驗證方案有人工驗收項目時，工作一定要經過人核可：就算自動驗收全部通過，程式也要等你把清單勾完、按了核可才會併進分支。</p>
 
       <h3>第一次使用</h3>
       <ul>
-        <li><b>網址</b>：用 Tailscale 網址開，例如 <code>https://&lt;主機&gt;/job.html</code>。第一次在網址後加 <code>?token=…</code>，瀏覽器會記住。</li>
+        <li><b>網址</b>：用 Tailscale 網址開，例如 <code>https://&lt;主機&gt;/flow.html#new</code>。第一次在網址後加 <code>?token=…</code>，瀏覽器會記住。</li>
         <li><b>你是誰</b>：
           <ul>
-            <li>用 Tailscale 登入的人會自動帶出身分，右上角直接顯示你的名字，不用再填。</li>
-            <li>其他人請按右上角「填名字」。勾選、核可、發佈都會記在這個名字下。</li>
+            <li>用 Tailscale 登入的人會自動帶出身分，標題列右邊直接顯示「你是 ○○」，不用再填。</li>
+            <li>其他人請按標題列右邊的「填名字」。勾選、核可、發佈都會記在這個名字下。</li>
           </ul>
         </li>
         <li><b>能不能試跑</b>：試跑會執行程式，所以你的身分要在 <code>exec_allowed_users</code> 裡，例如 <code>ts:&lt;登入帳號&gt;</code> 或 <code>name:&lt;名字&gt;</code>，由工程師設定。看、勾選、核可、下載不需要這個權限。</li>
@@ -1911,7 +1940,7 @@ loop verify-plan datasets &lt;方案 id&gt;     # 人員會看到的圖資清單
             </ul>
           </td></tr>
           <tr><td>退回修改之後</td><td>任務回到佇列，你的意見會附在需求後面。它在同一個分支上接著改，人工清單重新開始。</td></tr>
-          <tr><td>看板上的草稿一直加不進排程</td><td>通常是從對話轉成的待辦，缺 repo 或驗證。按「用新工作重寫」，內容會帶到新工作頁。</td></tr>
+          <tr><td>看板上的草稿一直加不進排程</td><td>通常是從對話轉成的待辦，缺 repo 或驗證。按「用工作流程重寫」，內容會帶到新工作流程。</td></tr>
         </tbody>
       </table></div>
       <p>API（給整合用）：</p>
@@ -1933,10 +1962,11 @@ loop verify-plan datasets &lt;方案 id&gt;     # 人員會看到的圖資清單
         <thead><tr><th>你可以說</th><th>會發生什麼</th></tr></thead>
         <tbody>
           <tr><td>現在狀況？／有什麼要我處理？</td><td>狀況總覽：等你處理的任務、正在跑和排隊的任務、評比、額度、本地模型。</td></tr>
-          <tr><td>找登入相關的任務／t_… 怎麼了？</td><td>列出任務或評比（都有 id）；看單張的詳情，以及接下來「你可以說」的話。</td></tr>
+          <tr><td>找登入相關的任務／t_… 怎麼了？</td><td>列出任務或評比（都有 id）；看單張的詳情，以及接下來「你可以說」的話。也看得懂驗證方案 <code>vp_…</code> 與快篩批次 <code>sg_…</code>。</td></tr>
           <tr><td>哪個模型適合 CUDA？</td><td>依評比結果的模型戰績。</td></tr>
           <tr><td>修一個 bug／加一個功能／演算法誤判／效能／評估這個套件（貼網址）／大工作拆成幾塊</td><td>照範本問清楚，組成 PRD 草稿並檢查。你確認後才送出。草稿也能在工作流程頁打開來改。</td></tr>
           <tr><td>重賽 CCL，加 Nemotron、拿掉 haiku</td><td>沿用上一場的題目、驗證、門檻和保護路徑，換參賽模型。你確認後才開始。</td></tr>
+          <tr><td>快篩 gpt-oss-120b 和 qwen38-flash</td><td>用內建小題（預設 slugify、log-analyzer、csv-parser，每題 15 分鐘）先驗每個模型，不評分、不花額度；你確認後開始，或排在正在跑的評比後面。</td></tr>
           <tr><td>排入／中止／續跑／重來／放棄／核可／合併／退回修改／結案／刪除 t_…</td><td>先檢查任務現在的狀態允不允許。你確認後執行，和看板按鈕做的事一樣。</td></tr>
           <tr><td>取消評比／重新評分／重量基準 b_…</td><td>同上。</td></tr>
           <tr><td>切到 qwen3-coder-next</td><td>這則回答寫完才切，因為切換會重啟 vLLM。如果還有別的回答正在產生，或權重還沒下載，就會拒絕並說明原因。</td></tr>

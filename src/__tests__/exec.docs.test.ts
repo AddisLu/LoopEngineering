@@ -64,12 +64,12 @@ describe('the PRD example in chapter 26c', () => {
 });
 
 describe('the manual documents the operator flow', () => {
-  it('chapter 26d is in the TOC and walks a non-programmer through 新工作 → 驗收 → 交付', () => {
+  it('chapter 26d is in the TOC and walks a non-programmer through 工作流程 → 驗收 → 交付', () => {
     const manual = fs.readFileSync(path.join(__dirname, '..', '..', 'docs', '操作說明.html'), 'utf8');
     expect(manual).toContain('<section id="operators">');
     expect(manual).toContain('href="#operators"');
     for (const s of [
-      '/job.html',
+      '/flow.html#new',
       '/task.html',
       '/plans.html',
       'loop verify-plan add',
@@ -80,7 +80,7 @@ describe('the manual documents the operator flow', () => {
       'SHA256SUMS',
       'artifacts_max_mb',
       'exec_allowed_users',
-      '用新工作重寫',
+      '用工作流程重寫',
       '--artifacts',
     ]) {
       expect(manual, s).toContain(s);
@@ -99,5 +99,26 @@ describe('the manual documents 對話操作', () => {
     for (const s of [...keys, '確認 K7Q', 'loop-ops-mcp.mjs', 'LOOP_OPS_USER', '/api/ops/actions/:id/confirm', 'prd_repo_allowlist']) {
       expect(manual, s).toContain(s);
     }
+  });
+});
+
+describe('the manual documents the one app frame, 模型快篩 and two Sparks', () => {
+  const manual = () => fs.readFileSync(path.join(__dirname, '..', '..', 'docs', '操作說明.html'), 'utf8');
+
+  it('chapter 5 describes the frame every page shares and the chat\'s four tabs', () => {
+    const m = manual();
+    for (const s of ['同一套版面', '你是 ○○', 'Alt+1～4', '需要你處理', '機台狀況', '/plans.html#vp_', '這次拿掉的重複功能']) expect(m, s).toContain(s);
+    // the pages it used to describe are gone
+    for (const s of ['圖示列第', 'Alt+1～7', '五步引導', '頂欄「＋ 新增 task」']) expect(m, s).not.toContain(s);
+  });
+
+  it('chapter 26 covers 模型快篩 (settings, CLI, API) and starting a model across two Sparks', async () => {
+    const { DEFAULT_SETTINGS } = await import('../config.js');
+    const m = manual();
+    for (const k of ['bench_screen_questions', 'bench_screen_budget_min', 'local_spark_nodes']) {
+      expect(DEFAULT_SETTINGS, k).toHaveProperty(k);
+      expect(m, k).toContain(k);
+    }
+    for (const s of ['模型快篩', 'loop bench screen', '/api/benchmarks/screen', 'sg_…', '兩台 Spark', 'launch-cluster.sh stop', 'CLUSTER_NODES', 'cluster_only']) expect(m, s).toContain(s);
   });
 });
