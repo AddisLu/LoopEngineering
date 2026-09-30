@@ -349,3 +349,12 @@ export async function confirmButton(db: Database.Database, idOrCode: string, use
   const after = await getOpsRunner().start(db, getActionById(db, a.id)!, deps);
   return { ok: true, action: after, message: outcomeLine(after) };
 }
+
+/**
+ * loop-ops (the MCP forwarder for tools like Claude Code, where a person approves each call): no
+ * conversation turns to check, so the action's code must be given, and it must be this caller's.
+ */
+export async function confirmWithCode(db: Database.Database, code: string | undefined, userKey: string, deps: ExecDeps): Promise<ConfirmOutcome> {
+  if (!code || !code.trim()) return { ok: false, message: '要帶動作代碼（code），就是準備時回傳的那三個字' };
+  return confirmButton(db, code.trim(), userKey, deps);
+}

@@ -30,6 +30,8 @@ import { SANDBOX_PROMPT, execAllowedFor, sandboxTools, type SandboxRun } from '.
 import { chatWorkspaceDir, removeChatWorkspace } from '../exec/workspace.js';
 import type { McpPool } from '../mcp/client.js';
 import { runToolLoop } from '../chat/toolLoop.js';
+import { OPS_PROMPT, opsAllowedFor, opsPromptTail, opsTools, type OpsToolDeps } from '../chatops/tools.js';
+import { getOpsRunner } from '../chatops/execute.js';
 import type { Lookup } from '../chat/netGuard.js';
 import { recipeInfo } from '../local/recipes.js';
 import { nanoid } from 'nanoid';
@@ -140,6 +142,8 @@ export interface ChatRouteOptions {
   sandboxRun?: SandboxRun;
   /** Test injection: the in-flight answer registry (defaults to the process singleton). */
   generations?: GenerationRegistry;
+  /** Test injection for 對話操作: preparer, runner and git dependencies (src/chatops/tools.ts). */
+  opsDeps?: OpsToolDeps;
 }
 
 interface ModelFiles {
@@ -336,7 +340,8 @@ export function systemPromptWithTools(tools: ToolDef[]): string {
     .filter(Boolean)
     .join('');
   const sandbox = names.includes('sandbox_run') ? SANDBOX_PROMPT : '';
-  return ['你是在網頁對話框裡直接回答問題的助理，預設使用繁體中文。', how, sandbox, ...PROMPT_TAIL].filter(Boolean).join('\n');
+  const ops = names.includes('ops_overview') ? OPS_PROMPT : '';
+  return ['你是在網頁對話框裡直接回答問題的助理，預設使用繁體中文。', how, sandbox, ops, ...PROMPT_TAIL].filter(Boolean).join('\n');
 }
 
 /**
@@ -1207,14 +1212,14 @@ export function registerChatRoutes(app: FastifyInstance, db: Database.Database, 
     if (!model) return reply.code(409).send({ error: `no local model ready (status: ${status})` });
     // 離開頁面也繼續: the page hands over the empty assistant row it created; the answer is then
     // kept and persisted server-side (src/chat/generation.ts) and can be re-attached to.
-    let genMeta: { messageId: string; conversationId: string; userKey: string } | null = null;
+    let genMeta: { messageId: string; conversationId: string; userKey: string; label: string } | null = null;
     if (typeof body.message_id === 'string' && body.message_id) {
       const me = gate(req, reply);
       if (!me) return reply;
       const row = getMessage(db, body.message_id, me.user_key);
       if (!row || row.message.role !== 'assistant') return reply.code(404).send({ error: 'message_id: 找不到這則回答' });
       if (gens.isRunning(body.message_id)) return reply.code(409).send({ error: '這則回答還在產生中' });
-      genMeta = { messageId: body.message_id, conversationId: row.conversation.id, userKey: me.user_key };
+      genMeta = { messageId: body.message_id, conversationId: row.conversation.id, userKey: me.user_key, label: me.label };
     }
     const thinking = body.thinking === true && !cont;
     const requested = Number(body.max_tokens);
@@ -1255,6 +1260,34 @@ export function registerChatRoutes(app: FastifyInstance, db: Database.Database, 
         }
       }
     }
+    // 對話操作: the engine's own tools, offered whenever ops_chat_enabled (the 上網／工具 chip is not
+    // needed) and the recipe can call tools; read-only unless the asker is in ops_allowed_users and
+    // the answer belongs to a saved conversation (a pending action lives in that conversation)
+    let opsDefs: ToolDef[] = [];
+    let opsWho: { userKey: string | null; conversationId: string | null; allowed: boolean } | null = null;
+    if (getBool(db, 'ops_chat_enabled', false) && !cont && body.mode !== 'tune' && recipeInfo(model.recipe, getSetting(db, 'local_vllm_repo') || '')?.tool_parser) {
+      let userKey = genMeta?.userKey ?? null;
+      if (!userKey) {
+        try {
+          userKey = identity(req).user_key;
+        } catch {
+          userKey = null;
+        }
+      }
+      opsWho = { userKey, conversationId: genMeta?.conversationId ?? null, allowed: Boolean(genMeta) && opsAllowedFor(db, userKey) };
+      opsDefs = opsTools(db, {
+        ...opsWho,
+        chat: genMeta ? { messageId: genMeta.messageId, conversationId: genMeta.conversationId, userKey: genMeta.userKey, label: genMeta.label } : null,
+        mode: 'chat',
+        deps: {
+          isRunning: (id) => gens.isRunning(id),
+          otherAnswers: (except) => gens.runningCount(except),
+          ...opts.opsDeps,
+          view: { hubDir, ...opts.opsDeps?.view },
+          prep: { hubDir, ...opts.opsDeps?.prep },
+        },
+      });
+    }
     // 上網／工具: only when the page ticks the chip AND the operator turned it on AND the serving
     // recipe has a tool parser. Otherwise the request takes the untouched passthrough path below.
     let tools: ToolDef[] = [];
@@ -1268,7 +1301,9 @@ export function registerChatRoutes(app: FastifyInstance, db: Database.Database, 
         else {
           tools = (opts.tools ?? builtinTools)(db);
           if (opts.mcpPool && getBool(db, 'chat_mcp_enabled', true)) {
-            const m = await mcpTools(opts.mcpPool, getNum(db, 'chat_tool_schema_chars', 16_000));
+            // with 對話操作 on, servers whose tools act without confirmation (the `loop` MCP) are left out
+            const hide = opsWho ? new Set((getSetting(db, 'ops_hide_mcp_servers') || '').split(',').map((x) => x.trim()).filter(Boolean)) : undefined;
+            const m = await mcpTools(opts.mcpPool, getNum(db, 'chat_tool_schema_chars', 16_000), hide);
             tools = [...tools, ...m.tools];
             mcpSkipped = m.skipped;
           }
@@ -1276,30 +1311,39 @@ export function registerChatRoutes(app: FastifyInstance, db: Database.Database, 
           if (getBool(db, 'exec_enabled', false) && genMeta && execAllowedFor(db, genMeta.userKey)) {
             tools = [...tools, ...sandboxTools(db, chatWorkspaceDir(genMeta.conversationId), { run: opts.sandboxRun })];
           }
-          if (!tools.length) toolsNote = '沒有可用的工具（chat_search_url 未設定、MCP 也沒有 server）';
+          if (!tools.length && !opsDefs.length) toolsNote = '沒有可用的工具（chat_search_url 未設定、MCP 也沒有 server）';
         }
       }
     }
+    if (opsDefs.length) tools = [...tools, ...opsDefs];
     const tuning = body.mode === 'tune' ? `\n\n${TUNE_PROMPT}` : '';
     const grounding = knowledge?.context ? `\n\n${KNOWLEDGE_PROMPT}\n\n參考資料：\n${knowledge.context}` : '';
     const first = messages[0];
     const basePrompt = tools.length ? systemPromptWithTools(tools) : CHAT_SYSTEM_PROMPT;
+    // what this conversation has pending: the model does not see earlier turns' tool calls
+    const opsTail = opsWho ? opsPromptTail(db, opsWho) : '';
     const upstreamMessages =
       first?.role === 'system'
-        ? [{ role: 'system', content: `${textOf(first.content)}${tuning}${grounding}` }, ...messages.slice(1)]
-        : [{ role: 'system', content: `${basePrompt}${tuning}${grounding}` }, ...messages];
+        ? [{ role: 'system', content: `${textOf(first.content)}${opsWho ? `\n${OPS_PROMPT}` : ''}${opsTail}${tuning}${grounding}` }, ...messages.slice(1)]
+        : [{ role: 'system', content: `${basePrompt}${opsTail}${tuning}${grounding}` }, ...messages];
 
     const ac = new AbortController();
     // a sandbox answer compiles, runs and profiles over several rounds, each of which may take
     // minutes — it gets its own round/time budget instead of the web-search one
     const withSandbox = tools.some((t) => t.name === 'sandbox_run');
-    const loopRounds = withSandbox
+    let loopRounds = withSandbox
       ? Math.min(20, Math.max(1, getNum(db, 'chat_tool_max_rounds', 5), getNum(db, 'exec_chat_max_rounds', 10)))
       : Math.min(10, Math.max(1, getNum(db, 'chat_tool_max_rounds', 5)));
-    const loopWallMs = withSandbox
+    let loopWallMs = withSandbox
       ? Math.max(getNum(db, 'chat_tool_wall_ms', 120_000), getNum(db, 'exec_chat_wall_ms', 900_000))
       : getNum(db, 'chat_tool_wall_ms', 120_000);
-    const timer = setTimeout(() => ac.abort(), withSandbox ? Math.max(10 * 60_000, loopWallMs + 5 * 60_000) : 10 * 60_000);
+    // 對話操作 looks things up before preparing (find → show → prepare): a few more rounds
+    const withOps = opsDefs.length > 0;
+    if (withOps) {
+      loopRounds = Math.min(20, Math.max(loopRounds, getNum(db, 'ops_chat_max_rounds', 8)));
+      loopWallMs = Math.max(loopWallMs, getNum(db, 'ops_chat_wall_ms', 300_000));
+    }
+    const timer = setTimeout(() => ac.abort(), withSandbox || withOps ? Math.max(10 * 60_000, loopWallMs + 5 * 60_000) : 10 * 60_000);
     const upstreamBody = {
       model: model.served_model_id,
       stream: true,
@@ -1334,6 +1378,8 @@ export function registerChatRoutes(app: FastifyInstance, db: Database.Database, 
       res.on('close', onClose);
       if (knowledgeFrame) emit(res, knowledgeFrame);
       if (mcpSkipped.length) emit(res, `data: ${JSON.stringify({ loop_tool: { skipped: mcpSkipped } })}\n\n`);
+      // only 對話操作 can reach here with a note (the chip was ticked but its tools are off)
+      if (toolsNote) emit(res, `data: ${JSON.stringify({ loop_tool: { unsupported: toolsNote } })}\n\n`);
       let loopError: string | null = null;
       try {
         const out = await runToolLoop({
@@ -1360,6 +1406,8 @@ export function registerChatRoutes(app: FastifyInstance, db: Database.Database, 
         clearTimeout(timer);
         if (gen) gens.finish(gen.messageId, ac.signal.aborted ? 'abort' : null, loopError);
         if (socketOpen) res.end();
+        // a model switch confirmed in this answer waits until the answer is written (it restarts vLLM)
+        if (gen && withOps) void getOpsRunner().runDeferred(gen.messageId).catch((err) => app.log.warn({ ops_deferred: (err as Error).message }));
       }
       return;
     }

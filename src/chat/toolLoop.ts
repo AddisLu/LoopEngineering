@@ -180,7 +180,7 @@ export async function runToolLoop(o: ToolLoopOptions): Promise<ToolLoopResult> {
           parseError = `參數不是合法 JSON：${c.args.slice(0, 120)}`;
         }
         const def = byName.get(c.name);
-        let r: { ok: boolean; text: string; summary: string; sources?: ToolCall['sources']; detail?: string };
+        let r: { ok: boolean; text: string; summary: string; sources?: ToolCall['sources']; detail?: string; action?: ToolCall['action'] };
         if (parseError) r = { ok: false, text: parseError, summary: parseError };
         else if (!def) r = { ok: false, text: `沒有這個工具：${c.name}`, summary: `未知工具 ${c.name}` };
         else {
@@ -210,6 +210,7 @@ export async function runToolLoop(o: ToolLoopOptions): Promise<ToolLoopResult> {
           summary: r.summary,
           ...(r.sources ? { sources: r.sources } : {}),
           ...(r.detail ? { detail: r.detail } : {}),
+          ...(r.action ? { action: r.action } : {}),
           _text: r.text,
         };
         return done;

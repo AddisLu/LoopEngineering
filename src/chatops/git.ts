@@ -78,6 +78,16 @@ export async function repoStatus(db: Database.Database, repo: string, d: GitOpsD
   return { repo, name: path.basename(repo), branch: branch === 'HEAD' ? null : branch, upstream, ahead, behind, dirty, last, remote: remote ? redactUrl(remote) : null };
 }
 
+/** git_status refresh=true: what origin has now (fetch only, nothing merges). Null = fine, else the reason. */
+export async function fetchOrigin(db: Database.Database, repo: string, d: GitOpsDeps = {}): Promise<string | null> {
+  try {
+    await git(db, d, repo, ['fetch', '--prune', 'origin']);
+    return null;
+  } catch (err) {
+    return (err as Error).message.split('\n')[0]!.slice(0, 160);
+  }
+}
+
 export function statusLine(s: GitStatus): string {
   const sync = s.upstream ? (s.ahead || s.behind ? `領先 ${s.ahead ?? 0}、落後 ${s.behind ?? 0}（對 ${s.upstream}）` : `和 ${s.upstream} 同步`) : '沒有 upstream';
   return `| ${s.name} | ${s.branch ?? '（detached）'} | ${sync} | ${s.dirty.length ? `${s.dirty.length} 個檔案有未提交修改` : '乾淨'} | ${s.last ?? '—'} |`;

@@ -3,6 +3,7 @@ import { getNum, getSetting } from '../db/index.js';
 import { htmlToText } from './html.js';
 import { BlockedUrlError, fetchBounded, type Lookup } from './netGuard.js';
 import type { McpPool } from '../mcp/client.js';
+import type { ActionView } from '../chatops/types.js';
 
 /**
  * Tools the chat page can hand to the local model (OpenAI function-calling shape, which vLLM
@@ -33,6 +34,8 @@ export interface ToolResult {
   sources?: ToolSource[];
   /** a short excerpt the card may show verbatim (e.g. a sandbox run's output tail) */
   detail?: string;
+  /** 對話操作: the action this call prepared, confirmed or cancelled — the card offers 確認／取消 */
+  action?: ActionView;
 }
 
 export interface ToolDef {
@@ -58,6 +61,7 @@ export interface ToolCall {
   summary: string;
   sources?: ToolSource[];
   detail?: string;
+  action?: ActionView;
 }
 export interface ToolRound {
   round: number;
@@ -204,11 +208,13 @@ export interface McpToolsResult {
  * Every tool the configured MCP servers offer, as ToolDefs, in config order until the schema
  * budget (characters of JSON the model must read per question) is used up.
  */
-export async function mcpTools(pool: McpPool, budgetChars: number): Promise<McpToolsResult> {
+export async function mcpTools(pool: McpPool, budgetChars: number, exclude?: ReadonlySet<string>): Promise<McpToolsResult> {
   const tools: ToolDef[] = [];
   const skipped: McpToolsResult['skipped'] = [];
   let used = 0;
   for (const srv of await pool.listTools()) {
+    // 對話操作 replaces a server's unconfirmed tools (e.g. `loop`): left out, not reported as skipped
+    if (exclude?.has(srv.server)) continue;
     if (srv.error) {
       skipped.push({ server: srv.server, reason: srv.error });
       continue;

@@ -185,6 +185,23 @@ export function markPresented(db: Database.Database, id: string, chat: ChatCtx, 
   ).run(chat.messageId, msg.ord, sqliteTime(new Date(now.getTime() + ttl * 60_000)), id, chat.conversationId, chat.userKey);
 }
 
+/**
+ * ops_show on a pending action: show it again so the person can confirm in the next turn — unless
+ * the answer right before this one already showed it (then the person may be confirming right now,
+ * and moving it would make their 「確認」 miss).
+ */
+export function reshow(db: Database.Database, a: OpsAction, chat: ChatCtx, now: Date = new Date()): boolean {
+  if (a.status !== 'pending' || a.conversation_id !== chat.conversationId || a.user_key !== chat.userKey) return false;
+  const cur = message(db, chat.messageId);
+  if (!cur) return false;
+  const prev = db
+    .prepare("SELECT MAX(ord) AS ord FROM chat_messages WHERE conversation_id = ? AND role = 'assistant' AND invalid_at IS NULL AND ord < ?")
+    .get(chat.conversationId, cur.ord) as { ord: number | null };
+  if (a.presented_ord >= (prev.ord ?? -1)) return false;
+  markPresented(db, a.id, chat, now);
+  return true;
+}
+
 /** Lazily retire pending actions: past their time, or shown by an answer that was since regenerated or deleted. */
 export function refreshPending(db: Database.Database, conversationId: string, now: Date = new Date()): void {
   db.prepare("UPDATE ops_actions SET status = 'expired', finished_at = datetime('now') WHERE conversation_id = ? AND status = 'pending' AND expires_at < ?").run(
