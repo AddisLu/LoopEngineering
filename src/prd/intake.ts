@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type Database from 'better-sqlite3';
-import { paths } from '../config.js';
+import { paths, type Complexity } from '../config.js';
 import { getBool, getSetting, logEvent } from '../db/index.js';
 import { createTask, getTask, setStatus } from '../tasks.js';
 import { validateTask, type GateResult } from '../gate/validateTask.js';
@@ -111,7 +111,8 @@ export function resolvePrdModel(db: Database.Database, explicit?: string | null)
   return isLocalModel(def) ? def : null; // null = the task inherits default_model at dispatch
 }
 
-function writePlanFile(markdown: string, title: string): string {
+/** Persists the PRD as a plan file under plansDir (the task's plan_ref) and returns its path. */
+export function writePlanFile(markdown: string, title: string): string {
   const slug =
     title
       .toLowerCase()
@@ -124,45 +125,38 @@ function writePlanFile(markdown: string, title: string): string {
   return file;
 }
 
-export async function submitPrd(db: Database.Database, markdown: string, opts: SubmitOptions = {}): Promise<SubmitResult> {
-  const model = opts.benchmark_models?.length ? null : resolvePrdModel(db, opts.model); // validate before any write
-  const check = opts.precheck ?? (await checkPrd(db, markdown, opts));
-  if (!check.ok) return { ok: false, check };
-  const f = check.fields;
-  const title = f.title!;
-  const planRef = writePlanFile(markdown, title);
+/** The task columns a PRD decides (taskFieldsFromPrd): what submitPrd creates and applyPrdToTask updates. */
+export interface PrdTaskFields {
+  title: string;
+  goal: string;
+  plan_ref: string;
+  repo_path: string | null;
+  base_branch: string;
+  verification_steps: string[];
+  verify_rubric: string;
+  complexity: Complexity;
+  verify_mode: string;
+  requires: string | null;
+  setup_cmd: string | null;
+  acceptance_metrics: string | null;
+  protected_paths: string | null;
+  artifacts: string | null;
+  /** the PRD's 領域 (BENCH_DOMAINS), null when it has none */
+  domain: string | null;
+}
+
+/**
+ * The PRD's fields → the task columns: rubric (acceptance + metrics + the human checklist),
+ * verify_mode, requires, setup, metrics, protected paths, artifacts. Pure; shared by submitPrd
+ * (create) and the 問題單 analysis (applyPrdToTask, update).
+ */
+export function taskFieldsFromPrd(f: PrdFields, planRef: string, opts: { verify_llm?: boolean } = {}): PrdTaskFields {
   // the human checklist rides along in the rubric so both the llm judge and VERIFY.md see it
   const rubric = [
     ...f.acceptance.map((a) => `- ${a}`),
     ...(f.acceptance_metrics ? ['', `驗收指標（引擎自動檢查）：${f.acceptance_metrics}`] : []),
     ...(f.manual_checks.length ? ['', '人工驗收：', ...f.manual_checks.map((m) => `- ${m}`)] : []),
   ].join('\n');
-  const common = {
-    title,
-    goal: f.goal,
-    plan_ref: planRef,
-    repo_path: f.repo_path,
-    base_branch: f.base_branch ?? 'main',
-    verification_steps: f.verify_steps,
-    verify_rubric: rubric,
-    complexity: f.complexity ?? 'M',
-  };
-
-  if (opts.benchmark_models?.length) {
-    const { benchmark, arms } = createBenchmark(db, {
-      ...common,
-      domain: f.domain ?? 'other',
-      models: opts.benchmark_models,
-      judge_models: opts.judge_models,
-      setup_cmd: f.setup_steps?.length ? f.setup_steps.join(' && ') : null,
-      source_kind: 'draft',
-      acceptance_metrics: f.acceptance_metrics,
-      protected_paths: f.protected_paths.length ? f.protected_paths.join(',') : null,
-    });
-    logEvent(db, { kind: 'note', detail: `PRD intake: benchmark ${benchmark.id} from ${path.basename(planRef)}` });
-    return { ok: true, kind: 'benchmark', check, plan_ref: planRef, benchmark, arms };
-  }
-
   // verify_mode follows what the PRD actually provides: commands → command, a human checklist →
   // manual, an explicit 驗證方式 section wins. 圖集比對 implies the GPU (the IP pipeline is CUDA);
   // an unmet capability makes the engine skip command verification and defer to a human.
@@ -171,22 +165,114 @@ export async function submitPrd(db: Database.Database, markdown: string, opts: S
   );
   if (opts.verify_llm) modes.add('llm');
   if (modes.size === 0) modes.add('command');
+  return {
+    title: f.title ?? '',
+    goal: f.goal,
+    plan_ref: planRef,
+    repo_path: f.repo_path,
+    base_branch: f.base_branch ?? 'main',
+    verification_steps: f.verify_steps,
+    verify_rubric: rubric,
+    complexity: f.complexity ?? 'M',
+    verify_mode: [...modes].join(','),
+    // a local image set needs this machine's GPU; one on a sandbox host is measured over there
+    requires: f.requires ?? (f.dataset && !f.dataset.host ? 'gpu' : null),
+    setup_cmd: f.setup_steps.length ? f.setup_steps.join(' && ') : null,
+    acceptance_metrics: f.acceptance_metrics,
+    protected_paths: f.protected_paths.length ? f.protected_paths.join(',') : null,
+    artifacts: f.artifacts.length ? f.artifacts.join(',') : null,
+    domain: f.domain,
+  };
+}
+
+/**
+ * The "update half" of submitPrd: an existing DRAFT task takes the PRD's fields (a 問題單 whose
+ * analysis just composed its PRD). Status, model, priority, owner and the ticket columns are left
+ * alone; an empty title / goal keeps the current one. Throws PrdInputError for a missing or
+ * non-draft task.
+ */
+export function applyPrdToTask(db: Database.Database, taskId: string, fields: PrdTaskFields): Task {
+  const cur = getTask(db, taskId);
+  if (!cur) throw new PrdInputError(`task not found: ${taskId}`);
+  if (cur.status !== 'draft') throw new PrdInputError(`task ${taskId} is ${cur.status} — only a draft takes a PRD`);
+  db.prepare(
+    `UPDATE tasks SET title = @title, goal = @goal, plan_ref = @plan_ref, plan_kind = 'md', repo_path = @repo_path,
+       base_branch = @base_branch, verification_steps = @verification_steps, verify_rubric = @verify_rubric,
+       complexity = @complexity, verify_mode = @verify_mode, requires = @requires, setup_cmd = @setup_cmd,
+       acceptance_metrics = @acceptance_metrics, protected_paths = @protected_paths, artifacts = @artifacts,
+       domain = @domain, updated_at = datetime('now')
+     WHERE id = @id AND status = 'draft'`,
+  ).run({
+    id: taskId,
+    title: fields.title.trim() || cur.title,
+    goal: fields.goal.trim() || cur.goal,
+    plan_ref: fields.plan_ref,
+    repo_path: fields.repo_path,
+    base_branch: fields.base_branch,
+    verification_steps: JSON.stringify(fields.verification_steps),
+    verify_rubric: fields.verify_rubric || null,
+    complexity: fields.complexity,
+    verify_mode: fields.verify_mode.trim() || 'command',
+    requires: fields.requires?.trim() || null,
+    setup_cmd: fields.setup_cmd?.trim() || null,
+    acceptance_metrics: fields.acceptance_metrics?.trim() || null,
+    protected_paths: fields.protected_paths?.trim() || null,
+    artifacts: fields.artifacts?.trim() || null,
+    domain: fields.domain?.trim() || null,
+  });
+  return getTask(db, taskId)!;
+}
+
+export async function submitPrd(db: Database.Database, markdown: string, opts: SubmitOptions = {}): Promise<SubmitResult> {
+  const model = opts.benchmark_models?.length ? null : resolvePrdModel(db, opts.model); // validate before any write
+  const check = opts.precheck ?? (await checkPrd(db, markdown, opts));
+  if (!check.ok) return { ok: false, check };
+  const f = check.fields;
+  const title = f.title!;
+  const planRef = writePlanFile(markdown, title);
+  const tf = taskFieldsFromPrd(f, planRef, { verify_llm: opts.verify_llm });
+  const common = {
+    title: tf.title,
+    goal: tf.goal,
+    plan_ref: tf.plan_ref,
+    repo_path: tf.repo_path,
+    base_branch: tf.base_branch,
+    verification_steps: tf.verification_steps,
+    verify_rubric: tf.verify_rubric,
+    complexity: tf.complexity,
+  };
+
+  if (opts.benchmark_models?.length) {
+    const { benchmark, arms } = createBenchmark(db, {
+      ...common,
+      domain: tf.domain ?? 'other',
+      models: opts.benchmark_models,
+      judge_models: opts.judge_models,
+      setup_cmd: tf.setup_cmd,
+      source_kind: 'draft',
+      acceptance_metrics: tf.acceptance_metrics,
+      protected_paths: tf.protected_paths,
+    });
+    logEvent(db, { kind: 'note', detail: `PRD intake: benchmark ${benchmark.id} from ${path.basename(planRef)}` });
+    return { ok: true, kind: 'benchmark', check, plan_ref: planRef, benchmark, arms };
+  }
+
   const created = createTask(db, {
     ...common,
     plan_kind: 'md',
     coding_tool: opts.coding_tool === 'plan' ? 'plan' : 'claude-code',
     model,
-    verify_mode: [...modes].join(','),
-    // a local image set needs this machine's GPU; one on a sandbox host is measured over there
-    requires: f.requires ?? (f.dataset && !f.dataset.host ? 'gpu' : null),
-    setup_cmd: f.setup_steps.length ? f.setup_steps.join(' && ') : null,
+    verify_mode: tf.verify_mode,
+    requires: tf.requires,
+    setup_cmd: tf.setup_cmd,
     created_by: opts.created_by ?? 'prd',
     owner: opts.owner ?? null,
     source_ref: opts.source_ref ?? null,
-    acceptance_metrics: f.acceptance_metrics,
-    protected_paths: f.protected_paths.length ? f.protected_paths.join(',') : null,
-    artifacts: f.artifacts.length ? f.artifacts.join(',') : null,
+    acceptance_metrics: tf.acceptance_metrics,
+    protected_paths: tf.protected_paths,
+    artifacts: tf.artifacts,
     verify_plan_id: opts.verify_plan_id ?? null,
+    domain: tf.domain,
   });
   const gate = validateTask(created, getSetting(db, 'host_capabilities') ?? '');
   if (gate.ok && opts.queue !== false) setStatus(db, created.id, 'queued', { detail: 'queued from PRD intake' });

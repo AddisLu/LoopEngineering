@@ -36,6 +36,8 @@ export interface NewTaskInput {
   protected_paths?: string | null;
   artifacts?: string | null;
   verify_plan_id?: string | null;
+  /** BENCH_DOMAINS (the PRD's 領域 / the repo's domain): what domain_routing picks a local model by */
+  domain?: string | null;
 }
 
 export function createTask(db: Database.Database, input: NewTaskInput): Task {
@@ -44,11 +46,11 @@ export function createTask(db: Database.Database, input: NewTaskInput): Task {
     `INSERT INTO tasks (id, title, goal, plan_ref, plan_kind, coding_tool, verification_steps,
        setup_cmd, repo_path, base_branch, complexity, priority, model, timeout_min, depends_on, environment,
        verify_mode, verify_rubric, verify_timeout_min, requires, owner, created_by, parent_id,
-       pipeline_id, stage_name, source_ref, experiment, benchmark_id, acceptance_metrics, protected_paths, artifacts, verify_plan_id, status)
+       pipeline_id, stage_name, source_ref, experiment, benchmark_id, acceptance_metrics, protected_paths, artifacts, verify_plan_id, domain, status)
      VALUES (@id, @title, @goal, @plan_ref, @plan_kind, @coding_tool, @verification_steps,
        @setup_cmd, @repo_path, @base_branch, @complexity, @priority, @model, @timeout_min, @depends_on, @environment,
        @verify_mode, @verify_rubric, @verify_timeout_min, @requires, @owner, @created_by, @parent_id,
-       @pipeline_id, @stage_name, @source_ref, @experiment, @benchmark_id, @acceptance_metrics, @protected_paths, @artifacts, @verify_plan_id, 'draft')`,
+       @pipeline_id, @stage_name, @source_ref, @experiment, @benchmark_id, @acceptance_metrics, @protected_paths, @artifacts, @verify_plan_id, @domain, 'draft')`,
   ).run({
     id,
     title: input.title,
@@ -82,6 +84,7 @@ export function createTask(db: Database.Database, input: NewTaskInput): Task {
     artifacts: input.artifacts?.trim() || null,
     verify_plan_id: input.verify_plan_id ?? null,
     protected_paths: input.protected_paths?.trim() || null,
+    domain: input.domain?.trim() || null,
   });
   logEvent(db, { task_id: id, kind: 'status', to_status: 'draft', detail: 'created' });
   return getTask(db, id)!;
