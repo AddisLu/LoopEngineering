@@ -64,6 +64,7 @@ import { getJobRunner, JobBusyError } from './local/jobs.js';
 import { buildCatalog } from './local/catalog.js';
 import { activeLocalRunCount } from './tasks.js';
 import { BENCH_DOMAINS, BenchmarkInputError, benchmarkMatrix, benchmarkRecommendations, createBenchmark, getBenchmark, listBenchmarks } from './benchmark/store.js';
+import { createScreen, listScreens } from './benchmark/screen.js';
 import { benchmarkReport } from './benchmark/report.js';
 import { judgeBenchmark } from './benchmark/complete.js';
 import { checkPrd, submitPrd, PrdInputError, type PrdCheck } from './prd/intake.js';
@@ -1063,6 +1064,41 @@ bench
     } catch (err) {
       if (err instanceof BenchmarkInputError) return fail(err.message);
       throw err;
+    }
+  });
+
+bench
+  .command('screen')
+  .description('模型快篩: run small built-in questions on local models, one after another (no judge, no quota)')
+  .requiredOption('--models <csv>', 'local models to screen, e.g. local:openai-gpt-oss-120b,local:qwen38-flash')
+  .option('--questions <csv>', 'built-in question keys (default: bench_screen_questions)')
+  .option('--budget <min>', 'time cap per question in minutes (default: bench_screen_budget_min)')
+  .action((o) => {
+    if (!benchOn()) return;
+    const db = getDb();
+    try {
+      const csv = (v: string | undefined) => (v ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+      const r = createScreen(db, { models: csv(o.models), questions: csv(o.questions), budget_min: o.budget ? Number(o.budget) : undefined });
+      console.log(`快篩 ${r.group}: ${r.rows.length} 題${r.started ? '，已開始' : r.waiting_for ? `，排在 ${r.waiting_for} 之後` : ''}`);
+    } catch (err) {
+      if (err instanceof BenchmarkInputError) return fail(err.message);
+      throw err;
+    }
+  });
+
+bench
+  .command('screens')
+  .description('recent 模型快篩 batches: per model, which questions passed')
+  .action(() => {
+    if (!benchOn()) return;
+    const groups = listScreens(getDb());
+    if (!groups.length) return console.log('(no screens)');
+    for (const g of groups) {
+      console.log(`${g.group}  ${pad(g.status, 10)} ${g.passed}/${g.total} passed  ${g.created_at}  (${g.budget_min} min/question)`);
+      for (const c of g.cells) {
+        const mark = c.outcome === 'pass' ? '✓' : c.outcome === 'fail' ? '✗' : c.outcome === 'running' ? '…' : c.outcome === 'queued' ? '·' : '-';
+        console.log(`  ${mark} ${pad(c.model, 34)} ${pad(c.question, 16)} ${c.duration_s != null ? `${Math.round(c.duration_s / 60)}m` : ''} ${c.attempts_label ?? ''}${c.failure ? `  ${c.failure.slice(0, 80)}` : ''}`);
+      }
     }
   });
 

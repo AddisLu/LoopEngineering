@@ -231,3 +231,26 @@ describe('/api/benchmarks', () => {
     });
   });
 });
+
+describe('模型快篩 routes', () => {
+  it('create, list, show, cancel and delete a batch; off means 404', async () => {
+    expect((await app.inject({ method: 'GET', url: '/api/benchmarks/screens' })).statusCode).toBe(404);
+    setSetting(db, 'benchmark_enabled', 'true');
+    const bad = await app.inject({ method: 'POST', url: '/api/benchmarks/screen', payload: { models: [] } });
+    expect(bad.statusCode).toBe(400);
+    const r = await app.inject({ method: 'POST', url: '/api/benchmarks/screen', payload: { models: ['sonnet', 'haiku'], questions: 'slugify', coding_tool: 'mock', budget_min: 10 } });
+    expect(r.statusCode).toBe(201);
+    const body = r.json();
+    expect(body).toMatchObject({ rows: [expect.any(String), expect.any(String)], started: expect.any(String), screen: { status: 'running', total: 2, budget_min: 10 } });
+    const list = (await app.inject({ method: 'GET', url: '/api/benchmarks/screens' })).json();
+    expect(list.defaults).toMatchObject({ questions: ['slugify', 'log-analyzer', 'csv-parser'], budget_min: 15 });
+    expect(list.defaults.builtin.length).toBeGreaterThan(3);
+    expect(list.screens[0]).toMatchObject({ group: body.group, cells: [{ model: 'sonnet', question: 'slugify', outcome: 'running' }, { model: 'haiku', outcome: 'queued' }] });
+    expect((await app.inject({ method: 'GET', url: `/api/benchmarks/screens/${body.group}` })).json().screen.group).toBe(body.group);
+    expect((await app.inject({ method: 'DELETE', url: `/api/benchmarks/screens/${body.group}` })).statusCode).toBe(409); // still running
+    const c = (await app.inject({ method: 'POST', url: `/api/benchmarks/screens/${body.group}/cancel` })).json();
+    expect(c.screen.status).toBe('cancelled');
+    expect((await app.inject({ method: 'DELETE', url: `/api/benchmarks/screens/${body.group}` })).json()).toMatchObject({ ok: true, deleted: 2 });
+    expect((await app.inject({ method: 'GET', url: `/api/benchmarks/screens/${body.group}` })).statusCode).toBe(404);
+  });
+});

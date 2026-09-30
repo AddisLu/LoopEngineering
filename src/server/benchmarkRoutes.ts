@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import type Database from 'better-sqlite3';
-import { getBool } from '../db/index.js';
+import { getBool, getNum, getSetting } from '../db/index.js';
 import type { Complexity } from '../config.js';
 import {
   activeBenchmark,
@@ -21,6 +21,7 @@ import type { GitExec } from '../benchmark/attempts.js';
 import type { SandboxDeps } from '../exec/sandbox.js';
 import type { BenchJudgeExec } from '../benchmark/judge.js';
 import { listBuiltin, resolveSource, type ResolveDeps, type SourceKind } from '../benchmark/source.js';
+import { createScreen, deleteScreen, getScreen, listScreens } from '../benchmark/screen.js';
 import { getDraft } from '../prd/drafts.js';
 import { submitPrd } from '../prd/intake.js';
 import { identityOf } from './identity.js';
@@ -214,6 +215,66 @@ export function registerBenchmarkRoutes(
     if (!getBenchmark(db, id)) return reply.code(404).send({ error: 'not found' });
     const benchmark = cancelBenchmark(db, id, '使用者取消', { onArmTask: opts.onArmCancel });
     return { benchmark };
+  });
+
+  // ---- 模型快篩 (src/benchmark/screen.ts) ------------------------------------------------------
+
+  /** Screen local models on small built-in questions: one row per model × question, back to back. */
+  app.post('/api/benchmarks/screen', async (req, reply) => {
+    if (!enabled()) return off(reply);
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const budget = b.budget_min == null || b.budget_min === '' ? undefined : Number(b.budget_min);
+    try {
+      const r = createScreen(
+        db,
+        { models: list(b.models), questions: list(b.questions), budget_min: budget, coding_tool: b.coding_tool === 'mock' ? 'mock' : undefined },
+        opts.source,
+      );
+      return reply.code(201).send({ ...r, screen: getScreen(db, r.group) });
+    } catch (err) {
+      if (err instanceof BenchmarkInputError) return reply.code(400).send({ error: err.message });
+      throw err;
+    }
+  });
+
+  app.get('/api/benchmarks/screens', async (_req, reply) => {
+    if (!enabled()) return off(reply);
+    return {
+      defaults: {
+        questions: (getSetting(db, 'bench_screen_questions') || '').split(',').map((s) => s.trim()).filter(Boolean),
+        budget_min: getNum(db, 'bench_screen_budget_min', 15),
+        builtin: listBuiltin(opts.source?.builtinDir),
+      },
+      screens: listScreens(db),
+    };
+  });
+
+  app.get('/api/benchmarks/screens/:group', async (req, reply) => {
+    if (!enabled()) return off(reply);
+    const g = getScreen(db, (req.params as { group: string }).group);
+    return g ? { screen: g } : reply.code(404).send({ error: 'not found' });
+  });
+
+  /** Stop a batch: the running row's arm is killed and failed, the waiting rows never start. */
+  app.post('/api/benchmarks/screens/:group/cancel', async (req, reply) => {
+    if (!enabled()) return off(reply);
+    const group = (req.params as { group: string }).group;
+    const g = getScreen(db, group);
+    if (!g) return reply.code(404).send({ error: 'not found' });
+    const live = g.cells.find((c) => c.outcome === 'running' || c.outcome === 'queued');
+    if (live) cancelBenchmark(db, live.benchmark_id, '使用者取消快篩', { onArmTask: opts.onArmCancel });
+    return { screen: getScreen(db, group) };
+  });
+
+  app.delete('/api/benchmarks/screens/:group', async (req, reply) => {
+    if (!enabled()) return off(reply);
+    try {
+      const n = deleteScreen(db, (req.params as { group: string }).group);
+      return n ? { ok: true, deleted: n } : reply.code(404).send({ error: 'not found' });
+    } catch (err) {
+      if (err instanceof BenchmarkInputError) return reply.code(409).send({ error: err.message });
+      throw err;
+    }
   });
 
   /** Drop a finished benchmark from the list. The arm tasks stay on the board. */
