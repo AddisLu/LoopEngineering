@@ -1,4 +1,4 @@
-// Shared helpers for the operator pages (job.html, task.html, plans.html). Rendering is
+// Shared helpers for every shell page (window.Ops: API, token, toast, identity). Rendering is
 // textContent-only: nothing here or in the pages builds HTML from strings.
 (() => {
   'use strict';
@@ -123,9 +123,13 @@
       };
       paint();
     }
-    const box = document.getElementById('ops-who');
-    if (box) {
-      // who the engine takes this browser to be: a Tailscale login outranks the typed name
+    mountWho(document.getElementById('ops-who'));
+  }
+
+  /** "你是 …" into `box`: who the engine takes this browser to be (a Tailscale login outranks the typed name). */
+  function mountWho(box) {
+    if (box && box.dataset.mounted !== '1') {
+      box.dataset.mounted = '1';
       let server = null;
       const paint = () => {
         box.replaceChildren();
@@ -157,5 +161,5 @@
     }
   }
 
-  window.Ops = { api, el, icon, localTime, toast, withToken, who, initChrome, stored, store };
+  window.Ops = { api, el, icon, localTime, toast, withToken, who, initChrome, mountWho, stored, store };
 })();

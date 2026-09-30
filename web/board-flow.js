@@ -3,11 +3,10 @@
 // a list view, the KPI strip, the "需要你處理" inbox and the change log. app.js still owns the live
 // stream, the dialogs and the classic columns (看板); it hands every snapshot over as a
 // 'board:snapshot' event and its actions as window.Board. textContent-only.
-import { $, fill, h, icon, mountRail, dur, hhmm, tsMs, modelName, isLocal, popMenu } from './frame.js';
+import { $, fill, h, icon, dur, hhmm, tsMs, modelName, isLocal, popMenu } from './frame.js';
 import { createCanvas } from './flow/canvas.js';
 import { layered, grid, stackGroups } from './flow/layout.js';
 
-mountRail('board');
 const Board = () => window.Board;
 
 const store = (k, v) => window.Ops.store(k, v);

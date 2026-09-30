@@ -14,25 +14,12 @@
       #view-kanban .card .btn { display: inline-block; border-radius: 999px; }
       #view-list { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: auto; }
       .views { flex: 1 1 auto; min-height: 0; display: flex; }
-      .top-search { width: 280px; height: 36px; padding: 0 10px; display: flex; align-items: center; gap: 8px; border: 1px solid var(--border-2); border-radius: 9px; background: var(--surface-2); color: var(--text-2); }
-      .top-search svg { width: 16px; height: 16px; flex: 0 0 auto; }
-      .top-search input { flex: 1 1 auto; min-width: 0; border: 0; background: transparent; font: inherit; font-size: 13px; color: var(--text); outline: none; }
       .sched { display: inline-flex; align-items: center; gap: 8px; }
       #sched-state .s-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--st-running); display: inline-block; }
       #sched-state.paused .s-dot { background: var(--st-blocked); }
       #sched-state { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
       #local-chip[data-state="warn"] { color: var(--warn); }
       #local-chip[data-state="danger"] { color: var(--danger); }
-      #conn { display: inline-flex; align-items: center; gap: 6px; }
-      #conn .conn-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-3); }
-      #conn.live .conn-dot { background: var(--st-running); }
-      #conn.down .conn-dot { background: var(--danger); }
-      .more-wrap { position: relative; }
-      #more-menu { right: 0; top: 42px; }
-      .loglist { position: absolute; left: 12px; bottom: 48px; z-index: 20; width: min(640px, 90vw); max-height: 50vh; overflow: auto; padding: 8px; background: var(--surface-2); border: 1px solid var(--border-2); border-radius: 12px; box-shadow: var(--shadow-pop); font-size: 13px; }
-      .loglist div { display: flex; gap: 10px; padding: 5px 8px; border-radius: 6px; }
-      .loglist div:hover { background: var(--surface-sunk); }
-      .loglist .ts { font-family: var(--mono); font-size: 12px; color: var(--text-2); }
       .canvas-wrap { position: relative; flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; }
       .fnode .ic svg { pointer-events: none; }
       @media (max-width: 820px) {
@@ -41,13 +28,12 @@
         .views > .inbox { order: -1; flex: 0 0 auto; overflow: visible; }
         #view-list { flex: 0 0 auto; overflow: visible; }
         .canvas-wrap { min-height: 360px; }
-        .top-search { display: none; }
         #view-switch button[data-view="kanban"] { display: none; }
       }
     </style>
   </head>
-  <body class="app">
-    <nav id="rail"><a href="/">回到對話</a></nav>
+  <body class="app" data-nav="board">
+    <nav id="app-rail" class="app-rail"><a href="/">回到對話</a></nav>
     <div class="app-main">
       <header class="app-top">
         <h1>總覽</h1>
@@ -64,6 +50,7 @@
           <span id="sched-state" class="state"><span class="s-dot"></span><span class="s-text">–</span></span>
           <button id="pause-btn" class="btn sm" type="button">暫停排程</button>
         </span>
+        <span class="ops-who hide-sm" id="ops-who"></span>
         <div class="more-wrap">
           <button class="btn icon" id="more-btn" type="button" aria-label="更多" aria-haspopup="menu" aria-expanded="false"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.7" /><circle cx="12" cy="12" r="1.7" /><circle cx="19" cy="12" r="1.7" /></svg></button>
           <div class="menu-pop" id="more-menu" role="menu" hidden>
@@ -267,5 +254,6 @@
     <script src="/ops.js"></script>
     <script src="/app.js"></script>
     <script type="module" src="/board-flow.js"></script>
+    <script type="module" src="/frame-boot.js"></script>
   </body>
 </html>

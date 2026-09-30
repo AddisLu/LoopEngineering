@@ -1,9 +1,8 @@
 // 評比 page: every benchmark as a card, one benchmark as a chart dashboard (the design canvas
 // "Loop 介面改版" ⑦–⑨), and 戰績 — which model fits which kind of work. textContent-only.
-import { $, fill, h, icon, api, withToken, mountRail, dur, tokens, tsMs, shortTime } from './frame.js';
+import { $, fill, h, icon, api, withToken, dur, tokens, tsMs, shortTime } from './frame.js';
 import { groupedBars, lineChart, dotPlot, scatter, swimlane, outcomeDots, bullet, heatColor, fmtNum, hbars } from './charts.js';
 
-mountRail('bench');
 
 const fmt = (n, d = 1) => (n == null || isNaN(n) ? '–' : Number(n).toFixed(d));
 const pct = (n) => (n == null || isNaN(n) ? '–' : `${Math.round(n * 100)}%`);

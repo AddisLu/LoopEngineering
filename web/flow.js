@@ -5,14 +5,13 @@
 //   /flow.html?task=<id>  → run: the same stages lit by what the task did, and every attempt
 // The form behind the canvas is the PRD form (web/prd-compose.js composes the Markdown the gate
 // reads), so a flow is exactly a PRD. textContent-only.
-import { $, fill, h, icon, api, mountRail, dur, tokens, hhmm, shortTime, modelName, isLocal } from './frame.js';
+import { $, fill, h, icon, api, dur, tokens, hhmm, shortTime, modelName, isLocal } from './frame.js';
 import { createCanvas } from './flow/canvas.js';
 import { composePrd, emptyDataset } from './prd-compose.js';
 import { mergeForm, applyPlan, applyKind, baseName } from './prd-form.js';
 import { KINDS } from './prd-kinds.js';
 import { hbars, fmtNum } from './charts.js';
 
-mountRail('flow');
 
 const qs = new URLSearchParams(location.search);
 const hashQuery = () => new URLSearchParams((location.hash.split('?')[1] || ''));
@@ -155,19 +154,33 @@ async function startView() {
   // recent drafts
   try {
     const { drafts } = await api('/api/prd/drafts?limit=8');
-    fill($('drafts'), 
-      ...(drafts.length
-        ? drafts.map((d) =>
-            h(
-              'a',
-              { href: d.status === 'submitted' && d.task_id ? `/flow.html?task=${encodeURIComponent(d.task_id)}` : `/flow.html?draft=${encodeURIComponent(d.id)}` },
-              h('span.t', null, d.title),
-              h(`span.chip-s${d.status === 'submitted' ? '.ok' : ''}`, null, d.status === 'submitted' ? '已送出' : '草稿'),
-              h('span.w', null, shortTime(d.updated_at)),
-            ),
-          )
-        : [h('p.empty-s', null, '還沒有草稿。')]),
-    );
+    const row = (d) => {
+      const del = h('button.drow-del', { type: 'button', 'aria-label': `刪除草稿「${d.title}」`, title: '刪除草稿' }, icon('trash', { sw: 1.8 }));
+      const r = h(
+        'div.drow',
+        null,
+        h(
+          'a',
+          { href: d.status === 'submitted' && d.task_id ? `/flow.html?task=${encodeURIComponent(d.task_id)}` : `/flow.html?draft=${encodeURIComponent(d.id)}` },
+          h('span.t', null, d.title),
+          h(`span.chip-s${d.status === 'submitted' ? '.ok' : ''}`, null, d.status === 'submitted' ? '已送出' : '草稿'),
+          h('span.w', null, shortTime(d.updated_at)),
+        ),
+        del,
+      );
+      del.onclick = async () => {
+        if (!confirm(`刪除草稿「${d.title}」？${d.status === 'submitted' ? '已建立的任務不會被刪除。' : ''}`)) return;
+        try {
+          await api(`/api/prd/drafts/${encodeURIComponent(d.id)}`, 'DELETE');
+          r.remove();
+          if (!$('drafts').querySelector('.drow')) fill($('drafts'), h('p.empty-s', null, '還沒有草稿。'));
+        } catch (e) {
+          window.Ops.toast(`刪不掉：${e.message}`, 'bad');
+        }
+      };
+      return r;
+    };
+    fill($('drafts'), ...(drafts.length ? drafts.map(row) : [h('p.empty-s', null, '還沒有草稿。')]));
   } catch (e) {
     if (e.status === 404) notice('PRD 閘門沒有開（prd_gate_enabled=false）：工作流程要靠它檢查需求。可以用 loop config set prd_gate_enabled true 打開，或先用總覽的「新增單一任務（進階）」。');
     fill($('drafts'), h('p.empty-s', null, '讀不到草稿。'));

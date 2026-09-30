@@ -30,9 +30,13 @@
       .tcard .chips { display: flex; gap: 6px; flex-wrap: wrap; }
       .tcard.dashed { border-style: dashed; background: transparent; }
       .drafts { border: 1px solid var(--border); border-radius: 14px; background: var(--surface-2); display: flex; flex-direction: column; }
-      .drafts a { min-height: 48px; padding: 0 16px; display: flex; align-items: center; gap: 12px; color: var(--text); text-decoration: none; border-top: 1px solid var(--surface-sunk); }
-      .drafts a:first-child { border-top: 0; }
-      .drafts a:hover { background: var(--surface-sunk); }
+      .drafts .drow { display: flex; align-items: center; border-top: 1px solid var(--surface-sunk); }
+      .drafts .drow:first-child { border-top: 0; }
+      .drafts .drow:hover { background: var(--surface-sunk); }
+      .drafts a { flex: 1 1 auto; min-width: 0; min-height: 48px; padding: 0 4px 0 16px; display: flex; align-items: center; gap: 12px; color: var(--text); text-decoration: none; }
+      .drafts .drow-del { flex: 0 0 auto; width: 36px; height: 36px; margin-right: 8px; display: grid; place-items: center; border: 0; border-radius: 8px; background: transparent; color: var(--text-3); cursor: pointer; }
+      .drafts .drow-del:hover { background: var(--danger-soft); color: var(--danger); }
+      .drafts .drow-del svg { width: 17px; height: 17px; }
       .drafts .t { flex: 1 1 auto; font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .drafts .w { width: 110px; text-align: right; font-size: 12.5px; color: var(--text-2); }
       .sec-h { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
@@ -76,8 +80,8 @@
       }
     </style>
   </head>
-  <body class="app">
-    <nav id="rail"><a href="/">回到對話</a></nav>
+  <body class="app" data-nav="flow">
+    <nav id="app-rail" class="app-rail"><a href="/">回到對話</a></nav>
     <div class="app-main" style="position: relative">
       <header class="app-top" id="top">
         <a class="crumb" href="/flow.html">工作流程</a>
@@ -88,6 +92,7 @@
         <div class="seg" role="tablist" aria-label="工作流程分頁" id="tabs" hidden></div>
         <span class="grow"></span>
         <div id="top-actions" class="runbar"></div>
+        <span class="ops-who hide-sm" id="ops-who"></span>
       </header>
       <p class="notice" id="notice" hidden></p>
 
@@ -169,5 +174,6 @@
 
     <script src="/ops.js"></script>
     <script type="module" src="/flow.js"></script>
+    <script type="module" src="/frame-boot.js"></script>
   </body>
 </html>

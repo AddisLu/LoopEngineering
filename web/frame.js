@@ -179,11 +179,11 @@ const NAV = [
 
 const RING_C = 2 * Math.PI * 14;
 
-/** Build the left rail into <nav id="rail"> and keep its usage ring fresh. */
-export function mountRail(active) {
-  const nav = document.getElementById('rail');
+/** Build the left rail into <nav id="app-rail"> (or `o.el`) and keep its usage ring fresh. */
+export function mountRail(active, o = {}) {
+  const nav = o.el || document.getElementById('app-rail');
   if (!nav) return;
-  nav.className = 'rail';
+  nav.className = 'app-rail';
   nav.setAttribute('aria-label', '主選單');
   nav.replaceChildren();
   const logo = h('a.logo', { href: '/', 'aria-label': 'Loop 首頁' }, icon('loop', { sw: 2 }));
@@ -217,6 +217,13 @@ export function mountRail(active) {
   nav.appendChild(usage);
 
   const settings = h('a.ibtn', { href: '/board.html#settings', 'aria-label': '設定', title: '設定' }, icon('gear', { sw: 1.8 }));
+  // already on 總覽: open the dialog directly (a second click on the same #settings link changes nothing)
+  settings.onclick = (e) => {
+    const btn = location.pathname === '/board.html' && document.getElementById('settings-btn');
+    if (!btn) return;
+    e.preventDefault();
+    btn.click();
+  };
   nav.appendChild(settings);
   const theme = h('button.ibtn', { type: 'button' });
   const paintTheme = () => {
@@ -247,6 +254,11 @@ export function mountRail(active) {
   poll();
   setInterval(poll, 60_000);
   return { paintUsage };
+}
+
+/** 你是 … in the top bar (#ops-who): the Tailscale login, or the name typed on this browser. */
+export function mountWho(el = document.getElementById('ops-who')) {
+  if (el) window.Ops.mountWho(el);
 }
 
 /** A small popup menu anchored under `anchor`; items: [label, onClick] | 'hr' | [label, href, 'link'] */
