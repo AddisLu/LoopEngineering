@@ -12,6 +12,7 @@ import {
   updateRun,
   latestRun,
   bumpResume,
+  listRunsForTask,
 } from '../tasks.js';
 import { readUsage } from '../token/usage.js';
 import { estimatePct } from '../token/accounting.js';
@@ -29,7 +30,7 @@ import { parseSteps, parseVerifyMode } from '../types.js';
 import { unmetCapabilities } from '../capabilities.js';
 import { runGapReview } from '../review/gapReviewer.js';
 import { createPr } from '../git/pr.js';
-import { prBody } from './runSummary.js';
+import { prBody, readVerify } from './runSummary.js';
 import { syncWithBase, pushBranch, stripLoopArtifacts, integrateIntoBase, baseRefFor } from '../git/integrate.js';
 import { verifiedShas } from '../review/code.js';
 import { artifactGlobs, collectArtifacts, unstageArtifacts } from '../review/artifacts.js';
@@ -867,6 +868,10 @@ function handleVerifyFailure(
   const failedStep = vres.failedStep ?? '(unknown step)';
   const maxResumes = getNum(db, 'max_resumes', 2);
   const finishedRun = getRun(db, runId)!;
+  // fix_attempts set: verify fixes get their own budget, then the escalation ladder (fix_escalation)
+  // hands the same branch to the next local model. Empty (default) = the path below, unchanged.
+  const fixBudget = (getSetting(db, 'fix_attempts') ?? '').trim();
+  if (fixBudget !== '') return handleFixBudget(db, task, runId, worktreePath, failedStep, tail, Number(fixBudget), finishedRun.session_id);
   if (finishedRun.session_id && task.resume_count < maxResumes) {
     writeResumeContext(worktreePath, failedStep, tail);
     bumpResume(db, task.id);
@@ -878,6 +883,80 @@ function handleVerifyFailure(
   }
   writeResumeContext(worktreePath, failedStep, tail); // a manual 續跑 resume still gets the context
   setStatus(db, task.id, 'attention', { run_id: runId, detail: `verify failed at: ${failedStep}\n${tail}` });
+}
+
+/**
+ * The fix budget and escalation ladder (settings `fix_attempts`, `fix_escalation`):
+ * - under budget: resume the same session to fix it (counted in tasks.fix_attempts, not resume_count,
+ *   so usage interrupts keep their own max_resumes budget);
+ * - budget spent and a next model on the ladder: switch the task to it and queue a cold start on the
+ *   same branch and worktree (addWorktree reuses both), with the whole failure history and a
+ *   「換個做法」 note in LOOP_RESUME_CONTEXT.md;
+ * - ladder exhausted: attention, as before.
+ */
+function handleFixBudget(
+  db: Database.Database,
+  task: Task,
+  runId: string,
+  worktreePath: string,
+  failedStep: string,
+  tail: string,
+  budget: number,
+  sessionId: string | null,
+): void {
+  const used = task.fix_attempts ?? 0;
+  const history = attemptHistory(db, task.id);
+  if (sessionId && used < budget) {
+    writeResumeContext(worktreePath, failedStep, tail, { history });
+    db.prepare('UPDATE tasks SET fix_attempts = fix_attempts + 1 WHERE id = ?').run(task.id);
+    setStatus(db, task.id, 'blocked', {
+      run_id: runId,
+      detail: `verify failed (fix ${used + 1}/${budget}) at: ${failedStep}`,
+    });
+    return;
+  }
+  const ladder = (getSetting(db, 'fix_escalation') ?? '').split(',').map((m) => m.trim()).filter(Boolean);
+  const step = task.ladder_step ?? 0;
+  const current = (task.model ?? '').trim();
+  // skip ladder entries equal to the model that just failed
+  let next: string | null = null;
+  let nextStep = step;
+  while (nextStep < ladder.length) {
+    const cand = ladder[nextStep]!;
+    nextStep += 1;
+    if (cand !== current) {
+      next = cand;
+      break;
+    }
+  }
+  if (next) {
+    writeResumeContext(worktreePath, failedStep, tail, {
+      history,
+      handover: `前一個模型（${current || '預設模型'}）用完了 ${budget} 次修正機會還是沒過。你是接手的模型：先讀懂上面每一次失敗的原因，換一個做法，不要重複同樣的修改；分支上已經有前一個模型的提交，可以沿用、也可以改掉。`,
+    });
+    db.prepare('UPDATE tasks SET model = ?, ladder_step = ?, fix_attempts = 0 WHERE id = ?').run(next, nextStep, task.id);
+    setStatus(db, task.id, 'queued', { run_id: runId, detail: `換模型重試：${next}（沒過 ${failedStep}）` });
+    return;
+  }
+  writeResumeContext(worktreePath, failedStep, tail, { history }); // a manual 續跑 still gets the context
+  setStatus(db, task.id, 'attention', { run_id: runId, detail: `verify failed at: ${failedStep}（修正與換模型都用完了）\n${tail}` });
+}
+
+/** One line per finished attempt of a task: which model, which step failed (or passed). */
+export function attemptHistory(db: Database.Database, taskId: string): string[] {
+  const out: string[] = [];
+  for (const [i, r] of listRunsForTask(db, taskId)
+    .slice()
+    .sort((a, b) => String(a.started_at).localeCompare(String(b.started_at)))
+    .entries()) {
+    const steps = readVerify(r);
+    if (!steps.length) continue;
+    const bad = steps.find((s) => !s.ok);
+    const why = bad ? `沒過「${bad.step}」${bad.timedOut ? '（逾時）' : bad.exitCode !== null ? `（exit ${bad.exitCode}）` : ''}` : '檢查都過了';
+    const tailLine = bad?.tail ? `：${bad.tail.trim().split('\n').filter(Boolean).slice(-1)[0]?.slice(0, 160) ?? ''}` : '';
+    out.push(`第 ${i + 1} 次 · ${r.model || '預設模型'} · ${why}${tailLine}`);
+  }
+  return out;
 }
 
 /** Best-effort PR creation; records pr_url + a note on success. Returns the URL or null. On a local
