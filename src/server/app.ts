@@ -55,6 +55,10 @@ import type { OpsToolDeps } from '../chatops/tools.js';
 import { registerExecRoutes } from './execRoutes.js';
 import { registerPlanRoutes, type PlanRouteOptions } from './planRoutes.js';
 import { registerReviewRoutes } from './reviewRoutes.js';
+import { registerRepoRoutes, type RepoRouteOptions } from './repoRoutes.js';
+import { registerMachineRoutes, type MachineRouteOptions } from './machineRoutes.js';
+import { registerCheckRoutes, type CheckRouteOptions } from './checkRoutes.js';
+import { registerTicketRoutes, type TicketRouteOptions } from './ticketRoutes.js';
 import { buildMorningReport } from '../report/morning.js';
 import fastifyWebsocket from '@fastify/websocket';
 import { registerTerminalRoutes, type TerminalRouteOptions } from './terminalRoutes.js';
@@ -80,6 +84,11 @@ function isReadonlyAllowed(url: string): boolean {
 }
 
 export interface AppOptions {
+  /** 問題單 flow test seams (each route module documents its own). */
+  repoRoutes?: RepoRouteOptions;
+  machineRoutes?: MachineRouteOptions;
+  checkRoutes?: CheckRouteOptions;
+  ticketRoutes?: TicketRouteOptions;
   db?: Database.Database;
   apiToken?: string | null;
   /** Second, read-only bearer: GET-only, restricted to the SSoT-read whitelist (see isReadonlyAllowed). */
@@ -618,6 +627,11 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
   registerChatRoutes(app, db, { identity: opts.chatIdentity, toolFetch: opts.chatToolFetch, toolLookup: opts.chatToolLookup, mcpPool, sandboxRun: opts.sandboxRun, opsDeps: opts.opsDeps });
   registerOpsRoutes(app, db, { identity: opts.chatIdentity, deps: opts.opsDeps });
   registerExecRoutes(app, db, { run: opts.sandboxRun });
+  // 問題單 → 分析 → 檢查 → PR: repos, machines, checks and tickets (each filled in by its own link)
+  registerRepoRoutes(app, db, opts.repoRoutes ?? {});
+  registerMachineRoutes(app, db, opts.machineRoutes ?? {});
+  registerCheckRoutes(app, db, opts.checkRoutes ?? {});
+  registerTicketRoutes(app, db, opts.ticketRoutes ?? {});
   registerPlanRoutes(app, db, { hostExec: opts.planHostExec, check: opts.planCheck, reviewExec: opts.prdReviewExec });
   registerReviewRoutes(app, db, { sandboxRun: opts.sandboxRun, releaseFetch: opts.releaseFetch, releaseToken: opts.releaseToken, identity: opts.chatIdentity });
   // inside a child plugin so it loads after @fastify/websocket (a `websocket: true` route

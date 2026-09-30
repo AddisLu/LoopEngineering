@@ -878,6 +878,15 @@ vplan
     }
   });
 
+// ---- repo commands (src/repo/*): loop repo import|list|rm ------------------------------------
+// (filled in by the repo-import link)
+
+// ---- machine commands (src/exec/machines.ts): loop machine add|list|check|rm ------------------
+// (filled in by the machines link)
+
+// ---- check commands (src/checks/*): loop check list|trial|baseline ---------------------------
+// (filled in by the checks link)
+
 const local = program.command('local').description('本地模型: list / load / stop / download / build / jobs (see local_models_enabled)');
 
 local
