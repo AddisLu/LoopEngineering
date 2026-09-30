@@ -197,6 +197,15 @@ function migrate(db: Database.Database): void {
   // the starting code every arm began from, measured once with the same verification (baseline_json):
   // what "faster than before" is measured against
   add('benchmarks', [['baseline_json', 'TEXT']]);
+  // 模型快篩 (src/benchmark/screen.ts): one row per model × built-in question, run back to back; rows
+  // waiting their turn are status 'queued' with no arm yet. NULL mode = an ordinary benchmark.
+  add('benchmarks', [
+    ['mode', 'TEXT'],
+    ['screen_group', 'TEXT'],
+    ['screen_seq', 'INTEGER'],
+    ['screen_json', 'TEXT'],
+  ]);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_benchmarks_screen ON benchmarks(screen_group)');
   // 分享連結: an unguessable token makes one conversation readable without a login. Partial index
   // so the many NULLs (every unshared conversation) do not collide.
   add('chat_conversations', [

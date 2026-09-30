@@ -29,7 +29,7 @@ export const NONNEG_KEYS = new Set([
   // 本地模型 (src/local/*.ts)
   'local_max_concurrency', 'local_switch_timeout_sec', 'local_switch_retry_min', 'local_timeout_multiplier',
   // benchmark mode
-  'bench_diff_cap_chars', 'bench_judge_timeout_ms',
+  'bench_diff_cap_chars', 'bench_judge_timeout_ms', 'bench_screen_budget_min',
   // PRD gate
   'local_chat_timeout_ms',
   // GPU 執行沙盒 (src/exec/sandbox.ts)
@@ -123,7 +123,7 @@ export const TUNABLE_KEYS = [
   // 晨報
   'morning_report_time',
   // benchmark mode
-  'benchmark_enabled', 'bench_judge_model', 'bench_final_measure',
+  'benchmark_enabled', 'bench_judge_model', 'bench_final_measure', 'bench_screen_questions', 'bench_screen_budget_min',
   // PRD gate
   'prd_gate_enabled', 'prd_require_llm', 'prd_default_model', 'prd_repo_allowlist',
 ] as const;
@@ -214,6 +214,9 @@ export function validateSetting(key: string, value: string): string | null {
     if (bad.length) return `prd_repo_allowlist entries must be absolute paths (got: ${bad.join(', ')})`;
   } else if (key === 'prd_default_model') {
     if (value !== '' && !isModelValue(value)) return `prd_default_model must be empty, a model alias or local:<id>`;
+  } else if (key === 'bench_screen_questions') {
+    const keys = value.split(',').map((s) => s.trim()).filter(Boolean);
+    if (!keys.length || keys.some((k) => !/^[a-z0-9-]+$/.test(k))) return 'bench_screen_questions must be a comma-separated list of built-in question keys (seed/bench/*.json), e.g. slugify,log-analyzer';
   } else if (key === 'bench_judge_model' || key === 'chat_escalate_model') {
     if (!BENCH_JUDGE_MODELS.has(value)) return `${key} must be one of: ${[...BENCH_JUDGE_MODELS].join(', ')}`;
   } else if (key === 'integration_provider') {

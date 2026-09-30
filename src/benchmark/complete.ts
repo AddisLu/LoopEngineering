@@ -13,6 +13,7 @@ import { aggregateJudgements, runBenchJudge, type ArmEvidence, type BenchJudgeEx
 import { getModelManager, type ModelManager } from '../local/modelManager.js';
 import { activeLocalRunCount } from '../tasks.js';
 import { isLocalModel, localId } from '../local/models.js';
+import { handOffRestore, promoteScreens, screenGroupDone } from './screen.js';
 
 /**
  * Benchmark completion: once every arm task is terminal, collect each arm's evidence (verify
@@ -36,6 +37,7 @@ export function isJudging(id: string): boolean {
  */
 export function rejudgeBlocker(detail: { benchmark: Benchmark; arms: BenchmarkArmView[] }): string | null {
   const { status } = detail.benchmark;
+  if (detail.benchmark.mode === 'screen') return '快篩沒有評審，不能重新評分。';
   if (status === 'judging' && isJudging(detail.benchmark.id)) return '這個評比正在評分中，等它跑完再試。';
   if (status === 'cancelled') return '這個評比已取消。';
   if (!detail.arms.every((a) => TERMINAL.has(a.task_status ?? 'failed'))) return '還有組別沒跑完。';
@@ -45,7 +47,8 @@ export function rejudgeBlocker(detail: { benchmark: Benchmark; arms: BenchmarkAr
 const measuringBaseline = new Set<string>();
 
 /** Why the baseline can't be measured now (null = go): the measurement needs the GPU to itself. */
-export function baselineBlocker(b: Pick<Benchmark, 'id' | 'status'>): string | null {
+export function baselineBlocker(b: Pick<Benchmark, 'id' | 'status'> & { mode?: string | null }): string | null {
+  if (b.mode === 'screen') return '快篩不量基準。';
   if (b.status === 'running' || b.status === 'judging') return '評比還在進行，等評完再量基準（量測要獨占 GPU）。';
   if (measuringBaseline.has(b.id)) return '基準正在量測中。';
   return null;
@@ -87,10 +90,73 @@ export async function checkBenchmarks(db: Database.Database, exec?: BenchJudgeEx
     const detail = getBenchmark(db, id);
     if (!detail || judging.has(id)) continue;
     if (!detail.arms.every((a) => TERMINAL.has(a.task_status ?? 'failed'))) continue;
-    await judgeBenchmark(db, id, exec);
+    if (detail.benchmark.mode === 'screen') await finishScreen(db, id);
+    else await judgeBenchmark(db, id, exec);
     done.push(id);
   }
+  // the queue is free again (or was all along): start the next 快篩 row waiting its turn
+  promoteScreens(db);
   return done;
+}
+
+/**
+ * One 快篩 row is done: record what the arm did (pass/fail, attempts, time, tokens) — no final
+ * re-measurement, no judge — close the arm, and when it was the batch's last row, report the batch
+ * and put the operator's model back (or hand that duty to whatever 快篩 still waits).
+ */
+export async function finishScreen(db: Database.Database, id: string, opts: { modelManager?: Pick<ModelManager, 'state' | 'ensureLoaded'> } = {}): Promise<Benchmark | null> {
+  if (judging.has(id)) return null;
+  const detail = getBenchmark(db, id);
+  if (!detail) return null;
+  judging.add(id);
+  try {
+    const bench = detail.benchmark;
+    const arm = detail.arms.find((a) => a.task_status != null);
+    if (!arm) {
+      db.prepare("UPDATE benchmarks SET status = 'cancelled', error = ? WHERE id = ?").run('參賽任務已被刪除', id);
+    } else {
+      const ev = collectArmEvidence(db, bench, arm);
+      const mins = Math.max(1, Math.round((ev.duration_s ?? 0) / 60));
+      const summary =
+        ev.verify_outcome === 'pass'
+          ? `通過${ev.iterations?.passed_at ? `（第 ${ev.iterations.passed_at} 次）` : ''}・${mins} 分`
+          : `沒過・${mins} 分：${(ev.failure ?? '').split('\n').find((l) => l.trim())?.slice(0, 120) ?? '沒有通過驗證'}`;
+      db.prepare("UPDATE benchmarks SET status = 'judged', winner = NULL, summary = ?, result_json = ?, judged_at = datetime('now') WHERE id = ?").run(
+        summary,
+        JSON.stringify({ screen: true, evidence: [ev] }),
+        id,
+      );
+      const t = getTask(db, arm.task_id);
+      if (t) {
+        cleanupWorktree(db, t);
+        if (t.status === 'review' || t.status === 'attention') setStatus(db, t.id, 'closed', { detail: `模型快篩 ${bench.screen_group} 完成` });
+      }
+      logEvent(db, { kind: 'note', detail: `模型快篩 ${bench.screen_group}: ${arm.model} ${bench.source_ref} → ${summary}` });
+    }
+    const group = bench.screen_group;
+    if (group && screenGroupDone(db, group)) {
+      const rows = db
+        .prepare("SELECT a.model AS model, SUM(CASE WHEN a.verify_outcome = 'pass' THEN 1 ELSE 0 END) AS passed, COUNT(*) AS n FROM benchmarks b JOIN benchmark_arms a ON a.benchmark_id = b.id WHERE b.screen_group = ? GROUP BY a.model")
+        .all(group) as Array<{ model: string; passed: number; n: number }>;
+      const line = rows.map((r) => `${r.model.replace(/^local:/, '')} ${r.passed}/${r.n}`).join('・');
+      logEvent(db, { kind: 'note', detail: `模型快篩 ${group} 完成：${line}` });
+      await notify(db, { title: 'Loop: 模型快篩完成', message: line || '（沒有跑完的題目）', tags: ['mag'] });
+      restoreAfter(db, bench, opts.modelManager);
+    }
+    return getBenchmark(db, id)!.benchmark;
+  } finally {
+    judging.delete(id);
+  }
+}
+
+/** After a benchmark (or a 快篩 batch): the operator's model back — unless 快篩 rows still wait, who inherit the duty. */
+function restoreAfter(db: Database.Database, bench: Benchmark, mm?: Pick<ModelManager, 'state' | 'ensureLoaded'>): void {
+  const restore = bench.restore_model;
+  if (handOffRestore(db, restore) !== 'restore' || !restore || activeLocalRunCount(db) !== 0) return;
+  const manager = mm ?? getModelManager(db);
+  if (manager.state().loaded === restore) return;
+  const r = manager.ensureLoaded(restore);
+  logEvent(db, { kind: 'note', detail: `benchmark ${bench.id}: switching back to ${restore} (${r})` });
 }
 
 /** Judge one benchmark now (also the retry path for judge_failed). Null if unknown or already judging. */
@@ -190,15 +256,8 @@ export async function judgeBenchmark(
       tags: ['trophy'],
     });
     // the arms may have switched vLLM around; put the operator's model back when nothing local runs
-    const restore = bench.restore_model;
-    if (restore && activeLocalRunCount(db) === 0) {
-      const mm = opts.modelManager ?? getModelManager(db);
-      const loaded = mm.state().loaded;
-      if (loaded !== restore) {
-        const r = mm.ensureLoaded(restore);
-        logEvent(db, { kind: 'note', detail: `benchmark ${id}: switching back to ${restore} (${r})` });
-      }
-    }
+    // (a 快篩 waiting its turn would switch again at once: it inherits the duty instead)
+    restoreAfter(db, bench, opts.modelManager);
     return getBenchmark(db, id)!.benchmark;
   } finally {
     judging.delete(id);

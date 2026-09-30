@@ -514,6 +514,10 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // re-measure every arm's final code, one arm at a time, before judging (attempts.ts measureArm):
   // what an arm timed for itself may have shared the GPU with another arm. The ranking goes by this.
   bench_final_measure: 'true',
+  // 模型快篩 (src/benchmark/screen.ts): the built-in questions a screen runs by default (CSV of
+  // seed/bench keys) and each question's time cap in minutes. No judge, no cloud call.
+  bench_screen_questions: 'slugify,log-analyzer,csv-parser',
+  bench_screen_budget_min: '15',
 
   // PRD 閘門（src/prd/*.ts, web/prd.html）：貼上 PRD → 規則檢查 + 已載入的本地模型審查（零 token），
   // 不完整就擋下；通過才建成任務（或 benchmark）。off by default = routes 404.

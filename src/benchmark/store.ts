@@ -32,7 +32,8 @@ export interface Benchmark {
   domain: string;
   complexity: Complexity;
   judge_model: string;
-  status: 'running' | 'judging' | 'judged' | 'judge_failed' | 'cancelled';
+  /** 'queued' only for 快篩 rows waiting their turn (no arm yet) */
+  status: 'queued' | 'running' | 'judging' | 'judged' | 'judge_failed' | 'cancelled';
   winner: string | null;
   summary: string | null;
   result_json: string | null;
@@ -60,6 +61,12 @@ export interface Benchmark {
   timeout_min: number | null;
   /** BaselineMeasurement: the base commit measured with the same verification (null = not measured) */
   baseline_json: string | null;
+  /** 'screen' = one row of a 模型快篩 (src/benchmark/screen.ts); null = an ordinary benchmark */
+  mode: string | null;
+  screen_group: string | null;
+  screen_seq: number | null;
+  /** 快篩 row: {"model", "coding_tool", "budget_min"} — the arm is created when its turn comes */
+  screen_json: string | null;
 }
 
 export interface BenchmarkJudgement {
@@ -306,38 +313,57 @@ export function createBenchmark(
     restore_model: models.some(isLocalModel) && getSetting(db, 'local_model_status') === 'ready' ? (getSetting(db, 'local_model_loaded') || null) : null,
   });
 
-  const insertArm = db.prepare('INSERT INTO benchmark_arms (benchmark_id, model, task_id) VALUES (?, ?, ?)');
-  for (const model of models) {
-    const task = createTask(db, {
-      title: `[bench] ${title} · ${model}`,
-      goal,
-      plan_ref: planRef,
-      plan_kind: planKind(planRef),
-      coding_tool: codingTool,
-      verification_steps: steps,
-      setup_cmd: setupCmd,
-      repo_path: repoPath,
-      base_branch: baseBranch,
-      complexity,
-      priority: input.priority ?? 2,
-      model,
-      timeout_min: runTimeout,
-      verify_mode: 'command',
-      verify_rubric: input.verify_rubric ?? null,
-      verify_timeout_min: verifyTimeout,
-      experiment: `bench:${id}`,
-      benchmark_id: id,
-      acceptance_metrics: acceptance,
-      protected_paths: protectedPaths,
-      artifacts,
-      verify_plan_id: plan?.id ?? null,
-    });
-    insertArm.run(id, model, task.id);
-    setStatus(db, task.id, 'queued', { detail: `benchmark ${id} arm (${model})` });
-  }
+  const row = getBenchmark(db, id)!.benchmark;
+  for (const model of models) createArm(db, row, model, { codingTool, priority: input.priority ?? 2 });
   logEvent(db, { kind: 'note', detail: `benchmark ${id} created: ${title} [${models.join(', ')}] domain=${domain}` });
   const created = getBenchmark(db, id)!;
   return { benchmark: created.benchmark, arms: created.arms };
+}
+
+/**
+ * One arm: an ordinary task on the benchmark's question for `model` (so it goes through the normal
+ * tick -> runTask -> verify path), queued. Shared by createBenchmark and 快篩 (screen.ts), whose
+ * arms are created only when their row's turn comes.
+ */
+export function createArm(
+  db: Database.Database,
+  b: Benchmark,
+  model: string,
+  o: { codingTool?: 'claude-code' | 'mock'; priority?: number; label?: string } = {},
+): Task {
+  let steps: string[] = [];
+  try {
+    steps = JSON.parse(b.verification_steps) as string[];
+  } catch {
+    steps = [];
+  }
+  const task = createTask(db, {
+    title: `${o.label ?? '[bench]'} ${b.title} · ${model}`,
+    goal: b.goal,
+    plan_ref: b.plan_ref,
+    plan_kind: planKind(b.plan_ref),
+    coding_tool: o.codingTool ?? 'claude-code',
+    verification_steps: steps,
+    setup_cmd: b.setup_cmd,
+    repo_path: b.repo_path,
+    base_branch: b.base_branch,
+    complexity: b.complexity,
+    priority: o.priority ?? 2,
+    model,
+    timeout_min: b.timeout_min,
+    verify_mode: 'command',
+    verify_rubric: b.verify_rubric,
+    verify_timeout_min: b.verify_timeout_min,
+    experiment: `bench:${b.id}`,
+    benchmark_id: b.id,
+    acceptance_metrics: b.acceptance_metrics,
+    protected_paths: b.protected_paths,
+    artifacts: b.artifacts,
+    verify_plan_id: b.verify_plan_id,
+  });
+  db.prepare('INSERT INTO benchmark_arms (benchmark_id, model, task_id) VALUES (?, ?, ?)').run(b.id, model, task.id);
+  setStatus(db, task.id, 'queued', { detail: `benchmark ${b.id} arm (${model})` });
+  return task;
 }
 
 /**
@@ -349,11 +375,17 @@ export function cancelBenchmark(
   db: Database.Database,
   id: string,
   reason = '使用者取消',
-  deps: { onArmTask?: (task: Task) => void } = {},
+  deps: { onArmTask?: (task: Task) => void; single?: boolean } = {},
 ): Benchmark | null {
   const detail = getBenchmark(db, id);
   if (!detail) return null;
   const { benchmark } = detail;
+  // a 快篩 row belongs to its batch: cancelling one stops the whole batch (what is running and what waits)
+  if (benchmark.mode === 'screen' && benchmark.screen_group && !deps.single) {
+    const rows = db.prepare("SELECT id FROM benchmarks WHERE screen_group = ? AND status IN ('queued','running','judging')").all(benchmark.screen_group) as { id: string }[];
+    for (const r of rows) cancelBenchmark(db, r.id, reason, { ...deps, single: true });
+    return getBenchmark(db, id)!.benchmark;
+  }
   if (benchmark.status === 'judged' || benchmark.status === 'cancelled') return benchmark;
   const TERMINAL = new Set(['review', 'attention', 'failed', 'closed']);
   for (const arm of detail.arms) {
@@ -447,7 +479,7 @@ export function benchmarkSummary(db: Database.Database): { running: BenchmarkLis
               AVG(a.judge_score) AS avg_score,
               AVG(CASE WHEN a.verify_outcome = 'pass' THEN 1.0 ELSE 0.0 END) AS verify_pass_rate
          FROM benchmark_arms a JOIN benchmarks b ON b.id = a.benchmark_id
-        WHERE b.status = 'judged' GROUP BY a.model ORDER BY wins DESC, avg_score DESC`,
+        WHERE b.status = 'judged' AND (b.mode IS NULL OR b.mode != 'screen') GROUP BY a.model ORDER BY wins DESC, avg_score DESC`,
     )
     .all() as Array<{ model: string; n: number; wins: number; avg_score: number | null; verify_pass_rate: number }>;
   return {
@@ -472,7 +504,10 @@ export interface MatrixRow {
   domain: string;
   n: number;
   avg_score: number | null;
-  win_rate: number;
+  /** among judged benchmarks only (快篩 has no judge); null when the row is 快篩 only */
+  win_rate: number | null;
+  /** how many of the n rows are 快篩 (no judge, no final measurement) */
+  screen_n: number;
   /** passed the bar: the final re-measurement when the benchmark had one, else the arm's own verification */
   verify_pass_rate: number;
   /** of the arms with attempt records: passed on the first verification, no send-back needed */
@@ -496,6 +531,8 @@ export interface MatrixFilter {
   min_n?: number | null;
   /** at least this pass rate (0-1) */
   min_pass?: number | null;
+  /** include 快篩 rows (default true); false = judged benchmarks only */
+  screens?: boolean;
 }
 
 /**
@@ -509,6 +546,7 @@ export function benchmarkMatrix(db: Database.Database, filter: MatrixFilter = {}
     where.push('b.domain = ?');
     args.push(filter.domain);
   }
+  if (filter.screens === false) where.push("(b.mode IS NULL OR b.mode != 'screen')");
   if (filter.kind === 'local') where.push("a.model LIKE 'local:%'");
   if (filter.kind === 'cloud') where.push("a.model NOT LIKE 'local:%'");
   const having: string[] = [];
@@ -525,7 +563,8 @@ export function benchmarkMatrix(db: Database.Database, filter: MatrixFilter = {}
     .prepare(
       `SELECT a.model AS model, b.domain AS domain, COUNT(*) AS n,
               AVG(a.judge_score) AS avg_score,
-              AVG(CASE WHEN a.model = b.winner THEN 1.0 ELSE 0.0 END) AS win_rate,
+              AVG(CASE WHEN b.mode = 'screen' THEN NULL WHEN a.model = b.winner THEN 1.0 ELSE 0.0 END) AS win_rate,
+              SUM(CASE WHEN b.mode = 'screen' THEN 1 ELSE 0 END) AS screen_n,
               AVG(CASE WHEN a.verify_outcome = 'pass' THEN 1.0 ELSE 0.0 END) AS verify_pass_rate,
               AVG(${tracked.replace('%s', 'first_try')}) AS first_try_rate,
               AVG(json_extract(a.attempts_json, '$.passed_at')) AS avg_passed_at,
@@ -547,7 +586,8 @@ export function benchmarkMatrix(db: Database.Database, filter: MatrixFilter = {}
     model_label: modelLabel(db, r.model),
     local: isLocalModel(r.model),
     avg_score: r1(r.avg_score),
-    win_rate: r2(r.win_rate)!,
+    win_rate: r2(r.win_rate),
+    screen_n: r.screen_n ?? 0,
     verify_pass_rate: r2(r.verify_pass_rate)!,
     first_try_rate: r2(r.first_try_rate),
     avg_passed_at: r1(r.avg_passed_at),
@@ -586,7 +626,9 @@ export function benchmarkRecommendations(db: Database.Database, opts: { min_n?: 
     if (!here.length) continue;
     const local = here.filter((r) => r.local).sort(better)[0] ?? null;
     const cloud = here.filter((r) => !r.local).sort(better)[0] ?? null;
-    const thin = !local || local.n < 3;
+    // 快篩 rows count toward pass rates, but a hint built only on them says so
+    const judged = local ? local.n - local.screen_n : 0;
+    const thin = !local || judged < 3;
     let verdict: string;
     let kind: Recommendation['kind'];
     if (!local) {
@@ -602,7 +644,8 @@ export function benchmarkRecommendations(db: Database.Database, opts: { min_n?: 
       kind = 'weaker';
       verdict = `${local.model_label} 做得到但不如雲端（通過率 ${pct(local.verify_pass_rate)} 對 ${cloud.model_label} ${pct(cloud.verify_pass_rate)}），重要的工作交給雲端`;
     }
-    out.push({ domain, local, cloud, thin, kind, verdict: thin && local ? `${verdict}；只有 ${local.n} 場，僅供參考` : verdict });
+    const basis = local && judged === 0 ? `；只有快篩結果（${local.n} 題），僅供參考` : thin && local ? `；只有 ${judged} 場評比，僅供參考` : '';
+    out.push({ domain, local, cloud, thin, kind, verdict: `${verdict}${basis}` });
   }
   return out;
 }
