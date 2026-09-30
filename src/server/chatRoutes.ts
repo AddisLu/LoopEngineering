@@ -7,6 +7,7 @@ import type Database from 'better-sqlite3';
 import { getBool, getNum, getSetting } from '../db/index.js';
 import { getLocalModel } from '../local/models.js';
 import { currentRevision } from '../local/weights.js';
+import { templateKwargs } from '../local/thinking.js';
 import { search as ragSearch, type RetrievedChunk } from '../knowledge/retrieve.js';
 import { getSource } from '../knowledge/ingest/sources.js';
 import { chatLocal } from '../local/chat.js';
@@ -512,6 +513,7 @@ export function registerChatRoutes(app: FastifyInstance, db: Database.Database, 
   const fetchImpl: ChatFetch = opts.fetch ?? ((url, init) => fetch(url, init));
   const searchImpl = opts.search ?? ((d, q, o) => ragSearch(d, q, o));
   const identity = opts.identity ?? ((req: FastifyRequest) => identityOf(req));
+  const hubDir = opts.hubDir ?? defaultHubDir();
   const expandQuery = async (q: string, servedModel: string): Promise<string[]> => {
     try {
       const r = await fetchImpl(`${baseUrl()}/chat/completions`, {
@@ -526,7 +528,7 @@ export function registerChatRoutes(app: FastifyInstance, db: Database.Database, 
           stream: false,
           temperature: 0,
           max_tokens: 200,
-          chat_template_kwargs: { enable_thinking: false },
+          chat_template_kwargs: templateKwargs(servedModel, false, hubDir),
         }),
         signal: AbortSignal.timeout(20_000),
       });
@@ -539,7 +541,6 @@ export function registerChatRoutes(app: FastifyInstance, db: Database.Database, 
   };
   const readMem = opts.readMeminfo ?? defaultMeminfo;
   const gpuFn = opts.gpu ?? defaultGpu;
-  const hubDir = opts.hubDir ?? defaultHubDir();
   const enabled = () => getBool(db, 'local_models_enabled', false);
   const disabled = { error: 'local models disabled (set local_models_enabled=true)' };
   const baseUrl = () => (getSetting(db, 'local_vllm_base_url') || 'http://127.0.0.1:8000/v1').replace(/\/+$/, '');
@@ -1350,7 +1351,7 @@ export function registerChatRoutes(app: FastifyInstance, db: Database.Database, 
       stream: true,
       stream_options: { include_usage: true },
       max_tokens: maxTokens,
-      chat_template_kwargs: { enable_thinking: thinking },
+      chat_template_kwargs: templateKwargs(model.served_model_id, thinking, hubDir),
       ...(cont ? { continue_final_message: true, add_generation_prompt: false } : {}),
     };
     const knowledgeFrame = knowledge

@@ -433,6 +433,38 @@ describe('/api/chat with a fake vLLM', () => {
       chat_template_kwargs: { enable_thinking: false },
     });
   });
+
+  // the served snapshot's template decides the switch (see local/thinking.ts)
+  const snapshotFile = (name: string, text: string) =>
+    fs.writeFileSync(path.join(hubDir, `models--${SERVED.replace('/', '--')}`, 'snapshots', 'abc', name), text);
+  const sentBodies = () => ({
+    expansion: calls.find((c) => (c.body as { stream?: boolean } | undefined)?.stream === false)?.body as Record<string, unknown> | undefined,
+    answer: calls.find((c) => c.url.endsWith('/chat/completions') && (c.body as { stream?: boolean }).stream === true)?.body as Record<string, unknown>,
+  });
+
+  it('GLM-5.x has no off switch: thinking off asks for low effort, in the answer and the keyword expansion', async () => {
+    snapshotFile('chat_template.jinja', "{%- set effective_reasoning_effort = reasoning_effort if reasoning_effort in ['low', 'high'] else 'max' -%}<|assistant|>{{- '<think>' -}}");
+    setSetting(db, 'local_model_status', 'ready');
+    setSetting(db, 'local_model_loaded', 'qwen38-flash');
+    setSetting(db, 'rag_enabled', 'true');
+    await app.inject({ method: 'POST', url: '/api/chat', payload: { messages: [{ role: 'user', content: 'RDMA 為什麼改 SEND/RECV？' }], knowledge: true } });
+    expect(sentBodies().expansion?.chat_template_kwargs).toEqual({ reasoning_effort: 'low' });
+    expect(sentBodies().answer.chat_template_kwargs).toEqual({ reasoning_effort: 'low' });
+    calls.length = 0;
+    await app.inject({ method: 'POST', url: '/api/chat', payload: { messages: [{ role: 'user', content: 'hi' }], thinking: true } });
+    expect(sentBodies().answer.chat_template_kwargs).toEqual({}); // on = the template's own default (max)
+  });
+
+  it('DeepSeek V4 reads `thinking`, which its recipe defaults to true: both switches go out', async () => {
+    snapshotFile('config.json', JSON.stringify({ model_type: 'deepseek_v4' }));
+    setSetting(db, 'local_model_status', 'ready');
+    setSetting(db, 'local_model_loaded', 'qwen38-flash');
+    await app.inject({ method: 'POST', url: '/api/chat', payload: { messages: [{ role: 'user', content: 'hi' }] } });
+    expect(sentBodies().answer.chat_template_kwargs).toEqual({ thinking: false, enable_thinking: false });
+    calls.length = 0;
+    await app.inject({ method: 'POST', url: '/api/chat', payload: { messages: [{ role: 'user', content: 'hi' }], thinking: true } });
+    expect(sentBodies().answer.chat_template_kwargs).toEqual({ thinking: true, enable_thinking: true });
+  });
 });
 
 describe('chat page static assets', () => {

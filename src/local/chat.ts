@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3';
 import { getBool, getNum, getSetting } from '../db/index.js';
 import { getLocalModel } from './models.js';
+import { templateKwargs } from './thinking.js';
 
 /**
  * One-shot chat completion against whatever local model vLLM is serving right now — for
@@ -56,7 +57,7 @@ export async function chatLocal(
         ],
         temperature: 0,
         max_tokens: maxTokens,
-        chat_template_kwargs: { enable_thinking: req.thinking ?? false },
+        chat_template_kwargs: templateKwargs(model.served_model_id, req.thinking ?? false),
       }),
       signal: AbortSignal.timeout(getNum(db, 'local_chat_timeout_ms', 180_000)),
     });

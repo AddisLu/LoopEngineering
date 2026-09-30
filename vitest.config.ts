@@ -15,6 +15,8 @@ export default defineConfig({
       LOOP_API_TOKEN: '',
       // local model weights are looked up here: an empty cache, never the machine's real one
       HF_HOME: path.join(TEST_DATA, 'hf'),
+      // …and HF_HUB_CACHE, which wins over HF_HOME, must not leak in from the shell either
+      HF_HUB_CACHE: path.join(TEST_DATA, 'hf', 'hub'),
       // No Claude login and no TokenBar: a usage read that reaches past the cache must find nothing
       // to send. With this host's login it hit the account's usage endpoint, and the 429s it earned
       // lock the real engine out too.
