@@ -54,6 +54,7 @@ import { cloudAllowed, isCloudModel, localFallbackModel } from '../local/backend
 import { benchmarkRecommendations } from '../benchmark/store.js';
 import { runSelfReview } from '../review/selfReview.js';
 import { attachmentsFor, repoMapFor, similarFixesFor } from '../intake/context.js';
+import { reportIssue } from '../integrations/giteaIssues.js';
 
 /**
  * MCP servers a local-model task may use (mcp_servers_json), with the runtime env the chat page
@@ -494,6 +495,7 @@ export async function runTask(
   // instead of a git diff when it runs the llm judge)
   setStatus(db, task.id, 'verifying', { run_id: run.id });
   const verifyOutcome = await runVerifyPipeline(db, task, worktreePath, run.id, task.base_branch);
+  reportIssue(db, task, 'verify'); // an issue-sourced ticket: the live check-status comment on Gitea
   if (verifyOutcome === 'fail') return; // already routed to blocked/attention inside the pipeline
   // 本地自評 (local_self_review, off by default): a local model summarises the diff for the reviewer
   if (getBool(db, 'local_self_review', false) && !isGeneric && !isMock) {
@@ -994,6 +996,7 @@ async function tryCreatePr(
     if (prUrl) {
       db.prepare('UPDATE tasks SET pr_url = ? WHERE id = ?').run(prUrl, task.id);
       logEvent(db, { task_id: task.id, run_id: runId, kind: 'note', detail: `PR: ${prUrl}` });
+      reportIssue(db, task.id, 'pr');
     }
     return prUrl;
   } catch (err) {

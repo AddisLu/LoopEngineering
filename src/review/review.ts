@@ -21,6 +21,7 @@ import { changedFiles, codeRefFor, readSource, type ChangedFile } from './code.j
 import { latestArtifacts, packageZip, type ArtifactManifest } from './artifacts.js';
 import { parseSteps, type Task, type TaskRun } from '../types.js';
 import { recordFix } from '../repo/ledger.js';
+import { reportIssue } from '../integrations/giteaIssues.js';
 
 /**
  * 驗收頁 (web/task.html): everything a person needs to decide whether a task's result is good —
@@ -283,7 +284,7 @@ export async function approveTask(
   db: Database.Database,
   task: Task,
   by: string,
-  deps: { sandboxDeps?: SandboxDeps } = {},
+  deps: { sandboxDeps?: SandboxDeps; closeIssue?: boolean } = {},
 ): Promise<{ merged: boolean; detail: string }> {
   if (task.approved_at) throw new ReviewError(`已由 ${task.approved_by} 核可`);
   if (task.status !== 'review') throw new ReviewError('要等任務進到「待驗收」（看板上的「待結案」）才能核可');
@@ -307,6 +308,7 @@ export async function approveTask(
   db.prepare("UPDATE tasks SET approved_by = ?, approved_at = datetime('now') WHERE id = ?").run(by, task.id);
   logEvent(db, { task_id: task.id, kind: 'note', detail: `核可（${by}）：${detail}` });
   recordFix(db, getTask(db, task.id) ?? task, 'merged');
+  reportIssue(db, task.id, 'done', { closeIssue: deps.closeIssue });
   return { merged, detail };
 }
 
@@ -326,6 +328,7 @@ export function requestChanges(db: Database.Database, task: Task, feedback: stri
     `UPDATE tasks SET goal = ?, merge_status = NULL, approved_by = NULL, approved_at = NULL, checklist_json = NULL, resume_count = 0 WHERE id = ?`,
   ).run(goal, task.id);
   recordFix(db, task, 'returned');
+  reportIssue(db, task.id, 'returned', { feedback: fb });
   removeTrialWorkspace(task);
   setStatus(db, task.id, 'queued', { detail: `退回修改（${by}）：${fb.slice(0, 200)}` });
   return getTask(db, task.id)!;

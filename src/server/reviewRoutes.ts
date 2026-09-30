@@ -103,7 +103,8 @@ export function registerReviewRoutes(app: FastifyInstance, db: Database.Database
     const c = ctx(req, reply);
     if (!c) return;
     try {
-      return await approveTask(db, c.task, c.who.label);
+      const closeIssue = ((req.body ?? {}) as { close_issue?: unknown }).close_issue === true;
+      return await approveTask(db, c.task, c.who.label, { closeIssue });
     } catch (err) {
       return fail(reply, err);
     }
