@@ -234,6 +234,27 @@ describe('驗收頁', () => {
   });
 });
 
+describe('結果頁: 交給同事', () => {
+  it('交給同事 records who follows the task up, and the page shows it', async () => {
+    const { task } = reviewedTask();
+    const r = await app.inject({ method: 'POST', url: `/api/tasks/${task.id}/owner`, headers: as('呂侑儒'), payload: { owner: ' 王小明 ' } });
+    expect(r.json()).toEqual({ ok: true, owner: '王小明' });
+    expect(getTask(db, task.id)!.owner).toBe('王小明');
+    expect(getTask(db, task.id)!.status).toBe('review'); // nothing else about the task changes
+    const notes = (db.prepare("SELECT detail FROM task_events WHERE task_id = ? AND kind = 'note'").all(task.id) as { detail: string }[]).map((e) => e.detail);
+    expect(notes).toContain('交給 王小明（呂侑儒）');
+    expect((await app.inject({ method: 'GET', url: `/api/tasks/${task.id}/review` })).json().task.owner).toBe('王小明');
+
+    for (const payload of [{}, { owner: 3 }, { owner: 'x'.repeat(41) }, { owner: 'a\u0007b' }]) {
+      expect((await app.inject({ method: 'POST', url: `/api/tasks/${task.id}/owner`, payload })).statusCode, JSON.stringify(payload)).toBe(400);
+    }
+    expect((await app.inject({ method: 'POST', url: '/api/tasks/t_nope/owner', payload: { owner: '王小明' } })).statusCode).toBe(404);
+    const back = await app.inject({ method: 'POST', url: `/api/tasks/${task.id}/owner`, headers: as('王小明'), payload: { owner: '' } });
+    expect(back.json()).toEqual({ ok: true, owner: null });
+    expect(getTask(db, task.id)!.owner).toBeNull();
+  });
+});
+
 describe('新工作流程 options', () => {
   it('offers the allow-listed repos with their branches', async () => {
     const repo = dir('jobrepo');

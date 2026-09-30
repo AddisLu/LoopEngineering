@@ -120,7 +120,7 @@ export function tickCheck(db: Database.Database, task: Task, index: number, chec
 export type Verdict = 'passed' | 'manual' | 'failed' | 'in_progress';
 
 export interface ReviewBundle {
-  task: Pick<Task, 'id' | 'title' | 'goal' | 'status' | 'repo_path' | 'base_branch' | 'model' | 'merge_status' | 'pr_url' | 'acceptance_metrics' | 'verify_plan_id' | 'approved_by' | 'approved_at' | 'release_url' | 'created_at'>;
+  task: Pick<Task, 'id' | 'title' | 'goal' | 'status' | 'repo_path' | 'base_branch' | 'model' | 'merge_status' | 'pr_url' | 'acceptance_metrics' | 'verify_plan_id' | 'approved_by' | 'approved_at' | 'release_url' | 'created_at' | 'owner'>;
   verdict: Verdict;
   /** one line a person reads first */
   headline: string;
@@ -239,6 +239,7 @@ export function reviewBundle(
       approved_at: task.approved_at ?? null,
       release_url: task.release_url ?? null,
       created_at: task.created_at,
+      owner: task.owner ?? null,
     },
     verdict,
     headline,
@@ -325,6 +326,20 @@ export function requestChanges(db: Database.Database, task: Task, feedback: stri
   ).run(goal, task.id);
   removeTrialWorkspace(task);
   setStatus(db, task.id, 'queued', { detail: `退回修改（${by}）：${fb.slice(0, 200)}` });
+  return getTask(db, task.id)!;
+}
+
+/**
+ * 交給同事: who follows the task up from here (tasks.owner). Only the name is recorded — the run,
+ * the branch and the review state stay as they are; an empty name takes the task back (no owner).
+ */
+export function handOver(db: Database.Database, task: Task, owner: string, by: string): Task {
+  const name = owner.trim();
+  if (name.length > 40) throw new ReviewError('名字太長（最多 40 字）', 400);
+  if (/[\u0000-\u001f\u007f]/.test(name)) throw new ReviewError('名字裡有看不見的字元', 400);
+  if (name === (task.owner ?? '')) return task;
+  db.prepare('UPDATE tasks SET owner = ? WHERE id = ?').run(name || null, task.id);
+  logEvent(db, { task_id: task.id, kind: 'note', detail: name ? `交給 ${name}（${by}）` : `不再指定負責人（${by}）` });
   return getTask(db, task.id)!;
 }
 

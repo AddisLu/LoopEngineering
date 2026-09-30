@@ -9,6 +9,7 @@ import {
   approveTask,
   deliveryZip,
   getTrial,
+  handOver,
   listTrials,
   releaseTask,
   requestChanges,
@@ -198,6 +199,20 @@ export function registerReviewRoutes(app: FastifyInstance, db: Database.Database
         c.who.label,
         { fetchImpl: opts.releaseFetch, token: opts.releaseToken },
       );
+    } catch (err) {
+      return fail(reply, err);
+    }
+  });
+
+  // ---- 交給同事 ----
+  app.post('/api/tasks/:id/owner', async (req, reply) => {
+    const c = ctx(req, reply);
+    if (!c) return;
+    const owner = ((req.body ?? {}) as { owner?: unknown }).owner;
+    if (typeof owner !== 'string') return reply.code(400).send({ error: '請寫要交給誰' });
+    try {
+      const t = handOver(db, c.task, owner, c.who.label);
+      return { ok: true, owner: t.owner ?? null };
     } catch (err) {
       return fail(reply, err);
     }
