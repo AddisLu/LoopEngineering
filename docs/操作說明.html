@@ -1384,14 +1384,15 @@ loop bench recommend                                  # 各類工作建議的本
         <li><b>網路</b>：兩台的 200G 介面設固定 IP（這台 <code>192.168.177.11</code>，spark-02 <code>192.168.177.12</code>，MTU 9000），彼此 ping 得到。</li>
         <li><b>SSH</b>：這台能免密碼 SSH 到 spark-02（<code>ssh-copy-id</code>）。</li>
         <li><b>vLLM repo 的 <code>.env</code></b>：<code>CLUSTER_NODES=192.168.177.11,192.168.177.12</code>、<code>ETH_IF</code>、<code>IB_IF</code> 填 200G 介面與 RoCE 裝置名稱；<code>launch-cluster.sh --check-config</code> 要找到兩個節點。</li>
-        <li><b>映像與權重</b>：spark-02 也要有同一個容器映像與模型權重（同樣的 HF 快取路徑）。</li>
+        <li><b>映像與權重</b>：spark-02 也要有同一個容器映像與模型權重（同樣的 HF 快取路徑）。模型分頁的「下載」只下載到這台，也只檢查這台；兩台的模型下載完後，要先把權重複製過去（例如 <code>rsync -a --exclude 'trees/' ~/.cache/huggingface/hub/models--&lt;org&gt;--&lt;name&gt; spark-02:.cache/huggingface/hub/</code>，走 200G 約十幾分鐘），否則 spark-02 那半會載不起來。</li>
         <li><b>告訴 Loop</b>：<code>loop config set local_spark_nodes 2</code>，然後在「模型」分頁切到一個兩台的模型；切回單機模型時，確認兩台的容器都停了。</li>
       </ol>
+      <p>這台（head）另外跑著桌面、Loop 與 vLLM 的 API 伺服器，可用記憶體比 spark-02 少約 6–7 GiB，而且沒有 swap；容器裡的 earlyoom 在可用記憶體低於 512 MiB 時會砍掉 vLLM。剛好塞滿兩台的模型（例如 GLM-5.3 Flash）照原配方會在這台失敗，要用縮小 KV 快取與上下文的配方：vLLM repo 裡的 <code>recipes/glm-5.3-flash-kv4g.yaml</code>（模型分頁顯示為「GLM-5.3-Flash-NVFP4-Spark (精簡版)」：KV 2G、上下文 128K、最多同時 2 個請求）。</p>
 
       <h3>對話工作台（首頁 <code>/</code>）</h3>
       <ul>
         <li><b>入口</b>：網址根目錄就是對話（舊的 <code>/chat.html</code> 會自動轉過來，<code>?token=</code> 保留）。直接和 vLLM 目前載入的本地模型對話，不經雲端、不花 token；需要 <code>local_models_enabled=true</code> 且模型狀態為就緒。</li>
-        <li><b>速度</b>：每則回答下方標出首字延遲、輸出速度（tok/s）、輸出與讀入 token、總耗時；右欄「模型」分頁的「機台狀況」放大顯示，生成中另有服務端即時 tok/s。「思考模式」晶片會先推理再回答，較慢，思考過程可展開。</li>
+        <li><b>速度</b>：每則回答下方標出首字延遲、輸出速度（tok/s）、輸出與讀入 token、總耗時；右欄「模型」分頁的「機台狀況」放大顯示，生成中另有服務端即時 tok/s。「思考模式」晶片會先推理再回答，較慢，思考過程可展開。每個模型開關思考的方式不同，Loop 依模型內附的對話模板自動選：Qwen、Nemotron 用 <code>enable_thinking</code>；GLM-5.x、gpt-oss 沒有「不思考」可選，關閉時改用低推理強度（仍會先簡短想一下）；DeepSeek V4 用它自己的 <code>thinking</code> 開關。對話標題與知識庫的關鍵字擴展也照同樣規則。</li>
         <li><b>模型與記憶體</b>：右欄「模型」分頁的「機台狀況」顯示權重檔大小、量化格式、MoE 架構、最長上下文、MTP 推測解碼接受率；統一記憶體已用／總量與 vLLM 上限（<code>gpu_memory_utilization</code>）、KV 快取容量與使用率、GPU 溫度／功耗，每秒更新（右欄收起或切到別的分頁時停止查詢）。</li>
         <li><b>對話紀錄</b>：存在伺服器、<b>依使用者分開</b>。身分優先取 Tailscale 注入的登入帳號，沒有就用標題列「你是」填的名字（<code>x-loop-user</code>）。這是工作區分隔、<b>不是權限控管</b>：知道網址與 token 的人都看得到這台機器上的資料。可搜尋（中文兩字詞也搜得到）、改名、刪除；接續舊對話時只會把最近 <code>chat_context_turns</code>（預設 12）輪帶進模型，較早的內容留在畫面上並標示。</li>
         <li><b>逐則動作</b>：滑過訊息會出現按鈕——<b>重答</b>（丟掉這個回答重問，舊的軟刪除、順序不亂）、<b>編輯重問</b>（把問題放回輸入框，之後的內容一併移除）、<b>複製</b>、<b>存進知識庫</b>、<b>轉成任務</b>、<b>請雲端複核</b>。</li>
