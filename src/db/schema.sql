@@ -602,3 +602,163 @@ CREATE TABLE IF NOT EXISTS ops_actions (
 );
 CREATE INDEX IF NOT EXISTS idx_ops_actions_conv ON ops_actions(conversation_id, status, created_at);
 CREATE INDEX IF NOT EXISTS idx_ops_actions_status ON ops_actions(status);
+
+-- ---------------------------------------------------------------------------------------------
+-- 問題單 → 分析 → 檢查 → PR (src/repo/*, src/exec/{machines,remote}.ts, src/checks/*, src/intake/*).
+-- A ticket is a task in status 'draft' (columns added in migrate()); what hangs off a repo lives here.
+
+-- Repo registry: an imported git repo (Gitea) — tickets, checks and the repo map hang off this,
+-- not off a bare path. local_path is where the engine's clone lives (git_clone_root/<name>).
+CREATE TABLE IF NOT EXISTS repos (
+  id              TEXT PRIMARY KEY,               -- r_<nanoid(10)>
+  name            TEXT NOT NULL,
+  remote_url      TEXT NOT NULL,                  -- as pasted; credentials are never stored
+  gitea_owner     TEXT,
+  gitea_repo      TEXT,
+  local_path      TEXT NOT NULL UNIQUE,
+  default_branch  TEXT NOT NULL DEFAULT 'main',
+  pr_base         TEXT,                           -- NULL = default_branch
+  machine         TEXT,                           -- machines.name; NULL = the engine host
+  stack_json      TEXT,                           -- {languages:{cpp:0.62,...}, dirs:[...], entry_points:[...]}
+  build_cmd       TEXT,
+  test_cmd        TEXT,
+  setup_cmd       TEXT,
+  domain          TEXT NOT NULL DEFAULT 'other',  -- BENCH_DOMAINS
+  issue_label     TEXT,                           -- Gitea label that auto-opens tickets; NULL = off
+  issue_comments  INTEGER NOT NULL DEFAULT 1,
+  map_path        TEXT,                           -- REPO_MAP.md under <dataDir>/repo-maps/
+  map_sha         TEXT,
+  map_at          TEXT,
+  source_id       TEXT,                           -- knowledge sources.id when auto-ingested
+  enabled         INTEGER NOT NULL DEFAULT 1,
+  created_by      TEXT,
+  created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Bare-shell machines reached over SSH (Linux or Windows) for running a repo's checks.
+-- exec_hosts (the Docker GPU sandbox) is a separate registry and stays as it is.
+CREATE TABLE IF NOT EXISTS machines (
+  name            TEXT PRIMARY KEY,               -- [a-z0-9][a-z0-9_-]{0,39}; never 'local' / 'engine'
+  ssh_target      TEXT NOT NULL,                  -- user@host
+  ssh_port        INTEGER,
+  os              TEXT NOT NULL DEFAULT 'auto',   -- auto | linux | windows (auto: the health check fills it in)
+  shell           TEXT NOT NULL DEFAULT 'auto',   -- auto | bash | powershell | cmd
+  work_root       TEXT NOT NULL,                  -- /srv/loop or C:\loop
+  labels          TEXT NOT NULL DEFAULT '',       -- CSV: cuda, aoi-v3, camera, gpu
+  description     TEXT,                           -- for the model: what this box has
+  transport       TEXT NOT NULL DEFAULT 'auto',   -- auto | gitea (the box fetches the branch itself) | copy (the engine sends the tree)
+  enabled         INTEGER NOT NULL DEFAULT 1,
+  last_check_json TEXT,
+  last_check_at   TEXT,
+  last_check_ok   INTEGER,
+  created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- 圖資: a Gitea repo holding an images folder + an answer file (ground truth).
+CREATE TABLE IF NOT EXISTS datasets (
+  id              TEXT PRIMARY KEY,               -- ds_<nanoid(8)>
+  name            TEXT NOT NULL UNIQUE,
+  remote_url      TEXT NOT NULL,
+  images_dir      TEXT NOT NULL DEFAULT 'images',
+  answer_file     TEXT NOT NULL DEFAULT 'answers.json',
+  answer_format   TEXT NOT NULL DEFAULT 'auto',   -- auto | json | csv | labels
+  cases           INTEGER,                        -- counted when linked
+  created_by      TEXT,
+  created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- 檢查: what proves a change to this repo good. Rendered into a task's verification_steps as
+-- 'check:<id>' and snapshotted into tasks.checks_json, so a later edit never changes a queued task.
+CREATE TABLE IF NOT EXISTS checks (
+  id              TEXT PRIMARY KEY,               -- ck_<nanoid(8)>
+  repo_id         TEXT NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
+  name            TEXT NOT NULL,
+  kind            TEXT NOT NULL,                  -- build | test | repro | dataset | custom | manual
+  machine         TEXT,                           -- machines.name; NULL = engine host; 'sandbox:<host|local>' = the Docker sandbox (migrated plans)
+  command         TEXT,                           -- template; dataset: {images} {answers} {out}; NULL for manual
+  pass_rule       TEXT NOT NULL DEFAULT 'exit0',  -- exit0 | metrics | baseline
+  metrics         TEXT,                           -- "correct_rate >= 0.98; time_ms <= 5300" (parseAcceptance)
+  baseline_json   TEXT,                           -- {sha, values:{...}, ms, at}
+  baseline_tol    REAL NOT NULL DEFAULT 0.1,      -- time tolerance for pass_rule = baseline
+  dataset_id      TEXT REFERENCES datasets(id) ON DELETE SET NULL,
+  test_globs      TEXT,                           -- repro: files carried onto base for the 紅→綠 check
+  red_on_base     INTEGER NOT NULL DEFAULT 1,     -- repro: must fail before the change
+  timeout_min     INTEGER,
+  required        INTEGER NOT NULL DEFAULT 1,
+  ord             INTEGER NOT NULL DEFAULT 0,
+  protected_paths TEXT,                           -- CSV globs (same meaning as verify_plans)
+  artifacts       TEXT,                           -- CSV globs
+  manual_text     TEXT,                           -- kind = manual: the checklist line
+  enabled         INTEGER NOT NULL DEFAULT 1,
+  created_by      TEXT,
+  updated_by      TEXT,
+  created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_checks_repo ON checks(repo_id, ord);
+
+-- One row per execution of one check: 試跑 from the editor, a baseline measurement, the
+-- repro-before dry run, and every verify / re-verify step of a task run.
+CREATE TABLE IF NOT EXISTS check_runs (
+  id              TEXT PRIMARY KEY,               -- cr_<nanoid(10)>
+  check_id        TEXT NOT NULL,                  -- soft reference: the check may be deleted later
+  task_id         TEXT REFERENCES tasks(id) ON DELETE CASCADE,   -- NULL for a 試跑 from the editor
+  run_id          TEXT,                           -- task_runs.id when part of a verification
+  kind            TEXT NOT NULL,                  -- trial | baseline | repro_before | verify | reverify | red_green
+  machine         TEXT,
+  head_sha        TEXT,
+  base_sha        TEXT,
+  ok              INTEGER,
+  exit_code       INTEGER,
+  timed_out       INTEGER NOT NULL DEFAULT 0,
+  ms              INTEGER,
+  output_tail     TEXT,                           -- last 20k chars
+  metrics_json    TEXT,                           -- {values, checks[], pass} or the discovered values
+  result_json     TEXT,                           -- dataset: per-case rows; repro: {before, after}
+  artifacts_json  TEXT,
+  started_at      TEXT NOT NULL DEFAULT (datetime('now')),
+  finished_at     TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_check_runs_check ON check_runs(check_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_check_runs_task ON check_runs(task_id);
+
+-- Gitea issue bookkeeping for a ticket (identity stays in tasks.source_ref = 'gitea:owner/repo#12').
+CREATE TABLE IF NOT EXISTS issue_links (
+  task_id         TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+  repo_id         TEXT,
+  owner           TEXT NOT NULL,
+  repo            TEXT NOT NULL,
+  number          INTEGER NOT NULL,
+  issue_url       TEXT NOT NULL,
+  posted_json     TEXT NOT NULL DEFAULT '{}',     -- {analysis: <comment id>, started, verify, pr, returned, done}
+  closed_at       TEXT,
+  created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Per-repo memory of past fixes: retrieved into the analysis and (opt-in) into LOOP_TASK.md.
+CREATE TABLE IF NOT EXISTS fix_ledger (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  repo_id         TEXT NOT NULL,
+  task_id         TEXT,
+  issue_ref       TEXT,
+  title           TEXT NOT NULL,
+  symptom         TEXT NOT NULL DEFAULT '',
+  files           TEXT NOT NULL DEFAULT '',       -- newline-separated paths (searchable)
+  summary         TEXT NOT NULL DEFAULT '',       -- self-review summary or a diffstat
+  outcome         TEXT NOT NULL,                  -- merged | returned | abandoned
+  model           TEXT,
+  attempts        INTEGER,
+  created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_fix_ledger_repo ON fix_ledger(repo_id, created_at DESC);
+CREATE VIRTUAL TABLE IF NOT EXISTS fix_ledger_fts USING fts5(
+  title, symptom, files, summary, content='fix_ledger', content_rowid='id', tokenize='trigram'
+);
+CREATE TRIGGER IF NOT EXISTS fix_ledger_ai AFTER INSERT ON fix_ledger BEGIN
+  INSERT INTO fix_ledger_fts(rowid, title, symptom, files, summary) VALUES (new.id, new.title, new.symptom, new.files, new.summary);
+END;
+CREATE TRIGGER IF NOT EXISTS fix_ledger_ad AFTER DELETE ON fix_ledger BEGIN
+  INSERT INTO fix_ledger_fts(fix_ledger_fts, rowid, title, symptom, files, summary) VALUES ('delete', old.id, old.title, old.symptom, old.files, old.summary);
+END;

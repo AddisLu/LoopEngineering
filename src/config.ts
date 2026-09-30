@@ -43,6 +43,10 @@ export const paths = {
   outputsDir: path.join(DATA_DIR, 'outputs'),
   // Uploaded voice-intake audio, transcoded/transcribed then deleted (see voiceRoutes.ts).
   voiceDir: path.join(DATA_DIR, 'voice'),
+  // 問題單 screenshots (per task), repo maps (per repo) and pulled-back check outputs (per run)
+  taskImagesDir: path.join(DATA_DIR, 'task-images'),
+  repoMapsDir: path.join(DATA_DIR, 'repo-maps'),
+  checkRunsDir: path.join(DATA_DIR, 'check-runs'),
   // TokenBar integration (host)
   tokenbarMcpDir: process.env.TOKENBAR_MCP_DIR ? expand(process.env.TOKENBAR_MCP_DIR) : null,
   tokenCache: expand(
@@ -57,7 +61,7 @@ export const paths = {
 } as const;
 
 export function ensureDirs(): void {
-  for (const d of [paths.dataDir, paths.logsDir, paths.worktreesDir, paths.plansDir, paths.reviewsDir, paths.outputsDir, paths.voiceDir]) {
+  for (const d of [paths.dataDir, paths.logsDir, paths.worktreesDir, paths.plansDir, paths.reviewsDir, paths.outputsDir, paths.voiceDir, paths.taskImagesDir, paths.repoMapsDir, paths.checkRunsDir]) {
     fs.mkdirSync(d, { recursive: true });
   }
 }
@@ -531,6 +535,33 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   prd_require_llm: 'false',
   prd_default_model: '',
   local_chat_timeout_ms: '180000',
+
+  // 問題單 → 分析 → 檢查 → PR (src/intake/*, src/checks/*, src/repo/*, src/exec/{machines,remote}.ts).
+  // Every flag below defaults to today's behaviour; imported repos and tickets are new paths.
+  repo_map_inject: 'false',        // LOOP_TASK.md gets the repo map (## Repo 地圖)
+  repo_map_budget_chars: '8000',
+  repo_auto_ingest: 'true',        // an imported repo also becomes a knowledge source (only reachable from import)
+  failing_first: 'false',          // the repro check must fail on base before the agent starts
+  fix_attempts: '',                // '' = fixes share max_resumes as before; a number = its own budget
+  fix_escalation: '',              // CSV of local:<id> to try next when the budget is spent
+  local_self_review: 'false',      // a local model reviews the diff after verification passes
+  domain_routing: 'false',         // pick the local model by the domain's 戰績
+  fix_ledger_inject: 'false',      // LOOP_TASK.md gets similar past fixes of this repo
+  llm_judge_backend: 'claude',     // claude | local
+  knowledge_distill_backend: 'claude', // claude | local | off
+  planner_backend: 'claude',       // claude | local
+  cloud_llm_allowed: 'true',       // false = every LLM step resolves to a local model or is refused
+  approval_mode: 'self',           // self | manager (a manager approves a ticket before it is queued)
+  manager_users: '',               // CSV of ts:<login> / name:<name> / local
+  check_timeout_min: '20',
+  checks_baseline_refresh: 'false',
+  gitea_issue_comments: 'true',    // comment progress back on an issue-sourced ticket
+  gitea_poll_interval_min: '10',   // label poller cadence (only runs for repos with an issue_label)
+  gitea_merge_via_pr: 'true',      // imported Gitea repos merge through the PR API (works with branch protection)
+  intake_vision: 'auto',           // auto | model | ocr | off — how screenshots are read at intake
+  intake_ocr_cmd: '',              // e.g. "tesseract {file} - -l eng+chi_tra"; used when no vision model serves
+  checks_migrated: 'false',        // state: verify_plans → checks one-shot migration done
+  gitea_issue_cursor: '',          // state: the label poller's last seen timestamp
 };
 
 // TokenBar's freshness window (usage-core SHARED_TTL, the bars' THROTTLE_MS): whoever reads first

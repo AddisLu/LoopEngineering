@@ -37,6 +37,8 @@ export const NONNEG_KEYS = new Set([
   'exec_chat_max_rounds', 'exec_chat_wall_ms',
   // 對話操作 (src/chatops/*)
   'ops_confirm_ttl_min', 'ops_chat_max_rounds', 'ops_chat_wall_ms', 'ops_git_timeout_sec', 'ops_git_clone_timeout_sec',
+  // 問題單 / 檢查 (src/intake/*, src/checks/*)
+  'repo_map_budget_chars', 'check_timeout_min', 'gitea_poll_interval_min',
 ]);
 // values must be a number in [0, 1] (a fraction/weight, unlike the 0-100 PERCENT_KEYS)
 export const UNIT_INTERVAL_KEYS = new Set(['rag_hybrid_alpha']);
@@ -88,6 +90,9 @@ export const BOOL_KEYS = new Set([
   'exec_enabled', 'exec_profiling_cap',
   // 對話操作 (src/chatops/*) — off = the chat's tools are exactly what they were
   'ops_chat_enabled', 'ops_git_engine_repo', 'ops_external_enabled',
+  // 問題單 → 分析 → 檢查 (src/intake/*, src/checks/*, src/repo/*) — every one off = prior behaviour
+  'repo_map_inject', 'repo_auto_ingest', 'failing_first', 'local_self_review', 'domain_routing', 'fix_ledger_inject',
+  'cloud_llm_allowed', 'checks_baseline_refresh', 'gitea_issue_comments', 'gitea_merge_via_pr', 'checks_migrated',
 ]);
 
 /** Accepted `integration_provider` values ('none' = the bridge is fully off). */
@@ -126,6 +131,9 @@ export const TUNABLE_KEYS = [
   'benchmark_enabled', 'bench_judge_model', 'bench_final_measure', 'bench_screen_questions', 'bench_screen_budget_min',
   // PRD gate
   'prd_gate_enabled', 'prd_require_llm', 'prd_default_model', 'prd_repo_allowlist',
+  // 角色與核可 / 機密 / 準確度 (the 問題單 flow)
+  'approval_mode', 'manager_users', 'cloud_llm_allowed',
+  'failing_first', 'local_self_review', 'repo_map_inject', 'fix_ledger_inject', 'domain_routing', 'fix_attempts', 'fix_escalation',
 ] as const;
 
 /** Accepted model aliases for coding runs ('' / 'default' = the claude CLI default). */
@@ -136,6 +144,14 @@ export const LOCAL_MODEL_RE = /^local:[A-Za-z0-9][\w.-]*$/;
 
 /** External models allowed to judge a benchmark (src/benchmark/judge.ts). */
 export const BENCH_JUDGE_MODELS = new Set(['opus', 'fable', 'fable-5', 'sonnet']);
+
+/** Who may approve a ticket before Loop starts on it (approval_mode = manager). */
+export const APPROVAL_MODE_VALUES = new Set(['self', 'manager']);
+/** Which model runs an LLM step: the cloud `claude` CLI as before, or the served local model. */
+export const LLM_BACKEND_VALUES = new Set(['claude', 'local']);
+export const DISTILL_BACKEND_VALUES = new Set(['claude', 'local', 'off']);
+/** How screenshots on a 問題單 are read (src/intake/vision.ts). */
+export const INTAKE_VISION_VALUES = new Set(['auto', 'model', 'ocr', 'off']);
 
 /** A cloud alias or a local model — valid for default_model / route_* / task.model. */
 export function isModelValue(value: string): boolean {
@@ -185,7 +201,7 @@ export function validateSetting(key: string, value: string): string | null {
     if (value !== '' && !value.startsWith('/')) return 'terminal_cwd must be an absolute path (or empty for the home directory)';
   } else if (key === 'terminal_worktree_root') {
     if (value !== '' && !value.startsWith('/')) return 'terminal_worktree_root must be an absolute path';
-  } else if (key === 'terminal_allowed_users' || key === 'exec_allowed_users' || key === 'ops_allowed_users') {
+  } else if (key === 'terminal_allowed_users' || key === 'exec_allowed_users' || key === 'ops_allowed_users' || key === 'manager_users') {
     const bad = value.split(',').map((s) => s.trim()).filter(Boolean).filter((s) => !/^(ts:\S+|name:\S+|local)$/i.test(s));
     if (bad.length) return `${key} entries must be ts:<login>, name:<name> or local (got: ${bad.join(', ')})`;
   } else if (key === 'gitea_url') {
@@ -231,6 +247,19 @@ export function validateSetting(key: string, value: string): string | null {
     }
   } else if (key === 'shell') {
     if (!SHELL_VALUES.has(value)) return `shell must be one of: ${[...SHELL_VALUES].join(', ')}`;
+  } else if (key === 'approval_mode') {
+    if (!APPROVAL_MODE_VALUES.has(value)) return `approval_mode must be one of: ${[...APPROVAL_MODE_VALUES].join(', ')}`;
+  } else if (key === 'llm_judge_backend' || key === 'planner_backend') {
+    if (!LLM_BACKEND_VALUES.has(value)) return `${key} must be one of: ${[...LLM_BACKEND_VALUES].join(', ')}`;
+  } else if (key === 'knowledge_distill_backend') {
+    if (!DISTILL_BACKEND_VALUES.has(value)) return `knowledge_distill_backend must be one of: ${[...DISTILL_BACKEND_VALUES].join(', ')}`;
+  } else if (key === 'intake_vision') {
+    if (!INTAKE_VISION_VALUES.has(value)) return `intake_vision must be one of: ${[...INTAKE_VISION_VALUES].join(', ')}`;
+  } else if (key === 'fix_escalation') {
+    const bad = value.split(',').map((s) => s.trim()).filter(Boolean).filter((s) => !LOCAL_MODEL_RE.test(s));
+    if (bad.length) return `fix_escalation entries must be local:<id> (got: ${bad.join(', ')})`;
+  } else if (key === 'fix_attempts') {
+    if (value !== '' && !(Number.isInteger(Number(value)) && Number(value) >= 0)) return 'fix_attempts must be a whole number (or empty to share max_resumes)';
   }
   return null;
 }

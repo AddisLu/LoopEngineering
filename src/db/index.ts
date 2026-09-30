@@ -248,6 +248,30 @@ function migrate(db: Database.Database): void {
   ]);
   // what a run's verification collected: {dir, files:[{path,size,sha256}], ...} (null = nothing)
   add('task_runs', [['artifacts_json', 'TEXT']]);
+  // 問題單 (src/intake/*): a ticket is a draft task carrying what the person typed (intake_json),
+  // its screenshots (images_json), the 分析卡 (analysis_json) and the frozen checks it will run
+  // (checks_json). fix_attempts / ladder_step drive the fix budget and the model escalation ladder,
+  // review_json holds the local self-review, approval_state the manager gate before dispatch.
+  // All nullable / zero = a task that is not a ticket behaves exactly as before.
+  add('tasks', [
+    ['repo_id', 'TEXT'],
+    ['domain', 'TEXT'],
+    ['intake_json', 'TEXT'],
+    ['images_json', 'TEXT'],
+    ['analysis_json', 'TEXT'],
+    ['analysis_status', 'TEXT'],
+    ['checks_json', 'TEXT'],
+    ['fix_attempts', 'INTEGER NOT NULL DEFAULT 0'],
+    ['ladder_step', 'INTEGER NOT NULL DEFAULT 0'],
+    ['review_json', 'TEXT'],
+    ['approval_state', 'TEXT'],
+    ['start_approved_by', 'TEXT'],
+    ['start_approved_at', 'TEXT'],
+  ]);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_tasks_repo ON tasks(repo_id)');
+  // a served model that accepts image_url parts (screenshots at intake go to it directly)
+  add('local_models', [['vision', 'INTEGER NOT NULL DEFAULT 0']]);
+
 }
 
 function seedSettings(db: Database.Database): void {
