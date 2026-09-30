@@ -86,6 +86,15 @@ describe('tick: self_update_pending idle-gated rebuild+restart', () => {
     expect(info.reason).not.toBe('self-updating');
   });
 
+  it('waits while a confirmed chat action (對話操作) is still running', () => {
+    setSetting(db, 'self_update_pending', 'true');
+    let calls = 0;
+    const info = runTick({ inflightCount: () => 0, opsBusy: () => true, selfUpdate: () => { calls += 1; } });
+    expect(calls).toBe(0);
+    expect(getBool(db, 'self_update_pending')).toBe(true);
+    expect(info.reason).not.toBe('self-updating');
+  });
+
   it('when idle: clears the marker, calls selfUpdate once, dispatches nothing this tick', () => {
     setSetting(db, 'self_update_pending', 'true');
     const q = createTask(db, MOCK_TASK);

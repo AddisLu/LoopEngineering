@@ -31,6 +31,9 @@ export interface TickDeps {
   // 本地模型: loads/switches the vLLM model (src/local/modelManager.ts; tests inject a stub).
   // Only consulted when local_models_enabled is on.
   modelManager?: Pick<ModelManager, 'state' | 'ensureLoaded' | 'unavailable' | 'refresh'>;
+  // 對話操作 (src/chatops/execute.ts): a confirmed chat action still running — a self-update
+  // restart would cut it off, so the rebuild waits like it does for task runs.
+  opsBusy?(): boolean;
   now?: Date;
 }
 
@@ -99,7 +102,7 @@ export function tick(db: Database.Database, deps: TickDeps): TickInfo {
   // the marker armed (checked again next tick); idle clears it, hands off to
   // selfUpdate(), and skips dispatch entirely this tick (a rebuild racing a live run
   // would restart out from under it).
-  if (getBool(db, 'self_update_pending') && deps.inflightCount() === 0) {
+  if (getBool(db, 'self_update_pending') && deps.inflightCount() === 0 && !deps.opsBusy?.()) {
     setSetting(db, 'self_update_pending', 'false');
     logEvent(db, { kind: 'note', detail: 'self-update: rebuilding + restarting engine' });
     try {

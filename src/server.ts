@@ -13,10 +13,14 @@ import { getEmbedWarmWorkerSingleton } from './knowledge/embed.js';
 import { checkBenchmarks } from './benchmark/complete.js';
 import { bridgeEdgesCached } from './knowledge/bridge.js';
 import { pumpMorningReport } from './report/morning.js';
+import { markInterrupted } from './chatops/actions.js';
 
 /** Production entry: runs the scheduling loop AND serves the API/board. systemd runs this. */
 export async function main(): Promise<void> {
   const db = getDb();
+  // 對話操作 jobs that were running when the engine stopped did not finish: say so
+  const interrupted = markInterrupted(db);
+  if (interrupted) console.log(`[chatops] ${interrupted} chat action(s) interrupted by the restart`);
   const engine = createEngine(db);
   const app = buildApp({ db });
 

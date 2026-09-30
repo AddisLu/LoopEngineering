@@ -76,6 +76,13 @@ export class GenerationRegistry {
     return Boolean(g && !g.done);
   }
 
+  /** Answers still being written (other than `exceptId`): a model switch must not cut them off. */
+  runningCount(exceptId?: string): number {
+    let n = 0;
+    for (const [id, g] of this.gens) if (!g.done && id !== exceptId) n += 1;
+    return n;
+  }
+
   start(meta: { messageId: string; conversationId: string; userKey: string }, ac: AbortController): Generation {
     const cur = this.gens.get(meta.messageId);
     if (cur && !cur.done) throw new GenerationBusyError('這則回答還在產生中');

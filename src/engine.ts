@@ -8,6 +8,7 @@ import { recoverOnStartup } from './orchestrator/recovery.js';
 import { tick, type TickInfo } from './scheduler/tick.js';
 import { releasePower } from './scheduler/power.js';
 import { paths, ENGINE_REPO_ROOT, USAGE_CACHE_FILE } from './config.js';
+import { getOpsRunner } from './chatops/execute.js';
 
 /**
  * Rebuild + restart the engine in place, detached so it survives the engine's own
@@ -81,6 +82,7 @@ export function createEngine(db: Database.Database = getDb()): Engine {
     startRun,
     selfUpdate,
     modelManager,
+    opsBusy: () => getOpsRunner().inFlight() > 0,
   };
 
   recoverOnStartup(db);
