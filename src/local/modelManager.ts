@@ -63,7 +63,8 @@ export interface ModelManagerDeps {
   pollMs?: number;
 }
 
-const REFRESH_MS = 5 * 60_000;
+// one GET /v1/models on localhost: every tick is cheap, and a crash shows within about a minute
+const REFRESH_MS = 60_000;
 
 /**
  * How a recipe is started. `HF_HUB_OFFLINE=1` is deliberate: the switcher only offers models
@@ -142,6 +143,8 @@ export class ModelManager {
   private switching: Promise<void> | null = null;
   private errorAt = 0;
   private lastRefresh = 0;
+  /** Background probes in a row that found nothing serving (see reconcile's `patient`). */
+  private misses = 0;
   private readonly d: Required<ModelManagerDeps>;
 
   constructor(db: Database.Database, deps: ModelManagerDeps = {}) {
@@ -200,11 +203,16 @@ export class ModelManager {
   refresh(): void {
     if (this.switching || this.d.now() - this.lastRefresh < REFRESH_MS) return;
     this.lastRefresh = this.d.now();
-    void this.reconcile();
+    void this.reconcile({ patient: true });
   }
 
-  /** Adopt whatever vLLM is actually serving (engine restart, manual start, crash). */
-  async reconcile(): Promise<void> {
+  /**
+   * Adopt whatever vLLM is actually serving (engine restart, manual start, crash). `patient` is the
+   * every-tick background check: it needs two misses in a row before it calls a ready model gone,
+   * because /v1/models can time out under load and one slow answer must not take the chat offline.
+   * An explicit call (restart, CLI) believes the first answer.
+   */
+  async reconcile(opts: { patient?: boolean } = {}): Promise<void> {
     if (this.switching) return;
     this.lastRefresh = this.d.now();
     const served = await this.servedModelId();
@@ -214,11 +222,13 @@ export class ModelManager {
     const candidates = served ? listLocalModels(this.db).filter((m) => m.served_model_id === served) : [];
     const match = candidates.find((m) => m.id === this.st.loaded) ?? candidates[0];
     if (match) {
+      this.misses = 0; // a good answer between two slow ones is not "two in a row"
       if (!(this.st.status === 'ready' && this.st.loaded === match.id)) {
         this.set({ loaded: match.id, wanted: match.id, status: 'ready', error: null });
         logEvent(this.db, { kind: 'note', detail: `local model: adopted running ${match.id}` });
       }
     } else if (this.st.status === 'ready' || this.st.status === 'starting') {
+      if (opts.patient && ++this.misses < 2) return;
       this.set({ loaded: null, status: 'idle' });
       logEvent(this.db, { kind: 'note', detail: 'local model: vLLM not serving a registered model — marked idle' });
     }
@@ -335,6 +345,7 @@ export class ModelManager {
 
   private set(patch: Partial<ModelManagerState>): void {
     this.st = { ...this.st, ...patch, since: new Date(this.d.now()).toISOString() };
+    this.misses = 0; // every transition starts the count over
     setSetting(this.db, 'local_model_loaded', this.st.loaded ?? '');
     setSetting(this.db, 'local_model_status', this.st.status);
   }

@@ -78,6 +78,11 @@ export function tick(db: Database.Database, deps: TickDeps): TickInfo {
   const active = (counts.running ?? 0) + (counts.verifying ?? 0) + (counts.queued ?? 0) + deps.inflightCount();
   updatePower(active > 0);
 
+  // 3b. a crashed vLLM must stop saying 就緒: check what it really serves, paused or not and with no
+  // local work queued — dispatchLocal's own check only ran when local tasks were waiting (throttled
+  // inside refresh(); with local models off this never probes, as before).
+  if (getBool(db, 'local_models_enabled', false)) deps.modelManager?.refresh();
+
   // 本地模型 status fragment appended to the scheduler reason (null when there is no local work,
   // so with local models off every reason string is exactly what it was before).
   let localReason: string | null = null;

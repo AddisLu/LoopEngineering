@@ -42,8 +42,10 @@ function inflight(model: string) {
 function stubManager(init: Partial<ModelManagerState> = {}, unavailable: string[] = []) {
   const st: ModelManagerState = { loaded: null, wanted: null, status: 'idle', since: null, error: null, ...init };
   const ensured: string[] = [];
+  const refreshes = { n: 0 };
   return {
     ensured,
+    refreshes,
     mm: {
       state: () => ({ ...st }),
       ensureLoaded: (id: string) => {
@@ -51,7 +53,9 @@ function stubManager(init: Partial<ModelManagerState> = {}, unavailable: string[
         return 'switching' as const;
       },
       unavailable: (id: string) => unavailable.includes(id),
-      refresh: () => {},
+      refresh: () => {
+        refreshes.n += 1;
+      },
     },
   };
 }
@@ -76,10 +80,27 @@ describe('tick: local models off (default)', () => {
     queued('sonnet');
     expect(runTick().info.reason).toBe('dispatched');
   });
+
+  it('never probes vLLM', () => {
+    const stub = stubManager({ status: 'ready', loaded: 'qwen38-flash' });
+    runTick(stub.mm);
+    expect(stub.refreshes.n).toBe(0);
+  });
 });
 
 describe('tick: local models on', () => {
   beforeEach(() => setSetting(db, 'local_models_enabled', 'true'));
+
+  it('checks what vLLM serves every tick — paused, or with nothing local queued — so a crash stops saying 就緒', () => {
+    const stub = stubManager({ status: 'ready', loaded: 'qwen38-flash' });
+    setSetting(db, 'scheduler_paused', 'true');
+    expect(runTick(stub.mm).info.paused).toBe(true);
+    expect(stub.refreshes.n).toBe(1);
+    setSetting(db, 'scheduler_paused', 'false');
+    queued('sonnet');
+    runTick(stub.mm);
+    expect(stub.refreshes.n).toBe(2);
+  });
 
   it('dispatches on the loaded model even when the quota breaker has tripped', () => {
     setCachedUsage(99, 99);

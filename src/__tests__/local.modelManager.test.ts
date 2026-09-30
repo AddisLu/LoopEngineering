@@ -295,6 +295,22 @@ describe('ModelManager reconcile / restart', () => {
     expect(getSetting(db, 'local_model_status')).toBe('idle');
   });
 
+  it('the every-tick check calls a ready model gone only after two misses in a row', async () => {
+    const up = new ModelManager(db, harness({ served: [QWEN] }).deps);
+    await up.reconcile();
+    // a slow /v1/models under load, an answer, another slow one: still serving
+    const mm = new ModelManager(db, harness({ served: [null, QWEN, null, null] }).deps);
+    await mm.reconcile({ patient: true });
+    expect(mm.state().status).toBe('ready');
+    await mm.reconcile({ patient: true });
+    await mm.reconcile({ patient: true });
+    expect(mm.state()).toMatchObject({ status: 'ready', loaded: 'qwen38-flash' });
+    // the second miss in a row: it crashed
+    await mm.reconcile({ patient: true });
+    expect(mm.state()).toMatchObject({ status: 'idle', loaded: null });
+    expect(getSetting(db, 'local_model_status')).toBe('idle');
+  });
+
   it('a persisted mid-switch state is not trusted after a restart', () => {
     setSetting(db, 'local_model_status', 'starting');
     setSetting(db, 'local_model_loaded', '');
