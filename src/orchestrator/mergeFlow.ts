@@ -34,6 +34,11 @@ export function mergeBlocker(t: Task): { error: string; extra: Record<string, un
 
 const inFlight = new Set<string>();
 
+/** Tasks being merged by hand right now (in this process) — 對話操作's git refuses to touch their repos meanwhile. */
+export function mergingTaskIds(): string[] {
+  return [...inFlight];
+}
+
 /**
  * 合併 / 核可並合併 for a task parked in review at merge_status pending/conflict: the engine's own
  * close-out, run on demand. The latest base goes into the task branch first; when that changed the
