@@ -52,6 +52,17 @@ describe('模型對話 scripts', () => {
     expect(js).toContain('contextTurns');
   });
 
+  it('對話操作: the card confirms through the page\'s own request and shows the engine\'s summary; links stay on this site', () => {
+    const js = read('chat.js');
+    expect(js).toContain('/api/ops/actions/${encodeURIComponent(v.id)}/confirm');
+    expect(js).toContain('/api/ops/actions/${encodeURIComponent(v.id)}/cancel');
+    expect(js).toContain("el('pre', 'sum', v.summary || '')"); // verbatim, never the model's retelling
+    const src = /const SAFE_URL = (\/.+\/i);/.exec(read('chat-md.js'))![1]!;
+    const safe = new Function(`return ${src}`)() as RegExp;
+    for (const ok of ['https://github.com/x', 'http://127.0.0.1:4711/', '/task.html?id=t_1', '/benchmarks.html#b=b_1']) expect(safe.test(ok), ok).toBe(true);
+    for (const bad of ['//evil.example/x', '/\\evil.example', 'javascript:alert(1)', 'data:text/html,x', 'task.html']) expect(safe.test(bad), bad).toBe(false);
+  });
+
   it('remembers each rail state under its loop_shell_* key, in the file that owns that rail', () => {
     expect(read('chat.js')).toContain('loop_shell_rail'); // 對話紀錄
     expect(read('dock.js')).toContain('loop_shell_dock'); // 工作面板

@@ -141,9 +141,10 @@ export class GenerationRegistry {
         g.acc.keywords = Array.isArray(k.keywords) ? k.keywords : [];
         continue;
       }
-      const t = j.loop_tool as { round?: number } | undefined;
+      const t = j.loop_tool as { round?: number; calls?: unknown } | undefined;
       if (t) {
-        if (t.round) g.acc.tools.push(t);
+        // a finished round (with its calls) — not the 'running' frame announced before it
+        if (t.round && Array.isArray(t.calls)) g.acc.tools.push(t);
         continue;
       }
       const u = j.usage as GenUsage | undefined;

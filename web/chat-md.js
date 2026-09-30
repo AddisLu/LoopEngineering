@@ -9,7 +9,8 @@ import { el } from './shell.js';
  */
 
 // ---- markdown → DOM nodes built one by one (model output is untrusted) -----------
-const SAFE_URL = /^https?:\/\//i;
+// http(s), or a page of this site ('/task.html?id=…' from 對話操作) — never '//host' or '/\\host'
+const SAFE_URL = /^(?:https?:\/\/|\/(?![\/\\]))/i;
 const INLINE =
   /(`+)([\s\S]*?[^`])\1(?!`)|\*\*([^*]+?)\*\*|__([^_\s][^_]*?)__|~~([^~]+?)~~|\*([^*\s][^*]*?)\*|\[([^\]]+)\]\(([^)\s]+)\)|(https?:\/\/[^\s<>)）」]+)/g;
 

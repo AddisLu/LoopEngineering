@@ -571,13 +571,22 @@ function renderRefs(a, k) {
 
 // 上網／工具: one collapsible card per answer, kept under the citations. Everything shown is the
 // server's summary of each call (name, outcome, source URLs) — never page bodies.
-const TOOL_ICON = { web_search: '🔎', fetch_url: '📄', sandbox_write_file: '📝', sandbox_read_file: '📄', sandbox_list: '📁', sandbox_run: '▶️' };
-const TOOL_LABEL = { sandbox_write_file: '沙盒寫檔', sandbox_read_file: '沙盒讀檔', sandbox_list: '沙盒目錄', sandbox_run: '沙盒執行' };
+const TOOL_ICON = {
+  web_search: '🔎', fetch_url: '📄', sandbox_write_file: '📝', sandbox_read_file: '📄', sandbox_list: '📁', sandbox_run: '▶️',
+  ops_overview: '📋', ops_find: '🔍', ops_show: '👁', ops_standings: '🏆', ops_templates: '📐', git_status: '🌿',
+  ops_prepare_work: '📝', ops_prepare_benchmark: '⚖️', ops_prepare_action: '🧭', git_prepare: '🌿', ops_confirm: '✅', ops_cancel: '✖️',
+};
+const TOOL_LABEL = {
+  sandbox_write_file: '沙盒寫檔', sandbox_read_file: '沙盒讀檔', sandbox_list: '沙盒目錄', sandbox_run: '沙盒執行',
+  ops_overview: '狀況總覽', ops_find: '找任務／評比', ops_show: '查看', ops_standings: '模型戰績', ops_templates: '範本', git_status: 'git 狀態',
+  ops_prepare_work: '準備工作', ops_prepare_benchmark: '準備評比', ops_prepare_action: '準備動作', git_prepare: '準備 git', ops_confirm: '確認執行', ops_cancel: '取消動作',
+};
 const toolIcon = (name) => TOOL_ICON[name] || (name.startsWith('mcp__') ? '🧩' : '🛠');
 const toolLabel = (name) => TOOL_LABEL[name] || (name.startsWith('mcp__') ? name.slice(5).replace('__', '.') : name);
-function renderTools(a, rounds) {
+function renderTools(a, rounds, saved = false) {
   if (a.toolBox) a.toolBox.remove();
   if (!rounds || !rounds.length) return;
+  rounds = rounds.filter((r) => Array.isArray(r.calls)); // answers saved before the fix kept 'running' frames too
   const box = el('details', 'tools');
   const calls = rounds.flatMap((r) => r.calls || []);
   const failed = calls.filter((c) => c.ok === false).length;
@@ -613,6 +622,104 @@ function renderTools(a, rounds) {
   box.append(list);
   (a.refs || a.body).after(box);
   a.toolBox = box;
+  renderActions(a, rounds, saved);
+}
+
+// 對話操作: an action the local model prepared (or confirmed, or cancelled). The card shows the
+// engine's own summary — not the model's retelling — and 確認執行／取消, the page's own request, so
+// the person can confirm by clicking instead of typing. A saved answer re-reads the current status.
+const ACT_WORD = { pending: '待確認', running: '執行中', done: '已完成', failed: '失敗', cancelled: '已取消', superseded: '已被新的準備取代', expired: '已過期', interrupted: '中斷（引擎重啟）' };
+const actPainters = new Map(); // action id → painters of every card showing it
+function renderActions(a, rounds, saved) {
+  if (a.actBox) a.actBox.remove();
+  a.actBox = null;
+  const latest = new Map();
+  for (const c of rounds.flatMap((r) => r.calls || [])) if (c.action && c.action.id) latest.set(c.action.id, c.action);
+  if (!latest.size) return;
+  const box = el('div', 'opsacts');
+  for (const act of latest.values()) box.append(actionCard(act, saved));
+  (a.toolBox || a.refs || a.body).after(box);
+  a.actBox = box;
+}
+
+function actionCard(view, saved) {
+  const card = el('div', 'opsact');
+  let polling = false;
+  const paint = (v, msg) => {
+    card.replaceChildren();
+    card.dataset.status = v.status;
+    const head = el('div', 'h');
+    head.append(el('b', null, `${ACT_WORD[v.status] || v.status} · ${v.code}`));
+    if (v.risk === 'high') head.append(el('span', 'risk', '高風險'));
+    card.append(head, el('pre', 'sum', v.summary || ''));
+    const res = v.status === 'pending' ? null : (v.result && v.result.detail) || v.error;
+    if (res) card.append(el('div', 'res', res));
+    if (msg && msg !== res) card.append(el('div', 'msg-line', msg));
+    if (v.result && v.result.links && v.result.links.length) {
+      const ul = el('ul');
+      for (const l of v.result.links) {
+        const li = el('li');
+        const link = el('a', null, l.title || l.url);
+        link.href = l.url;
+        link.target = '_blank';
+        link.rel = 'noopener';
+        li.append(link);
+        ul.append(li);
+      }
+      card.append(ul);
+    }
+    if (v.status === 'pending') {
+      const row = el('div', 'btns');
+      const yes = el('button', 'btn sm primary', '確認執行');
+      const no = el('button', 'btn sm', '取消');
+      yes.type = no.type = 'button';
+      yes.onclick = () => send(`/api/ops/actions/${encodeURIComponent(v.id)}/confirm`, [yes, no]);
+      no.onclick = () => send(`/api/ops/actions/${encodeURIComponent(v.id)}/cancel`, [yes, no]);
+      row.append(yes, no, el('span', 'hint', v.risk === 'high' ? `或回覆「確認 ${v.code}」` : '或回覆「確認」'));
+      card.append(row);
+    }
+    if (v.status === 'running') poll(v.id);
+  };
+  // the same action may show in several answers (prepared in one, confirmed in the next)
+  const paintAll = (v, msg) => {
+    for (const p of actPainters.get(v.id) || []) p === paint ? paint(v, msg) : p(v);
+  };
+  const send = async (url, btns) => {
+    for (const b of btns) b.disabled = true;
+    try {
+      const r = await api(url, { method: 'POST', body: '{}' });
+      paintAll(r.action, r.message);
+    } catch (e) {
+      if (e.body && e.body.action) paintAll(e.body.action, e.body.message || e.message);
+      else {
+        for (const b of btns) b.disabled = false;
+        toast(e.message, 'bad');
+      }
+    }
+  };
+  const poll = (id) => {
+    if (polling) return;
+    polling = true;
+    let n = 0;
+    const tick = async () => {
+      if (!card.isConnected || n++ > 300) return void (polling = false);
+      try {
+        const r = await api(`/api/ops/actions/${encodeURIComponent(id)}`);
+        if (r.action.status === 'running') return void setTimeout(tick, 3000);
+        polling = false;
+        paintAll(r.action);
+      } catch {
+        polling = false;
+      }
+    };
+    setTimeout(tick, 3000);
+  };
+  const set = actPainters.get(view.id) || new Set();
+  set.add(paint);
+  actPainters.set(view.id, set);
+  paint(view);
+  if (saved) api(`/api/ops/actions/${encodeURIComponent(view.id)}`).then((r) => paint(r.action)).catch(() => {});
+  return card;
 }
 
 function onToolFrame(a, t, answer, announce) {
@@ -1206,7 +1313,7 @@ function replayMsg(m) {
     if (m.sources && m.sources.length) renderRefs(v, { sources: m.sources, ms: 0, keywords: m.keywords });
     if (m.tools && m.tools.length) {
       v.toolRounds = m.tools;
-      renderTools(v, m.tools);
+      renderTools(v, m.tools, true);
     }
     const bits = [
       m.ttft_ms != null ? `首字 ${fmtSec(m.ttft_ms)}` : null,
