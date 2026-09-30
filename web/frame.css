@@ -282,6 +282,8 @@ svg.fedges path.fail { stroke: var(--danger); }
 aside.inbox { width: 340px; flex: 0 0 auto; padding: 16px; border-left: 1px solid var(--border); background: var(--surface); overflow-y: auto; }
 .inbox h2 { margin: 0; font-size: 15px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
 .inbox h2 .count { font-size: 12px; font-weight: 700; padding: 1px 8px; border-radius: 999px; background: var(--text); color: var(--surface); }
+.inbox h2.wait { margin-top: 6px; }
+.inbox h2.wait .count { background: var(--st-review); color: #fff; }
 .inbox article { padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); cursor: pointer; }
 .inbox article.need { border: 1.5px solid var(--st-attention); }
 .inbox article .kind { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--accent-2); }

@@ -97,17 +97,24 @@ function paintTasks(s) {
   paintInbox($('dock-inbox'), s, { act: inboxAct });
 }
 
-// How many things wait for you — what the list shows: needs you, or waits for your 核可 / 結案. On the
-// tab, and on the top bar's panel toggle while the panel is closed (below 1280px it starts closed,
-// and on a phone it is a drawer: the count must not live only inside it).
+// The same two numbers as 總覽's tiles and the list's two groups: 需要你處理 (orange) and, when
+// nothing needs you, 待核可 (blue). On the tab, and on the top bar's panel toggle while the panel is
+// closed (below 1280px it starts closed, and on a phone it is a drawer: the count must not live only
+// inside it).
 let needCount = 0;
+let waitCount = 0;
 function paintNeedBadge() {
-  const text = needCount ? String(needCount) : '';
-  setText('act-tasks-badge', text);
-  $('act-tasks-badge').hidden = !needCount;
-  setText('dock-badge', text);
-  $('dock-badge').hidden = !needCount || isOpen();
-  $('dock-toggle').title = needCount ? `顯示或收起右側面板（需要你處理 ${needCount}）` : '顯示或收起右側面板';
+  const n = needCount || waitCount;
+  const kind = needCount ? 'need' : 'wait';
+  for (const id of ['act-tasks-badge', 'dock-badge']) {
+    setText(id, n ? String(n) : '');
+    $(id).dataset.kind = kind;
+  }
+  $('act-tasks-badge').hidden = !n;
+  $('dock-badge').hidden = !n || isOpen();
+  const what = [needCount ? `需要你處理 ${needCount}` : null, waitCount ? `待核可 ${waitCount}` : null].filter(Boolean).join('・');
+  $('act-tasks').title = `${what || '需要你處理'}（Alt+1）`;
+  $('dock-toggle').title = what ? `顯示或收起右側面板（${what}）` : '顯示或收起右側面板';
 }
 
 /** Registered in the init block, after every `let` it reads: a snapshot already in hand is delivered at once. */
@@ -115,7 +122,8 @@ function onSnapshot(s) {
   const wasBench = benchBusy && benchBusy.id;
   benchBusy = s.benchmark || null;
   if ((benchBusy && benchBusy.id) !== wasBench && catalogData) paintCatalog(catalogData);
-  needCount = (s.cards || []).filter((c) => needsYou(c) || awaiting(c)).length;
+  needCount = (s.cards || []).filter(needsYou).length;
+  waitCount = (s.cards || []).filter(awaiting).length;
   paintNeedBadge();
   if (!$('pane-tasks').hidden) paintTasks(s);
 }

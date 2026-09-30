@@ -341,7 +341,10 @@ describe('chat-first shell', () => {
     const toggle = page.slice(page.indexOf('id="dock-toggle"'), page.indexOf('</button>', page.indexOf('id="dock-toggle"')));
     expect(toggle).toContain('id="dock-badge"');
     const js = read('dock.js');
-    expect(js).toContain("$('dock-badge').hidden = !needCount || isOpen();");
+    expect(js).toContain("$('dock-badge').hidden = !n || isOpen();");
+    // the same two numbers as 總覽's tiles: 需要你處理 first, 待核可 when nothing needs you
+    expect(js).toContain('needCount = (s.cards || []).filter(needsYou).length;');
+    expect(js).toContain('waitCount = (s.cards || []).filter(awaiting).length;');
     // onBoard delivers a snapshot already in hand at once: it must not run before the lets it reads
     expect(js.indexOf('onBoard(onSnapshot);')).toBeGreaterThan(js.indexOf('let benchBusy'));
     expect(js.indexOf('onBoard(onSnapshot);')).toBeGreaterThan(js.lastIndexOf('paintTabs();') - 1);
@@ -349,5 +352,17 @@ describe('chat-first shell', () => {
     expect(js).toContain("document.addEventListener('ops:who'");
     // on a phone the chat's toasts clear the frame's bottom bar
     expect(read('shell.css')).toContain('.toasts { left: 12px; right: 12px; bottom: 76px;');
+  });
+
+  it('the inbox counts what 總覽\'s tiles count: 需要你處理 and 待核可, each under its own heading', () => {
+    const inbox = read('inbox.js');
+    expect(inbox).toContain("h('h2', null, '需要你處理', h('span.count', null, String(need.length)))");
+    expect(inbox).toContain("h('h2.wait', null, '待核可', h('span.count', null, String(wait.length)))");
+    const board = read('board-flow.js');
+    // the tiles and the groups share one definition of each (inbox.js exports it)
+    expect(board).toContain("tile('need', '需要你處理', need,");
+    expect(board).toContain('const need = count(needsYou);');
+    expect(board).toContain("tile('review', '待核可', count(awaiting), 'review')");
+    expect(board).toMatch(/import \{[^}]*awaiting[^}]*needsYou[^}]*\} from '\.\/inbox\.js'/);
   });
 });

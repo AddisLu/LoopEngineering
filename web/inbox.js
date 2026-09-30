@@ -26,7 +26,10 @@ export function why(c) {
 }
 
 /**
- * Paint 需要你處理 into `box` from a board snapshot, and return how many items need you.
+ * Paint the inbox into `box` from a board snapshot, in the same two groups — and so the same two
+ * numbers — as 總覽's tiles: 需要你處理 (a task that failed, a merge conflict, a draft missing
+ * something) and 待核可 (waiting for your 核可 or 結案). One heading over both used to count them
+ * together, so the panel said 3 where the tile said 1. Returns { need, wait }.
  *   o.title(c)  the name a card carries (總覽 names 評比 / 快篩 arms by their model)
  *   o.open(c)   open the task (總覽: its detail dialog; the default: 總覽, deep-linked)
  *   o.act(path) run a one-click action (續跑, 結案)
@@ -40,16 +43,17 @@ export function paintInbox(box, snap, o = {}) {
   const items = [];
   for (const c of snap.cards) {
     if (c.status === 'attention') {
-      items.push({ order: 0, el: h('article.need', { onclick: () => open(c) }, h('div.kind', null, icon('bang', { sw: 2.4 }), '需要處理'), h('div.ttl', null, nodeTitle(c)), h('div.why', null, why(c) || '執行出了問題，worktree 還在，等你決定'), h('div.acts', null, h('button.btn.primary.sm', { type: 'button', onclick: (e) => { e.stopPropagation(); act(`/api/tasks/${c.id}/resume`); } }, '續跑'), h('button.btn.sm', { type: 'button', onclick: (e) => { e.stopPropagation(); open(c); } }, '看原因'), focusBtn(c))) });
+      items.push({ order: 0, wait: false, el: h('article.need', { onclick: () => open(c) }, h('div.kind', null, icon('bang', { sw: 2.4 }), '需要處理'), h('div.ttl', null, nodeTitle(c)), h('div.why', null, why(c) || '執行出了問題，worktree 還在，等你決定'), h('div.acts', null, h('button.btn.primary.sm', { type: 'button', onclick: (e) => { e.stopPropagation(); act(`/api/tasks/${c.id}/resume`); } }, '續跑'), h('button.btn.sm', { type: 'button', onclick: (e) => { e.stopPropagation(); open(c); } }, '看原因'), focusBtn(c))) });
     } else if (c.status === 'review' && c.merge_status === 'conflict') {
-      items.push({ order: 1, el: h('article.need.bad', { onclick: () => open(c) }, h('div.kind', null, icon('merge'), '合併衝突'), h('div.ttl', null, nodeTitle(c)), h('div.why', null, '已建一張解衝突任務；它結案後再合併'), h('div.acts', null, h('a.btn.primary.sm', { href: `/task.html?id=${encodeURIComponent(c.id)}`, onclick: (e) => e.stopPropagation() }, '去驗收'), focusBtn(c))) });
+      items.push({ order: 1, wait: false, el: h('article.need.bad', { onclick: () => open(c) }, h('div.kind', null, icon('merge'), '合併衝突'), h('div.ttl', null, nodeTitle(c)), h('div.why', null, '已建一張解衝突任務；它結案後再合併'), h('div.acts', null, h('a.btn.primary.sm', { href: `/task.html?id=${encodeURIComponent(c.id)}`, onclick: (e) => e.stopPropagation() }, '去驗收'), focusBtn(c))) });
     } else if (c.status === 'draft' && c.gate && !c.gate.ok) {
-      items.push({ order: 3, el: h('article.need', { onclick: () => open(c) }, h('div.kind', null, icon('doc'), '草稿缺資料'), h('div.ttl', null, nodeTitle(c)), h('div.why', null, `缺：${(c.gate.missing || []).map((m) => String(m).split(/[ (]/)[0]).join('、')}`), h('div.acts', null, h('a.btn.primary.sm', { href: `/flow.html#new?title=${encodeURIComponent(c.title || '')}&expected=${encodeURIComponent(c.goal || '')}`, onclick: (e) => e.stopPropagation() }, '用工作流程補齊'), focusBtn(c))) });
+      items.push({ order: 2, wait: false, el: h('article.need', { onclick: () => open(c) }, h('div.kind', null, icon('doc'), '草稿缺資料'), h('div.ttl', null, nodeTitle(c)), h('div.why', null, `缺：${(c.gate.missing || []).map((m) => String(m).split(/[ (]/)[0]).join('、')}`), h('div.acts', null, h('a.btn.primary.sm', { href: `/flow.html#new?title=${encodeURIComponent(c.title || '')}&expected=${encodeURIComponent(c.goal || '')}`, onclick: (e) => e.stopPropagation() }, '用工作流程補齊'), focusBtn(c))) });
     } else if (awaiting(c)) {
       const merged = c.merge_status === 'merged';
       const manual = c.merge_status === 'pending' && manualMode(c);
       items.push({
-        order: 2,
+        order: 3,
+        wait: true,
         el: h(
           'article',
           { onclick: () => (location.href = `/task.html?id=${encodeURIComponent(c.id)}`) },
@@ -73,12 +77,16 @@ export function paintInbox(box, snap, o = {}) {
   if (snap.benchmark && snap.benchmark.mode === 'screen') nextLine('running', `模型快篩「${String(snap.benchmark.title).replace(/^快篩：/, '')}」進行中：一題一題跑，不評分`);
   else if (snap.benchmark) nextLine('running', `評比「${snap.benchmark.title}」：${snap.benchmark.arms_done}/${snap.benchmark.arm_count} 組完成，全部完成後一組一組量測再評分`);
   if (next.children.length === 1) next.appendChild(h('div', null, h('span.sub', null, '沒有排隊或等續跑的任務。')));
+  const need = items.filter((i) => !i.wait);
+  const wait = items.filter((i) => i.wait);
   fill(box,
-    h('h2', null, '需要你處理', h('span.count', null, String(items.length))),
-    ...(items.length ? items.map((i) => i.el) : [h('p.empty-s', null, '目前沒有要你處理的事。')]),
+    h('h2', null, '需要你處理', h('span.count', null, String(need.length))),
+    ...(need.length ? need.map((i) => i.el) : [h('p.empty-s', null, '目前沒有要你處理的事。')]),
+    wait.length ? h('h2.wait', null, '待核可', h('span.count', null, String(wait.length))) : null,
+    ...wait.map((i) => i.el),
     next,
   );
-  return items.length;
+  return { need: need.length, wait: wait.length };
 }
 
 /** the scheduler's last reason ("session 82% >= 65%", …) in words */

@@ -309,6 +309,7 @@ dialog.save-dialog .dialog-foot { display: flex; justify-content: flex-end; }
   font-size: 10px; line-height: 16px; font-variant-numeric: tabular-nums; font-weight: 700;
   border-radius: 999px; background: var(--st-attention); color: var(--on-accent);
 }
+.dock-tabs .badge[data-kind="wait"], #dock-toggle .badge[data-kind="wait"] { background: var(--st-review); color: #fff; }
 
 /* ---- right dock ---------------------------------------------------------- */
 .dock-inner {
