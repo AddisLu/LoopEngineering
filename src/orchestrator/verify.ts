@@ -39,6 +39,20 @@ export function sandboxStepCommand(step: string): string | null {
   return parseSandboxStep(step)?.command ?? null;
 }
 
+/**
+ * A step written as `check:<ck_id>` is one of the repo's 檢查 (src/checks/*), frozen into the task's
+ * checks_json: on the engine host, on a 機台, a 圖資回歸 or a 紅→綠 repro — the checks runner
+ * decides, and its result carries the check's NAME as the step, so failures read 「單元測試」.
+ */
+export const CHECK_STEP_PREFIX = 'check:';
+const CHECK_STEP_RE = /^check:\s*(ck_[A-Za-z0-9_-]{1,40})\s*$/;
+
+export function parseCheckStep(step: string): string | null {
+  return CHECK_STEP_RE.exec(step.trim())?.[1] ?? null;
+}
+
+export type CheckStepRunner = (step: string, cwd: string, timeoutMs: number) => Promise<VerifyStepResult>;
+
 /** Run each verification step in the worktree, in order, each with its own timeout. */
 export async function runVerification(
   task: Task,
@@ -47,11 +61,22 @@ export async function runVerification(
   shellOpts?: ResolveShellOptions,
   // runs `sandbox:` steps; null/absent (exec_enabled off) makes such a step fail with a clear note
   sandbox?: SandboxStepRunner | null,
+  // runs `check:` steps (src/checks/runner.ts); null/absent makes such a step fail with a clear note
+  checks?: CheckStepRunner | null,
 ): Promise<VerifyResult> {
   const steps = parseSteps(task);
   const shell = resolveShell(shellOpts);
   const results: VerifyStepResult[] = [];
   for (const step of steps) {
+    const ck = parseCheckStep(step);
+    if (ck !== null) {
+      const started = Date.now();
+      const r = await runCheckStep(step, cwd, perStepTimeoutMs, checks ?? null);
+      r.ms = Date.now() - started;
+      results.push(r);
+      if (!r.ok) return { ok: false, results, failedStep: r.step };
+      continue;
+    }
     const sb = parseSandboxStep(step);
     const started = Date.now();
     const r = sb === null ? await runStep(step, cwd, perStepTimeoutMs, shell) : await runSandboxStep(step, sb.command, sb.host, cwd, perStepTimeoutMs, sandbox ?? null);
@@ -60,6 +85,17 @@ export async function runVerification(
     if (!r.ok) return { ok: false, results, failedStep: step };
   }
   return { ok: true, results, failedStep: null };
+}
+
+async function runCheckStep(step: string, cwd: string, timeoutMs: number, checks: CheckStepRunner | null): Promise<VerifyStepResult> {
+  if (!checks) {
+    return { step, ok: false, exitCode: null, timedOut: false, output: '這一步是 repo 的檢查（check:），但這裡沒有接上檢查執行器：請從任務的驗證流程執行它。' };
+  }
+  try {
+    return await checks(step, cwd, timeoutMs);
+  } catch (err) {
+    return { step, ok: false, exitCode: null, timedOut: false, output: `檢查執行失敗：${String((err as Error)?.message ?? err)}` };
+  }
 }
 
 async function runSandboxStep(
