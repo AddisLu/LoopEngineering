@@ -80,7 +80,7 @@ function defaultMachineRunner(_db: Database.Database): MachineRunner | null {
   return null;
 }
 
-export function resolveCheckDeps(db: Database.Database, deps: CheckDeps = {}): Deps {
+export function resolveCheckDeps(db: Database.Database, deps: CheckDeps = {}): ResolvedCheckDeps {
   const now = deps.now ?? Date.now;
   return {
     machines: deps.machines !== undefined ? deps.machines : defaultMachineRunner(db),
