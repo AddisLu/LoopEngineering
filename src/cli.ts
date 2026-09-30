@@ -73,6 +73,8 @@ import { checkSandbox, formatCheck } from './exec/check.js';
 import { parseAcceptance } from './orchestrator/acceptance.js';
 import { ensureWorkspace, execRoot } from './exec/workspace.js';
 import { deleteExecHost, getExecHost, listExecHosts, LOCAL_HOST, realHostExec, resolveExecTarget, setHostIds, sshArgs, upsertExecHost, type ExecHost, type ExecTarget } from './exec/hosts.js';
+import { getRepo, listRepos, parseStack, RepoError } from './repo/store.js';
+import { awaitImport, importRepo, removeRepo } from './repo/import.js';
 
 const program = new Command();
 program.name('loop').description('Loop Engineering — token-aware coding-task scheduler').version('0.1.0');
@@ -879,7 +881,56 @@ vplan
   });
 
 // ---- repo commands (src/repo/*): loop repo import|list|rm ------------------------------------
-// (filled in by the repo-import link)
+
+const repoCmd = program.command('repo').description('repo registry (src/repo/*): import a Gitea repo, list, rm');
+
+repoCmd
+  .command('import <url>')
+  .description('clone into git_clone_root, detect branch / build / test / setup commands and the stack, register it (and add it to the knowledge base when repo_auto_ingest is on)')
+  .option('--name <name>', 'folder and display name (default: from the URL)')
+  .option('--domain <domain>', `領域: ${BENCH_DOMAINS.join('|')} (default: from the detected stack)`)
+  .action(async (url: string, o) => {
+    const db = getDb();
+    let job;
+    try {
+      job = importRepo(db, { url, name: o.name ?? null, domain: o.domain ?? null, who: 'cli' });
+    } catch (err) {
+      if (err instanceof RepoError) return fail(err.message);
+      throw err;
+    }
+    job = await awaitImport(job.id);
+    for (const s of job.steps) console.log(`${s.ok === null ? '…' : s.ok ? '✓' : '✗'} ${s.label}${s.detail ? `：${s.detail}` : ''}`);
+    if (job.status !== 'done' || !job.repo_id) return fail(job.error ?? '匯入失敗');
+    const r = getRepo(db, job.repo_id)!;
+    console.log(`${r.id}  ${r.name}  ${r.local_path}  (${r.default_branch})`);
+  });
+
+repoCmd
+  .command('list')
+  .description('registered repos')
+  .action(() => {
+    const db = getDb();
+    const rows = listRepos(db);
+    if (!rows.length) {
+      console.log('(no repos — `loop repo import <url>`)');
+      return;
+    }
+    for (const r of rows) {
+      const stack = parseStack(r);
+      const langs = stack ? Object.entries(stack.languages).slice(0, 3).map(([l, s]) => `${l} ${Math.round(s * 100)}%`).join(', ') : '';
+      console.log(`${r.id}  ${pad(r.name, 24)} ${pad(r.default_branch, 14)} ${pad(r.domain, 10)} ${r.enabled ? '' : '(disabled) '}${r.local_path}${langs ? `  [${langs}]` : ''}`);
+    }
+  });
+
+repoCmd
+  .command('rm <id>')
+  .description('remove the registry row and its repo-picker entry (the clone stays on disk)')
+  .action((id: string) => {
+    const db = getDb();
+    const r = removeRepo(db, id);
+    if (!r) return fail(`no repo ${id}`);
+    console.log(`removed ${r.id} (${r.name}); ${r.local_path} left on disk`);
+  });
 
 // ---- machine commands (src/exec/machines.ts): loop machine add|list|check|rm ------------------
 // (filled in by the machines link)
