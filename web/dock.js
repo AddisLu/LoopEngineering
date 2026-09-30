@@ -304,7 +304,8 @@ function paintJob(job) {
   }
   card.hidden = false;
   const mins = Math.max(0, Math.round((Date.now() - Date.parse(job.started_at)) / 60000));
-  setText('model-job-title', `${job.kind === 'download' ? '下載' : '建置映像'} ${job.kind === 'download' ? job.recipe : job.container || job.recipe} · 已 ${mins} 分鐘`);
+  const verb = job.kind === 'download' ? '下載' : job.kind === 'sync' ? '同步到另一台' : '建置映像';
+  setText('model-job-title', `${verb} ${job.kind === 'build' ? job.container || job.recipe : job.recipe} · 已 ${mins} 分鐘`);
   const bar = $('model-job-bar');
   const known = job.kind === 'download' && job.size_bytes && job.bytes_now != null;
   bar.classList.toggle('indeterminate', !known);
@@ -328,7 +329,7 @@ async function startJob(kind, recipe, label) {
   if (jobTimer) return toast('已有工作在跑，等它結束', 'warn');
   try {
     const r = await api('/api/local/jobs', { method: 'POST', body: JSON.stringify({ kind, recipe }) });
-    toast(`${kind === 'download' ? '開始下載' : '開始建置'} ${label}，在背景進行`, 'ok');
+    toast(`${kind === 'download' ? '開始下載' : kind === 'sync' ? '開始同步到另一台' : '開始建置'} ${label}，在背景進行`, 'ok');
     paintJob(r.job);
     if (catalogData) paintCatalog({ ...catalogData, job: r.job });
     watchJob();
@@ -351,7 +352,7 @@ function watchJob() {
     if (!job || job.status !== 'running') {
       clearInterval(jobTimer);
       jobTimer = null;
-      const what = job ? (job.kind === 'download' ? '下載' : '建置') : '工作';
+      const what = job ? (job.kind === 'download' ? '下載' : job.kind === 'sync' ? '同步到另一台' : '建置') : '工作';
       if (job && job.status === 'done') toast(`${what} ${job.recipe} 完成`, 'ok');
       else if (job && job.status === 'error') toast(`${what}失敗：${job.error || '看 log'}`, 'bad');
       else if (job) toast(`${what}${job.status === 'cancelled' ? '已取消' : '結果不明'}：${job.error || ''}`, 'warn');
@@ -422,7 +423,12 @@ async function switchModel(e) {
     }, 5000);
   } catch (err) {
     switching = false;
-    toast(`切不過去：${err.message}`, 'bad');
+    // two Sparks: the other node lacks the weights — offer the copy instead of a dead end
+    if (/另一台 Spark 還沒有這個模型的權重/.test(err.message)) {
+      if (window.confirm(`${err.message}\n\n現在同步到另一台嗎？（走 200G 線，大模型約幾分鐘；同步完再按一次「切換」）`)) startJob('sync', e.recipe, e.name);
+    } else {
+      toast(`切不過去：${err.message}`, 'bad');
+    }
     loadModels();
   }
 }

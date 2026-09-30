@@ -123,6 +123,9 @@ export interface AppOptions {
   dockerProbe?: LocalRouteOptions['dockerProbe'];
   /** Test-only: a stub download/build runner (never spawns uvx/docker). */
   localJobRunner?: LocalRouteOptions['jobRunner'];
+  /** two Sparks: the other nodes and how to ask them about their weights (tests) */
+  localClusterWorkers?: LocalRouteOptions['clusterWorkers'];
+  localClusterExec?: LocalRouteOptions['clusterExec'];
   /** Test-only: HF size lookup / free-disk probe / clock for the model catalog. */
   localCatalog?: LocalRouteOptions['catalog'];
   /** Test-only: fake pty factory / identity for the terminal drawer (never spawns a shell). */
@@ -594,6 +597,8 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
     hubDir: opts.localHubDir,
     dockerProbe: opts.dockerProbe,
     jobRunner: opts.localJobRunner,
+    clusterWorkers: opts.localClusterWorkers,
+    clusterExec: opts.localClusterExec,
     catalog: opts.localCatalog,
   });
   registerBenchmarkRoutes(app, db, {

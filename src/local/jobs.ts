@@ -2,10 +2,10 @@ import { spawn as nodeSpawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import type Database from 'better-sqlite3';
-import { paths } from '../config.js';
+import { paths, ENGINE_REPO_ROOT } from '../config.js';
 import { getSetting, setSetting, logEvent } from '../db/index.js';
 import { clearImageCache, imageExists } from './images.js';
-import { weightsBytes, weightsComplete } from './weights.js';
+import { hubDir, repoDir, weightsBytes, weightsComplete } from './weights.js';
 import { registerRecipe } from './models.js';
 import { scopedCommand, unitName } from './scope.js';
 
@@ -26,7 +26,8 @@ export { scopedCommand } from './scope.js';
  * record lives in the local_job_json setting and is re-adopted by pid on the next start.
  */
 
-export type JobKind = 'download' | 'build';
+/** sync: copy a downloaded model to the other Sparks of the cluster (scripts/sync-weights.sh) */
+export type JobKind = 'download' | 'build' | 'sync';
 export type JobStatus = 'running' | 'done' | 'error' | 'cancelled' | 'unknown';
 
 export interface JobView {
@@ -48,6 +49,8 @@ export interface JobView {
   /** last line of the log with `\r` progress handled — what the panel shows under the bar */
   last_line: string;
   error: string | null;
+  /** sync: the Sparks being copied to; download: the Sparks a finished download is synced to next */
+  workers?: string[];
 }
 
 export interface JobHandle {
@@ -127,7 +130,7 @@ export function explainFailure(kind: JobKind, tail: string[]): string {
     return '連不上網路（下載與映像都要對外連線）';
   }
   const last = [...tail].reverse().find((l) => l.length > 0);
-  return last ? last.slice(0, 200) : kind === 'download' ? '下載失敗，看 log' : '建置失敗，看 log';
+  return last ? last.slice(0, 200) : kind === 'download' ? '下載失敗，看 log' : kind === 'sync' ? '同步到另一台失敗，看 log' : '建置失敗，看 log';
 }
 
 export class LocalJobRunner {
@@ -194,6 +197,7 @@ export class LocalJobRunner {
   }
 
   private finishedOnDisk(j: JobView): boolean {
+    if (j.kind === 'sync') return false; // the other Spark's disk is not visible from here: 結果不明, re-run is cheap
     if (j.kind === 'download') return Boolean(j.model) && this.complete(j.model!);
     if (j.container) {
       clearImageCache();
@@ -206,10 +210,15 @@ export class LocalJobRunner {
     setSetting(this.db, SETTING, this.job ? JSON.stringify(this.job) : '');
   }
 
-  start(kind: JobKind, recipe: string, entry: { model: string | null; container: string | null; size_bytes: number | null; repo: string }): JobView {
+  start(
+    kind: JobKind,
+    recipe: string,
+    entry: { model: string | null; container: string | null; size_bytes: number | null; repo: string; workers?: string[] },
+  ): JobView {
     const cur = this.current();
     if (cur && cur.status === 'running') throw new JobBusyError(`已有工作在跑：${cur.kind} ${cur.recipe}`);
-    if (kind === 'download' && !entry.model) throw new Error('recipe has no model field');
+    if ((kind === 'download' || kind === 'sync') && !entry.model) throw new Error('recipe has no model field');
+    if (kind === 'sync' && !entry.workers?.length) throw new Error('沒有其他 Spark 要同步（vLLM repo 的 .env 沒有 CLUSTER_NODES）');
     fs.mkdirSync(paths.logsDir, { recursive: true });
     const started = this.now();
     const safe = recipe.replace(/[^a-zA-Z0-9._-]+/g, '-');
@@ -230,11 +239,19 @@ export class LocalJobRunner {
       size_bytes: entry.size_bytes,
       last_line: '',
       error: null,
+      ...(entry.workers?.length ? { workers: entry.workers } : {}),
     };
     const handle =
       kind === 'download'
         ? this.launch('uvx', ['hf', 'download', entry.model!], entry.repo, logPath)
-        : this.launch('bash', [path.join(entry.repo, 'run-recipe.sh'), recipe, '--solo', '--build-only'], entry.repo, logPath);
+        : kind === 'sync'
+          ? this.launch(
+              'bash',
+              [path.join(ENGINE_REPO_ROOT, 'scripts', 'sync-weights.sh'), hubDir(), path.basename(repoDir(entry.model!)), ...entry.workers!],
+              entry.repo,
+              logPath,
+            )
+          : this.launch('bash', [path.join(entry.repo, 'run-recipe.sh'), recipe, '--solo', '--build-only'], entry.repo, logPath);
     job.pid = handle.pid ?? null;
     this.job = job;
     this.persist();
@@ -275,6 +292,18 @@ export class LocalJobRunner {
     this.refreshLive(j);
     this.persist();
     logEvent(this.db, { kind: 'note', detail: `local ${j.kind} ${status}: ${j.recipe}${error ? ` — ${error}` : ''}` });
+    // a two-Spark model is only usable once every node has it: continue with the sync right away
+    if (status === 'done' && j.kind === 'download' && j.model && j.workers?.length) {
+      try {
+        this.start('sync', j.recipe, { model: j.model, container: j.container, size_bytes: j.size_bytes, repo: this.repoOf(j), workers: j.workers });
+      } catch (err) {
+        logEvent(this.db, { kind: 'note', detail: `local sync not started: ${String(err)}` });
+      }
+    }
+  }
+
+  private repoOf(j: JobView): string {
+    return getSetting(this.db, 'local_vllm_repo') || path.dirname(j.log_path);
   }
 
   private refreshLive(j: JobView): void {
@@ -318,7 +347,9 @@ export class LocalJobRunner {
         }
       }
     }
-    this.finish('cancelled', null, j.kind === 'download' ? '已取消——下載到一半的檔案留著，再按一次會續傳' : '已取消');
+    // a cancelled download must not roll into its sync
+    if (j.kind === 'download') delete j.workers;
+    this.finish('cancelled', null, j.kind === 'download' ? '已取消——下載到一半的檔案留著，再按一次會續傳' : j.kind === 'sync' ? '已取消——已複製的檔案留著，再按一次會接著同步' : '已取消');
     return { ...j };
   }
 
