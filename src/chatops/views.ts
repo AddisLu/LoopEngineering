@@ -167,7 +167,7 @@ export function overviewView(db: Database.Database, o: { userKey?: string | null
     out.push('', '### 排隊／等續跑');
     out.push(table(['任務', '狀態'], waiting.map((t) => [`${t.id} ${t.title}`, TASK_WORD[t.status] ?? t.status])));
   }
-  const benches = listBenchmarks(db, 30).filter((b) => b.mode !== 'screen' && (b.status === 'running' || b.status === 'judging' || (toMs(b.judged_at) ?? 0) > now.getTime() - 24 * 3600_000));
+  const benches = listBenchmarks(db, 30).filter((b) => b.status === 'running' || b.status === 'judging' || (toMs(b.judged_at) ?? 0) > now.getTime() - 24 * 3600_000);
   if (benches.length) {
     out.push('', '### 評比');
     for (const b of benches.slice(0, 3)) {
@@ -225,7 +225,7 @@ export function findView(db: Database.Database, o: { q?: string; status?: string
     }
   }
   if (kind !== 'task' && (!o.status || o.status === 'any' || o.status === 'running')) {
-    for (const b of listBenchmarks(db, 50).filter((x) => x.mode !== 'screen')) {
+    for (const b of listBenchmarks(db, 50)) {
       if (q && b.id !== q && !b.title.toLowerCase().includes(q.toLowerCase())) continue;
       if (o.status === 'running' && b.status !== 'running' && b.status !== 'judging') continue;
       rows.push({ type: '評比', id: b.id, title: b.title, status: BENCH_WORD[b.status] ?? b.status, updated_at: b.judged_at ?? b.created_at });
@@ -413,7 +413,7 @@ export function templatesView(db: Database.Database, o: { topic: TemplateTopic; 
       break;
     }
     case 'benchmark': {
-      const recent = listBenchmarks(db, 30).filter((b) => b.mode !== 'screen').slice(0, 8);
+      const recent = listBenchmarks(db, 30).slice(0, 8);
       const builtin = listBuiltin();
       data = { benchmarks: recent.map((b) => b.id), builtin: builtin.map((q) => q.key) };
       out.push(

@@ -66,7 +66,7 @@ import { activeLocalRunCount } from './tasks.js';
 import { BENCH_DOMAINS, BenchmarkInputError, benchmarkMatrix, benchmarkRecommendations, createBenchmark, getBenchmark, listBenchmarks } from './benchmark/store.js';
 import { createScreen, listScreens } from './benchmark/screen.js';
 import { benchmarkReport } from './benchmark/report.js';
-import { judgeBenchmark } from './benchmark/complete.js';
+import { judgeBenchmark, rejudgeBlocker } from './benchmark/complete.js';
 import { checkPrd, submitPrd, PrdInputError, type PrdCheck } from './prd/intake.js';
 import { formatSandboxResult, runSandbox, sandboxSettings, settingsForHost } from './exec/sandbox.js';
 import { checkSandbox, formatCheck } from './exec/check.js';
@@ -1200,8 +1200,9 @@ bench
     const db = getDb();
     const d = getBenchmark(db, id);
     if (!d) return fail(`no such benchmark: ${id}`);
-    const pending = d.arms.filter((a) => !['review', 'attention', 'failed', 'closed'].includes(a.task_status ?? 'failed'));
-    if (pending.length) return fail(`${pending.length} arm(s) still running`);
+    // the same refusals as the page's 重新評分 (a 快篩 row has no judge: judging it would discard its result)
+    const why = rejudgeBlocker(d);
+    if (why) return fail(why);
     const b = await judgeBenchmark(db, id);
     if (!b) return fail('judge already in progress');
     console.log(`${b.id}: ${b.status}${b.winner ? `  winner=${b.winner}` : ''}${b.error ? `  error=${b.error}` : ''}`);

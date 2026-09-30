@@ -129,7 +129,7 @@ async function runWork(db: Database.Database, a: OpsAction, deps: ExecDeps): Pro
 async function runBenchmark(db: Database.Database, a: OpsAction, deps: ExecDeps): Promise<ActionResult> {
   if (a.op === 'screen') {
     const s = a.params as { models: string[]; questions: string[]; budget_min: number };
-    const r = createScreen(db, { models: s.models, questions: s.questions, budget_min: s.budget_min });
+    const r = createScreen(db, { models: s.models, questions: s.questions, budget_min: s.budget_min }, { guard: { hubDir: deps.hubDir, dockerProbe: deps.dockerProbe } });
     const when = r.started ? '已開始' : r.waiting_for ? `排在 ${r.waiting_for} 之後` : '已排入';
     return { ok: true, detail: `快篩 ${r.group}：${r.rows.length} 題${when}（${s.models.map((m) => m.replace(/^local:/, '')).join('、')}）`, links: [link.screen(r.group)], data: { screen_group: r.group } };
   }

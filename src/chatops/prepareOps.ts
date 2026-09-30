@@ -41,7 +41,7 @@ function findBenchmark(db: Database.Database, ref: string): { b: Benchmark | nul
   const key = ref.trim();
   if (key.startsWith('b_')) return { b: getBenchmark(db, key)?.benchmark ?? null, candidates: [] };
   // a 快篩 row is not something to rerun: only real benchmarks
-  const all = listBenchmarks(db, 80).filter((b) => b.mode !== 'screen');
+  const all = listBenchmarks(db, 80);
   if (!key || key === 'latest' || key === '上一場' || key === '最近') return { b: all[0] ?? null, candidates: [] };
   const low = key.toLowerCase();
   const hits = all.filter((b) => b.title.toLowerCase().includes(low));
@@ -185,7 +185,8 @@ export async function prepareScreen(db: Database.Database, chat: ChatCtx, args: 
   const builtin = listBuiltin();
   const want = list(args.questions);
   const defaults = (getSetting(db, 'bench_screen_questions') || 'slugify,log-analyzer,csv-parser').split(',').map((s) => s.trim()).filter(Boolean);
-  const questions = want.length ? want : defaults;
+  const questions = [...new Set(want.length ? want : defaults)];
+  if (questions.length > 6) return no('questions', '快篩一次最多 6 題，要留哪幾題？');
   const unknown = questions.filter((q) => !builtin.some((b) => b.key === q));
   if (unknown.length) return no('questions', `沒有這些內建題：${unknown.join('、')}；有：${builtin.map((b) => b.key).join('、')}`);
   const budget = getNum(db, 'bench_screen_budget_min', 15);

@@ -267,7 +267,9 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // carry their own). e.g. /mnt/nas/aoi:/datasets
   exec_data_mounts: '',
   // 轉成任務 → 驗證新技術: where spike repos (and their bare origins under .origins/) are created
-  spike_root: path.join(os.homedir(), 'Addis', 'spikes'),
+  // LOOP_SPIKE_ROOT: the test suite points this at its own data dir, so a built-in benchmark
+  // question never lands a repo in this host's ~/Addis/spikes
+  spike_root: process.env.LOOP_SPIKE_ROOT || path.join(os.homedir(), 'Addis', 'spikes'),
   // 工作流程 / 對話操作: directories the repo picker may offer, on top of the enabled
   // git/folder knowledge sources. CSV of absolute paths; '' = only registered sources.
   prd_repo_allowlist: '',
@@ -490,6 +492,7 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   local_model_loaded: '',
   local_model_status: 'idle',
   local_job_json: '', // engine STATE: the one download/build job in flight (src/local/jobs.ts)
+  bench_restore_model: '', // engine STATE: the operator's model, switched back to once benchmarks and 快篩 are done
   // Night-only local work (src/scheduler/tick.ts dispatchLocal): "HH:MM-HH:MM" in the engine's
   // local clock, may wrap midnight ("19:00-07:00"). Outside it no local task starts and no model
   // is loaded for one; a run already going is left to finish. '' = any time (as before).

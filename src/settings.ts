@@ -29,7 +29,7 @@ export const NONNEG_KEYS = new Set([
   // 本地模型 (src/local/*.ts)
   'local_max_concurrency', 'local_switch_timeout_sec', 'local_switch_retry_min', 'local_timeout_multiplier',
   // benchmark mode
-  'bench_diff_cap_chars', 'bench_judge_timeout_ms', 'bench_screen_budget_min',
+  'bench_diff_cap_chars', 'bench_judge_timeout_ms',
   // PRD gate
   'local_chat_timeout_ms',
   // GPU 執行沙盒 (src/exec/sandbox.ts)
@@ -215,8 +215,12 @@ export function validateSetting(key: string, value: string): string | null {
   } else if (key === 'prd_default_model') {
     if (value !== '' && !isModelValue(value)) return `prd_default_model must be empty, a model alias or local:<id>`;
   } else if (key === 'bench_screen_questions') {
-    const keys = value.split(',').map((s) => s.trim()).filter(Boolean);
-    if (!keys.length || keys.some((k) => !/^[a-z0-9-]+$/.test(k))) return 'bench_screen_questions must be a comma-separated list of built-in question keys (seed/bench/*.json), e.g. slugify,log-analyzer';
+    // the same bounds createScreen enforces: a value it would refuse must not be storable
+    const keys = [...new Set(value.split(',').map((s) => s.trim()).filter(Boolean))];
+    if (!keys.length || keys.length > 6 || keys.some((k) => !/^[a-z0-9-]+$/.test(k))) return 'bench_screen_questions must be 1 to 6 comma-separated built-in question keys (seed/bench/*.json), e.g. slugify,log-analyzer';
+  } else if (key === 'bench_screen_budget_min') {
+    const n = Number(value);
+    if (!Number.isInteger(n) || n < 3 || n > 120) return 'bench_screen_budget_min must be a whole number of minutes from 3 to 120';
   } else if (key === 'bench_judge_model' || key === 'chat_escalate_model') {
     if (!BENCH_JUDGE_MODELS.has(value)) return `${key} must be one of: ${[...BENCH_JUDGE_MODELS].join(', ')}`;
   } else if (key === 'integration_provider') {

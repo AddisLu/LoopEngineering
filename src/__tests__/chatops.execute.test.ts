@@ -182,7 +182,8 @@ describe('模型快篩 from the chat', () => {
     expect(p.action.summary).toContain('slugify（簡單）');
     expect(p.action.summary).toContain('不花訂閱額度');
     const t2 = turn('確認');
-    const r = await confirmTyped(db, t2, undefined, never, deps);
+    // the same machine at run time: the engine checks again that the model can start
+    const r = await confirmTyped(db, t2, undefined, never, { ...deps, ...guard });
     expect(r).toMatchObject({ ok: true, message: expect.stringContaining('這則回答結束後') });
     expect(listScreens(db)).toEqual([]); // nothing switches the model while this answer is written
     await getOpsRunner().runDeferred(t2.messageId);

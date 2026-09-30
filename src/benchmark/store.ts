@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 import { nanoid } from 'nanoid';
-import { getSetting, logEvent } from '../db/index.js';
+import { getSetting, logEvent, setSetting } from '../db/index.js';
 import { createTask, getTask, setStatus } from '../tasks.js';
 import { validateTask } from '../gate/validateTask.js';
 import { isModelValue, BENCH_JUDGE_MODELS } from '../settings.js';
@@ -309,11 +309,13 @@ export function createBenchmark(
     judge_models: judges.join(','),
     source_kind: input.source_kind ?? 'manual',
     source_ref: input.source_ref ?? null,
-    // the model serving right now — the judge step switches back to it when the arms are done
+    // the model serving right now — switched back to once benchmarks and 快篩 are all done
     restore_model: models.some(isLocalModel) && getSetting(db, 'local_model_status') === 'ready' ? (getSetting(db, 'local_model_loaded') || null) : null,
   });
 
   const row = getBenchmark(db, id)!.benchmark;
+  // one place for the whole queue (screen.ts settleRestore); a 快篩 queued behind this finds it there
+  if (row.restore_model && !getSetting(db, 'bench_restore_model')) setSetting(db, 'bench_restore_model', row.restore_model);
   for (const model of models) createArm(db, row, model, { codingTool, priority: input.priority ?? 2 });
   logEvent(db, { kind: 'note', detail: `benchmark ${id} created: ${title} [${models.join(', ')}] domain=${domain}` });
   const created = getBenchmark(db, id)!;
@@ -440,7 +442,8 @@ export interface BenchmarkListRow extends Benchmark {
   models: string[];
 }
 
-export function listBenchmarks(db: Database.Database, limit = 50): BenchmarkListRow[] {
+/** The newest benchmarks. 快篩 rows (one per model × question) have their own list (listScreens) and are left out unless asked for. */
+export function listBenchmarks(db: Database.Database, limit = 50, opts: { screens?: boolean } = {}): BenchmarkListRow[] {
   const rows = db
     .prepare(
       `SELECT b.*,
@@ -448,7 +451,9 @@ export function listBenchmarks(db: Database.Database, limit = 50): BenchmarkList
               (SELECT COUNT(*) FROM benchmark_arms a LEFT JOIN tasks t ON t.id = a.task_id
                 WHERE a.benchmark_id = b.id AND (t.id IS NULL OR t.status IN ('review','attention','failed','closed'))) AS arms_done,
               (SELECT GROUP_CONCAT(a.model, ',') FROM benchmark_arms a WHERE a.benchmark_id = b.id) AS models_csv
-         FROM benchmarks b ORDER BY b.created_at DESC, b.rowid DESC LIMIT ?`,
+         FROM benchmarks b
+        ${opts.screens ? '' : "WHERE COALESCE(b.mode, '') <> 'screen'"}
+        ORDER BY b.created_at DESC, b.rowid DESC LIMIT ?`,
     )
     .all(limit) as (Benchmark & { arm_count: number; arms_done: number; models_csv: string | null })[];
   return rows.map(({ models_csv, ...b }) => ({

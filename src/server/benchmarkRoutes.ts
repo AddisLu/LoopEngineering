@@ -62,7 +62,12 @@ export function registerBenchmarkRoutes(
   const off = (reply: FastifyReply) =>
     reply.code(404).send({ error: 'benchmark mode disabled (set benchmark_enabled=true)' });
 
-  app.get('/api/benchmarks', async (_req, reply) => (enabled() ? { benchmarks: listBenchmarks(db) } : off(reply)));
+  // ?screens=1 includes 快篩 rows (normally listed per batch by /api/benchmarks/screens)
+  app.get('/api/benchmarks', async (req, reply) => {
+    if (!enabled()) return off(reply);
+    const screens = ['1', 'true'].includes(String((req.query as { screens?: string } | undefined)?.screens ?? ''));
+    return { benchmarks: listBenchmarks(db, 50, { screens }) };
+  });
 
   // ?domain=cuda&kind=local|cloud&min_n=2&min_pass=0.5 — which models pass which kind of software
   app.get('/api/benchmarks/matrix', async (req, reply) => {

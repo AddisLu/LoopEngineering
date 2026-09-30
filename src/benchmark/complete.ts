@@ -11,9 +11,8 @@ import { notify } from '../notify.js';
 import { getBenchmark, judgeList, type Benchmark, type BenchmarkArmView } from './store.js';
 import { aggregateJudgements, runBenchJudge, type ArmEvidence, type BenchJudgeExec, type BenchJudgeResult } from './judge.js';
 import { getModelManager, type ModelManager } from '../local/modelManager.js';
-import { activeLocalRunCount } from '../tasks.js';
-import { isLocalModel, localId } from '../local/models.js';
-import { handOffRestore, promoteScreens, screenGroupDone } from './screen.js';
+import type { LocalGuardDeps } from '../local/guard.js';
+import { failUnloadableScreens, promoteScreens, reportScreenGroup, screenGroupDone, settleRestore } from './screen.js';
 
 /**
  * Benchmark completion: once every arm task is terminal, collect each arm's evidence (verify
@@ -79,10 +78,21 @@ export async function remeasureBaseline(
   }
 }
 
-/** Judge every running benchmark whose arms have all finished. Returns the ids judged this call. */
-export async function checkBenchmarks(db: Database.Database, exec?: BenchJudgeExec): Promise<string[]> {
+/**
+ * Judge every running benchmark whose arms have all finished, start the next 快篩 row if the queue
+ * is free, and put the operator's model back once nothing automated is left. Returns the ids
+ * judged this call. `modelManager` and `guard` are test seams (default: the engine's model manager,
+ * this machine's HF cache and docker).
+ */
+export async function checkBenchmarks(
+  db: Database.Database,
+  exec?: BenchJudgeExec,
+  opts: { modelManager?: Pick<ModelManager, 'state' | 'ensureLoaded'>; guard?: LocalGuardDeps } = {},
+): Promise<string[]> {
   if (!getBool(db, 'benchmark_enabled', false)) return [];
   const done: string[] = [];
+  // a 快篩 row whose model failed to start: record that as its result instead of waiting forever
+  failUnloadableScreens(db, opts.modelManager ?? getModelManager(db));
   // 'judging' is also picked up: the in-flight guard lives in memory, so a restart during
   // judging used to leave the row stuck at 'judging' with nothing left to finish it.
   const running = db.prepare("SELECT id FROM benchmarks WHERE status IN ('running','judging')").all() as { id: string }[];
@@ -90,12 +100,14 @@ export async function checkBenchmarks(db: Database.Database, exec?: BenchJudgeEx
     const detail = getBenchmark(db, id);
     if (!detail || judging.has(id)) continue;
     if (!detail.arms.every((a) => TERMINAL.has(a.task_status ?? 'failed'))) continue;
-    if (detail.benchmark.mode === 'screen') await finishScreen(db, id);
-    else await judgeBenchmark(db, id, exec);
+    if (detail.benchmark.mode === 'screen') await finishScreen(db, id, { modelManager: opts.modelManager });
+    else await judgeBenchmark(db, id, exec, { modelManager: opts.modelManager });
     done.push(id);
   }
   // the queue is free again (or was all along): start the next 快篩 row waiting its turn
-  promoteScreens(db);
+  promoteScreens(db, { guard: opts.guard });
+  // nothing left (a cancel, a judge failure, a batch that ended while promoting): the model back
+  settleRestore(db, opts.modelManager);
   return done;
 }
 
@@ -135,28 +147,13 @@ export async function finishScreen(db: Database.Database, id: string, opts: { mo
     }
     const group = bench.screen_group;
     if (group && screenGroupDone(db, group)) {
-      const rows = db
-        .prepare("SELECT a.model AS model, SUM(CASE WHEN a.verify_outcome = 'pass' THEN 1 ELSE 0 END) AS passed, COUNT(*) AS n FROM benchmarks b JOIN benchmark_arms a ON a.benchmark_id = b.id WHERE b.screen_group = ? GROUP BY a.model")
-        .all(group) as Array<{ model: string; passed: number; n: number }>;
-      const line = rows.map((r) => `${r.model.replace(/^local:/, '')} ${r.passed}/${r.n}`).join('・');
-      logEvent(db, { kind: 'note', detail: `模型快篩 ${group} 完成：${line}` });
-      await notify(db, { title: 'Loop: 模型快篩完成', message: line || '（沒有跑完的題目）', tags: ['mag'] });
-      restoreAfter(db, bench, opts.modelManager);
+      await reportScreenGroup(db, group);
+      settleRestore(db, opts.modelManager);
     }
     return getBenchmark(db, id)!.benchmark;
   } finally {
     judging.delete(id);
   }
-}
-
-/** After a benchmark (or a 快篩 batch): the operator's model back — unless 快篩 rows still wait, who inherit the duty. */
-function restoreAfter(db: Database.Database, bench: Benchmark, mm?: Pick<ModelManager, 'state' | 'ensureLoaded'>): void {
-  const restore = bench.restore_model;
-  if (handOffRestore(db, restore) !== 'restore' || !restore || activeLocalRunCount(db) !== 0) return;
-  const manager = mm ?? getModelManager(db);
-  if (manager.state().loaded === restore) return;
-  const r = manager.ensureLoaded(restore);
-  logEvent(db, { kind: 'note', detail: `benchmark ${bench.id}: switching back to ${restore} (${r})` });
 }
 
 /** Judge one benchmark now (also the retry path for judge_failed). Null if unknown or already judging. */
@@ -255,9 +252,9 @@ export async function judgeBenchmark(
       message: `${bench.title} (${bench.domain})\n${podium}\n${result.summary}`,
       tags: ['trophy'],
     });
-    // the arms may have switched vLLM around; put the operator's model back when nothing local runs
-    // (a 快篩 waiting its turn would switch again at once: it inherits the duty instead)
-    restoreAfter(db, bench, opts.modelManager);
+    // the arms may have switched vLLM around; put the operator's model back once nothing automated
+    // is left (a 快篩 waiting its turn would switch again at once: the last one to finish does it)
+    settleRestore(db, opts.modelManager, bench.restore_model);
     return getBenchmark(db, id)!.benchmark;
   } finally {
     judging.delete(id);

@@ -421,4 +421,9 @@ describe('the test suite itself', () => {
     expect(paths.tokenbarMcpDir).toBeNull();
     expect(savedEnvToken ?? '').toBe('');
   });
+
+  it('writes built-in benchmark repos under its own data dir, never ~/Addis/spikes', async () => {
+    const { DEFAULT_SETTINGS } = await import('../config.js');
+    expect(DEFAULT_SETTINGS.spike_root.startsWith(process.env.LOOP_DATA_DIR!)).toBe(true);
+  });
 });
