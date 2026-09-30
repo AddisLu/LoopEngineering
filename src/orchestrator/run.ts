@@ -32,7 +32,7 @@ import { unmetCapabilities } from '../capabilities.js';
 import { runGapReview } from '../review/gapReviewer.js';
 import { createPr } from '../git/pr.js';
 import { prBody, readVerify } from './runSummary.js';
-import { syncWithBase, pushBranch, stripLoopArtifacts, integrateIntoBase, baseRefFor } from '../git/integrate.js';
+import { syncWithBase, pushBranch, stripLoopArtifacts, integrateIntoBase, baseRefFor, gitEnvFor } from '../git/integrate.js';
 import { verifiedShas } from '../review/code.js';
 import { artifactGlobs, collectArtifacts, unstageArtifacts } from '../review/artifacts.js';
 import { createMergeTask } from './mergeTask.js';
@@ -250,6 +250,7 @@ export async function runTask(
       branch = `loop/${task.id}`;
       const wt = addWorktree(task.repo_path!, branch, task.base_branch!, {
         fetchBase: getBool(db, 'git_fetch_base', true),
+        env: gitEnvFor(db, task.repo_path), // the Gitea token for an http origin on that host; nothing otherwise
       });
       worktreePath = wt.path;
     }
@@ -528,16 +529,18 @@ export async function runTask(
     const base = task.base_branch;
     const autoPush = getBool(db, 'auto_push_branch', true);
     const autoMerge = getBool(db, 'auto_merge', true) && !manualVerify;
+    // network git (fetch / push) gets the Gitea token when origin is on the Gitea host; undefined otherwise
+    const gitEnv = gitEnvFor(db, worktreePath);
 
     // 1. early backup push of the loop branch
-    if (autoPush) pushBranch(worktreePath, branch);
+    if (autoPush) pushBranch(worktreePath, branch, gitEnv);
 
     // 2. bring the latest base into the branch — ONLY when we intend to integrate.
     //    With auto_merge off (or a manual verify outcome) the branch is left exactly as
     //    the agent committed it, so all-flags-off truly restores the old diffstat ->
     //    gap-review -> PR flow.
     if (autoMerge) {
-      const sync = syncWithBase(worktreePath, base, getBool(db, 'git_fetch_base', true));
+      const sync = syncWithBase(worktreePath, base, getBool(db, 'git_fetch_base', true), gitEnv);
       if (sync.status === 'merged') {
         logEvent(db, { task_id: task.id, run_id: run.id, kind: 'merge', detail: `merged ${sync.baseRef} into ${branch}` });
         // the branch changed — re-verify (command+llm gates only; reaching this branch
@@ -550,7 +553,7 @@ export async function runTask(
           manualVerify = true; // e.g. budget crossed the hard limit between the two passes
           reviewDetail = markManualPending(db, task.id);
         } else if (autoPush) {
-          pushBranch(worktreePath, branch);
+          pushBranch(worktreePath, branch, gitEnv);
         }
       } else if (sync.status === 'refused') {
         // Not a content conflict (e.g. dirty tracked files from a verify step) — skip
@@ -603,8 +606,8 @@ export async function runTask(
     let mergeStatus: string | null = null;
     if (autoMerge && !manualVerify) {
       stripLoopArtifacts(worktreePath);
-      if (autoPush) pushBranch(worktreePath, branch);
-      const r = integrateIntoBase(task.repo_path, worktreePath, branch, base);
+      if (autoPush) pushBranch(worktreePath, branch, gitEnv);
+      const r = integrateIntoBase(task.repo_path, worktreePath, branch, base, gitEnv);
       mergeStatus = r.outcome;
       db.prepare('UPDATE tasks SET merge_status = ? WHERE id = ?').run(r.outcome, task.id);
       logEvent(db, { task_id: task.id, run_id: run.id, kind: 'merge', detail: r.detail });
@@ -986,6 +989,7 @@ async function tryCreatePr(
       body: giteaUrl ? prBody(getTask(db, task.id) ?? task, getRun(db, runId), worktreePath) : undefined,
       gitea: giteaUrl ? { url: giteaUrl, token: process.env.GITEA_TOKEN ?? '' } : null,
       onError: (msg) => logEvent(db, { task_id: task.id, run_id: runId, kind: 'note', detail: msg }),
+      env: gitEnvFor(db, worktreePath),
     });
     if (prUrl) {
       db.prepare('UPDATE tasks SET pr_url = ? WHERE id = ?').run(prUrl, task.id);

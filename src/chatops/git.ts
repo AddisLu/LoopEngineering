@@ -4,6 +4,8 @@ import type Database from 'better-sqlite3';
 import { getBool, getNum, getSetting, setSetting } from '../db/index.js';
 import { isEngineRepo, paths } from '../config.js';
 import { gitAsync, GitError, redactUrl } from '../git/async.js';
+import { giteaCreds, giteaGitEnv, giteaHostOf, hostOf } from '../git/gitea.js';
+import { validBranch } from '../git/refs.js';
 import { mergingTaskIds } from '../orchestrator/mergeFlow.js';
 import { getTask } from '../tasks.js';
 import { listJobRepos } from '../plans/job.js';
@@ -36,8 +38,8 @@ const str = (v: unknown, max = 300): string => (typeof v === 'string' ? v.trim()
 const no = (fact: string, question: string): PrepareOutcome => ({ ok: false, missing: [{ fact, question }] });
 const expand = (p: string) => (p.startsWith('~') ? path.join(process.env.HOME ?? '', p.slice(1)) : p);
 
-async function git(db: Database.Database, d: GitOpsDeps, repo: string, args: string[]): Promise<string> {
-  return (await gitAsync(repo, args, { timeoutMs: timeout(db, d) })).stdout.trim();
+async function git(db: Database.Database, d: GitOpsDeps, repo: string, args: string[], env?: Record<string, string>): Promise<string> {
+  return (await gitAsync(repo, args, { timeoutMs: timeout(db, d), env })).stdout.trim();
 }
 async function tryGit(db: Database.Database, d: GitOpsDeps, repo: string, args: string[]): Promise<string | null> {
   try {
@@ -45,6 +47,11 @@ async function tryGit(db: Database.Database, d: GitOpsDeps, repo: string, args: 
   } catch {
     return null;
   }
+}
+/** Env for a fetch / push in `repo`: the Gitea token when origin is an http(s) URL on the Gitea host, else nothing. */
+async function netEnv(db: Database.Database, d: GitOpsDeps, repo: string): Promise<Record<string, string> | undefined> {
+  if (!giteaCreds(db)) return undefined;
+  return giteaGitEnv(db, { remoteUrl: await tryGit(db, d, repo, ['remote', 'get-url', 'origin']) }) ?? undefined;
 }
 
 export interface GitStatus {
@@ -81,7 +88,7 @@ export async function repoStatus(db: Database.Database, repo: string, d: GitOpsD
 /** git_status refresh=true: what origin has now (fetch only, nothing merges). Null = fine, else the reason. */
 export async function fetchOrigin(db: Database.Database, repo: string, d: GitOpsDeps = {}): Promise<string | null> {
   try {
-    await git(db, d, repo, ['fetch', '--prune', 'origin']);
+    await git(db, d, repo, ['fetch', '--prune', 'origin'], await netEnv(db, d, repo));
     return null;
   } catch (err) {
     return (err as Error).message.split('\n')[0]!.slice(0, 160);
@@ -138,31 +145,55 @@ function engineGuard(db: Database.Database, repo: string): string | null {
     : null;
 }
 
-/** A clone URL someone typed: https or ssh to a host, no credentials, no transport tricks. */
-export function validateCloneUrl(url: string, allowFile = false): string | null {
+export interface CloneUrlOptions {
+  /** tests: file:// origins */
+  allowFile?: boolean;
+  /** the gitea_url host: plain http:// is accepted for that host only (the intranet Gitea) */
+  giteaHost?: string | null;
+}
+
+/**
+ * A clone URL someone typed: https or ssh to a host, no credentials, no transport tricks. Plain
+ * http:// only to the Gitea host (giteaHost); `ssh://git@host:2222/owner/repo(.git)` is the
+ * Gitea ssh form. The second argument may still be the old `allowFile` boolean.
+ */
+export function validateCloneUrl(url: string, allow: boolean | CloneUrlOptions = false): string | null {
+  const o: CloneUrlOptions = typeof allow === 'boolean' ? { allowFile: allow } : allow;
   const u = url.trim();
   if (!u || /\s/.test(u) || u.startsWith('-')) return '網址格式不對';
   if (/^(ext|fd)::/i.test(u) || /--upload-pack|--config/i.test(u)) return '不接受這種網址';
-  if (/^file:\/\//i.test(u)) return allowFile ? null : '只能抓網路上的 repo（https 或 ssh）';
-  if (/^https:\/\/[^/@\s]+@/i.test(u)) return '網址裡不要放帳號或 token（伺服器已經設好 git 的認證）';
+  if (/^file:\/\//i.test(u)) return o.allowFile ? null : '只能抓網路上的 repo（https 或 ssh）';
+  if (/^(https?|ssh):\/\/[^/@\s]+:[^/@\s]*@/i.test(u) || /^https?:\/\/[^/@\s]+@/i.test(u)) return '網址裡不要放帳號或 token（伺服器已經設好 git 的認證）';
   if (/^https:\/\/[a-z0-9.-]+(:\d+)?\/[\w.~-]+\/[\w.~/-]+$/i.test(u)) return null;
-  if (/^(ssh:\/\/)?git@[a-z0-9.-]+[:/][\w.~-]+\/[\w.~-]+$/i.test(u)) return null;
-  return '只能抓 https://主機/擁有者/專案 或 git@主機:擁有者/專案 這種網址';
+  if (/^http:\/\/[a-z0-9.-]+(:\d+)?\/[\w.~-]+\/[\w.~/-]+$/i.test(u)) {
+    const host = hostOf(u);
+    if (o.giteaHost && host && host === o.giteaHost.toLowerCase()) return null;
+    return o.giteaHost ? `http:// 只接受 Gitea 主機（${o.giteaHost}）；其他主機請用 https` : '不接受 http://（只有設定裡的 Gitea 主機可以）；請用 https 或 ssh';
+  }
+  if (/^ssh:\/\/git@[a-z0-9.-]+(:\d+)?\/[\w.~-]+\/[\w.~-]+$/i.test(u)) return null;
+  if (/^git@[a-z0-9.-]+:[\w.~-]+\/[\w.~-]+$/i.test(u)) return null;
+  return '只能抓 https://主機/擁有者/專案、ssh://git@主機:埠/擁有者/專案 或 git@主機:擁有者/專案 這種網址';
+}
+
+/** GIT_ALLOW_PROTOCOL for a clone of `url`: http only when it is the Gitea host, file only in tests. */
+export function cloneProtocols(url: string, o: CloneUrlOptions = {}): string {
+  const p = ['https', 'ssh'];
+  const host = hostOf(url);
+  if (/^http:\/\//i.test(url) && o.giteaHost && host && host === o.giteaHost.toLowerCase()) p.push('http');
+  if (o.allowFile) p.push('file');
+  return p.join(':');
 }
 
 export function cloneRoot(db: Database.Database, d: GitOpsDeps = {}): string {
   return d.cloneRoot ?? expand(getSetting(db, 'git_clone_root') || path.join(process.env.HOME ?? '', 'Addis', 'repos'));
 }
 
-/**
- * A branch as the person names it — never an option (`--force`), a force marker (`+main`), a
- * refspec (`a:b`) or anything git would not accept as a branch. `origin/main` is fine (merge).
- */
-const BRANCH_RE = /^(?![-+./])(?!.*(?:\.\.|@\{|\/\/|\/\.|\.lock(?:\/|$)|[./]$))[A-Za-z0-9._/-]{1,200}$/;
-export const validBranch = (b: string): boolean => BRANCH_RE.test(b);
+// A branch as the person names it — never an option, a force marker or a refspec (src/git/refs.ts).
+export { validBranch };
 const badBranch = (b: string) => no('branch', `「${b}」不是可以用的分支名稱`);
 
-const repoNameOf = (url: string): string =>
+/** The folder name a clone of `url` gets under git_clone_root ('' when the URL has none). */
+export const repoNameOf = (url: string): string =>
   (url.replace(/\/+$/, '').split(/[/:]/).pop() ?? '')
     .replace(/\.git$/, '')
     .replace(/[^\w.-]+/g, '-')
@@ -176,7 +207,7 @@ export async function prepareGit(db: Database.Database, chat: ChatCtx, args: Rec
     if (!url) return no('url', '要抓哪個 repo？把網址貼上來');
     const texts = userTexts(db, chat.conversationId);
     if (!saidByUser(texts, url) && !saidByUser(texts, url.replace(/\.git$/, ''))) return no('url', '要抓的網址要是你貼過的，請把網址貼上來');
-    const bad = validateCloneUrl(url, d.allowFileUrls);
+    const bad = validateCloneUrl(url, { allowFile: d.allowFileUrls, giteaHost: giteaHostOf(db) });
     if (bad) return no('url', bad);
     const name = repoNameOf(url);
     if (!name) return no('url', '看不出這個網址的 repo 名稱');
@@ -205,7 +236,7 @@ export async function prepareGit(db: Database.Database, chat: ChatCtx, args: Rec
   if (busy) return no('repo', busy);
   // fetch first: what origin has now decides whether this is a fast-forward
   try {
-    await git(db, d, repo, ['fetch', '--prune', 'origin']);
+    await git(db, d, repo, ['fetch', '--prune', 'origin'], await netEnv(db, d, repo));
   } catch (err) {
     return no('repo', `抓不到 origin 的最新狀態：${(err as Error).message}`);
   }
@@ -305,9 +336,18 @@ function checkedOutAt(porcelain: string | null, branch: string): string | null {
   return null;
 }
 
-function addToAllowlist(db: Database.Database, dir: string): void {
+/** prd_repo_allowlist += dir (the repo picker of 工作流程 / 對話操作 offers it; listJobRepos reads it). */
+export function addToAllowlist(db: Database.Database, dir: string): void {
   const cur = (getSetting(db, 'prd_repo_allowlist') || '').split(',').map((s) => s.trim()).filter(Boolean);
   if (!cur.includes(dir)) setSetting(db, 'prd_repo_allowlist', [...cur, dir].join(','));
+}
+
+/** prd_repo_allowlist -= dir (realpath-insensitive). */
+export function removeFromAllowlist(db: Database.Database, dir: string): void {
+  const target = real(dir);
+  const cur = (getSetting(db, 'prd_repo_allowlist') || '').split(',').map((s) => s.trim()).filter(Boolean);
+  const next = cur.filter((p) => p !== dir && real(p) !== target);
+  if (next.length !== cur.length) setSetting(db, 'prd_repo_allowlist', next.join(','));
 }
 
 /** Run a confirmed git action (the OpsRunner's deps.git). */
@@ -316,7 +356,8 @@ export async function runGit(db: Database.Database, a: OpsAction, d: GitOpsDeps 
   if (a.op === 'clone') {
     const url = String(p.url);
     const dest = String(p.dest);
-    const bad = validateCloneUrl(url, d.allowFileUrls);
+    const urlOpts: CloneUrlOptions = { allowFile: d.allowFileUrls, giteaHost: giteaHostOf(db) };
+    const bad = validateCloneUrl(url, urlOpts);
     if (bad) return { ok: false, detail: bad };
     if (fs.existsSync(dest)) return { ok: false, detail: `${dest} 已經存在` };
     fs.mkdirSync(path.dirname(dest), { recursive: true });
@@ -327,7 +368,9 @@ export async function runGit(db: Database.Database, a: OpsAction, d: GitOpsDeps 
       try {
         await gitAsync(path.dirname(dest), ['clone', '--', url, tmp], {
           timeoutMs: d.cloneTimeoutMs ?? Math.max(30, getNum(db, 'ops_git_clone_timeout_sec', 900)) * 1000,
-          allowProtocols: d.allowFileUrls ? 'https:ssh:file' : 'https:ssh',
+          allowProtocols: cloneProtocols(url, urlOpts),
+          // the Gitea token (GIT_ASKPASS) for an http(s) URL on the Gitea host; nothing for any other server
+          env: giteaGitEnv(db, { remoteUrl: url }) ?? undefined,
         });
         fs.renameSync(tmp, dest);
       } catch (err) {
@@ -377,7 +420,7 @@ async function push(db: Database.Database, d: GitOpsDeps, repo: string, p: Recor
   const local = await tryGit(db, d, repo, ['rev-parse', '--verify', `refs/heads/${branch}`]);
   if (!local || local !== expect.local) return { ok: false, detail: `${branch} 在準備之後又動過了（commit 不一樣），沒有推；請重新準備` };
   try {
-    await git(db, d, repo, ['push', 'origin', `${local}:refs/heads/${branch}`]);
+    await git(db, d, repo, ['push', 'origin', `${local}:refs/heads/${branch}`], await netEnv(db, d, repo));
   } catch (err) {
     const msg = (err as Error).message;
     if (/non-fast-forward|fetch first|rejected/i.test(msg)) return { ok: false, detail: `遠端有新的 commit，沒有推（不會 force）；先 pull 或 merge 再推` };

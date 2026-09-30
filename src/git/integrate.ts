@@ -1,13 +1,45 @@
 import { execFileSync } from 'node:child_process';
+import type Database from 'better-sqlite3';
+import { giteaCreds, giteaGitEnv } from './gitea.js';
+
+/**
+ * Environment additions for a network git call (fetch / push): the Gitea token via GIT_ASKPASS
+ * (gitea.ts giteaGitEnv) when the repo's origin is on the Gitea host, nothing otherwise. Empty /
+ * undefined means "exactly the process environment" — the call is byte-identical to before.
+ */
+export type GitEnv = Record<string, string> | null | undefined;
 
 // Same shape as worktree.ts:git — thin wrapper over `git -C <dir> ...`. Every
 // NETWORK-touching call in this file additionally passes { timeout } and is wrapped in
 // try/catch: these helpers must NEVER throw and NEVER hang the orchestrator loop.
-function git(dir: string, args: string[], opts: { timeout?: number } = {}): string {
-  return execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8', timeout: opts.timeout });
+function git(dir: string, args: string[], opts: { timeout?: number; env?: GitEnv } = {}): string {
+  return execFileSync('git', ['-C', dir, ...args], {
+    encoding: 'utf8',
+    timeout: opts.timeout,
+    ...(opts.env && Object.keys(opts.env).length ? { env: { ...process.env, ...opts.env } } : {}),
+  });
 }
 
 const NET_TIMEOUT = 30_000;
+
+/** `origin`'s URL (a local read, no network), or null without one. */
+export function originUrl(dir: string): string | null {
+  try {
+    return git(dir, ['remote', 'get-url', 'origin']).trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The env additions network git in `dir` needs: the Gitea token when gitea_url + GITEA_TOKEN are
+ * set AND origin is an http(s) URL on that host; undefined otherwise. Without credentials it does
+ * not even read the remote, so the default path stays exactly what it was.
+ */
+export function gitEnvFor(db: Database.Database, dir: string | null | undefined): Record<string, string> | undefined {
+  if (!dir || !giteaCreds(db)) return undefined;
+  return giteaGitEnv(db, { remoteUrl: originUrl(dir) }) ?? undefined;
+}
 
 /**
  * True when the repo has at least one configured remote. Moved here from pr.ts so the
@@ -25,10 +57,10 @@ export function hasRemote(dir: string): boolean {
  * `git fetch origin <base>` (30s cap). No-op returning false when there is no remote or
  * the fetch fails/hangs — callers fall back to the local base ref.
  */
-export function fetchBase(gitDir: string, base: string): boolean {
+export function fetchBase(gitDir: string, base: string, env?: GitEnv): boolean {
   if (!hasRemote(gitDir)) return false;
   try {
-    git(gitDir, ['fetch', 'origin', base], { timeout: NET_TIMEOUT });
+    git(gitDir, ['fetch', 'origin', base], { timeout: NET_TIMEOUT, env });
     return true;
   } catch {
     return false;
@@ -65,8 +97,8 @@ export interface SyncResult {
  *   verify step) — NOT a content conflict; callers should skip sync, not spawn a
  *   merge-resolution task. Distinguished by the absence of MERGE_HEAD.
  */
-export function syncWithBase(worktree: string, base: string, doFetch: boolean): SyncResult {
-  if (doFetch) fetchBase(worktree, base);
+export function syncWithBase(worktree: string, base: string, doFetch: boolean, env?: GitEnv): SyncResult {
+  if (doFetch) fetchBase(worktree, base, env);
   const baseRef = baseRefFor(worktree, base);
 
   // Already contains base?
@@ -114,10 +146,10 @@ export function syncWithBase(worktree: string, base: string, doFetch: boolean): 
  * Push the loop branch to origin as a backup (30s cap). Host-only and fully guarded:
  * returns false (never throws) with no remote or on any failure.
  */
-export function pushBranch(worktree: string, branch: string): boolean {
+export function pushBranch(worktree: string, branch: string, env?: GitEnv): boolean {
   if (!hasRemote(worktree)) return false;
   try {
-    git(worktree, ['push', '-u', 'origin', branch], { timeout: NET_TIMEOUT });
+    git(worktree, ['push', '-u', 'origin', branch], { timeout: NET_TIMEOUT, env });
     return true;
   } catch {
     return false;
@@ -162,6 +194,7 @@ export function integrateIntoBase(
   gitDir: string,
   branch: string,
   base: string,
+  env?: GitEnv,
 ): { outcome: IntegrateOutcome; detail: string } {
   // From the worktree HEAD already points at the branch; from the bare repoPath we must
   // name the branch explicitly.
@@ -171,7 +204,7 @@ export function integrateIntoBase(
   if (hasRemote(gitDir)) {
     let pushed = false;
     try {
-      git(gitDir, ['push', 'origin', pushSpec], { timeout: NET_TIMEOUT });
+      git(gitDir, ['push', 'origin', pushSpec], { timeout: NET_TIMEOUT, env });
       pushed = true;
     } catch {
       pushed = false;
@@ -181,7 +214,7 @@ export function integrateIntoBase(
       return { outcome: 'pending', detail: `push rejected (base advanced) — ${branch} not integrated into ${base}` };
     }
     // Merged on origin. Best-effort sync of the user's local base — must never corrupt it.
-    const localDetail = syncLocalBase(repoPath, base, branch, true);
+    const localDetail = syncLocalBase(repoPath, base, branch, true, env);
     return { outcome: 'merged', detail: `pushed ${branch} into origin/${base}${localDetail}` };
   }
 
@@ -228,11 +261,11 @@ function isClean(repo: string): boolean {
  * so their checkout isn't left behind. Never changes the integrate outcome (already merged
  * on origin) and never touches a dirty checkout. Returns a detail suffix.
  */
-function syncLocalBase(repo: string, base: string, _branch: string, didPush: boolean): string {
+function syncLocalBase(repo: string, base: string, _branch: string, didPush: boolean, env?: GitEnv): string {
   if (!didPush) return '';
   const cur = currentBranch(repo);
   try {
-    git(repo, ['fetch', 'origin', base], { timeout: NET_TIMEOUT });
+    git(repo, ['fetch', 'origin', base], { timeout: NET_TIMEOUT, env });
   } catch {
     return ' (local base not synced: fetch failed)';
   }

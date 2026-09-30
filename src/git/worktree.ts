@@ -4,7 +4,7 @@ import path from 'node:path';
 import type Database from 'better-sqlite3';
 import { paths } from '../config.js';
 import { listRunsForTask } from '../tasks.js';
-import { fetchBase, baseRefFor } from './integrate.js';
+import { fetchBase, baseRefFor, type GitEnv } from './integrate.js';
 import type { Task } from '../types.js';
 
 function git(repo: string, args: string[]): string {
@@ -24,7 +24,7 @@ export function addWorktree(
   repoPath: string,
   branch: string,
   baseBranch: string,
-  opts: { fetchBase?: boolean } = {},
+  opts: { fetchBase?: boolean; /** env additions for the fetch (integrate.ts gitEnvFor) */ env?: GitEnv } = {},
 ): Worktree {
   fs.mkdirSync(paths.worktreesDir, { recursive: true });
   const wtPath = path.join(paths.worktreesDir, branch.replace(/[/\\]/g, '_'));
@@ -45,7 +45,7 @@ export function addWorktree(
   } else if (opts.fetchBase) {
     // Cut the new branch from the freshly-fetched origin tip. Resolve to a SHA start point
     // (not the ref) so the branch never picks up accidental upstream tracking.
-    fetchBase(repoPath, baseBranch);
+    fetchBase(repoPath, baseBranch, opts.env);
     let start = baseBranch;
     try {
       start = git(repoPath, ['rev-parse', baseRefFor(repoPath, baseBranch)]).trim();
