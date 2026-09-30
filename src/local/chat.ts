@@ -19,6 +19,8 @@ export interface LocalChatRequest {
    * 89 s; with thinking off the same review returned valid JSON in 12 s.
    */
   thinking?: boolean;
+  /** screenshots for a vision model, sent as image_url data URLs beside the user text */
+  images?: { mime: string; base64: string }[];
 }
 
 export type LocalChatResult =
@@ -53,7 +55,12 @@ export async function chatLocal(
         model: model.served_model_id,
         messages: [
           { role: 'system', content: req.system },
-          { role: 'user', content: req.user },
+          {
+            role: 'user',
+            content: req.images?.length
+              ? [{ type: 'text', text: req.user }, ...req.images.map((im) => ({ type: 'image_url', image_url: { url: `data:${im.mime};base64,${im.base64}` } }))]
+              : req.user,
+          },
         ],
         temperature: 0,
         max_tokens: maxTokens,

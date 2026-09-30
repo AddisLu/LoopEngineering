@@ -13,6 +13,8 @@ export interface LocalModel {
   served_model_id: string; // id vLLM serves it under (== the HF repo id for these recipes)
   enabled: number;
   notes: string | null;
+  /** 1 = accepts image_url parts (screenshots go to it directly) */
+  vision?: number;
   created_at: string;
 }
 
@@ -111,6 +113,14 @@ export function syncRecipeName(db: Database.Database, row: LocalModel, name: str
   if (row.notes !== PANEL_NOTE || !name || row.display_name === name) return row;
   db.prepare('UPDATE local_models SET display_name = ? WHERE id = ?').run(name, row.id);
   return { ...row, display_name: name };
+}
+
+/** local_models.vision follows what the served weights can do (read from their config.json). */
+export function syncVision(db: Database.Database, row: LocalModel, vision: boolean): LocalModel {
+  const v = vision ? 1 : 0;
+  if ((row.vision ?? 0) === v) return row;
+  db.prepare('UPDATE local_models SET vision = ? WHERE id = ?').run(v, row.id);
+  return { ...row, vision: v };
 }
 
 export function registerRecipe(db: Database.Database, entry: { recipe: string; name: string | null; model: string }): LocalModel {

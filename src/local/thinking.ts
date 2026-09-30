@@ -55,6 +55,19 @@ function modelType(snapshot: string): string {
   }
 }
 
+/** Does the served revision accept image_url parts? (a vision tower in config.json) */
+export function modelHasVision(servedId: string, dir = hubDir()): boolean {
+  const repo = repoDir(servedId, dir);
+  const rev = currentRevision(repo);
+  if (!rev) return false;
+  try {
+    const c = JSON.parse(readFile(path.join(repo, 'snapshots', rev), 'config.json') ?? '') as Record<string, unknown>;
+    return Boolean(c.vision_config || c.is_multimodal || c.image_token_id !== undefined);
+  } catch {
+    return false;
+  }
+}
+
 export function thinkingStyle(servedId: string, dir = hubDir()): ThinkingStyle {
   const repo = repoDir(servedId, dir);
   const rev = currentRevision(repo);
