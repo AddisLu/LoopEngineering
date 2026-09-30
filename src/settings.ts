@@ -238,7 +238,8 @@ export function validateSetting(key: string, value: string): string | null {
     const n = Number(value);
     if (!Number.isInteger(n) || n < 3 || n > 120) return 'bench_screen_budget_min must be a whole number of minutes from 3 to 120';
   } else if (key === 'bench_judge_model' || key === 'chat_escalate_model') {
-    if (!BENCH_JUDGE_MODELS.has(value)) return `${key} must be one of: ${[...BENCH_JUDGE_MODELS].join(', ')}`;
+    // local:<id> judges are for 公司模式 (src/benchmark/judge.ts runs them through chatLocal)
+    if (!BENCH_JUDGE_MODELS.has(value) && !(key === 'bench_judge_model' && LOCAL_MODEL_RE.test(value))) return `${key} must be one of: ${[...BENCH_JUDGE_MODELS].join(', ')}${key === 'bench_judge_model' ? ', local:<id>' : ''}`;
   } else if (key === 'integration_provider') {
     if (!INTEGRATION_PROVIDER_VALUES.has(value)) return `integration_provider must be one of: ${[...INTEGRATION_PROVIDER_VALUES].join(', ')}`;
   } else if (key === 'agent_backend') {

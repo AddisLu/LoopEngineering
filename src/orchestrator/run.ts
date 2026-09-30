@@ -48,6 +48,8 @@ import { cleanupTaskMcp, writeTaskMcp, execServerForTask, execToolTimeoutMs, EXE
 import { sandboxSettings, verifySandboxRunner, type SandboxDeps } from '../exec/sandbox.js';
 import { describeExecHosts, resolveExecTarget } from '../exec/hosts.js';
 import { evaluateAcceptance, extractMetrics, formatAcceptance, formatSpecs, parseAcceptance, parseProtected, protectedViolations, type MetricSpec, type MetricsReport } from './acceptance.js';
+import { cloudAllowed, isCloudModel, localFallbackModel } from '../local/backend.js';
+import { benchmarkRecommendations } from '../benchmark/store.js';
 
 /**
  * MCP servers a local-model task may use (mcp_servers_json), with the runtime env the chat page
@@ -107,14 +109,45 @@ export function resolveModel(db: Database.Database, task: Task): string | null {
   // A per-task model is non-empty => it WINS (incl. the explicit literal 'default', which
   // then resolves to null = CLI default), so a task can always pin/opt-out of routing.
   const perTask = task.model?.trim();
-  if (perTask) return perTask === 'default' ? null : perTask;
+  if (perTask) return guardCloud(db, perTask === 'default' ? null : perTask);
   let chosen = '';
-  if (getBool(db, 'model_routing', false)) {
+  // 依領域選模型: the local model with the best 戰績 for this domain (domain_routing, opt-in)
+  if (getBool(db, 'domain_routing', false) && task.domain) chosen = domainPick(db, task.domain) ?? '';
+  if (!chosen && getBool(db, 'model_routing', false)) {
     const routed = (getSetting(db, `route_${task.complexity}`) ?? '').trim();
     if (routed && routed !== 'default') chosen = routed; // ''/'default' route -> fall through
   }
   if (!chosen) chosen = (getSetting(db, 'default_model') ?? '').trim();
-  return chosen && chosen !== 'default' ? chosen : null;
+  return guardCloud(db, chosen && chosen !== 'default' ? chosen : null);
+}
+
+/** The best local model for a domain by benchmark standings ('can' always; 'weaker' too in 公司模式). */
+export function domainPick(db: Database.Database, domain: string): string | null {
+  let recs: ReturnType<typeof benchmarkRecommendations>;
+  try {
+    recs = benchmarkRecommendations(db);
+  } catch {
+    return null;
+  }
+  const r = recs.find((x) => x.domain === domain);
+  if (!r?.local) return null;
+  if (r.kind === 'can' || (r.kind === 'weaker' && !cloudAllowed(db))) return r.local.model;
+  return null;
+}
+
+/**
+ * 公司模式 (cloud_llm_allowed=false): a cloud alias never reaches the claude CLI — it becomes the
+ * served local model (or the first enabled one); with no local model at all the alias stays and
+ * the dispatch fails visibly instead of silently going to the cloud.
+ */
+function guardCloud(db: Database.Database, model: string | null): string | null {
+  if (cloudAllowed(db) || (model && !isCloudModel(model))) return model;
+  const local = localFallbackModel(db);
+  if (local) {
+    logEvent(db, { kind: 'note', detail: `公司模式：模型 ${model ?? '（預設）'} 改用本地模型 ${local}` });
+    return local;
+  }
+  return model;
 }
 
 /**

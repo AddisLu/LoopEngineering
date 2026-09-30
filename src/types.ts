@@ -1,6 +1,20 @@
 import type { Complexity, TaskStatus } from './config.js';
 
 export interface Task {
+  /** 問題單 flow (nullable on every task that is not a ticket; see migrate()) */
+  repo_id?: string | null;
+  domain?: string | null;
+  intake_json?: string | null;
+  images_json?: string | null;
+  analysis_json?: string | null;
+  analysis_status?: string | null;
+  checks_json?: string | null;
+  fix_attempts?: number;
+  ladder_step?: number;
+  review_json?: string | null;
+  approval_state?: string | null;
+  start_approved_by?: string | null;
+  start_approved_at?: string | null;
   id: string;
   title: string;
   goal: string;

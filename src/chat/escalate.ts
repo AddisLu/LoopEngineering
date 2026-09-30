@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3';
 import { getBool, getNum, getSetting } from '../db/index.js';
+import { assertCloudAllowed } from '../local/backend.js';
 import { BENCH_JUDGE_MODELS } from '../settings.js';
 import { claudePromptExec, hasClaudeCli, type BenchJudgeExec } from '../benchmark/judge.js';
 import { readUsage } from '../token/usage.js';
@@ -87,6 +88,8 @@ export async function escalateMessage(db: Database.Database, opts: EscalateOptio
   if (usage >= hardLimit) {
     return { ok: false, error: `usage ${usage}% >= hard limit ${hardLimit}% — 雲端複核延後`, status: 409 };
   }
+  const refused = assertCloudAllowed(db);
+  if (refused) return { ok: false, error: refused, status: 403 };
   if (!opts.exec && !hasClaudeCli()) return { ok: false, error: 'claude CLI not found on PATH', status: 503 };
 
   const turns = getNum(db, 'chat_context_turns', 12);

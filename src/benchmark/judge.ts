@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import type Database from 'better-sqlite3';
 import { getNum } from '../db/index.js';
+import { localPrompt } from '../local/backend.js';
 import { readUsage } from '../token/usage.js';
 import type { Benchmark } from './store.js';
 import type { FinalMeasurement, IterationSummary } from './attempts.js';
@@ -261,11 +262,23 @@ export async function runBenchJudge(
   exec?: BenchJudgeExec,
   judgeModel: string = bench.judge_model,
 ): Promise<BenchJudgeResult> {
-  const hardLimit = getNum(db, 'hard_limit_pct', 95);
-  const usage = readUsage().session.percent;
-  if (usage >= hardLimit) return { ok: false, error: `usage ${usage}% >= hard limit ${hardLimit}% — judge postponed` };
-  if (!exec && !hasClaudeCli()) return { ok: false, error: 'claude CLI not found on PATH' };
-  const run = exec ?? claudePromptExec(getNum(db, 'bench_judge_timeout_ms', 600_000));
+  // a local:<id> judge (公司模式) is the served model through chatLocal: no CLI, no usage guard
+  const localJudge = !exec && judgeModel.startsWith('local:');
+  if (!localJudge) {
+    const hardLimit = getNum(db, 'hard_limit_pct', 95);
+    const usage = readUsage().session.percent;
+    if (usage >= hardLimit) return { ok: false, error: `usage ${usage}% >= hard limit ${hardLimit}% — judge postponed` };
+    if (!exec && !hasClaudeCli()) return { ok: false, error: 'claude CLI not found on PATH' };
+  }
+  const run: BenchJudgeExec =
+    exec ??
+    (localJudge
+      ? async (prompt) => {
+          const out = await localPrompt(db, prompt, { maxTokens: 4096 });
+          if (out === null) throw new Error('local judge: the served model did not answer');
+          return out;
+        }
+      : claudePromptExec(getNum(db, 'bench_judge_timeout_ms', 600_000)));
   try {
     return parseBenchJudgement(await run(buildBenchPrompt(bench, arms), judgeModel), arms);
   } catch (err) {

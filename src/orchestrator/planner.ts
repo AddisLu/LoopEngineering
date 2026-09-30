@@ -4,6 +4,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type Database from 'better-sqlite3';
 import { getNum, getBool, getSetting, logEvent } from '../db/index.js';
+import { backendFor, localPrompt } from '../local/backend.js';
 import { paths } from '../config.js';
 import { readUsage } from '../token/usage.js';
 import { createTask, setStatus } from '../tasks.js';
@@ -228,11 +229,16 @@ export async function runPlanner(
   exec?: PlannerExec,
 ): Promise<Task[] | null> {
   if (task.coding_tool === 'mock') return null;
-  const hardLimit = getNum(db, 'hard_limit_pct', 95);
-  if (readUsage().session.percent >= hardLimit) return null;
+  // planner_backend=local (or 公司模式): the served local model plans; no usage guard (no quota spent)
+  const local = !exec && backendFor(db, 'planner_backend') === 'local';
+  if (!local) {
+    const hardLimit = getNum(db, 'hard_limit_pct', 95);
+    if (readUsage().session.percent >= hardLimit) return null;
+  }
 
   const sddSpecs = getBool(db, 'sdd_specs', false);
-  const run: PlannerExec = exec ?? ((prompt) => defaultExec(prompt, getSetting(db, 'default_model') || 'sonnet'));
+  const run: PlannerExec =
+    exec ?? (local ? (prompt) => localPrompt(db, prompt, { maxTokens: 4096 }) : (prompt) => defaultExec(prompt, getSetting(db, 'default_model') || 'sonnet'));
   try {
     const knowledge = knowledgeContext(db, task);
     const out = await run(buildPrompt(task, knowledge, sddSpecs));

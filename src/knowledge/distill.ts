@@ -4,6 +4,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type Database from 'better-sqlite3';
 import { getBool, getNum } from '../db/index.js';
+import { backendFor, localPrompt } from '../local/backend.js';
 import { latestRun } from '../tasks.js';
 import { readUsage } from '../token/usage.js';
 import type { Task } from '../types.js';
@@ -221,16 +222,22 @@ export async function runDistiller(
   db: Database.Database,
   task: Task,
   material: string | null,
-  exec: DistillExec = defaultExec,
+  exec?: DistillExec,
 ): Promise<KnowledgeNode[] | null> {
   if (!material) return null;
   if (task.coding_tool === 'mock') return null;
   if (!getBool(db, 'knowledge_distill', true)) return null;
-  const hardLimit = getNum(db, 'hard_limit_pct', 95);
-  if (readUsage().session.percent >= hardLimit) return null;
+  // knowledge_distill_backend: claude (as before) | local (the served model, no usage guard) | off
+  const backend = exec ? 'claude' : backendFor(db, 'knowledge_distill_backend');
+  if (backend === 'off') return null;
+  if (backend === 'claude') {
+    const hardLimit = getNum(db, 'hard_limit_pct', 95);
+    if (readUsage().session.percent >= hardLimit) return null;
+  }
+  const run: DistillExec = exec ?? (backend === 'local' ? (prompt) => localPrompt(db, prompt, { maxTokens: 2048 }) : defaultExec);
 
   try {
-    const out = await exec(buildPrompt(material));
+    const out = await run(buildPrompt(material));
     if (!out) return null;
     const items = parseDistillerOutput(out);
     if (!items) return null;

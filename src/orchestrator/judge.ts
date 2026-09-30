@@ -2,6 +2,7 @@ import { execFile, execFileSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import type Database from 'better-sqlite3';
 import { getNum, getSetting } from '../db/index.js';
+import { backendFor, localPrompt } from '../local/backend.js';
 import { readUsage } from '../token/usage.js';
 import type { Task } from '../types.js';
 import { buildFileListing } from './outputFiles.js';
@@ -105,11 +106,20 @@ export async function runLlmJudge(
   exec?: JudgeExec,
 ): Promise<JudgeResult> {
   if (task.coding_tool === 'mock') return { pass: null, reason: 'skipped' };
-  if (!hasClaudeCli()) return { pass: null, reason: 'skipped' };
-  const hardLimit = getNum(db, 'hard_limit_pct', 95);
-  if (readUsage().session.percent >= hardLimit) return { pass: null, reason: 'skipped' };
+  // llm_judge_backend=local (or 公司模式): the served local model judges through chatLocal — no CLI,
+  // no usage guard (it costs no quota). An inconclusive answer still routes to manual review.
+  const local = !exec && backendFor(db, 'llm_judge_backend') === 'local';
+  if (!local) {
+    if (!hasClaudeCli()) return { pass: null, reason: 'skipped' };
+    const hardLimit = getNum(db, 'hard_limit_pct', 95);
+    if (readUsage().session.percent >= hardLimit) return { pass: null, reason: 'skipped' };
+  }
 
-  const run: JudgeExec = exec ?? ((prompt, cwd) => defaultExec(prompt, cwd, getSetting(db, 'llm_judge_model') || 'haiku'));
+  const run: JudgeExec =
+    exec ??
+    (local
+      ? async (prompt) => (await localPrompt(db, prompt, { maxTokens: 1024 })) ?? ''
+      : (prompt, cwd) => defaultExec(prompt, cwd, getSetting(db, 'llm_judge_model') || 'haiku'));
   try {
     const out = await run(buildPrompt(task, workdir, base), workdir);
     return parseJudgeOutput(out);
