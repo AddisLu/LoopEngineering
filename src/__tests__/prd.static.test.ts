@@ -25,7 +25,7 @@ describe('PRD helpers (prd-compose / prd-kinds)', () => {
     const index = read('index.html');
     expect(index).toContain('id="prd-new"');
     expect(index).toContain('id="prd-drafts"');
-    expect(index).toContain('href="/flow.html"');
+    expect(read('frame.js')).toContain("'/flow.html'"); // the app rail
     // old links (chat answers, bookmarks) still land somewhere: /prd.html forwards to 工作流程, ?draft= kept
     expect(read('prd.html')).toContain("location.replace('/flow.html' + location.search + location.hash)");
     expect(read('prd.html')).not.toContain('prd-classic');

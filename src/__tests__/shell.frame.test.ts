@@ -9,7 +9,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WEB = path.join(__dirname, '..', '..', 'web');
 const read = (f: string) => fs.readFileSync(path.join(WEB, f), 'utf8');
 const NAV_KEYS = [...read('frame.js').matchAll(/\['(\w+)', '[^']+', '(\/[^']*)'/g)].map((m) => m[1]!);
-const SHELL_PAGES = ['board.html', 'flow.html', 'benchmarks.html', 'plans.html', 'morning.html', 'task.html', 'brain.html'];
+const SHELL_PAGES = ['index.html', 'board.html', 'flow.html', 'benchmarks.html', 'plans.html', 'morning.html', 'task.html', 'brain.html'];
 
 describe('the app shell', () => {
   it('frame.js builds the rail into #app-rail, with every page in it', () => {

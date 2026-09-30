@@ -10,7 +10,11 @@
    so without this reset, hiding an element in JS does nothing at all. */
 [hidden] { display: none !important; }
 
-/* ---- topbar: half the height of the board's, because the log needs the pixels ---- */
+/* ---- the chat in the app frame (frame.css: the left rail, the top bar, 你是, theme) ---- */
+.chat-page .app-top h1 { min-width: 0; font-size: inherit; }
+.chat-page .conv-title { font-size: 15px; }
+
+/* ---- topbar of the share page (outside the app frame on purpose) ---- */
 .topbar-mini {
   position: sticky; top: 0; z-index: 20;
   flex: 0 0 auto;
@@ -43,11 +47,6 @@
 .svc[data-state="ok"]  { color: var(--ok); background: var(--ok-soft); }
 .svc[data-state="bad"] { color: var(--danger); background: var(--danger-soft); }
 
-.usage-chips { display: flex; gap: 6px; }
-.usage-chips .chip { font-variant-numeric: tabular-nums; }
-.usage-chips .chip[data-state="warn"]   { color: var(--warn); background: var(--warn-soft); }
-.usage-chips .chip[data-state="danger"] { color: var(--danger); background: var(--danger-soft); }
-
 /* ---- the three-track shell ---------------------------------------------- */
 main.shell {
   --rail-w: 262px;
@@ -70,7 +69,7 @@ main.shell.dock-collapsed { --dock-w: 0px; }
 
 aside.rail, aside.dock { min-width: 0; min-height: 0; overflow: hidden; }
 
-/* ---- left rail: conversations + who + secondary nav ---------------------- */
+/* ---- left rail: conversations ------------------------------------------- */
 .rail-inner {
   min-width: 262px; height: 100%;
   display: flex; flex-direction: column; gap: 9px;
@@ -107,18 +106,7 @@ aside.rail, aside.dock { min-width: 0; min-height: 0; overflow: hidden; }
   padding: 3px 6px; border-radius: 6px; border: 1px solid var(--accent); background: var(--bg); color: var(--text);
 }
 
-.rail-foot { border-top: 1px solid var(--border); padding-top: 9px; font-size: 12px; display: flex; flex-direction: column; gap: 7px; }
-.rail-foot .who { display: flex; align-items: center; gap: 6px; }
-.rail-foot .who b { font-weight: 600; }
-.rail-foot .note { opacity: .55; line-height: 1.5; margin: 0; }
-#who-form { display: flex; gap: 6px; }
-#who-name {
-  flex: 1 1 auto; min-width: 0; font: inherit; font-size: 12.5px;
-  padding: 5px 8px; border-radius: var(--r-sm); border: 1px solid var(--border); background: var(--bg); color: var(--text);
-}
-.rail-nav { display: flex; flex-wrap: wrap; gap: 4px 10px; }
-.rail-nav a { font-size: 12px; color: var(--text-2); text-decoration: none; }
-.rail-nav a:hover { color: var(--accent); text-decoration: underline; }
+.rail-note { border-top: 1px solid var(--border); padding-top: 9px; margin: 0; font-size: 12px; opacity: .55; line-height: 1.5; }
 
 /* ---- centre: the conversation ------------------------------------------- */
 .convo {
@@ -407,10 +395,11 @@ main.shell.dock-wide .dock-inner { min-width: 460px; }
   .dock-inner, main.shell.dock-wide .dock-inner { min-width: 340px; }
 }
 
-/* Phone: no width to hand over, so both rails become off-canvas drawers. */
-@media (max-width: 720px) {
+/* Phone (the app frame's breakpoint: its rail moves to the bottom here too): no width to hand
+   over, so both rails become off-canvas drawers. */
+@media (max-width: 820px) {
   .topbar-mini { padding: 0 10px; gap: 8px; }
-  .topbar-mini .brand-text, .usage-chips { display: none; }
+  .topbar-mini .brand-text { display: none; }
   .conv-title { max-width: 46vw; }
   main.shell { display: flex; flex-direction: column; padding: 8px; gap: 8px; }
   aside.rail, aside.dock { display: none; }
@@ -579,6 +568,7 @@ main.shell.share .log { padding: 4px; }
   display: flex; flex-direction: column; gap: 1px;
 }
 .menu[hidden] { display: none; }
+.menu.menu-end { left: auto; right: 0; } /* near the right edge: open leftwards */
 .menu-item {
   font: inherit; font-size: 13px; text-align: left;
   padding: 8px 10px; border: 0; border-radius: var(--r-sm);

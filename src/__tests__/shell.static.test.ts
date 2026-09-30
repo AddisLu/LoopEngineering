@@ -27,9 +27,7 @@ describe('chat-first shell', () => {
       'conv-search',
       'new-chat-btn',
       'conv-title',
-      'who-label',
-      'who-form',
-      'who-name',
+      'ops-who',
       'convo',
       'log',
       'empty',
@@ -80,7 +78,7 @@ describe('chat-first shell', () => {
       'pane-status',
       'pane-bench',
       'svc-state',
-      'theme-btn',
+      'help-menu',
       'term-toggle',
       'term-drawer',
       'term-handle',
@@ -110,7 +108,8 @@ describe('chat-first shell', () => {
     expect(css).toContain('main.shell.dock-collapsed');
     // the old chat page squeezed the conversation between a fixed cap and two永久欄
     expect(css).not.toContain('max-width: 1680px');
-    expect(css).toContain('@media (max-width: 720px)');
+    expect(css).toContain('@media (max-width: 820px)'); // the app frame's phone width
+    expect(read('shell.js')).toContain("matchMedia('(max-width: 820px)')");
     expect(css).toContain('@media (prefers-reduced-motion: reduce)');
   });
 
@@ -127,11 +126,25 @@ describe('chat-first shell', () => {
     expect(read('index.html')).toContain('工作區分隔');
   });
 
-  it('links every kept page from the rail, and the manual from /docs/', () => {
-    const page = read('index.html');
-    for (const href of ['/board.html', '/brain.html', '/flow.html', '/benchmarks.html', '/docs/操作說明.html']) {
-      expect(page, `rail does not link ${href}`).toContain(`href="${href}"`);
+  it('links every kept page from the app rail, and the manual from the 說明 menu', () => {
+    // the chat is a page of the app frame: frame.js builds its rail with every page in it
+    expect(read('index.html')).toMatch(/<body class="app chat-page" data-nav="chat">/);
+    const frame = read('frame.js');
+    for (const href of ['/', '/board.html', '/brain.html', '/flow.html', '/benchmarks.html', '/plans.html', '/morning.html']) {
+      expect(frame, `rail does not link ${href}`).toContain(`'${href}'`);
     }
+    expect(read('index.html')).toContain('href="/docs/操作說明.html"');
+  });
+
+  it('the top bar is the frame\'s: no brand, usage chips, theme button or page links of its own', () => {
+    const page = read('index.html');
+    for (const gone of ['topbar-mini', 'usage-chips', 'theme-btn', 'rail-nav', 'who-form', 'clear-btn', '>總覽 ↗<']) expect(page, gone).not.toContain(gone);
+    expect(read('chat.js')).not.toContain('wireTheme');
+    expect(read('shell.js')).not.toContain('wireTheme');
+    // 你是 changes whose history this is: the list starts over for the new name
+    expect(read('chat.js')).toContain("document.addEventListener('ops:who'");
+    // icon buttons open their menus: a click lands on the <svg> inside the button
+    expect(read('chat-actions.js')).not.toContain('e.target !== btn');
   });
 
   it('keeps the old /chat.html bookmark working without duplicating the page', () => {

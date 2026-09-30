@@ -60,11 +60,11 @@ describe('operator pages: 驗收 / 驗證方案 / 晨報', () => {
     expect(fs.readFileSync(path.join(WEB, '..', 'src', 'chatops', 'format.ts'), 'utf8')).toContain('/plans.html#');
   });
 
-  it('are reachable from the chat rail, the board and the morning report', () => {
+  it('are reachable from the app rail, the chat, the board and the morning report', () => {
     const index = read('index.html');
     // 新工作 is the start of 工作流程 now; /job.html forwards there with its prefill
     expect(index).toMatch(/href="\/flow\.html#new"/);
-    expect(index).toMatch(/href="\/plans\.html"/);
+    expect(read('frame.js')).toContain("'/plans.html'");
     expect(read('board.html')).toMatch(/href="\/flow\.html#new"/);
     const job = read('job.html');
     expect(job).toContain("location.replace('/flow.html'");

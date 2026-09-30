@@ -2,8 +2,8 @@
  * Shared shell layer for the chat-first workspace (index.html) and the pages it links to.
  *
  * Holds the things every panel needs and nobody should re-implement: the API token bootstrap,
- * the identity header, a JSON fetch helper, the theme toggle, the single board SSE connection,
- * toasts, and the collapsible rail/dock state. DOM is built with textContent only — never as
+ * the identity header, a JSON fetch helper, the single board SSE connection, toasts, and the
+ * collapsible rail/dock state. (The theme toggle and 你是 are the app frame's: frame.js, ops.js.) DOM is built with textContent only — never as
  * parsed markup, since everything here can end up rendering model or task text.
  */
 
@@ -102,21 +102,6 @@ export function when(raw) {
   return d.toDateString() === new Date().toDateString()
     ? d.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' })
     : d.toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' });
-}
-
-// ---- theme ------------------------------------------------------------------
-const mode = () => (document.documentElement.getAttribute('data-mode') === 'dark' ? 'dark' : 'light');
-
-export function wireTheme(btn) {
-  if (!btn) return;
-  const paint = () => (btn.textContent = mode() === 'dark' ? '☀' : '☾');
-  btn.onclick = () => {
-    const next = mode() === 'dark' ? 'light' : 'dark';
-    document.documentElement.setAttribute('data-mode', next);
-    store('loop_mode', next);
-    paint();
-  };
-  paint();
 }
 
 // ---- toast ------------------------------------------------------------------
@@ -233,7 +218,7 @@ export const drawer = {
 };
 
 // ---- collapsible rails ------------------------------------------------------
-export const phone = () => window.matchMedia('(max-width: 720px)').matches;
+export const phone = () => window.matchMedia('(max-width: 820px)').matches; // frame.css's phone width
 
 /**
  * Collapsing animates a grid track on `main`, so the width goes back to the conversation instead

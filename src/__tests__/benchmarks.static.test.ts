@@ -13,7 +13,7 @@ describe('benchmarks page + local model board wiring: static assets', () => {
     const html = fs.readFileSync(path.join(WEB_DIR, 'benchmarks.html'), 'utf8');
     expect(html).toContain('/styles.css');
     expect(html).toContain('/benchmarks.js');
-    expect(fs.readFileSync(path.join(WEB_DIR, 'index.html'), 'utf8')).toMatch(/href="\/benchmarks\.html"/);
+    expect(fs.readFileSync(path.join(WEB_DIR, 'frame.js'), 'utf8')).toContain("'/benchmarks.html'"); // the app rail
   });
 
   it('benchmarks.js never uses innerHTML (cheap XSS guard)', () => {

@@ -335,10 +335,10 @@ describe('morning page: static assets', () => {
   const WEB = path.join(path.dirname(new URL(import.meta.url).pathname), '..', '..', 'web');
   const read = (f: string) => fs.readFileSync(path.join(WEB, f), 'utf8');
 
-  it('renders with textContent only and is linked from the chat rail and the board', () => {
+  it('renders with textContent only and is linked from the app rail and the board', () => {
     expect(read('morning.js')).not.toMatch(/innerHTML/);
     expect(read('morning.html')).toContain('/morning.js');
-    expect(read('index.html')).toMatch(/href="\/morning\.html"/);
+    expect(read('frame.js')).toContain("'/morning.html'");
     expect(read('board.html')).toMatch(/href="\/morning\.html"/);
   });
 

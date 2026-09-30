@@ -161,28 +161,7 @@ function paintTasks(s) {
   list.replaceChildren(...out);
 }
 
-function paintTopbarUsage(s) {
-  const u = s.usage || {};
-  const set = (id, label, value) => {
-    const node = $(id);
-    if (!node) return;
-    node.textContent = `${label} ${value == null ? '–' : `${Math.round(value)}%`}`;
-    node.dataset.state = value == null ? 'ok' : value >= 90 ? 'danger' : value >= 70 ? 'warn' : 'ok';
-  };
-  set('usage-session', 'session', u.session);
-  set('usage-weekly', 'weekly', u.weekly);
-  // not a live reading: say why in the tooltip and keep the chips amber whatever the number
-  const why = usageNote(u.error);
-  for (const [id, base] of [['usage-session', '5 小時視窗用量'], ['usage-weekly', '每週視窗用量']]) {
-    const node = $(id);
-    if (!node) continue;
-    node.title = why ? `${base} — ${why}` : base;
-    if (why && node.dataset.state === 'ok') node.dataset.state = 'warn';
-  }
-}
-
 onBoard((s) => {
-  paintTopbarUsage(s);
   const wasBench = benchBusy && benchBusy.id;
   benchBusy = s.benchmark || null;
   setText('act-bench-badge', benchBusy ? `${benchBusy.arms_done}/${benchBusy.arm_count}` : '');

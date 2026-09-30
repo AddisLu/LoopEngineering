@@ -73,10 +73,9 @@ describe('brain page: static assets', () => {
     expect(html.indexOf('<script src="/ops.js"></script>')).toBeLessThan(html.indexOf('/brain.js'));
   });
 
-  it('index.html contains the 知識庫 nav link to /brain.html', () => {
-    const html = fs.readFileSync(path.join(WEB_DIR, 'index.html'), 'utf8');
-    expect(html).toMatch(/href="\/brain\.html"/);
-    expect(html).toContain('知識庫');
+  it('the app rail links 知識星圖 (/brain.html), and the chat keeps its 知識庫 panel', () => {
+    expect(fs.readFileSync(path.join(WEB_DIR, 'frame.js'), 'utf8')).toMatch(/\['brain', '知識星圖', '\/brain\.html'/);
+    expect(fs.readFileSync(path.join(WEB_DIR, 'index.html'), 'utf8')).toContain('知識庫');
   });
 
   it('the galaxy renderer draws edges additively and keeps node cores small', () => {

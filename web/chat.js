@@ -1,17 +1,16 @@
-import { $, api, authHeaders, drawer, el, fmtInt, fmtSec, nameHeader, onBoard, phone, rail, setText, store, stored, toast, when, wireTheme } from './shell.js';
+import { $, api, authHeaders, drawer, el, fmtInt, fmtSec, nameHeader, onBoard, phone, rail, setText, store, stored, toast, when } from './shell.js';
 import { renderMarkdown } from './chat-md.js';
 import { mountActions, mountConvMenu, mountHelpMenu } from './chat-actions.js';
 
 /**
  * The conversation itself: streaming answers from the local model, pasted screenshots, and the
- * server-side history (src/chat/store.ts). The surrounding shell (rails, theme, API helper) is
- * shell.js; the markdown/preview renderer is chat-md.js; the right-hand panels are dock.js.
+ * server-side history (src/chat/store.ts). The page sits in the app frame (frame.js: the left
+ * rail, theme, 你是); the chat's own shell (history rail, dock, API helper) is shell.js, the
+ * markdown/preview renderer chat-md.js, the right-hand panels dock.js.
  *
  * Every history call goes through histSafe, so a storage failure degrades to in-memory-only
  * behaviour instead of breaking the answer the user is waiting for (a static test enforces this).
  */
-
-wireTheme($('theme-btn'));
 
 // ---- rails ----------------------------------------------------------------
 const shellMain = $('shell-main');
@@ -1030,13 +1029,11 @@ function resetChat() {
   log.replaceChildren(empty);
   resetRunTiles();
 }
-$('clear-btn').onclick = () => newChat();
 
 // ---- 對話紀錄：伺服器端歷史 (src/chat/store.ts) --------------------------------
 // The page drives every save and the server just stores: the SSE deltas and the timings are
 // already parsed here. Every call goes through histSafe, so if storage fails the chat simply
 // behaves like it did before history existed instead of breaking.
-let me = null;
 let convId = null; // server id of the open thread; null until the first turn is saved
 let contextTurns = 12;
 let histLive = true; // false once the server says the feature is off
@@ -1065,35 +1062,9 @@ async function histSafe(fn, fallback = null) {
 }
 
 // ---- 誰在問 -----------------------------------------------------------------
-function paintWho() {
-  setText('who-label', me ? me.label : '（未知）');
-  const needName = Boolean(me && me.needs_name);
-  $('who-form').hidden = !needName;
-  $('who-change').hidden = !me || me.source !== 'manual';
-  if (needName) setText('who-label', '（還沒留名字）');
-}
-
-async function loadMe() {
-  me = await histSafe(() => chatApi('/api/chat/me'));
-  paintWho();
-}
-
-$('who-form').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const name = $('who-name').value.trim();
-  if (!name) return;
-  store('loop_chat_user', name);
-  $('who-name').value = '';
-  convId = null;
-  resetChat();
-  await loadMe();
-  loadConvs();
-});
-$('who-change').onclick = () => {
-  $('who-form').hidden = false;
-  $('who-name').value = (stored('loop_chat_user') || '').trim();
-  $('who-name').focus();
-};
+// 你是 is the frame's (ops.js, top bar): history is kept per person, so a new name starts over
+// with that person's own list.
+document.addEventListener('ops:who', () => newChat());
 
 // ---- 側欄列表 ---------------------------------------------------------------
 function paintConvNote(text) {
@@ -1156,10 +1127,6 @@ async function loadConvs() {
   const q = $('conv-search').value.trim();
   const data = await histSafe(() => chatApi(`/api/chat/conversations${q ? `?q=${encodeURIComponent(q)}` : ''}`));
   if (!data) return;
-  if (data.user) {
-    me = { ...data.user, needs_name: data.user.source === 'local' };
-    paintWho();
-  }
   if (!data.items.length) {
     paintConvNote(q ? '找不到符合的對話' : '還沒有紀錄。問一個問題就會自動存下來，之後可以搜尋、改名、接著問。');
     return;
@@ -1388,8 +1355,7 @@ mountConvMenu({
   },
 });
 paintTitle('新對話');
-loadMe()
-  .then(loadConvs)
+loadConvs()
   .then(() => {
     // come back to where you were — including an answer that is still being generated
     const last = stored('loop_last_conv');

@@ -335,8 +335,9 @@ export function mountHelpMenu() {
     btn.setAttribute('aria-expanded', 'true');
   };
   for (const a of list.querySelectorAll('a')) a.addEventListener('click', close);
+  // the button holds an icon: a click on it lands on the <svg>, which is still the button
   document.addEventListener('click', (e) => {
-    if (!list.hidden && !list.contains(e.target) && e.target !== btn) close();
+    if (!list.hidden && !list.contains(e.target) && !btn.contains(e.target)) close();
   });
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') close();
@@ -446,7 +447,7 @@ export function mountConvMenu(ctx) {
     btn.setAttribute('aria-expanded', 'true');
   };
   document.addEventListener('click', (e) => {
-    if (!list.hidden && !list.contains(e.target) && e.target !== btn) close();
+    if (!list.hidden && !list.contains(e.target) && !btn.contains(e.target)) close();
   });
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') close();
