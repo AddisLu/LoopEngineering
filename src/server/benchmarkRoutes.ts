@@ -70,7 +70,7 @@ export function registerBenchmarkRoutes(
     const q = (req.query ?? {}) as Record<string, string | undefined>;
     const n = (v?: string) => (v == null || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
     const kind = q.kind === 'local' || q.kind === 'cloud' ? q.kind : null;
-    return { matrix: benchmarkMatrix(db, { domain: str(q.domain), kind, min_n: n(q.min_n), min_pass: n(q.min_pass) }) };
+    return { matrix: benchmarkMatrix(db, { domain: str(q.domain), kind, min_n: n(q.min_n), min_pass: n(q.min_pass), screens: q.screens !== 'false' }) };
   });
 
   /** Per software type: the local model to hand that work to, next to the best cloud model. */

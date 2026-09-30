@@ -104,7 +104,7 @@ export interface BoardState {
   // 本地模型 topbar chip: what vLLM serves (ModelManager state persisted in settings) + local runs in flight.
   local: { enabled: boolean; loaded: string | null; status: string; inflight: number };
   // 評比使用中: the chat page greys out model switching while a benchmark owns the GPU
-  benchmark: { id: string; title: string; status: string; arms_done: number; arm_count: number } | null;
+  benchmark: { id: string; title: string; status: string; arms_done: number; arm_count: number; mode: string | null; screen_group: string | null } | null;
   // every benchmark a card on the board belongs to: 總覽 draws each one as a group (question → arms →
   // final measurement → judge), so it needs the title and where the judging stands
   benchmarks: BoardBenchmark[];
@@ -118,6 +118,13 @@ export interface BoardBenchmark {
   winner: string | null;
   judge_models: string | null;
   judge_model: string;
+  /** 模型快篩: 'screen', its batch, its place in the batch, its question, how the one arm did, the batch size */
+  mode: string | null;
+  screen_group: string | null;
+  screen_seq: number | null;
+  source_ref: string | null;
+  verify_outcome: string | null;
+  screen_total: number | null;
 }
 
 /** The benchmarks the given arm tasks belong to (one small query). */
@@ -125,7 +132,12 @@ function boardBenchmarks(db: Database.Database, ids: string[]): BoardBenchmark[]
   if (!ids.length || !getBool(db, 'benchmark_enabled', false)) return [];
   const marks = ids.map(() => '?').join(',');
   return db
-    .prepare(`SELECT id, title, status, domain, winner, judge_models, judge_model FROM benchmarks WHERE id IN (${marks}) ORDER BY created_at DESC`)
+    .prepare(
+      `SELECT b.id, b.title, b.status, b.domain, b.winner, b.judge_models, b.judge_model, b.mode, b.screen_group, b.screen_seq, b.source_ref,
+              (SELECT a.verify_outcome FROM benchmark_arms a WHERE a.benchmark_id = b.id LIMIT 1) AS verify_outcome,
+              CASE WHEN b.screen_group IS NULL THEN NULL ELSE (SELECT COUNT(*) FROM benchmarks x WHERE x.screen_group = b.screen_group) END AS screen_total
+         FROM benchmarks b WHERE b.id IN (${marks}) ORDER BY b.created_at DESC`,
+    )
     .all(...ids) as BoardBenchmark[];
 }
 
@@ -151,7 +163,7 @@ function runningBenchmark(db: Database.Database): BoardState['benchmark'] {
   if (!getBool(db, 'benchmark_enabled', false)) return null;
   const row = db
     .prepare(
-      `SELECT b.id, b.title, b.status,
+      `SELECT b.id, b.title, b.status, b.mode, b.screen_group,
               (SELECT COUNT(*) FROM benchmark_arms a WHERE a.benchmark_id = b.id) AS arm_count,
               (SELECT COUNT(*) FROM benchmark_arms a LEFT JOIN tasks t ON t.id = a.task_id
                 WHERE a.benchmark_id = b.id AND (t.id IS NULL OR t.status IN ('review','attention','failed','closed'))) AS arms_done

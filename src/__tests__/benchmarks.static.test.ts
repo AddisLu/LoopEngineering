@@ -153,3 +153,17 @@ describe('benchmarks page + local model board wiring: static assets', () => {
     expect(html).toContain('name="local_models_enabled"');
   });
 });
+
+describe('模型快篩 on the 評比 page', () => {
+  it('has its own tab, form and batch list, and the standings can leave it out', () => {
+    const html = fs.readFileSync(path.join(__dirname, '..', '..', 'web', 'benchmarks.html'), 'utf8');
+    const js = fs.readFileSync(path.join(__dirname, '..', '..', 'web', 'benchmarks.js'), 'utf8');
+    expect(html).toContain('data-view="screen"');
+    for (const id of ['view-screen', 'screen-models', 'screen-questions', 'screen-budget', 'screen-est', 'screen-start', 'screen-err', 'screen-list', 'screen-empty', 'st-screens']) expect(html, id).toContain(`id="${id}"`);
+    expect(js).toContain("/api/benchmarks/screen'");
+    expect(js).toContain('#screen=');
+    // a 快篩 row opened as #b= goes to its batch, and the list of benchmarks leaves 快篩 rows out
+    expect(js).toContain("detail.benchmark.mode === 'screen'");
+    expect(js).toContain("b.mode !== 'screen'");
+  });
+});

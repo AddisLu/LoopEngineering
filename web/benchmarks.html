@@ -78,6 +78,28 @@
       .src-pane > label { display: grid; gap: 4px; font-size: 13px; font-weight: 600; }
       .src-pane input, .src-pane select, .src-pane textarea { font: inherit; font-size: 13.5px; font-weight: 400; padding: 8px 10px; border: 1px solid var(--border-2); border-radius: 9px; background: var(--surface-2); color: var(--text); }
       .hint { font-size: 12.5px; color: var(--text-2); line-height: 1.6; margin: 0; }
+      /* 模型快篩 */
+      .screen-start { padding: 16px 18px; display: flex; flex-direction: column; gap: 14px; margin-bottom: 18px; }
+      .screen-start .panel-h { margin: 0; }
+      .screen-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+      .screen-col h3 { margin: 0 0 8px; font-size: 13px; color: var(--text-2); font-weight: 600; }
+      .screen-go { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+      .screen-go .budget { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; white-space: nowrap; }
+      .screen-go .budget input { width: 64px; }
+      .screen-go .hint { flex: 1 1 320px; }
+      .screen-list { display: flex; flex-direction: column; gap: 12px; }
+      .screen-card { padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; }
+      .screen-card.focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+      .screen-card .row-s { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 13px; }
+      .screen-tbl td a { color: var(--text); text-decoration: none; }
+      .screen-tbl td a:hover { text-decoration: underline; }
+      .screen-tbl .mark { font-weight: 700; }
+      .screen-tbl .mark.pass { color: var(--ok); }
+      .screen-tbl .mark.fail { color: var(--danger); }
+      .screen-tbl .mark.running { color: var(--accent); }
+      .screen-tbl .mark.queued, .screen-tbl .mark.cancelled { color: var(--text-3); }
+      .screen-tbl .s { font-size: 12px; color: var(--text-2); }
+      @media (max-width: 820px) { .screen-cols { grid-template-columns: minmax(0, 1fr); } }
       .picks { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 8px; }
       .pick { display: flex; gap: 10px; align-items: center; min-height: 48px; padding: 8px 12px; border: 1px solid var(--border-2); border-radius: 10px; cursor: pointer; background: var(--surface-2); }
       .pick.on { border: 1.5px solid var(--accent); background: var(--accent-soft); }
@@ -100,6 +122,7 @@
         <h1 id="page-title">評比</h1>
         <div class="seg" role="tablist" aria-label="評比分頁" id="view-tabs">
           <button type="button" role="tab" data-view="list" aria-selected="true">每一場</button>
+          <button type="button" role="tab" data-view="screen" aria-selected="false">快篩</button>
           <button type="button" role="tab" data-view="standings" aria-selected="false">戰績</button>
         </div>
         <span class="grow"></span>
@@ -136,6 +159,33 @@
           </div>
 
           <!-- ============ standings: which model fits which work ============ -->
+          <!-- ============ 模型快篩: small built-in questions, one model at a time ============ -->
+          <div id="view-screen" hidden class="app-body" style="padding: 0">
+            <section class="card-s screen-start">
+              <div class="panel-h"><h2>模型快篩</h2><span class="sub">先用內建小題看模型會不會寫程式，過了再開正式評比。每題限時、不用雲端評審、不花訂閱額度，結果記進戰績。</span></div>
+              <div class="screen-cols">
+                <div class="screen-col">
+                  <h3>模型</h3>
+                  <div class="picks" id="screen-models"></div>
+                </div>
+                <div class="screen-col">
+                  <h3>題目</h3>
+                  <div class="picks" id="screen-questions"></div>
+                </div>
+              </div>
+              <div class="screen-go">
+                <label class="budget">每題上限 <input type="number" id="screen-budget" min="3" max="120" step="1" /> 分鐘</label>
+                <p class="hint" id="screen-est"></p>
+                <span class="grow"></span>
+                <button class="btn primary" id="screen-start" type="button" disabled>開始快篩</button>
+              </div>
+              <p class="err" id="screen-err" hidden></p>
+            </section>
+            <div class="panel-h"><h2>最近的快篩</h2></div>
+            <div id="screen-list" class="screen-list"></div>
+            <p class="hint" id="screen-empty" hidden>還沒有快篩。</p>
+          </div>
+
           <div id="view-standings" hidden class="app-body" style="padding: 0">
             <div class="filters" style="padding: 0" id="st-filters">
               <span class="flabel-s">領域</span>
@@ -150,6 +200,8 @@
               <button class="fchip" type="button" data-n="1" aria-pressed="true">1 場</button>
               <button class="fchip" type="button" data-n="3" aria-pressed="false">3 場</button>
               <button class="fchip" type="button" data-n="5" aria-pressed="false">5 場</button>
+              <span class="fsep"></span>
+              <button class="fchip" type="button" id="st-screens" aria-pressed="true" title="快篩只算通過率、一次就過和時間；勝率與評審分數只看正式評比">含快篩</button>
             </div>
             <section style="display: flex; flex-direction: column; gap: 10px">
               <div class="panel-h"><h2>哪個本地模型適合哪種工作</h2><span class="sub">每種軟體類型裡通過率最高的本地模型，旁邊是最好的雲端模型；少於 3 場只能當參考</span></div>

@@ -132,6 +132,8 @@ function iconFor(c) {
 
 /** the name a node carries: a benchmark arm is its model, a pipeline stage its stage */
 function nodeTitle(c) {
+  const q = SCREEN_Q.get(c.id);
+  if (q) return `${modelName(c.model)} · ${q}`;
   if (c.benchmark_id) return modelName(c.model);
   if (c.stage_name) return c.stage_name;
   if (c.parent_task_id) return '解衝突';
@@ -188,11 +190,24 @@ function buildGroups(cards, s) {
     for (const c of g.cards) groupOf.set(c.id, g);
     return g;
   };
-  // benchmarks
+  // benchmarks; a 模型快篩 batch (one row per model × question) is one group, its questions in order
   const benches = new Map((s.benchmarks || []).map((b) => [b.id, b]));
   const byBench = new Map();
-  for (const c of cards) if (c.benchmark_id) (byBench.get(c.benchmark_id) || byBench.set(c.benchmark_id, []).get(c.benchmark_id)).push(c);
+  const byScreen = new Map();
+  SCREEN_Q.clear();
+  for (const c of cards) {
+    if (!c.benchmark_id) continue;
+    const b = benches.get(c.benchmark_id);
+    if (b && b.mode === 'screen' && b.screen_group) {
+      SCREEN_Q.set(c.id, b.source_ref || '');
+      (byScreen.get(b.screen_group) || byScreen.set(b.screen_group, []).get(b.screen_group)).push({ c, b });
+    } else (byBench.get(c.benchmark_id) || byBench.set(c.benchmark_id, []).get(c.benchmark_id)).push(c);
+  }
   for (const [bid, list] of byBench) add({ kind: 'benchmark', id: `b:${bid}`, bench: benches.get(bid) || { id: bid, title: '評比', status: 'running' }, cards: list });
+  for (const [sg, list] of byScreen) {
+    list.sort((x, y) => (x.b.screen_seq ?? 0) - (y.b.screen_seq ?? 0));
+    add({ kind: 'screen', id: `s:${sg}`, group: sg, rows: list.map((x) => x.b), total: list[0].b.screen_total || list.length, cards: list.map((x) => x.c) });
+  }
   // pipelines
   const byPipe = new Map();
   for (const c of cards) if (!groupOf.has(c.id) && c.pipeline_id) (byPipe.get(c.pipeline_id) || byPipe.set(c.pipeline_id, []).get(c.pipeline_id)).push(c);
@@ -288,6 +303,40 @@ function synNode(id, bench, title, sub, ic, state, badgeKind) {
 function groupScene(g, widthHint) {
   const nodes = [];
   const edges = [];
+  if (g.kind === 'screen') {
+    // 快篩 → question 1 → question 2 → … → 結果: one at a time, no final measurement, no judge
+    const passed = g.rows.filter((b) => b.status === 'judged' && b.verify_outcome === 'pass').length;
+    const finished = g.rows.filter((b) => b.status === 'judged' || b.status === 'cancelled').length;
+    const all = finished === g.total;
+    const models = [...new Set(g.cards.map((c) => modelName(c.model)))];
+    nodes.push(synNode(`${g.id}:q`, g.rows[0].id, '快篩', `${models.join('、')} · ${g.total} 題`, 'bench', 'ok', null));
+    let prev = `${g.id}:q`;
+    for (const [i, c] of g.cards.entries()) {
+      // a finished question reads as passed / missed: every arm ends 已結案, which would all look green
+      const b = g.rows[i];
+      const n = taskNode(c);
+      if (b && (b.status === 'judged' || b.status === 'cancelled')) {
+        const ok = b.status === 'judged' && b.verify_outcome === 'pass';
+        const sub = b.status === 'cancelled' ? '已取消' : ok ? '通過' : '沒過';
+        const title = nodeTitle(c);
+        Object.assign(n, {
+          state: b.status === 'cancelled' ? 'idle' : ok ? 'ok' : 'fail',
+          badge: b.status === 'cancelled' ? null : { kind: ok ? 'ok' : 'fail' },
+          label: `${title}：${sub}`,
+          sig: `${n.sig}|${sub}`,
+          build: () => [h('span.ic', null, icon(iconFor(c))), h('span.tx', null, h('span.t', null, title), h('span.s', null, sub))],
+        });
+      }
+      nodes.push(n);
+      edges.push({ from: prev, to: c.id, cls: ['review', 'attention', 'failed', 'closed'].includes(c.status) ? 'ok' : 'wait' });
+      prev = c.id;
+    }
+    nodes.push(synNode(`${g.id}:end`, g.rows[0].id, '結果', all ? `${passed}/${g.total} 題通過` : `${finished}/${g.total} 題跑完 · ${passed} 題通過`, 'scale', all ? (passed ? 'ok' : 'warn') : 'idle', all ? (passed ? 'ok' : 'warn') : null));
+    edges.push({ from: prev, to: `${g.id}:end`, cls: all ? 'ok' : 'wait' });
+    const shown = g.cards.some(matches);
+    for (const n of nodes) if (!n.card) n.dim = !shown;
+    return { nodes, edges, layout: layered(nodes, edges, { gapX: 48, gapY: 16 }) };
+  }
   if (g.kind === 'benchmark') {
     const b = g.bench;
     const bid = b.id;
@@ -337,17 +386,22 @@ function groupScene(g, widthHint) {
   return { nodes, edges, layout: layered(nodes, edges, { gapX: 64, gapY: 18 }) };
 }
 
-const GROUP_ICON = { benchmark: 'bench', pipeline: 'flow', epic: 'flow', chain: 'flow', single: 'list' };
-const GROUP_WORD = { benchmark: '評比', pipeline: '流程', epic: '拆解', chain: '依序', single: '' };
+const GROUP_ICON = { benchmark: 'bench', screen: 'bench', pipeline: 'flow', epic: 'flow', chain: 'flow', single: 'list' };
+const GROUP_WORD = { benchmark: '評比', screen: '快篩', pipeline: '流程', epic: '拆解', chain: '依序', single: '' };
+/** card id → its 快篩 question, so a 快篩 arm reads "model · question" everywhere */
+const SCREEN_Q = new Map();
 
 function groupHead(g) {
   const doneN = g.cards.filter((c) => c.status === 'closed' || (c.status === 'review' && c.merge_status === 'merged')).length;
-  const title = g.kind === 'benchmark' ? g.bench.title : g.title;
+  const title = g.kind === 'benchmark' ? g.bench.title : g.kind === 'screen' ? [...new Set(g.cards.map((c) => modelName(c.model)))].join('、') : g.title;
   const parts = [icon(GROUP_ICON[g.kind]), h('b', null, `${GROUP_WORD[g.kind] ? `${GROUP_WORD[g.kind]} · ` : ''}${title}`)];
   if (g.kind === 'benchmark') {
     parts.push(h('span.chip-s', null, g.bench.domain === 'cuda' ? 'cuda' : g.bench.domain || '評比'));
     parts.push(h('span.meta-s', null, `${g.cards.filter((c) => ['review', 'attention', 'failed', 'closed'].includes(c.status)).length}/${g.cards.length} 組完成`));
     parts.push(h('a', { href: `/benchmarks.html#b=${encodeURIComponent(g.bench.id)}` }, '開啟評比'));
+  } else if (g.kind === 'screen') {
+    parts.push(h('span.meta-s', null, `${g.rows.filter((b) => b.status === 'judged' || b.status === 'cancelled').length}/${g.total} 題`));
+    parts.push(h('a', { href: `/benchmarks.html#screen=${encodeURIComponent(g.group)}` }, '開啟快篩'));
   } else if (g.kind === 'single') {
     parts.push(h('span.meta-s', null, `${g.cards.length} 個 · 依更新時間`));
   } else {
@@ -546,7 +600,8 @@ function paintInbox() {
   const q = snap.cards.filter((x) => x.status === 'queued');
   if (q.length) nextLine('queued', `排隊中 ${q.length} 個：${q.slice(0, 2).map(nodeTitle).join('、')}${q.length > 2 ? '…' : ''}`);
   if (snap.local && (snap.local.enabled || snap.local.inflight)) nextLine(snap.local.status === 'error' ? 'failed' : 'running', `本地模型：${snap.local.loaded ? modelName(snap.local.loaded) : '未載入'}${snap.local.inflight ? ` · 執行中 ${snap.local.inflight}` : ''}`);
-  if (snap.benchmark) nextLine('running', `評比「${snap.benchmark.title}」：${snap.benchmark.arms_done}/${snap.benchmark.arm_count} 組完成，全部完成後一組一組量測再評分`);
+  if (snap.benchmark && snap.benchmark.mode === 'screen') nextLine('running', `模型快篩「${String(snap.benchmark.title).replace(/^快篩：/, '')}」進行中：一題一題跑，不評分`);
+  else if (snap.benchmark) nextLine('running', `評比「${snap.benchmark.title}」：${snap.benchmark.arms_done}/${snap.benchmark.arm_count} 組完成，全部完成後一組一組量測再評分`);
   if (next.children.length === 1) next.appendChild(h('div', null, h('span.sub', null, '沒有排隊或等續跑的任務。')));
   fill(box,
     h('h2', null, '需要你處理', h('span.count', null, String(items.length))),
@@ -581,7 +636,7 @@ const LIST_CHIPS = [
 function groupLabel(c, groups) {
   const g = groups.find((x) => x.cards.includes(c));
   if (!g || g.kind === 'single') return '單一任務';
-  return `${GROUP_WORD[g.kind]} · ${g.kind === 'benchmark' ? g.bench.title : g.title}`;
+  return `${GROUP_WORD[g.kind]} · ${g.kind === 'benchmark' ? g.bench.title : g.kind === 'screen' ? g.group : g.title}`;
 }
 function paintList() {
   const groups = buildGroups(snap.cards, snap);
@@ -602,7 +657,7 @@ function paintList() {
         `tr.row${needsYou(c) ? '.need' : ''}`,
         { onclick: () => Board()?.openDetail(c.id) },
         h('td', null, h('span.stc', null, h('span.dot', { dataset: { st: c.status } }), STATUS_WORD[c.status] || c.status)),
-        h('td', null, h('div.ttl', { title: c.title }, c.benchmark_id ? `${modelName(c.model)} · ${String(c.title).replace(/^\[bench\]\s*/, '').replace(/ · [^·]+$/, '')}` : String(c.title).replace(/^\[bench\]\s*/, ''))),
+        h('td', null, h('div.ttl', { title: c.title }, SCREEN_Q.has(c.id) ? `快篩 · ${nodeTitle(c)}` : c.benchmark_id ? `${modelName(c.model)} · ${String(c.title).replace(/^\[bench\]\s*/, '').replace(/ · [^·]+$/, '')}` : String(c.title).replace(/^\[bench\]\s*/, ''))),
         h('td.sub', null, groupLabel(c, groups)),
         h('td.nowrap', null, c.model ? `${isLocal(c.model) ? '本地 ' : ''}${modelName(c.model)}` : c.coding_tool === 'claude-code' ? '預設模型' : c.coding_tool),
         h('td.num.sub', null, hhmmOrDate(c.updated_at)),

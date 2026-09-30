@@ -127,6 +127,12 @@ async function paintRunning() {
   const run = summary.running;
   $('running-box').hidden = !run;
   if (!run) return;
+  if (run.mode === 'screen') {
+    fill($('running-line'), h('b', null, `模型快篩 · ${run.title.replace(/^快篩：/, '')}`), h('span.hint', null, `進行中 · ${run.models.map(modelName).join('、')}`));
+    $('running-box').onclick = () => go(`#screen=${run.screen_group}`);
+    fill($('running-flow'));
+    return;
+  }
   fill($('running-line'), 
     h('b', null, run.title),
     h('span.hint', null, `${STATUS[run.status] || run.status} · ${run.arms_done}/${run.arm_count} 組完成 · ${run.models.map(modelName).join('、')}`),
@@ -156,9 +162,11 @@ function progressFlow(b, arms) {
 }
 
 function paintBenchList() {
-  const rows = allBenchmarks.filter((b) => !statusFilter || b.status === statusFilter || (statusFilter === 'running' && b.status === 'judging'));
+  // 快篩 rows live in their own tab (one row per model × question would drown the list)
+  const all = allBenchmarks.filter((b) => b.mode !== 'screen');
+  const rows = all.filter((b) => !statusFilter || b.status === statusFilter || (statusFilter === 'running' && b.status === 'judging'));
   $('list-empty').hidden = rows.length > 0;
-  $('list-count').textContent = `${rows.length} / ${allBenchmarks.length} 場`;
+  $('list-count').textContent = `${rows.length} / ${all.length} 場`;
   fill($('bench-list'), 
     ...rows.map((b) => {
       const st = b.status === 'judged' ? 'ok' : b.status === 'judge_failed' ? 'bad' : b.status === 'cancelled' ? '' : 'info';
@@ -184,13 +192,14 @@ for (const b of $('filter-status').querySelectorAll('button')) {
 }
 
 // ================= standings =================
-const stFilter = { domain: '', kind: '', n: 1 };
+const stFilter = { domain: '', kind: '', n: 1, screens: true };
 
 async function loadStandings() {
   const q = new URLSearchParams();
   if (stFilter.domain) q.set('domain', stFilter.domain);
   if (stFilter.kind) q.set('kind', stFilter.kind);
   if (stFilter.n > 1) q.set('min_n', String(stFilter.n));
+  if (!stFilter.screens) q.set('screens', 'false');
   const [{ matrix }, { recommendations }, h2h, sum] = await Promise.all([
     api(`/api/benchmarks/matrix${q.toString() ? `?${q}` : ''}`),
     api(`/api/benchmarks/recommend${stFilter.n > 1 ? `?min_n=${stFilter.n}` : ''}`),
@@ -233,6 +242,11 @@ for (const b of $('st-filters').querySelectorAll('[data-kind]')) {
     loadStandings().catch((e) => pageError(e.message));
   };
 }
+$('st-screens').onclick = () => {
+  stFilter.screens = !stFilter.screens;
+  $('st-screens').setAttribute('aria-pressed', String(stFilter.screens));
+  loadStandings().catch((e) => pageError(e.message));
+};
 for (const b of $('st-filters').querySelectorAll('[data-n]')) {
   b.onclick = () => {
     stFilter.n = Number(b.dataset.n);
@@ -394,9 +408,9 @@ function paintMatrixTable(matrix) {
   $('matrix-empty').hidden = matrix.length > 0;
   fillTable(
     $('matrix'),
-    ['領域', '模型', '類型', '場數', '通過率', '一次就過', '第幾次過', '用 ncu', '平均分數', '勝率', '平均輸出 token', '平均耗時'],
+    ['領域', '模型', '類型', '場數', '其中快篩', '通過率', '一次就過', '第幾次過', '用 ncu', '平均分數', '勝率', '平均輸出 token', '平均耗時'],
     matrix.map((m) =>
-      row([domainLabel(m.domain), modelName(m.model) || m.model_label, m.local ? '本地' : '雲端', m.n, pct(m.verify_pass_rate), pct(m.first_try_rate), fmt(m.avg_passed_at), pct(m.profiler_rate), fmt(m.avg_score), pct(m.win_rate), tokens(m.avg_tokens_out), dur(m.avg_duration_s)]),
+      row([domainLabel(m.domain), modelName(m.model) || m.model_label, m.local ? '本地' : '雲端', m.n, m.screen_n || '–', pct(m.verify_pass_rate), pct(m.first_try_rate), fmt(m.avg_passed_at), pct(m.profiler_rate), fmt(m.avg_score), pct(m.win_rate), tokens(m.avg_tokens_out), dur(m.avg_duration_s)]),
     ),
   );
 }
@@ -409,6 +423,10 @@ let lastDetail = null;
 async function loadDetail(id) {
   detailId = id;
   const detail = await api(`/api/benchmarks/${encodeURIComponent(id)}`);
+  if (detail.benchmark.mode === 'screen') {
+    location.replace(`#screen=${encodeURIComponent(detail.benchmark.screen_group || '')}`);
+    return;
+  }
   // attempts of arms still running are not stored on the benchmark yet: read each arm's history
   const live = detail.benchmark.status === 'running' || detail.benchmark.status === 'judging';
   // attempts stored before they carried timestamps (or not stored yet) are read from the task's history
@@ -1088,9 +1106,161 @@ $('bench-submit').onclick = async () => {
 };
 $('cancel-new').onclick = () => go('#list');
 $('nav-new').onclick = () => go('#new');
-for (const b of $('view-tabs').querySelectorAll('button')) b.onclick = () => go(b.dataset.view === 'standings' ? '#standings' : '#list');
+for (const b of $('view-tabs').querySelectorAll('button')) b.onclick = () => go({ standings: '#standings', screen: '#screen' }[b.dataset.view] || '#list');
+
+// ================= 模型快篩 =================
+const screenState = { models: new Set(), questions: new Set(), budget: 15, defaults: null, builtin: [], picks: [] };
+let screenFocus = null;
+const SCREEN_STATUS = { queued: ['排隊中', 'info'], running: ['進行中', 'info'], done: ['完成', 'ok'], cancelled: ['已取消', ''] };
+const CELL_MARK = { pass: '✓', fail: '✗', running: '…', queued: '·', cancelled: '—' };
+const LEVEL = { S: '簡單', M: '中等', L: '難' };
+
+async function loadScreens(focus, quiet = false) {
+  screenFocus = focus || null;
+  const data = await api('/api/benchmarks/screens');
+  if (!screenState.defaults) {
+    screenState.defaults = data.defaults;
+    screenState.builtin = data.defaults.builtin;
+    screenState.questions = new Set(data.defaults.questions);
+    screenState.budget = data.defaults.budget_min;
+    await loadScreenModels();
+    paintScreenForm();
+  }
+  paintScreenList(data.screens, quiet);
+}
+
+async function loadScreenModels() {
+  const picks = [];
+  try {
+    const cat = await api('/api/local/catalog');
+    for (const e of cat.entries) if (e.registered_id) MODEL_NAMES.set(`local:${e.registered_id}`, e.name);
+    for (const e of cat.entries.filter((x) => x.registered_id)) {
+      const ready = e.action === 'switch' || e.loaded;
+      picks.push({ id: `local:${e.registered_id}`, title: `${e.name}${e.loaded ? '（使用中）' : ''}`, sub: ready ? `本地 · ${gb(e.disk_bytes || e.size_bytes)}` : `不能快篩：${e.blocked_by || '未就緒'}`, disabled: !ready });
+    }
+  } catch (e) {
+    /* local models off: nothing to screen */
+  }
+  screenState.picks = picks;
+}
+
+function paintScreenForm() {
+  const toggle = (set, id) => (on) => {
+    if (on) set.add(id);
+    else set.delete(id);
+    paintScreenEst();
+  };
+  fill(
+    $('screen-models'),
+    ...(screenState.picks.length
+      ? screenState.picks.map((p) => pickCard({ ...p, checked: screenState.models.has(p.id), onToggle: toggle(screenState.models, p.id) }))
+      : [h('p.hint', null, '沒有可以快篩的本地模型：先在對話頁右欄「模型」登錄或下載。')]),
+  );
+  fill(
+    $('screen-questions'),
+    ...screenState.builtin.map((q) =>
+      pickCard({ id: q.key, title: q.title, sub: `${q.key} · ${domainLabel(q.domain)} · ${LEVEL[q.complexity] || '中等'}`, checked: screenState.questions.has(q.key), onToggle: toggle(screenState.questions, q.key) }),
+    ),
+  );
+  $('screen-budget').value = String(screenState.budget);
+  paintScreenEst();
+}
+$('screen-budget').oninput = () => {
+  screenState.budget = Number($('screen-budget').value) || screenState.defaults?.budget_min || 15;
+  paintScreenEst();
+};
+
+function paintScreenEst() {
+  const m = screenState.models.size;
+  const q = screenState.questions.size;
+  const b = screenState.budget || 15;
+  $('screen-est').textContent =
+    m && q
+      ? `${m} 個模型 × ${q} 題，一題接一題，最多約 ${m * (4 + q * b)} 分鐘（切換模型約 4 分 × ${m}）。快篩期間對話頁的本地模型會被換掉，做完會切回。`
+      : '勾選要快篩的模型和題目。';
+  $('screen-start').disabled = !(m && q);
+}
+
+$('screen-start').onclick = async () => {
+  $('screen-start').disabled = true;
+  $('screen-err').hidden = true;
+  try {
+    const r = await api('/api/benchmarks/screen', 'POST', { models: [...screenState.models], questions: [...screenState.questions], budget_min: screenState.budget });
+    window.Ops.toast(r.started ? `快篩 ${r.group} 開始了` : r.waiting_for ? `快篩 ${r.group} 排在 ${r.waiting_for} 之後` : `快篩 ${r.group} 已排入`);
+    screenState.models.clear();
+    paintScreenForm();
+    go(`#screen=${r.group}`);
+  } catch (e) {
+    $('screen-err').hidden = false;
+    $('screen-err').textContent = e.message;
+    paintScreenEst();
+  }
+};
+
+function paintScreenList(screens, quiet) {
+  $('screen-empty').hidden = screens.length > 0;
+  fill($('screen-list'), ...screens.map(screenCard));
+  const el = screenFocus && document.getElementById(`sg-${screenFocus}`);
+  if (el) {
+    el.classList.add('focus');
+    if (!quiet) el.scrollIntoView({ block: 'nearest' });
+  }
+}
+
+function screenCard(g) {
+  const [word, cls] = SCREEN_STATUS[g.status] || [g.status, ''];
+  const live = g.status === 'running' || g.status === 'queued';
+  const act = live
+    ? h('button.btn.sm', {
+        type: 'button',
+        onclick: async () => {
+          if (!confirm(`取消快篩 ${g.group}？還在跑的那一題會被停掉，排隊中的不會開始。`)) return;
+          await api(`/api/benchmarks/screens/${encodeURIComponent(g.group)}/cancel`, 'POST', {}).catch((e) => window.Ops.toast(e.message, 'bad'));
+          loadScreens(screenFocus, true);
+        },
+      }, '取消')
+    : h('button.btn.sm.danger-ghost', {
+        type: 'button',
+        onclick: async () => {
+          if (!confirm(`刪除快篩 ${g.group} 的紀錄？戰績裡這幾題也會一起拿掉。`)) return;
+          await api(`/api/benchmarks/screens/${encodeURIComponent(g.group)}`, 'DELETE').catch((e) => window.Ops.toast(e.message, 'bad'));
+          loadScreens(null, true);
+        },
+      }, '刪除');
+  const cellFor = (m, q) => {
+    const c = g.cells.find((x) => x.model === m && x.question === q);
+    if (!c) return h('td');
+    const mins = c.duration_s != null ? `${Math.max(1, Math.round(c.duration_s / 60))} 分` : '';
+    // the cell says how it went in a few words; the attempts and the reason are in the tooltip
+    const short = c.attempts_label ? c.attempts_label.split('（')[0] : '';
+    const parts = [h(`span.mark.${c.outcome}`, null, CELL_MARK[c.outcome] || ''), mins ? h('span.s', null, ` ${mins}`) : null, short && (c.outcome === 'pass' || c.outcome === 'fail') ? h('span.s', null, ` · ${short}`) : null];
+    const td = h('td', { title: [c.attempts_label, c.failure].filter(Boolean).join('\n') || { queued: '排隊中', running: '進行中', cancelled: '已取消' }[c.outcome] || '' });
+    if (c.task_id) td.appendChild(h('a', { href: `/flow.html?task=${encodeURIComponent(c.task_id)}` }, parts));
+    else td.append(...parts.filter(Boolean));
+    return td;
+  };
+  const table = h(
+    'table.tbl.screen-tbl',
+    null,
+    h('thead', null, h('tr', null, h('th', null, '模型'), ...g.questions.map((q) => h('th', null, q)), h('th', null, '通過'))),
+    h(
+      'tbody',
+      null,
+      ...g.models.map((m) =>
+        h('tr', null, h('td', null, h('b', null, modelName(m))), ...g.questions.map((q) => cellFor(m, q)), h('td.num', null, `${g.cells.filter((x) => x.model === m && x.outcome === 'pass').length}/${g.questions.length}`)),
+      ),
+    ),
+  );
+  return h(
+    'section.card-s.screen-card',
+    { id: `sg-${g.group}` },
+    h('div.row-s', null, chip(word, cls), h('b', null, g.group), h('span', null, `${g.passed}/${g.total} 題通過`), h('span.hint', null, `每題上限 ${g.budget_min} 分 · ${localTime(g.created_at)}`), h('span.grow'), act),
+    h('div.tbl-wrap', null, table),
+  );
+}
 
 // ================= routing =================
+const VIEWS = ['list', 'screen', 'standings', 'detail', 'new'];
 let timer = null;
 function go(hash) {
   if (location.hash === hash) render();
@@ -1100,9 +1270,10 @@ function go(hash) {
 async function render() {
   const hash = location.hash || '#list';
   const detail = /^#b=(.+)$/.exec(hash);
-  const view = detail ? 'detail' : hash === '#new' ? 'new' : hash === '#standings' ? 'standings' : 'list';
-  for (const v of ['list', 'standings', 'detail', 'new']) $(`view-${v}`).hidden = v !== view;
-  for (const b of $('view-tabs').querySelectorAll('button')) b.setAttribute('aria-selected', String((b.dataset.view === 'standings') === (view === 'standings') && view !== 'detail' && view !== 'new'));
+  const screen = /^#screen(?:=(.+))?$/.exec(hash);
+  const view = detail ? 'detail' : hash === '#new' ? 'new' : hash === '#standings' ? 'standings' : screen ? 'screen' : 'list';
+  for (const v of VIEWS) $(`view-${v}`).hidden = v !== view;
+  for (const b of $('view-tabs').querySelectorAll('button')) b.setAttribute('aria-selected', String(b.dataset.view === view));
   $('nav-new').hidden = view === 'new';
   if (timer) clearInterval(timer);
   timer = null;
@@ -1118,6 +1289,9 @@ async function render() {
       paintEstimate();
     } else if (view === 'standings') {
       await loadStandings();
+    } else if (view === 'screen') {
+      await loadScreens(screen[1] ? decodeURIComponent(screen[1]) : null);
+      timer = setInterval(() => loadScreens(screenFocus, true).catch((e) => pageError(`更新不了快篩：${e.message}`)), 10000);
     } else {
       await loadList();
       timer = setInterval(() => loadList().catch((e) => pageError(`更新不了列表：${e.message}`)), 15000);
@@ -1126,7 +1300,7 @@ async function render() {
   } catch (e) {
     if (e.status === 404) {
       $('disabled-note').hidden = false;
-      for (const v of ['list', 'standings', 'detail', 'new']) $(`view-${v}`).hidden = true;
+      for (const v of VIEWS) $(`view-${v}`).hidden = true;
     } else if (view === 'new') {
       $('form-err').hidden = false;
       $('form-err').textContent = e.message;

@@ -1106,6 +1106,14 @@ function armInfo() {
   const b = bench?.benchmark;
   const arm = bench?.arms?.find((a) => a.task_id === t.id);
   if (!b) return { final: stageInfo('idle', '等全部組做完'), judge: stageInfo('idle', '評審') };
+  // 模型快篩: one model on one small question — no re-measurement, no judge; the arm's own gate decides
+  if (b.mode === 'screen') {
+    const done = b.status === 'judged';
+    return {
+      final: stageInfo('skip', '快篩不重新量測'),
+      judge: done ? stageInfo(arm?.verify_outcome === 'pass' ? 'ok' : 'warn', arm?.verify_outcome === 'pass' ? '快篩通過（沒有評審）' : '快篩沒過（沒有評審）') : stageInfo('skip', '快篩沒有評審'),
+    };
+  }
   let final = null;
   try {
     final = arm?.final_json ? JSON.parse(arm.final_json) : null;
