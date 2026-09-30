@@ -20,6 +20,7 @@ export const TASK_WORD: Record<string, string> = {
 };
 
 export const BENCH_WORD: Record<string, string> = {
+  queued: '排隊中',
   running: '進行中',
   judging: '評分中',
   judged: '已評分',
@@ -80,4 +81,5 @@ export const link = {
   draft: (id: string) => ({ title: '工作流程草稿', url: `/flow.html?draft=${encodeURIComponent(id)}` }),
   board: () => ({ title: '總覽', url: '/board.html' }),
   plan: (id: string) => ({ title: `${id} 驗證方案`, url: `/plans.html#${encodeURIComponent(id)}` }),
+  screen: (group: string) => ({ title: `${group} 快篩`, url: `/benchmarks.html#screen=${encodeURIComponent(group)}` }),
 };

@@ -8,6 +8,7 @@ import { linkSubmittedDraft, submitPrd, type PrdCheck } from '../prd/intake.js';
 import type { PrdReviewExec } from '../prd/review.js';
 import { createSpike, type SpikeDeps } from '../spike/create.js';
 import { cancelBenchmark, createBenchmark, getBenchmark, type NewBenchmarkInput } from '../benchmark/store.js';
+import { createScreen, getScreen } from '../benchmark/screen.js';
 import { resolveSource, writeQuestionPlan, type ResolveDeps } from '../benchmark/source.js';
 import { judgeBenchmark, rejudgeBlocker, remeasureBaseline } from '../benchmark/complete.js';
 import type { BenchJudgeExec } from '../benchmark/judge.js';
@@ -126,6 +127,12 @@ async function runWork(db: Database.Database, a: OpsAction, deps: ExecDeps): Pro
 }
 
 async function runBenchmark(db: Database.Database, a: OpsAction, deps: ExecDeps): Promise<ActionResult> {
+  if (a.op === 'screen') {
+    const s = a.params as { models: string[]; questions: string[]; budget_min: number };
+    const r = createScreen(db, { models: s.models, questions: s.questions, budget_min: s.budget_min });
+    const when = r.started ? '已開始' : r.waiting_for ? `排在 ${r.waiting_for} 之後` : '已排入';
+    return { ok: true, detail: `快篩 ${r.group}：${r.rows.length} 題${when}（${s.models.map((m) => m.replace(/^local:/, '')).join('、')}）`, links: [link.screen(r.group)], data: { screen_group: r.group } };
+  }
   const p = a.params as { from: string; ref: string; config: Record<string, unknown>; models: string[]; judges: string[]; title: string };
   let input: NewBenchmarkInput;
   let cleanup: (() => void) | undefined;
@@ -215,6 +222,11 @@ async function runBenchOp(db: Database.Database, a: OpsAction, deps: ExecDeps): 
   const links = [link.bench(id)];
   if (a.op === 'cancel_benchmark') {
     const b = cancelBenchmark(db, id, `使用者從對話取消（${a.user_label ?? a.user_key}）`, { onArmTask: (t) => killTaskRuns(db, t.id, 'user') });
+    const group = (a.params as { group?: string }).group;
+    if (group) {
+      const g = getScreen(db, group);
+      return { ok: true, detail: `快篩 ${group} 已${g?.status === 'cancelled' ? '取消' : '停止'}：${g?.passed ?? 0}/${g?.total ?? 0} 題通過`, links: [link.screen(group)] };
+    }
     return { ok: true, detail: `評比 ${id} 已${b?.status === 'cancelled' ? '取消' : `是「${b?.status}」`}`, links };
   }
   if (a.op === 'rejudge') {

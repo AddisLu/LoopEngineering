@@ -9,7 +9,9 @@ import { createTask, getTask, setStatus } from '../tasks.js';
 import { appendMessage, createConversation } from '../chat/store.js';
 import { createBenchmark, getBenchmark } from '../benchmark/store.js';
 import { createPending, getActionById } from '../chatops/actions.js';
-import { prepareAction, prepareBenchmark } from '../chatops/prepareOps.js';
+import { prepareAction, prepareBenchmark, prepareScreen } from '../chatops/prepareOps.js';
+import { listScreens } from '../benchmark/screen.js';
+import { showView } from '../chatops/views.js';
 import { factsFrom, prepareWork } from '../chatops/prepare.js';
 import { confirmButton, confirmTyped, getOpsRunner, type ExecDeps } from '../chatops/execute.js';
 import type { ChatCtx } from '../chatops/types.js';
@@ -155,6 +157,45 @@ describe('benchmarks from the chat', () => {
     expect(b.benchmark).toMatchObject({ title: 'CCL 8192×5000（重賽）', acceptance_metrics: 'correct == 1; max_ms <= 10', protected_paths: 'bench/**,run_bench.sh', domain: 'cuda', complexity: 'L' });
     expect(JSON.parse(b.benchmark.verification_steps)).toEqual(['sandbox: bash run_bench.sh']);
     expect(b.arms.map((a) => a.model).sort()).toEqual(['opus', 'sonnet']);
+  });
+});
+
+describe('模型快篩 from the chat', () => {
+  it('prepared from the templates, started only after the confirming answer, cancelled as a batch', async () => {
+    setSetting(db, 'benchmark_enabled', 'true');
+    setSetting(db, 'local_models_enabled', 'true');
+    // a model the switcher would offer: weights complete in a (fake) HF cache, recipes from an empty dir
+    setSetting(db, 'local_vllm_repo', fs.mkdtempSync(path.join(os.tmpdir(), 'loop-recipes-')));
+    const hubDir = path.join(repo, 'hub');
+    const snap = path.join(hubDir, 'models--local-inference-lab--Qwen3.8-Flash-Next-NVFP4', 'snapshots', 'rev1');
+    fs.mkdirSync(snap, { recursive: true });
+    fs.writeFileSync(path.join(snap, 'model.safetensors'), 'w');
+    fs.mkdirSync(path.join(hubDir, 'models--local-inference-lab--Qwen3.8-Flash-Next-NVFP4', 'blobs'));
+    fs.writeFileSync(path.join(hubDir, 'models--local-inference-lab--Qwen3.8-Flash-Next-NVFP4', 'blobs', 'b1'), 'w');
+    const guard = { hubDir, dockerProbe: () => true };
+    const turn = chat();
+    expect(await prepareScreen(db, turn('快篩 sonnet'), { models: ['sonnet'] }, guard)).toMatchObject({ ok: false, missing: [{ question: expect.stringContaining('不是本地模型') }] });
+    const p = await prepareScreen(db, turn('快篩 qwen38-flash'), { models: ['qwen38-flash'], questions: ['slugify'] }, guard);
+    if (!p.ok) throw new Error(JSON.stringify(p.missing));
+    expect(p.action).toMatchObject({ kind: 'benchmark', op: 'screen', speed: 'deferred', risk: 'normal' });
+    expect(p.action.summary).toContain('模型快篩：qwen38-flash');
+    expect(p.action.summary).toContain('slugify（簡單）');
+    expect(p.action.summary).toContain('不花訂閱額度');
+    const t2 = turn('確認');
+    const r = await confirmTyped(db, t2, undefined, never, deps);
+    expect(r).toMatchObject({ ok: true, message: expect.stringContaining('這則回答結束後') });
+    expect(listScreens(db)).toEqual([]); // nothing switches the model while this answer is written
+    await getOpsRunner().runDeferred(t2.messageId);
+    expect(getActionById(db, r.action!.id)).toMatchObject({ status: 'done', result: { detail: expect.stringContaining('已開始') } });
+    const g = listScreens(db)[0]!;
+    expect(g.cells[0]).toMatchObject({ model: 'local:qwen38-flash', question: 'slugify', outcome: 'running' });
+    expect(showView(db, g.group)!.markdown).toContain(`${g.group} 快篩 qwen38-flash：進行中`);
+    const c = await prepareAction(db, turn(`取消快篩 ${g.group}`), { action: 'cancel_benchmark', target: g.group });
+    if (!c.ok) throw new Error(JSON.stringify(c.missing));
+    expect(c.action.summary).toContain(`取消快篩 ${g.group}`);
+    const done = await confirmTyped(db, turn('好'), undefined, never, deps);
+    expect(done).toMatchObject({ ok: true, action: { status: 'done', result: { detail: expect.stringContaining(`快篩 ${g.group} 已取消`) } } });
+    expect(listScreens(db)[0]!.status).toBe('cancelled');
   });
 });
 

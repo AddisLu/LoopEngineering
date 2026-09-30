@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import type Database from 'better-sqlite3';
-import { getBool, getNum } from '../db/index.js';
+import { getBool, getNum, getSetting } from '../db/index.js';
 import { getTask } from '../tasks.js';
 import type { Task } from '../types.js';
 import { BENCH_JUDGE_MODELS } from '../settings.js';
@@ -40,7 +40,8 @@ export interface OpsPrepDeps extends LocalGuardDeps {
 function findBenchmark(db: Database.Database, ref: string): { b: Benchmark | null; candidates: string[] } {
   const key = ref.trim();
   if (key.startsWith('b_')) return { b: getBenchmark(db, key)?.benchmark ?? null, candidates: [] };
-  const all = listBenchmarks(db, 50);
+  // a 快篩 row is not something to rerun: only real benchmarks
+  const all = listBenchmarks(db, 80).filter((b) => b.mode !== 'screen');
   if (!key || key === 'latest' || key === '上一場' || key === '最近') return { b: all[0] ?? null, candidates: [] };
   const low = key.toLowerCase();
   const hits = all.filter((b) => b.title.toLowerCase().includes(low));
@@ -168,6 +169,50 @@ export async function prepareBenchmark(db: Database.Database, chat: ChatCtx, arg
   return { ok: true, action, warnings: [] };
 }
 
+// ---- 模型快篩 -------------------------------------------------------------------------------------
+
+/** 快篩: local models on small built-in questions, one after another; no judge, no quota. */
+export async function prepareScreen(db: Database.Database, chat: ChatCtx, args: Record<string, unknown>, deps: OpsPrepDeps = {}): Promise<PrepareOutcome> {
+  if (!getBool(db, 'benchmark_enabled', false)) return no('benchmark', '評比功能沒有開（benchmark_enabled=false），要先在設定打開');
+  const models: string[] = [];
+  for (const m of list(args.models)) {
+    const r = resolveModel(db, m, deps);
+    if (!r.ok) return no('models', r.question);
+    if (!r.value || !r.value.startsWith('local:')) return no('models', `快篩只測本地模型；「${m}」不是本地模型`);
+    if (!models.includes(r.value)) models.push(r.value);
+  }
+  if (!models.length) return no('models', '要快篩哪個本地模型？');
+  const builtin = listBuiltin();
+  const want = list(args.questions);
+  const defaults = (getSetting(db, 'bench_screen_questions') || 'slugify,log-analyzer,csv-parser').split(',').map((s) => s.trim()).filter(Boolean);
+  const questions = want.length ? want : defaults;
+  const unknown = questions.filter((q) => !builtin.some((b) => b.key === q));
+  if (unknown.length) return no('questions', `沒有這些內建題：${unknown.join('、')}；有：${builtin.map((b) => b.key).join('、')}`);
+  const budget = getNum(db, 'bench_screen_budget_min', 15);
+  const busy = activeBenchmark(db);
+  const level = (k: string) => ({ S: '簡單', M: '中等', L: '難' })[builtin.find((b) => b.key === k)?.complexity ?? 'M'] ?? '中等';
+  const summary = [
+    `模型快篩：${models.map(modelName).join('、')}`,
+    `- 題目：${questions.map((q) => `${q}（${level(q)}）`).join('、')}`,
+    `- 每題上限 ${budget} 分鐘，一題接一題；不用雲端評審、不花訂閱額度，結果記進戰績`,
+    `- 預估：最多約 ${models.length * (4 + questions.length * budget)} 分鐘（切換模型約 4 分 × ${models.length} 個）`,
+    '- 快篩期間本地模型會被換掉，這裡的回答會變慢或暫停；做完會切回現在的模型',
+    ...(busy ? [`- 目前有評比 ${busy.id}「${busy.title}」在跑：快篩會排在它後面`] : []),
+  ].join('\n');
+  const action = createPending(db, chat, {
+    kind: 'benchmark',
+    op: 'screen',
+    target: models.join(','),
+    params: { models, questions, budget_min: budget },
+    expect: null,
+    summary,
+    risk: 'normal',
+    // it switches the local model: never while the answer that confirmed it is still being written
+    speed: 'deferred',
+  });
+  return { ok: true, action, warnings: [] };
+}
+
 // ---- actions on tasks, benchmarks and the local model -------------------------------------------
 
 export type OpsActionName =
@@ -279,13 +324,39 @@ export async function prepareAction(
   }
 
   if (action === 'cancel_benchmark' || action === 'rejudge' || action === 'baseline') {
-    const detail = getBenchmark(db, target);
+    // a 快篩 batch (sg_…) is cancelled through any of its rows: cancelling one cancels the batch
+    let rowId = target;
+    if (target.startsWith('sg_')) {
+      if (action !== 'cancel_benchmark') return no('action', '快篩只能取消，沒有評分或基準');
+      const live = db
+        .prepare("SELECT id FROM benchmarks WHERE screen_group = ? ORDER BY CASE status WHEN 'running' THEN 0 WHEN 'queued' THEN 1 ELSE 2 END, screen_seq LIMIT 1")
+        .get(target) as { id: string } | undefined;
+      if (!live) return no('target', `找不到快篩「${target}」`);
+      rowId = live.id;
+    }
+    const detail = getBenchmark(db, rowId);
     if (!detail) return no('target', `找不到評比「${target}」`);
     const b = detail.benchmark;
     let why: string | null = null;
     let verb = '';
     let risk: Risk = 'normal';
     let note = '';
+    if (action === 'cancel_benchmark' && b.mode === 'screen') {
+      const group = b.screen_group ?? b.id;
+      const live = (db.prepare("SELECT COUNT(*) AS n FROM benchmarks WHERE screen_group = ? AND status IN ('queued','running','judging')").get(group) as { n: number }).n;
+      if (!live) return no('state', `快篩 ${group} 已經跑完或取消了`);
+      const pending = createPending(db, chat, {
+        kind: 'bench_op',
+        op: action,
+        target: group,
+        params: { id: b.id, group },
+        expect: null,
+        summary: [`取消快篩 ${group}`, `- 還在跑的那一題會被停掉，排隊中的 ${live} 題不會開始`].join('\n'),
+        risk: 'normal',
+        speed: 'fast',
+      });
+      return { ok: true, action: pending, warnings: [] };
+    }
     if (action === 'cancel_benchmark') {
       verb = '取消評比';
       risk = 'high';
