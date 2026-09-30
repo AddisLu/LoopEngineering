@@ -50,6 +50,8 @@ import { describeExecHosts, resolveExecTarget } from '../exec/hosts.js';
 import { evaluateAcceptance, extractMetrics, formatAcceptance, formatSpecs, parseAcceptance, parseProtected, protectedViolations, type MetricSpec, type MetricsReport } from './acceptance.js';
 import { cloudAllowed, isCloudModel, localFallbackModel } from '../local/backend.js';
 import { benchmarkRecommendations } from '../benchmark/store.js';
+import { checkStepRunner, hasCheckSteps, pushForMachineChecks, type CheckDeps } from '../checks/runner.js';
+import { verifyKindFor } from '../checks/runs.js';
 
 /**
  * MCP servers a local-model task may use (mcp_servers_json), with the runtime env the chat page
@@ -193,6 +195,8 @@ export async function runTask(
     deployExec?: DeployExec;
     /** Test injection for the optional RAG task-context pull (see knowledge/context.ts). */
     ragEmbedExec?: EmbedExec;
+    /** Test injection for `check:` verification steps (machine runner, shell, git — src/checks/runner.ts). */
+    checkDeps?: CheckDeps;
   } = {},
 ): Promise<void> {
   // An epic (coding_tool='plan') never touches a worktree/adapter — it's decomposed into
@@ -484,7 +488,7 @@ export async function runTask(
   // verify (base=null for a repo-less generic task: judge.ts builds a file-list prompt
   // instead of a git diff when it runs the llm judge)
   setStatus(db, task.id, 'verifying', { run_id: run.id });
-  const verifyOutcome = await runVerifyPipeline(db, task, worktreePath, run.id, task.base_branch);
+  const verifyOutcome = await runVerifyPipeline(db, task, worktreePath, run.id, task.base_branch, undefined, undefined, opts.checkDeps);
   if (verifyOutcome === 'fail') return; // already routed to blocked/attention inside the pipeline
   let manualVerify = verifyOutcome === 'manual';
   // 產出物: take them now, before the close-out can reclaim the worktree
@@ -531,7 +535,7 @@ export async function runTask(
         // the branch changed — re-verify (command+llm gates only; reaching this branch
         // already proves the first pass was NOT 'manual', since autoMerge would be false)
         setStatus(db, task.id, 'verifying', { run_id: run.id });
-        const reOutcome = await runVerifyPipeline(db, task, worktreePath, run.id, base);
+        const reOutcome = await runVerifyPipeline(db, task, worktreePath, run.id, base, undefined, undefined, opts.checkDeps);
         if (reOutcome === 'fail') return;
         await collectTaskArtifacts(db, task, run.id, worktreePath); // what was re-verified is what ships
         if (reOutcome === 'manual') {
@@ -653,11 +657,13 @@ export async function runVerifyPipeline(
   judgeExec?: JudgeExec,
   // Test-only: stands in for `docker run` behind `sandbox:` verification steps.
   sandboxDeps?: SandboxDeps,
+  // Test-only: the machine runner / shell / git behind `check:` steps (src/checks/runner.ts).
+  checkDeps?: CheckDeps,
 ): Promise<VerifyPipelineOutcome> {
   const modes = parseVerifyMode(task);
   let needsManual = modes.has('manual');
 
-  const gate = await runVerifyGate(db, task, worktree, runId, base, sandboxDeps);
+  const gate = await runVerifyGate(db, task, worktree, runId, base, sandboxDeps, { checkDeps });
   if (gate.failure) {
     handleVerifyFailure(db, task, runId, worktree, gate.failure);
     return 'fail';
@@ -708,7 +714,7 @@ export async function runVerifyGate(
   runId: string,
   base: string | null,
   sandboxDeps?: SandboxDeps,
-  opts: { record?: boolean } = {},
+  opts: { record?: boolean; checkDeps?: CheckDeps } = {},
 ): Promise<VerifyGateResult> {
   const timeoutMs = (task.verify_timeout_min ?? getNum(db, 'verify_step_timeout_min', 10)) * 60_000;
   const record = opts.record ?? true;
@@ -764,6 +770,12 @@ export async function runVerifyGate(
     // `sandbox:` steps run in the same GPU 沙盒 the agent had — null when exec is off, so such
     // a step fails with a clear message instead of silently running on the host
     const sandbox = sandboxSettings(db);
+    // 檢查 (src/checks/*): `check:` steps get the checks runner, built once per verification; a check
+    // on a 機台 fetches the branch from origin, so it goes up first. No check: steps → neither happens.
+    const checks = hasCheckSteps(task)
+      ? checkStepRunner(db, task, { ...opts.checkDeps, record: record ? { runId, kind: verifyKindFor(db, task.id, runId) } : null })
+      : null;
+    if (checks) pushForMachineChecks(db, task, worktree, runId);
     const vres = await runVerification(
       task,
       worktree,
@@ -771,6 +783,7 @@ export async function runVerifyGate(
       { shellSetting: getSetting(db, 'shell') },
       // the task's remote workspace is shared with the agent's own runs (same key): incremental builds
       sandbox.enabled ? verifySandboxRunner(sandbox, sandboxDeps, (name) => resolveExecTarget(db, name), `task-${task.id}`) : null,
+      checks,
     );
     // 驗收指標: whatever the steps reported, compared with the task's thresholds by the engine
     const metrics = specs.length || vres.results.some((r) => r.output.includes('LOOP_METRICS'))
