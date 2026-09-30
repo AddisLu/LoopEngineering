@@ -185,6 +185,7 @@
     <a href="#sandbox">26b · GPU 執行沙盒：自己跑、自己驗證</a>
     <a href="#overnight">26c · 夜間無人開發：遠端沙盒、驗收指標、晨報</a>
     <a href="#operators">26d · 操作人員流程：新工作、驗收、交付</a>
+    <a href="#chatops">26e · 用對話操作：打字就能開工作、評比、git</a>
     <a href="#appendix">27 · 附錄（API / 檔案位置）</a>
   </nav>
 
@@ -670,6 +671,9 @@ npm run loop -- list --status review</code></pre>
         </tbody>
       </table></div>
 
+      <h3>對話操作（見<a href="#chatops">第 26e 章</a>）</h3>
+      <p>全部預設關閉；不開就和改版前完全一樣。完整說明見第 26e 章的設定表。主要是 <code>ops_chat_enabled</code>（總開關）、<code>ops_allowed_users</code>（誰能執行）、<code>ops_external_enabled</code>（loop-ops MCP 能不能準備與執行）。</p>
+
       <h3>環境變數（<code>~/.config/loop-engineering/env</code>）</h3>
       <div class="tbl-wrap">
       <table>
@@ -803,6 +807,7 @@ systemctl --user disable loop-engineering</code></pre>
         <li>MCP 打<b>本機</b> <code>http://127.0.0.1:4711</code>，token 自動從 <code>~/.config/loop-engineering/env</code> 讀取——不用手動帶。</li>
         <li>新增/更新 MCP 後需<b>重開一個 Claude Code 對話</b>（或重載視窗）才會載入工具；用 <code>/mcp</code> 確認 <code>loop-engineering</code> 為 Connected。</li>
         <li>檔案：<code>mcp/loop-mcp.mjs</code>。註冊：<code>claude mcp add --scope user loop-engineering -- node ~/Coding/LoopEngineering/mcp/loop-mcp.mjs</code></li>
+        <li>要「先準備、確認才執行」的版本（任務、評比、模型、git 都有），改用 <code>loop-ops</code>，見<a href="#chatops">第 26e 章</a>。</li>
       </ul>
 
       <div class="note warn"><span class="ic">⚠️</span><span>因預設直接排程執行，請確認目標 repo 與驗證步驟正確——執行會實際動用 Claude Code 額度。每次的自動偵測結果都會回報，過目再放行。</span></div>
@@ -1919,6 +1924,127 @@ loop verify-plan datasets &lt;方案 id&gt;     # 人員會看到的圖資清單
       </ul>
     </section>
 
+    <section id="chatops">
+      <h2><span class="num">26e</span>用對話操作：打字就能開工作、評比、git</h2>
+      <p>在對話頁（入口頁）直接打字，就能查狀況、開新工作、重賽評比、處理任務、切模型、做 git。本地模型負責查資料和問清楚；工作內容由引擎照範本組出來。<b>本地模型不會自己執行任何動作</b>：會花額度、改程式、動 repo 的事，都要你在下一則訊息回覆「確認」，或按卡片上的「確認執行」。</p>
+
+      <h3>可以怎麼說</h3>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>你可以說</th><th>會發生什麼</th></tr></thead>
+        <tbody>
+          <tr><td>現在狀況？／有什麼要我處理？</td><td>狀況總覽：等你處理的任務、正在跑和排隊的任務、評比、額度、本地模型。</td></tr>
+          <tr><td>找登入相關的任務／t_… 怎麼了？</td><td>列出任務或評比（都有 id）；看單張的詳情，以及接下來「你可以說」的話。</td></tr>
+          <tr><td>哪個模型適合 CUDA？</td><td>依評比結果的模型戰績。</td></tr>
+          <tr><td>修一個 bug／加一個功能／演算法誤判／效能／評估這個套件（貼網址）／大工作拆成幾塊</td><td>照範本問清楚，組成 PRD 草稿並檢查。你確認後才送出。草稿也能在工作流程頁打開來改。</td></tr>
+          <tr><td>重賽 CCL，加 Nemotron、拿掉 haiku</td><td>沿用上一場的題目、驗證、門檻和保護路徑，換參賽模型。你確認後才開始。</td></tr>
+          <tr><td>排入／中止／續跑／重來／放棄／核可／合併／退回修改／結案／刪除 t_…</td><td>先檢查任務現在的狀態允不允許。你確認後執行，和看板按鈕做的事一樣。</td></tr>
+          <tr><td>取消評比／重新評分／重量基準 b_…</td><td>同上。</td></tr>
+          <tr><td>切到 qwen3-coder-next</td><td>這則回答寫完才切，因為切換會重啟 vLLM。如果還有別的回答正在產生，或權重還沒下載，就會拒絕並說明原因。</td></tr>
+          <tr><td>app 的 git 狀態／pull／push／把 feature 合併到 main／抓 https://github.com/…</td><td>查狀態，或準備一個 git 動作。規則見下面的「git」。</td></tr>
+        </tbody>
+      </table></div>
+
+      <h3>確認規則</h3>
+      <ul>
+        <li><b>卡片</b>：準備好的動作會顯示成一張卡片，包含：
+          <ul>
+            <li>引擎寫的摘要（不是模型的轉述）；</li>
+            <li>三個字的代碼，例如 <code>K7Q</code>；</li>
+            <li>「確認執行／取消」按鈕。</li>
+          </ul>
+        </li>
+        <li><b>打字確認</b>：下一則訊息回覆「確認」「好」「OK」這類明確的同意。
+          <ul>
+            <li><b>高風險動作要附代碼</b>，回覆「確認 K7Q」。高風險包括中止、重來、放棄、刪除、取消評比、核可、合併、git push、git merge。</li>
+            <li>「好，但改成 sonnet」不算同意，模型會用新的內容重新準備。</li>
+            <li>模型不能在準備動作的同一則回答裡自己確認，引擎會擋下來。</li>
+          </ul>
+        </li>
+        <li><b>一次一個</b>：每個對話同時只有一個待確認動作；新的準備會取代舊的。待確認動作 30 分鐘內有效（<code>ops_confirm_ttl_min</code>）。</li>
+        <li><b>比較久的動作</b>（送出工作、核可、合併、評分、git）會先回「已開始」，卡片會自動更新結果。也可以問「K7Q 好了嗎？」。</li>
+        <li><b>執行前重新檢查</b>：如果任務狀態在準備之後變了，動作不會執行，會請你重新準備。</li>
+        <li><b>稽核</b>：每個執行過的動作都會記在任務紀錄，格式是「對話操作（你的名字）：…」。核可也記在你的名字下。</li>
+        <li><b>人工驗收清單</b>：對話不會代你勾選，要到驗收頁自己勾。</li>
+      </ul>
+
+      <h3>範本：品質從哪裡來</h3>
+      <p>模型只負責把事實問清楚。PRD、驗證和門檻由引擎用範本組出來，和工作流程頁用的是同一套範本。</p>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>工作種類</th><th>一定會問清楚的事</th></tr></thead>
+        <tbody>
+          <tr><td>演算法／誤判（algo）</td><td>哪一批圖、哪個區域、判成什麼；期望的結果；用哪個驗證方案或圖集。</td></tr>
+          <tr><td>修 bug（bugfix）</td><td>怎麼重現，或哪個指令會失敗。</td></tr>
+          <tr><td>新功能（feature）</td><td>一個具體的例子。</td></tr>
+          <tr><td>效能（perf）</td><td>現況數字；目標數字要有單位（例如 p95 ≤ 300 ms），而且要比現況好；用什麼方式量。</td></tr>
+          <tr><td>技術評估（spike）</td><td>要回答的問題；網址必須是你貼過的。</td></tr>
+          <tr><td>大工作（epic）</td><td>要拆成的 2–6 塊，以及 repo。</td></tr>
+        </tbody>
+      </table></div>
+      <p><b>驗證指令只接受四種來源</b>，模型自己想出來的指令會被拒絕：</p>
+      <ol>
+        <li>驗證方案；</li>
+        <li>沿用某張任務的驗證；</li>
+        <li>你在對話裡親口說的指令；</li>
+        <li>repo 偵測到的指令（摘要會標「偵測到，請確認」）。</li>
+      </ol>
+
+      <h3>git</h3>
+      <ul>
+        <li><b>範圍</b>：只能動「可以改的 repo 清單」（<code>prd_repo_allowlist</code>）裡的 repo。新抓的 repo 放在 <code>git_clone_root</code>（預設 <code>~/Addis/repos</code>），抓完會自動加進清單。</li>
+        <li><b>絕不</b> force、reset、rebase。</li>
+        <li><b>pull</b>：只快轉。有未提交的修改或分岔時會拒絕，並說明原因。</li>
+        <li><b>push</b>：摘要會列出要推的 commit。遠端比較新時會拒絕，不會蓋掉遠端。</li>
+        <li><b>merge</b>：
+          <ul>
+            <li>能快轉就快轉。</li>
+            <li>不能快轉時，先在暫存的 worktree 做合併 commit；沒有衝突才把分支移過去。</li>
+            <li>有衝突就放棄合併並列出衝突的檔案；分支和工作區都不會動。</li>
+          </ul>
+        </li>
+        <li><b>clone</b>：只收 https 或 ssh 網址，而且必須是你貼過的網址。網址裡不要放帳號或 token。</li>
+        <li><b>和任務錯開</b>：repo 裡有任務正在驗證或合併時，git 動作會等它結束。</li>
+        <li><b>引擎自己的 repo</b>（LoopEngineering）預設不能從對話 pull／push／merge，因為會觸發重建與重啟。要開放就設定 <code>ops_git_engine_repo</code>。</li>
+      </ul>
+
+      <h3>開啟與權限</h3>
+      <pre><code>loop config set ops_chat_enabled true
+loop config set ops_allowed_users ts:&lt;你的 Tailscale 帳號&gt;</code></pre>
+      <ul>
+        <li><b>只能查詢的情況</b>：不在 <code>ops_allowed_users</code> 裡的人，或沒有存起來的對話，都只能查詢。</li>
+        <li><b>名單只放 <code>ts:</code> 開頭的身分</b>（Tailscale 驗證過的）。<code>name:</code> 開頭的名字任何人都能自己填。</li>
+        <li><b>模型要支援工具呼叫</b>：目前的本地模型 recipe 要有 <code>--tool-call-parser</code>。</li>
+        <li><b>不用勾「上網／工具」</b>也有操作工具。勾了會再加上網和 MCP 工具，但舊的 <code>loop</code> MCP（加任務不經確認）會被隱藏（<code>ops_hide_mcp_servers</code>）。</li>
+      </ul>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>鍵</th><th>預設</th><th>說明</th></tr></thead>
+        <tbody>
+          <tr><td><code>ops_chat_enabled</code></td><td>false</td><td>總開關。關閉時對話頁沒有操作工具，<code>/api/ops</code> 回 404，和改版前完全一樣。</td></tr>
+          <tr><td><code>ops_allowed_users</code></td><td>（空）</td><td>誰能在對話裡準備和執行操作，逗號分隔（例如 <code>ts:you@example.com</code>）。空＝沒有人，大家都只能查詢。</td></tr>
+          <tr><td><code>ops_confirm_ttl_min</code></td><td>30</td><td>待確認動作的有效分鐘數。</td></tr>
+          <tr><td><code>ops_hide_mcp_servers</code></td><td>loop,loop-ops</td><td>提供操作工具時要隱藏的 MCP server。</td></tr>
+          <tr><td><code>ops_chat_max_rounds</code>／<code>ops_chat_wall_ms</code></td><td>8／300000</td><td>有操作工具時，一則回答最多幾輪工具呼叫、總共多少時間。</td></tr>
+          <tr><td><code>git_clone_root</code></td><td>~/Addis/repos</td><td>clone 下來的 repo 放在哪裡。</td></tr>
+          <tr><td><code>ops_git_timeout_sec</code>／<code>ops_git_clone_timeout_sec</code></td><td>120／900</td><td>一般 git 動作和 clone 的逾時秒數。</td></tr>
+          <tr><td><code>ops_git_engine_repo</code></td><td>false</td><td>能不能從對話對引擎自己的 repo 做 pull／push／merge。</td></tr>
+          <tr><td><code>ops_external_enabled</code></td><td>false</td><td>loop-ops MCP 能不能準備和執行動作。關閉時只能查詢。</td></tr>
+        </tbody>
+      </table></div>
+
+      <h3>在 VS Code 的 Claude Code 使用：loop-ops MCP</h3>
+      <pre><code>claude mcp add loop-ops -- node ~/Addis/LoopEngineering/mcp/loop-ops-mcp.mjs</code></pre>
+      <ul>
+        <li>工具和規則都和對話頁同一套：由引擎提供，<code>loop-ops</code> 只負責轉接。</li>
+        <li><b>身分</b>記為環境變數 <code>LOOP_OPS_USER</code> 的值（預設「外部工具」），和對話頁的人分開：對話頁準備的動作，它不能確認；它準備的動作，對話頁的人也不能確認。</li>
+        <li><b>預設只能查詢</b>。要讓它準備和執行，設定 <code>ops_external_enabled=true</code>。
+          <ul>
+            <li>確認時一定要帶代碼（<code>ops_confirm</code>，<code>code=K7Q</code>）。</li>
+            <li>Claude Code 每次呼叫工具前都會先問你。</li>
+          </ul>
+        </li>
+        <li><b>程式碼任務拿不到</b>：引擎派出的任務永遠不會帶 <code>loop-ops</code>，不論名稱或指令路徑，以免程式碼 agent 自己確認動作。</li>
+      </ul>
+    </section>
+
     <section id="appendix">
       <h2><span class="num">27</span>附錄</h2>
       <h3>REST / SSE 端點</h3>
@@ -1950,6 +2076,9 @@ loop verify-plan datasets &lt;方案 id&gt;     # 人員會看到的圖資清單
           <tr><td>GET</td><td><code>/api/chat/conversations/:id/export?format=md</code></td><td>匯出 Markdown</td></tr>
           <tr><td>POST/DELETE</td><td><code>/api/chat/conversations/:id/share</code></td><td>建立／取消分享連結</td></tr>
           <tr><td>GET</td><td><code>/api/chat/shared/:token</code></td><td><b>唯一免 token 的 API</b>：唯讀分享頁的內容（不含圖片）</td></tr>
+          <tr><td>GET</td><td><code>/api/ops/actions</code> · <code>/api/ops/actions/:id</code></td><td>對話操作：自己的動作與目前狀態（<code>?conversation_id=</code>）；<code>ops_chat_enabled=false</code> 時回 404（見第 26e 章）</td></tr>
+          <tr><td>POST</td><td><code>/api/ops/actions/:id/confirm</code> · <code>/cancel</code></td><td>對話卡片的「確認執行／取消」：只有準備它的人能按，確認還要在 <code>ops_allowed_users</code> 裡</td></tr>
+          <tr><td>GET/POST</td><td><code>/api/ops/tools</code> · <code>/api/ops/tools/:name</code></td><td>loop-ops MCP 轉接用：工具清單與呼叫，身分是 <code>ext:&lt;LOOP_OPS_USER&gt;</code>；<code>ops_external_enabled=false</code> 時只能查詢</td></tr>
           <tr><td>POST</td><td><code>/api/tasks</code></td><td>建立任務（JSON body）</td></tr>
           <tr><td>POST</td><td><code>/api/tasks/:id/queue</code></td><td>審核 + 入列</td></tr>
           <tr><td>POST</td><td><code>/api/tasks/:id/abort</code></td><td>中止並標 failed（終態）</td></tr>

@@ -87,3 +87,17 @@ describe('the manual documents the operator flow', () => {
     }
   });
 });
+
+describe('the manual documents 對話操作', () => {
+  it('chapter 26e is in the TOC and names every ops setting, the confirmation rules and loop-ops', async () => {
+    const { DEFAULT_SETTINGS } = await import('../config.js');
+    const manual = fs.readFileSync(path.join(__dirname, '..', '..', 'docs', '操作說明.html'), 'utf8');
+    expect(manual).toContain('<section id="chatops">');
+    expect(manual).toContain('href="#chatops"');
+    const keys = Object.keys(DEFAULT_SETTINGS).filter((k) => k.startsWith('ops_') || k === 'git_clone_root');
+    expect(keys.length).toBeGreaterThan(8);
+    for (const s of [...keys, '確認 K7Q', 'loop-ops-mcp.mjs', 'LOOP_OPS_USER', '/api/ops/actions/:id/confirm', 'prd_repo_allowlist']) {
+      expect(manual, s).toContain(s);
+    }
+  });
+});
