@@ -73,6 +73,8 @@ import { checkSandbox, formatCheck } from './exec/check.js';
 import { parseAcceptance } from './orchestrator/acceptance.js';
 import { ensureWorkspace, execRoot } from './exec/workspace.js';
 import { deleteExecHost, getExecHost, listExecHosts, LOCAL_HOST, realHostExec, resolveExecTarget, setHostIds, sshArgs, upsertExecHost, type ExecHost, type ExecTarget } from './exec/hosts.js';
+import { createMachine, datasetsUsingMachine, deleteMachine, getMachine, listMachines, MachineError, recordCheck, reposUsingMachine, updateMachine, type Machine } from './exec/machines.js';
+import { checkMachine, withMachineLock } from './exec/remote.js';
 
 const program = new Command();
 program.name('loop').description('Loop Engineering — token-aware coding-task scheduler').version('0.1.0');
@@ -882,7 +884,92 @@ vplan
 // (filled in by the repo-import link)
 
 // ---- machine commands (src/exec/machines.ts): loop machine add|list|check|rm ------------------
-// (filled in by the machines link)
+const machineCmd = program.command('machine').description("機台: Linux / Windows boxes reached over SSH that run a repo's checks (no Docker — `loop exec host` is the GPU sandbox)");
+const machineLine = (m: Machine): string =>
+  `${m.name}  ${m.ssh_target}${m.ssh_port ? `:${m.ssh_port}` : ''}  os=${m.os}  shell=${m.shell}  work_root=${m.work_root}  transport=${m.transport}  labels=${m.labels || '-'}${m.enabled ? '' : '  [disabled]'}`;
+
+machineCmd
+  .command('add <name>')
+  .description('register (or update) a machine: key login, git installed, a work directory the account may write to')
+  .requiredOption('--ssh <target>', 'user@host (or an ~/.ssh/config alias); key login, no password')
+  .option('--port <n>', 'ssh port', (v) => parseInt(v, 10))
+  .option('--os <os>', 'auto|linux|windows (auto: `loop machine check` finds out)')
+  .option('--shell <shell>', 'auto|bash|powershell|cmd — the syntax the checks on this box are written in')
+  .option('--work-root <dir>', 'where repos and 圖資 go on the box: /srv/loop (Linux) or C:\\loop (Windows)')
+  .option('--labels <csv>', 'e.g. cuda,aoi-v3,camera')
+  .option('--transport <t>', 'auto|gitea|copy — how the box gets the code (auto: the check decides)')
+  .option('--desc <text>', 'for the model: what this box has')
+  .option('--disabled', 'register it switched off')
+  .action((name: string, o) => {
+    const db = getDb();
+    try {
+      const prev = getMachine(db, name);
+      const m = prev
+        ? updateMachine(db, name, {
+            ssh_target: String(o.ssh),
+            ssh_port: o.port,
+            os: o.os,
+            shell: o.shell,
+            work_root: o.workRoot,
+            labels: o.labels,
+            transport: o.transport,
+            description: o.desc,
+            enabled: o.disabled ? false : undefined,
+          })!
+        : createMachine(db, {
+            name,
+            ssh_target: String(o.ssh),
+            ssh_port: o.port ?? null,
+            os: o.os ?? null,
+            shell: o.shell ?? null,
+            work_root: o.workRoot ?? (o.os === 'windows' ? 'C:\\loop' : '/srv/loop'),
+            labels: o.labels ?? null,
+            transport: o.transport ?? null,
+            description: o.desc ?? null,
+            enabled: !o.disabled,
+          });
+      console.log(`${prev ? 'updated' : 'added'} ${machineLine(m)}`);
+      console.log(`下一步：loop machine check ${m.name}`);
+    } catch (err) {
+      if (err instanceof MachineError) return fail(err.message);
+      throw err;
+    }
+  });
+
+machineCmd
+  .command('list')
+  .description('registered machines and their last check')
+  .action(() => {
+    const rows = listMachines(getDb());
+    if (!rows.length) return console.log('還沒有機台。加一台能 SSH 進去、裝了 git 的電腦：loop machine add <name> --ssh user@host --work-root /srv/loop');
+    for (const m of rows) {
+      const state = m.last_check_ok == null ? '○ 未檢查' : m.last_check_ok ? `● 正常（${m.last_check_at}）` : `● 有問題（${m.last_check_at}）`;
+      console.log(`${machineLine(m)}  ${state}${m.description ? `\n    ${m.description}` : ''}`);
+    }
+  });
+
+machineCmd
+  .command('check <name>')
+  .description('ssh login + OS, git, Gitea readable, work root, python, GPU, repo clones, 圖資 caches — stored on the machine (機台 page)')
+  .action(async (name: string) => {
+    const db = getDb();
+    const m = getMachine(db, name);
+    if (!m) return fail(`no such machine: ${name} (loop machine list)`);
+    const result = await withMachineLock(m.name, () => checkMachine(m, realHostExec, { repos: reposUsingMachine(db, m.name), datasets: datasetsUsingMachine(db, m.name) }));
+    const saved = recordCheck(db, m.name, result.lines, result.ok, result.detected);
+    console.log(formatCheck(result.lines));
+    const learned = (['os', 'shell', 'transport'] as const).filter((k) => m[k] === 'auto' && saved && saved[k] !== 'auto').map((k) => `${k}=${saved![k]}`);
+    if (learned.length) console.log(`（已記住：${learned.join('，')}）`);
+    if (!result.ok) process.exitCode = 1;
+  });
+
+machineCmd
+  .command('rm <name>')
+  .description('forget a machine (its clones on the box stay)')
+  .action((name: string) => {
+    if (!deleteMachine(getDb(), name)) return fail(`no such machine: ${name}`);
+    console.log(`removed ${name}`);
+  });
 
 // ---- check commands (src/checks/*): loop check list|trial|baseline ---------------------------
 // (filled in by the checks link)
