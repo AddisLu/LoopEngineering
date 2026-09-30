@@ -10,7 +10,7 @@ import { createTask, setStatus } from '../tasks.js';
 import { appendMessage, createConversation } from '../chat/store.js';
 import { getActionById } from '../chatops/actions.js';
 import { confirmTyped, getOpsRunner } from '../chatops/execute.js';
-import { prepareGit, repoStatus, runGit, validateCloneUrl, withRepoLock, type GitOpsDeps } from '../chatops/git.js';
+import { cloneProtocols, prepareGit, repoStatus, runGit, validateCloneUrl, withRepoLock, type GitOpsDeps } from '../chatops/git.js';
 import { redactUrl } from '../git/async.js';
 import type { ChatCtx, OpsAction } from '../chatops/types.js';
 
@@ -101,6 +101,26 @@ describe('clone URLs', () => {
     }
     expect(validateCloneUrl('file:///tmp/x/origin.git', true)).toBeNull();
     expect(redactUrl('fatal: could not read from https://bob:ghp_abc123@github.com/a/b.git')).toBe('fatal: could not read from https://***@github.com/a/b.git');
+  });
+
+  it('plain http only to the Gitea host; ssh with a port; still no credentials in a URL', () => {
+    const gitea = { giteaHost: 'gitea.corp' };
+    expect(validateCloneUrl('http://gitea.corp:3000/aoi/cf-aoi.git', gitea)).toBeNull();
+    expect(validateCloneUrl('http://GITEA.corp/aoi/cf-aoi', gitea)).toBeNull();
+    expect(validateCloneUrl('http://gitea.corp:3000/aoi/cf-aoi.git')).toMatch(/http/);
+    expect(validateCloneUrl('http://github.com/a/b', gitea)).toContain('gitea.corp');
+    expect(validateCloneUrl('http://gitea.corp.evil.com/a/b', gitea)).not.toBeNull();
+    expect(validateCloneUrl('ssh://git@gitea.corp:2222/aoi/cf-aoi.git')).toBeNull();
+    expect(validateCloneUrl('ssh://git@gitea.corp:2222/aoi/cf-aoi', gitea)).toBeNull();
+    for (const bad of ['http://oauth2:tok@gitea.corp:3000/aoi/cf-aoi.git', 'http://tok@gitea.corp:3000/aoi/cf-aoi.git', 'ssh://git:pw@gitea.corp:2222/aoi/cf-aoi.git', 'ssh://root@gitea.corp:2222/aoi/cf-aoi.git', 'ssh://git@gitea.corp:2222/aoi']) {
+      expect(validateCloneUrl(bad, gitea), bad).not.toBeNull();
+    }
+    expect(validateCloneUrl('file:///tmp/x/origin.git', { allowFile: true, giteaHost: 'gitea.corp' })).toBeNull();
+    expect(validateCloneUrl('file:///tmp/x/origin.git', { giteaHost: 'gitea.corp' })).not.toBeNull();
+    expect(cloneProtocols('https://github.com/a/b')).toBe('https:ssh');
+    expect(cloneProtocols('http://gitea.corp:3000/a/b', gitea)).toBe('https:ssh:http');
+    expect(cloneProtocols('http://github.com/a/b', gitea)).toBe('https:ssh');
+    expect(cloneProtocols('file:///x', { allowFile: true })).toBe('https:ssh:file');
   });
 
   it('clones only a URL the person pasted, into the clone root, and makes it workable', async () => {

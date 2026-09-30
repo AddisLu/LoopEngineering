@@ -5,7 +5,7 @@ import { isEngineRepo } from '../config.js';
 import { getBool, setSetting, logEvent } from '../db/index.js';
 import { getTask, latestRun } from '../tasks.js';
 import { addWorktree, removeWorktree } from '../git/worktree.js';
-import { syncWithBase, pushBranch, stripLoopArtifacts, integrateIntoBase } from '../git/integrate.js';
+import { syncWithBase, pushBranch, stripLoopArtifacts, integrateIntoBase, gitEnvFor } from '../git/integrate.js';
 import type { SandboxDeps } from '../exec/sandbox.js';
 import type { Task } from '../types.js';
 import { createMergeTask } from './mergeTask.js';
@@ -83,20 +83,22 @@ async function merge(
   const who = opts.by ? `（${opts.by}）` : '';
   const note = (detail: string) => logEvent(db, { task_id: task.id, run_id: run?.id ?? null, kind: 'merge', detail });
   const setMerge = (status: MergeOutcome) => db.prepare('UPDATE tasks SET merge_status = ? WHERE id = ?').run(status, task.id);
+  // network git gets the Gitea token when origin is on the Gitea host; undefined otherwise
+  const gitEnv = gitEnvFor(db, repo);
 
   let wt = run?.worktree_path && fs.existsSync(run.worktree_path) ? run.worktree_path : null;
   if (!wt) {
     // the worktree was reclaimed: check the branch out again — but never cut a fresh one
     if (!branchExists(repo, branch)) return { outcome: 'pending', detail: `找不到分支 ${branch}，沒有東西可以合併` };
     try {
-      wt = addWorktree(repo, branch, base).path;
+      wt = addWorktree(repo, branch, base, { env: gitEnv }).path;
       scratch.worktree = wt;
     } catch (err) {
       return { outcome: 'pending', detail: `無法取出 ${branch}：${String((err as Error).message).slice(0, 200)}` };
     }
   }
 
-  const sync = syncWithBase(wt, base, getBool(db, 'git_fetch_base', true));
+  const sync = syncWithBase(wt, base, getBool(db, 'git_fetch_base', true), gitEnv);
   let checked = '';
   if (sync.status === 'conflict') {
     setMerge('conflict');
@@ -135,8 +137,8 @@ async function merge(
   }
 
   stripLoopArtifacts(wt);
-  if (getBool(db, 'auto_push_branch', true)) pushBranch(wt, branch);
-  const r = integrateIntoBase(repo, wt, branch, base);
+  if (getBool(db, 'auto_push_branch', true)) pushBranch(wt, branch, gitEnv);
+  const r = integrateIntoBase(repo, wt, branch, base, gitEnv);
   setMerge(r.outcome);
   note(`${r.detail}${who}`);
   if (r.outcome !== 'merged') return { outcome: 'pending', detail: r.detail };

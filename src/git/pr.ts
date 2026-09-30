@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { hasRemote } from './integrate.js';
+import { hasRemote, type GitEnv } from './integrate.js';
 import { createGiteaPr, giteaRepoFor } from './gitea.js';
 
 // hasRemote now lives in integrate.ts (shared with the whole git close-out path); re-export
@@ -9,8 +9,12 @@ export { hasRemote };
 // Network-capped like integrate.ts: a hung push/gh must never block the tick loop.
 const NET_TIMEOUT = 30_000;
 
-function git(repo: string, args: string[]): string {
-  return execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8', timeout: NET_TIMEOUT });
+function git(repo: string, args: string[], env?: GitEnv): string {
+  return execFileSync('git', ['-C', repo, ...args], {
+    encoding: 'utf8',
+    timeout: NET_TIMEOUT,
+    ...(env && Object.keys(env).length ? { env: { ...process.env, ...env } } : {}),
+  });
 }
 
 function has(cmd: string): boolean {
@@ -32,6 +36,8 @@ export interface PrOptions {
   fetchImpl?: typeof fetch;
   /** called with why a Gitea PR could not be opened (the caller logs it on the task) */
   onError?: (msg: string) => void;
+  /** env additions for the push (integrate.ts gitEnvFor: the Gitea token over http) */
+  env?: GitEnv;
 }
 
 /**
@@ -52,7 +58,7 @@ export async function createPr(worktree: string, branch: string, title: string, 
   }
   if (!giteaRepo && !has('gh')) return null;
   try {
-    git(worktree, ['push', '-u', 'origin', branch]);
+    git(worktree, ['push', '-u', 'origin', branch], opts.env);
   } catch {
     return null;
   }
