@@ -4,87 +4,71 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>知識星圖 · Loop Engineering</title>
-    <script>
-      // Set theme before first paint to avoid a flash of the wrong mode.
-      (function () {
-        try {
-          var m = localStorage.getItem('loop_mode');
-          if (m !== 'light' && m !== 'dark') {
-            m = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-          }
-          document.documentElement.setAttribute('data-mode', m);
-        } catch (e) {}
-      })();
-    </script>
+    <script src="/theme-boot.js"></script>
     <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/frame.css" />
   </head>
-  <body class="brain-page">
-    <!-- The immersive knowledge graph is the whole page: a full-viewport dark canvas with
-         floating glass chrome over it. The curated-node management UI lives in a slide-in
-         drawer (☰ 清單). -->
-    <main id="graph-stage" class="graph-stage">
-      <canvas id="graph-canvas" class="graph-canvas" width="1280" height="800"></canvas>
-      <!-- 3D view: same graph, WebGL. Hidden until 立體 is switched on (web/brain3d.js). -->
-      <canvas id="graph-canvas-3d" class="graph-canvas" hidden></canvas>
-      <div id="graph-labels-3d" class="g3d-labels" hidden aria-hidden="true"></div>
-      <div id="graph-tooltip" class="graph-tooltip" hidden></div>
-      <div id="graph-empty" class="graph-empty" hidden>知識庫目前沒有節點</div>
-
-      <!-- top command bar -->
-      <header class="gbar gbar-top">
-        <div class="gbar-brand">
-          <span class="brand-mark" aria-hidden="true"></span>
-          <span class="gbar-titles">
-            <strong class="gbar-name">知識星圖</strong>
-            <span id="graph-title" class="gbar-sub">整體知識圖譜</span>
-          </span>
-        </div>
-        <div class="gbar-actions">
-          <a class="gbtn" href="/">← 回到對話</a>
-          <a class="gbtn" href="/board.html">總覽</a>
-          <button id="theme-btn" class="gbtn icon" type="button" title="切換佈景" aria-label="切換佈景"></button>
-          <button id="capture-btn" class="gbtn" type="button">📥 擷取</button>
-          <button id="relate-btn" class="gbtn" type="button">🔗 推斷關聯</button>
-          <button id="new-node-btn" class="gbtn primary" type="button">＋ 新增</button>
-          <button id="manage-toggle" class="gbtn" type="button" aria-controls="manage-drawer">☰ 清單</button>
-        </div>
+  <body class="app brain-page" data-nav="brain">
+    <nav id="app-rail" class="app-rail"><a href="/">回到對話</a></nav>
+    <div class="app-main">
+      <header class="app-top">
+        <h1>知識星圖</h1>
+        <span id="graph-title" class="top-sub hide-sm">整體知識圖譜</span>
+        <span class="grow"></span>
+        <span class="ops-who hide-sm" id="ops-who"></span>
+        <button id="capture-btn" class="btn" type="button">擷取</button>
+        <button id="relate-btn" class="btn" type="button">推斷關聯</button>
+        <button id="new-node-btn" class="btn primary" type="button">＋ 新增</button>
+        <button id="manage-toggle" class="btn" type="button" aria-controls="manage-drawer">清單</button>
       </header>
 
-      <!-- left dock: category legend + filters -->
-      <aside class="gdock" id="gdock">
-        <div class="gdock-head">
-          <span class="gdock-title">分類 · 星系</span>
-          <button id="dock-collapse" class="gdock-collapse" type="button" title="收合面板" aria-label="收合面板">‹</button>
-        </div>
-        <div class="gdock-scroll">
-          <div id="graph-legend" class="glegend" role="group" aria-label="分類圖例"></div>
-          <div class="gdock-group">
-            <div class="gdock-label">知識類型</div>
-            <div id="graph-kind-chips" class="chip-row" role="group" aria-label="知識類型篩選"></div>
-          </div>
-          <div class="gdock-group">
-            <div class="gdock-label">來源</div>
-            <div id="graph-source-chips" class="chip-row" role="group" aria-label="來源篩選"></div>
-          </div>
-          <div class="gdock-group">
-            <input id="graph-tag-filter" class="gfield" type="search" placeholder="依標籤過濾…" autocomplete="off" />
-            <input id="graph-scope-filter" class="gfield" type="search" placeholder="依 scope 過濾…" autocomplete="off" />
-            <label class="gcheck"><input id="graph-show-documents" type="checkbox" checked /> 顯示文件節點</label>
-          </div>
-        </div>
-      </aside>
+      <!-- The graph fills the content area: a dark canvas with floating glass chrome over it
+           (filters on the left, view controls bottom-right). The curated-node management UI
+           lives in a slide-in drawer (清單). -->
+      <main id="graph-stage" class="graph-stage">
+        <canvas id="graph-canvas" class="graph-canvas" width="1280" height="800"></canvas>
+        <!-- 3D view: same graph, WebGL. Hidden until 立體 is switched on (web/brain3d.js). -->
+        <canvas id="graph-canvas-3d" class="graph-canvas" hidden></canvas>
+        <div id="graph-labels-3d" class="g3d-labels" hidden aria-hidden="true"></div>
+        <div id="graph-tooltip" class="graph-tooltip" hidden></div>
+        <div id="graph-empty" class="graph-empty" hidden>知識庫目前沒有節點</div>
 
-      <!-- bottom-right view controls -->
-      <div class="gcontrols">
-        <label class="gdepth">展開跳數<input id="graph-depth" type="number" min="1" max="6" value="2" /></label>
-        <button id="graph-zoom-out" class="gbtn icon" type="button" title="縮小" aria-label="縮小">－</button>
-        <button id="graph-zoom-in" class="gbtn icon" type="button" title="放大" aria-label="放大">＋</button>
-        <button id="graph-3d" class="gbtn" type="button" aria-pressed="false" title="平面／立體切換">立體</button>
-        <button id="graph-reset" class="gbtn" type="button">重置視圖</button>
-      </div>
+        <!-- left dock: category legend + filters -->
+        <aside class="gdock" id="gdock">
+          <div class="gdock-head">
+            <span class="gdock-title">分類 · 星系</span>
+            <button id="dock-collapse" class="gdock-collapse" type="button" title="收合面板" aria-label="收合面板">‹</button>
+          </div>
+          <div class="gdock-scroll">
+            <div id="graph-legend" class="glegend" role="group" aria-label="分類圖例"></div>
+            <div class="gdock-group">
+              <div class="gdock-label">知識類型</div>
+              <div id="graph-kind-chips" class="chip-row" role="group" aria-label="知識類型篩選"></div>
+            </div>
+            <div class="gdock-group">
+              <div class="gdock-label">來源</div>
+              <div id="graph-source-chips" class="chip-row" role="group" aria-label="來源篩選"></div>
+            </div>
+            <div class="gdock-group">
+              <input id="graph-tag-filter" class="gfield" type="search" placeholder="依標籤過濾…" autocomplete="off" />
+              <input id="graph-scope-filter" class="gfield" type="search" placeholder="依 scope 過濾…" autocomplete="off" />
+              <label class="gcheck"><input id="graph-show-documents" type="checkbox" checked /> 顯示文件節點</label>
+            </div>
+          </div>
+        </aside>
 
-      <p class="ghint">拖曳平移 · 滾輪縮放 · 拖曳節點 · 懸停高亮鄰居 · 點節點聚焦展開</p>
-    </main>
+        <!-- bottom-right view controls -->
+        <div class="gcontrols">
+          <label class="gdepth">展開跳數<input id="graph-depth" type="number" min="1" max="6" value="2" /></label>
+          <button id="graph-zoom-out" class="gbtn icon" type="button" title="縮小" aria-label="縮小">－</button>
+          <button id="graph-zoom-in" class="gbtn icon" type="button" title="放大" aria-label="放大">＋</button>
+          <button id="graph-3d" class="gbtn" type="button" aria-pressed="false" title="平面／立體切換">立體</button>
+          <button id="graph-reset" class="gbtn" type="button">重置視圖</button>
+        </div>
+
+        <p class="ghint">拖曳平移 · 滾輪縮放 · 拖曳節點 · 懸停高亮鄰居 · 點節點聚焦展開</p>
+      </main>
+    </div>
 
     <!-- management drawer: curated-node list, search, draft-edge review -->
     <div id="drawer-scrim" class="drawer-scrim" hidden></div>
@@ -178,6 +162,8 @@
       </form>
     </dialog>
 
+    <script src="/ops.js"></script>
     <script type="module" src="/brain.js"></script>
+    <script type="module" src="/frame-boot.js"></script>
   </body>
 </html>

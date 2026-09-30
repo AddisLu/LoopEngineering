@@ -43,16 +43,34 @@ describe('brain page: static assets', () => {
     expect(html).not.toContain('relation-svg');
   });
 
-  it('brain.html references /styles.css and /brain.js, and is the full-screen immersive graph stage (G5)', () => {
+  it('brain.html references /styles.css and /brain.js, and the graph stage fills the app frame (G5)', () => {
     const html = fs.readFileSync(path.join(WEB_DIR, 'brain.html'), 'utf8');
     expect(html).toContain('/styles.css');
     expect(html).toContain('/brain.js');
-    // graph-first: a full-viewport <main class="graph-stage"> holds the canvas; the curated
-    // node list lives in a slide-in management drawer, not a narrow centered column.
+    // graph-first: <main class="graph-stage"> under the frame's top bar holds the canvas; the
+    // curated node list lives in a slide-in management drawer, not a narrow centered column.
     expect(html).toMatch(/<main[^>]*class="[^"]*graph-stage/);
     expect(html).toMatch(/id="manage-drawer"/);
     expect(html).toMatch(/id="graph-legend"/);
     expect(html).not.toMatch(/<main[^>]*class="board"/);
+    // the page's own command bar is the frame's top bar now; theme and way home are the rail's
+    expect(html).not.toContain('gbar');
+    expect(html).not.toContain('theme-btn');
+    for (const id of ['capture-btn', 'relate-btn', 'new-node-btn', 'manage-toggle', 'graph-title']) expect(html).toContain(`id="${id}"`);
+    const css = fs.readFileSync(path.join(WEB_DIR, 'styles.css'), 'utf8');
+    expect(css).toMatch(/\.graph-stage \{\s*position: relative; flex: 1 1 auto;/);
+    expect(css).toMatch(/\.gdock, \.gcontrols \{\s*position: absolute;/);
+  });
+
+  it('brain.js asks the API through window.Ops (one token bootstrap, 你是) and has no theme button of its own', () => {
+    const js = fs.readFileSync(path.join(WEB_DIR, 'brain.js'), 'utf8');
+    expect(js).toContain('window.Ops.api(');
+    expect(js).not.toContain('loop_token');
+    expect(js).not.toMatch(/\bfetch\(/);
+    expect(js).not.toContain("$('theme-btn')");
+    const html = fs.readFileSync(path.join(WEB_DIR, 'brain.html'), 'utf8');
+    expect(html.indexOf('<script src="/ops.js"></script>')).toBeGreaterThan(0);
+    expect(html.indexOf('<script src="/ops.js"></script>')).toBeLessThan(html.indexOf('/brain.js'));
   });
 
   it('index.html contains the 知識庫 nav link to /brain.html', () => {

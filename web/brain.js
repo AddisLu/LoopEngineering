@@ -15,12 +15,6 @@ import {
   vertexRadius,
 } from '/graph-layout.js';
 
-// ---- auth / token ----------------------------------------------------
-const params = new URLSearchParams(location.search);
-if (params.get('token')) localStorage.setItem('loop_token', params.get('token'));
-const TOKEN = localStorage.getItem('loop_token') || '';
-const authHeaders = TOKEN ? { Authorization: `Bearer ${TOKEN}` } : {};
-
 // ---- tiny DOM helpers --------------------------------------------------
 // XSS contract: every dynamic value below is placed via el()/textContent, never as a
 // raw HTML string, so no server-sourced value is ever parsed as markup. The force-directed
@@ -34,19 +28,12 @@ const el = (tag, cls, text) => {
   return e;
 };
 
-async function api(path, method = 'GET') {
-  const r = await fetch(path, { method, headers: authHeaders });
-  return r.ok ? r.json().catch(() => ({})) : Promise.reject(await r.text().catch(() => r.statusText));
-}
-async function postJSON(path, body) {
-  const r = await fetch(path, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', ...authHeaders },
-    body: JSON.stringify(body),
-  });
-  if (!r.ok) throw await r.text().catch(() => r.statusText);
-  return r.json().catch(() => ({}));
-}
+// Requests go through window.Ops (ops.js, loaded first): one token bootstrap for every page, and
+// 你是 on each request. Callers keep getting the reason as plain text, as before.
+const plain = (e) => Promise.reject((e && e.message) || String(e));
+const api = (path, method = 'GET') => window.Ops.api(path, method).catch(plain);
+const postJSON = (path, body) => window.Ops.api(path, 'POST', body).catch(plain);
+
 // fire-and-refetch for simple no-body mutations (approve/reject/delete)
 async function act(path, method = 'POST') {
   try { await api(path, method); await fetchAndRender(); }
@@ -57,24 +44,6 @@ async function actEdge(path, method = 'POST') {
   try { await api(path, method); await fetchDraftEdges(); }
   catch (e) { alert('操作失敗: ' + e); }
 }
-
-// ---- theme -------------------------------------------------------------
-const themeBtn = $('theme-btn');
-function currentMode() {
-  return document.documentElement.getAttribute('data-mode') === 'dark' ? 'dark' : 'light';
-}
-function paintThemeBtn() {
-  const dark = currentMode() === 'dark';
-  themeBtn.textContent = dark ? '☀' : '☾';
-  themeBtn.setAttribute('aria-label', dark ? '切換至淺色佈景' : '切換至深色佈景');
-}
-themeBtn.onclick = () => {
-  const next = currentMode() === 'dark' ? 'light' : 'dark';
-  document.documentElement.setAttribute('data-mode', next);
-  try { localStorage.setItem('loop_mode', next); } catch (e) {}
-  paintThemeBtn();
-};
-paintThemeBtn();
 
 // ---- Chinese label maps (fixes the garbled English/src_ chips) -----------
 // kind -> 中文 (curated-node kinds). Covers the 6 filter chips plus person/repo used elsewhere.
