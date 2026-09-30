@@ -8,7 +8,9 @@
   let plans = [];
   let hosts = [];
   let repos = [];
-  let current = null; // plan id being edited, null = new
+  // /plans.html#vp_… opens that plan (the chat's 查看 links here); the hash follows the selection
+  const fromHash = () => (/^#(vp_[\w-]+)$/.exec(location.hash) || [])[1] || null;
+  let current = fromHash(); // plan id being edited, null = new
 
   async function load() {
     try {
@@ -18,7 +20,10 @@
       repos = o.repos;
       fillSelects();
       renderList();
-      edit(current && plans.find((x) => x.id === current) ? current : plans[0] ? plans[0].id : null);
+      const missing = current && !plans.some((x) => x.id === current) ? current : null;
+      edit(current && !missing ? current : plans[0] ? plans[0].id : null);
+      $('page-err').hidden = !missing;
+      if (missing) $('page-err').textContent = `找不到驗證方案 ${missing}（可能已經刪除），先打開第一個。`;
     } catch (e) {
       $('page-err').textContent = `讀取失敗：${e.message}`;
       $('page-err').hidden = false;
@@ -86,7 +91,7 @@
     target.placeholder = '0.98';
     target.setAttribute('aria-label', '門檻');
     target.value = m ? m[3] : '';
-    const rm = el('button', 'icon-btn');
+    const rm = el('button', 'btn icon');
     rm.type = 'button';
     rm.setAttribute('aria-label', '移除這項門檻');
     rm.appendChild(icon('x'));
@@ -99,6 +104,7 @@
   function edit(id) {
     current = id;
     const p = plans.find((x) => x.id === id) || null;
+    history.replaceState(null, '', `${location.pathname}${location.search}${id ? `#${id}` : ''}`);
     renderList();
     $('form-err').hidden = true;
     $('check-out').replaceChildren();
@@ -120,6 +126,14 @@
     for (const spec of (p && p.metrics ? p.metrics.split(';') : ['']).map((s) => s.trim())) mb.appendChild(metricRow(spec));
   }
   $('new-btn').onclick = () => edit(null);
+  window.addEventListener('hashchange', () => {
+    const id = fromHash();
+    if (!id || id === current) return;
+    const known = plans.some((x) => x.id === id);
+    $('page-err').hidden = known;
+    if (known) edit(id);
+    else $('page-err').textContent = `找不到驗證方案 ${id}（可能已經刪除）。`;
+  });
 
   function formBody() {
     const metrics = [...$('f-metrics').querySelectorAll('.metric-row')]

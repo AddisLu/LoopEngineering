@@ -49,6 +49,7 @@
     const t = b.task;
     document.title = `${t.title} · 驗收`;
     $('title').textContent = t.title;
+    $('title').title = t.title; // the top bar cuts a long title short
     const meta = $('meta');
     meta.replaceChildren();
     const parts = [

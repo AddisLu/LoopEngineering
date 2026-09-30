@@ -6,10 +6,11 @@ import { describe, it, expect } from 'vitest';
 const WEB = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'web');
 const read = (f: string) => fs.readFileSync(path.join(WEB, f), 'utf8');
 
-describe('operator pages: 新工作 / 驗收 / 驗證方案', () => {
+describe('operator pages: 驗收 / 驗證方案 / 晨報', () => {
   const pages = [
     ['task.html', 'task.js'],
     ['plans.html', 'plans.js'],
+    ['morning.html', 'morning.js'],
   ] as const;
 
   it('the verdict banner kinds are not classes the board stylesheet owns (.progress is a 4px bar)', () => {
@@ -22,17 +23,41 @@ describe('operator pages: 新工作 / 驗收 / 驗證方案', () => {
     expect(styles).toMatch(/^\.progress \{/m); // the guard would catch the old 'progress' kind
   });
 
-  it('render with textContent only (cheap XSS guard) and share ops.js / ops.css', () => {
-    for (const js of ['ops.js', 'task.js', 'plans.js']) expect(read(js), js).not.toMatch(/innerHTML|outerHTML|insertAdjacentHTML|document\.write/);
+  it('render with textContent only (cheap XSS guard) and share ops.js / ops.css inside the app frame', () => {
+    for (const js of ['ops.js', 'task.js', 'plans.js', 'morning.js']) expect(read(js), js).not.toMatch(/innerHTML|outerHTML|insertAdjacentHTML|document\.write/);
     for (const [html, js] of pages) {
       const h = read(html);
       expect(h, html).toContain('/theme-boot.js');
-      expect(h, html).toContain('/styles.css');
-      expect(h, html).toContain('/ops.css');
+      // content styles load after the frame, so a page can refine a frame piece — never the other way round
+      expect(h.indexOf('/styles.css'), html).toBeLessThan(h.indexOf('/frame.css'));
+      expect(h.indexOf('/frame.css'), html).toBeLessThan(h.indexOf('/ops.css'));
       expect(h.indexOf('/ops.js'), html).toBeLessThan(h.indexOf(`/${js}`));
-      // every page offers the same four places
-      for (const href of ['/flow.html#new', '/morning.html', '/board.html', '/plans.html']) expect(h, `${html} → ${href}`).toContain(`href="${href}"`);
+      // the places to go are the rail's (frame.js), not a nav of each page's own
+      expect(h, html).not.toContain('ops-nav');
+      expect(h, html).not.toContain('theme-btn');
     }
+    // 驗收 is part of 總覽: the rail marks it, the top bar leads back
+    expect(read('task.html')).toContain('data-nav="board"');
+    expect(read('task.html')).toContain('<a class="crumb hide-sm" href="/board.html">總覽</a>');
+  });
+
+  it('ops.css only styles content: the frame owns the chrome, the view switch, toasts and .checks', () => {
+    const css = read('ops.css').replace(/\/\*[\s\S]*?\*\//g, ''); // rules, not the comments naming them
+    for (const sel of ['body.ops', '.ops-top', '.ops-nav', '.ops-brand', '.icon-btn', '.toast', '.seg', '.checks ']) expect(css, sel).not.toContain(sel);
+    expect(css).not.toMatch(/^\.card\b/m); // the board owns .card (status rail); operator pages use .panel
+    // the task checklist has its own name, so the flow's .checks in frame.css cannot restyle it
+    expect(read('task.html')).toContain('class="checklist" id="checks"');
+    expect(css).toContain('.checklist label');
+  });
+
+  it('/plans.html#vp_… opens that plan (the chat links there) and says so when it is gone', () => {
+    const js = read('plans.js');
+    expect(js).toMatch(/location\.hash/);
+    expect(js).toContain('vp_');
+    expect(js).toContain("addEventListener('hashchange'");
+    expect(js).toContain('找不到驗證方案');
+    // the chat's 查看 link points at exactly this
+    expect(fs.readFileSync(path.join(WEB, '..', 'src', 'chatops', 'format.ts'), 'utf8')).toContain('/plans.html#');
   });
 
   it('are reachable from the chat rail, the board and the morning report', () => {
@@ -59,10 +84,8 @@ describe('operator pages: 新工作 / 驗收 / 驗證方案', () => {
     expect(read('task.js')).toContain("withToken(`/api/tasks/${encodeURIComponent(id)}/artifacts.zip`)");
   });
 
-  it('a hidden panel stays hidden even though panels set display (styles.css / ops.css)', () => {
-    const css = read('ops.css');
-    expect(css).toMatch(/body\.ops \[hidden\] \{ display: none !important; \}/);
-    expect(css).not.toMatch(/^\.card\b/m); // the board owns .card (status rail); operator pages use .panel
-    expect(css).toMatch(/body\.ops \{[^}]*display: block/);
+  it('a hidden panel stays hidden even though panels set display (frame.css)', () => {
+    expect(read('frame.css')).toMatch(/body\.app \[hidden\] \{ display: none !important; \}/);
+    for (const [html] of pages) expect(read(html), html).toMatch(/<body class="app"/);
   });
 });

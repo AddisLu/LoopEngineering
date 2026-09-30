@@ -440,6 +440,7 @@ table.tbl .num { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .top-search { width: 280px; height: 36px; padding: 0 10px; display: flex; align-items: center; gap: 8px; border: 1px solid var(--border-2); border-radius: 9px; background: var(--surface-2); color: var(--text-2); }
 .top-search svg { width: 16px; height: 16px; flex: 0 0 auto; }
 .top-search input { flex: 1 1 auto; min-width: 0; border: 0; background: transparent; font: inherit; font-size: 13px; color: var(--text); outline: none; }
+.app-top select { height: 34px; padding: 0 10px; border: 1px solid var(--border-2); border-radius: 9px; background: var(--surface-2); color: var(--text); font: inherit; font-size: 13px; }
 .more-wrap { position: relative; }
 .more-wrap > .menu-pop { right: 0; top: 42px; }
 .conn { display: inline-flex; align-items: center; gap: 6px; }

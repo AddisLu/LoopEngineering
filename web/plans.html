@@ -6,104 +6,104 @@
     <title>驗證方案 · Loop Engineering</title>
     <script src="/theme-boot.js"></script>
     <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/frame.css" />
     <link rel="stylesheet" href="/ops.css" />
   </head>
-  <body class="ops">
-    <header class="ops-top">
-      <a class="ops-brand" href="/"><span class="mark" aria-hidden="true"></span>Loop Engineering</a>
-      <nav class="ops-nav" aria-label="頁面">
-        <a href="/flow.html#new">新工作流程</a>
-        <a href="/morning.html">晨報</a>
-        <a href="/board.html">總覽</a>
-        <a href="/plans.html" aria-current="page">驗證方案</a>
-      </nav>
-      <span class="grow"></span>
-      <span class="ops-who" id="ops-who"></span>
-      <button class="icon-btn" id="theme-btn" type="button"></button>
-    </header>
-
-    <main class="ops-main">
-      <div class="page-head">
-        <span class="kicker">工程師設定一次</span>
+  <body class="app" data-nav="plans">
+    <nav id="app-rail" class="app-rail"><a href="/">回到對話</a></nav>
+    <div class="app-main">
+      <header class="app-top">
         <h1>驗證方案</h1>
-        <p>一個方案回答「這套軟體改完，怎麼證明是好的」：在哪台機台跑、跑哪些指令、用哪裡的圖資、門檻多少、哪些檔案不能動、要收回哪些產出物。操作人員開新工作時只要挑方案與圖資。</p>
-      </div>
-      <p class="err" id="page-err" hidden></p>
-      <div class="plans-layout">
-        <aside class="stack">
-          <div class="row"><strong class="grow">方案</strong><button class="btn primary" type="button" id="new-btn">新增</button></div>
-          <div class="plan-list" id="plan-list"></div>
-        </aside>
+        <span class="grow"></span>
+        <span class="ops-who hide-sm" id="ops-who"></span>
+        <button class="btn primary" type="button" id="new-btn">＋ 新增</button>
+      </header>
 
-        <form class="panel" id="plan-form" autocomplete="off">
-          <div class="grid2">
-            <label class="field">方案名稱 <span class="sub">人員看到的名字</span>
-              <input id="f-name" maxlength="60" required placeholder="亮缺陷判型 — 標準圖集" />
-            </label>
-            <label class="field">適用軟體
-              <select id="f-repo"></select>
-            </label>
-            <label class="field">驗證機台
-              <select id="f-host"></select>
-            </label>
-            <label class="field">領域
-              <select id="f-domain">
-                <option value="cuda">CUDA／GPU</option>
-                <option value="cv">影像處理</option>
-                <option value="cpp">C++</option>
-                <option value="csharp">C#</option>
-                <option value="python">Python</option>
-                <option value="typescript">TypeScript</option>
-                <option value="other">其他</option>
-              </select>
-            </label>
+      <div class="app-scroll">
+        <main class="app-body">
+          <div class="page-head">
+            <span class="kicker">工程師設定一次</span>
+            <p>一個方案回答「這套軟體改完，怎麼證明是好的」：在哪台機台跑、跑哪些指令、用哪裡的圖資、門檻多少、哪些檔案不能動、要收回哪些產出物。操作人員開新工作時只要挑方案與圖資。</p>
           </div>
-          <label class="field">說明 <span class="sub">這個方案在檢查什麼（白話）</span>
-            <input id="f-desc" placeholder="編譯演算法、跑整批圖資，和標準答案比對檢出率與誤判率" />
-          </label>
-          <label class="field">驗證步驟 <span class="sub">一行一個指令；{dataset} 會換成人員選的圖資資料夾；方案指定了機台就不用寫 sandbox: 前綴</span>
-            <textarea id="f-steps" class="mono" rows="4" placeholder="cmake -S . -B build -DCMAKE_BUILD_TYPE=Release &amp;&amp; cmake --build build -j&#10;python3 scripts/eval/run.py --gallery {dataset} --golden {dataset}/golden"></textarea>
-          </label>
-          <div class="grid2">
-            <label class="field">圖資位置 <span class="sub">容器裡的路徑，例如 /datasets；它的子資料夾就是可選的圖資</span>
-              <input id="f-root" class="mono" placeholder="/datasets" />
-            </label>
-            <label class="field">預設圖資 <span class="sub">子資料夾名稱，可留空</span>
-              <input id="f-default" class="mono" placeholder="20260615" />
-            </label>
+          <p class="err" id="page-err" hidden></p>
+          <div class="plans-layout">
+            <aside class="stack">
+              <strong>方案</strong>
+              <div class="plan-list" id="plan-list"></div>
+            </aside>
+
+            <form class="panel" id="plan-form" autocomplete="off">
+              <div class="grid2">
+                <label class="field">方案名稱 <span class="sub">人員看到的名字</span>
+                  <input id="f-name" maxlength="60" required placeholder="亮缺陷判型 — 標準圖集" />
+                </label>
+                <label class="field">適用軟體
+                  <select id="f-repo"></select>
+                </label>
+                <label class="field">驗證機台
+                  <select id="f-host"></select>
+                </label>
+                <label class="field">領域
+                  <select id="f-domain">
+                    <option value="cuda">CUDA／GPU</option>
+                    <option value="cv">影像處理</option>
+                    <option value="cpp">C++</option>
+                    <option value="csharp">C#</option>
+                    <option value="python">Python</option>
+                    <option value="typescript">TypeScript</option>
+                    <option value="other">其他</option>
+                  </select>
+                </label>
+              </div>
+              <label class="field">說明 <span class="sub">這個方案在檢查什麼（白話）</span>
+                <input id="f-desc" placeholder="編譯演算法、跑整批圖資，和標準答案比對檢出率與誤判率" />
+              </label>
+              <label class="field">驗證步驟 <span class="sub">一行一個指令；{dataset} 會換成人員選的圖資資料夾；方案指定了機台就不用寫 sandbox: 前綴</span>
+                <textarea id="f-steps" class="mono" rows="4" placeholder="cmake -S . -B build -DCMAKE_BUILD_TYPE=Release &amp;&amp; cmake --build build -j&#10;python3 scripts/eval/run.py --gallery {dataset} --golden {dataset}/golden"></textarea>
+              </label>
+              <div class="grid2">
+                <label class="field">圖資位置 <span class="sub">容器裡的路徑，例如 /datasets；它的子資料夾就是可選的圖資</span>
+                  <input id="f-root" class="mono" placeholder="/datasets" />
+                </label>
+                <label class="field">預設圖資 <span class="sub">子資料夾名稱，可留空</span>
+                  <input id="f-default" class="mono" placeholder="20260615" />
+                </label>
+              </div>
+              <div class="stack">
+                <div class="field" style="margin: 0">驗收門檻 <span class="sub">評估程式要印一行 LOOP_METRICS {"名稱": 數值}；少回報一個就算不通過</span></div>
+                <div class="stack" id="f-metrics"></div>
+                <div><button class="btn" type="button" id="add-metric">＋ 加一項門檻</button></div>
+              </div>
+              <div class="grid2">
+                <label class="field">不能被改的檔案（保護路徑） <span class="sub">逗號分隔的 glob</span>
+                  <input id="f-protect" class="mono" placeholder="scripts/eval/**, data/golden/**" />
+                </label>
+                <label class="field">要收回的產出物 <span class="sub">逗號分隔的 glob；不會進 git</span>
+                  <input id="f-artifacts" class="mono" placeholder="build/cfaoi_ip, reports/*.csv" />
+                </label>
+              </div>
+              <label class="field">人工驗收項目 <span class="sub">一行一項，會出現在驗收頁的清單，全部勾完才能核可</span>
+                <textarea id="f-manual" rows="3" placeholder="上機台跑一次選定的圖集，確認判型正確"></textarea>
+              </label>
+              <label class="field">前置指令 <span class="sub">選填；開工前先跑，失敗就停，不花任何額度</span>
+                <input id="f-setup" class="mono" placeholder="git submodule update --init" />
+              </label>
+              <p class="err" id="form-err" hidden></p>
+              <div class="row">
+                <button class="btn primary" type="submit" id="save-btn">儲存</button>
+                <button class="btn" type="button" id="check-btn">檢查機台與圖資</button>
+                <span class="grow"></span>
+                <button class="btn warn-ghost" type="button" id="delete-btn" hidden>刪除</button>
+              </div>
+              <div class="check-lines" id="check-out"></div>
+            </form>
           </div>
-          <div class="stack">
-            <div class="field" style="margin: 0">驗收門檻 <span class="sub">評估程式要印一行 LOOP_METRICS {"名稱": 數值}；少回報一個就算不通過</span></div>
-            <div class="stack" id="f-metrics"></div>
-            <div><button class="btn" type="button" id="add-metric">＋ 加一項門檻</button></div>
-          </div>
-          <div class="grid2">
-            <label class="field">不能被改的檔案（保護路徑） <span class="sub">逗號分隔的 glob</span>
-              <input id="f-protect" class="mono" placeholder="scripts/eval/**, data/golden/**" />
-            </label>
-            <label class="field">要收回的產出物 <span class="sub">逗號分隔的 glob；不會進 git</span>
-              <input id="f-artifacts" class="mono" placeholder="build/cfaoi_ip, reports/*.csv" />
-            </label>
-          </div>
-          <label class="field">人工驗收項目 <span class="sub">一行一項，會出現在驗收頁的清單，全部勾完才能核可</span>
-            <textarea id="f-manual" rows="3" placeholder="上機台跑一次選定的圖集，確認判型正確"></textarea>
-          </label>
-          <label class="field">前置指令 <span class="sub">選填；開工前先跑，失敗就停，不花任何額度</span>
-            <input id="f-setup" class="mono" placeholder="git submodule update --init" />
-          </label>
-          <p class="err" id="form-err" hidden></p>
-          <div class="row">
-            <button class="btn primary" type="submit" id="save-btn">儲存</button>
-            <button class="btn" type="button" id="check-btn">檢查機台與圖資</button>
-            <span class="grow"></span>
-            <button class="btn warn-ghost" type="button" id="delete-btn" hidden>刪除</button>
-          </div>
-          <div class="check-lines" id="check-out"></div>
-        </form>
+        </main>
       </div>
-    </main>
+    </div>
 
     <script src="/ops.js"></script>
     <script src="/plans.js"></script>
+    <script type="module" src="/frame-boot.js"></script>
   </body>
 </html>

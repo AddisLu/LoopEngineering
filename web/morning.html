@@ -6,44 +6,41 @@
     <title>晨報 · Loop Engineering</title>
     <script src="/theme-boot.js"></script>
     <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/frame.css" />
     <link rel="stylesheet" href="/ops.css" />
   </head>
-  <body class="ops">
-    <header class="ops-top">
-      <a class="ops-brand" href="/"><span class="mark" aria-hidden="true"></span>Loop Engineering</a>
-      <nav class="ops-nav" aria-label="頁面">
-        <a href="/flow.html#new">新工作流程</a>
-        <a href="/morning.html" aria-current="page">晨報</a>
-        <a href="/board.html">總覽</a>
-        <a href="/plans.html">驗證方案</a>
-      </nav>
-      <span class="grow"></span>
-      <span class="ops-who" id="ops-who"></span>
-      <button class="icon-btn" id="theme-btn" type="button"></button>
-    </header>
-
-    <main class="ops-main">
-      <div class="page-head">
-        <span class="kicker">晨報 · 昨晚做了什麼</span>
-        <h1 id="headline">載入中…</h1>
-        <p id="subline"></p>
-      </div>
-      <div class="row">
-        <div class="row grow" id="counts"></div>
-        <label class="hint" for="hours">範圍</label>
-        <select id="hours" style="font: inherit; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--border-2); background: var(--surface-2); color: var(--text)">
-          <option value="12">12 小時</option>
-          <option value="24" selected>24 小時</option>
-          <option value="72">3 天</option>
-          <option value="168">7 天</option>
+  <body class="app" data-nav="morning">
+    <nav id="app-rail" class="app-rail"><a href="/">回到對話</a></nav>
+    <div class="app-main">
+      <header class="app-top">
+        <h1>晨報</h1>
+        <span class="grow"></span>
+        <span class="ops-who hide-sm" id="ops-who"></span>
+        <select id="hours" aria-label="範圍">
+          <option value="12">12 小時內</option>
+          <option value="24" selected>24 小時內</option>
+          <option value="72">3 天內</option>
+          <option value="168">7 天內</option>
         </select>
         <button class="btn" type="button" id="reload">重新整理</button>
+      </header>
+
+      <div class="app-scroll">
+        <main class="app-body">
+          <div class="page-head">
+            <span class="kicker">昨晚做了什麼</span>
+            <h2 id="headline">載入中…</h2>
+            <p id="subline"></p>
+          </div>
+          <div class="row" id="counts"></div>
+          <p class="err" id="page-err" hidden></p>
+          <div class="stack" id="list" style="gap: 14px"></div>
+        </main>
       </div>
-      <p class="err" id="page-err" hidden></p>
-      <div class="stack" id="list" style="gap: 14px"></div>
-    </main>
+    </div>
 
     <script src="/ops.js"></script>
     <script src="/morning.js"></script>
+    <script type="module" src="/frame-boot.js"></script>
   </body>
 </html>
