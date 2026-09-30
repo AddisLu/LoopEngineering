@@ -1387,7 +1387,7 @@ loop bench recommend                                  # 各類工作建議的本
         <li><b>映像與權重</b>：spark-02 也要有同一個容器映像與模型權重（同樣的 HF 快取路徑）。模型分頁的「下載」只下載到這台，也只檢查這台；兩台的模型下載完後，要先把權重複製過去（例如 <code>rsync -a --exclude 'trees/' ~/.cache/huggingface/hub/models--&lt;org&gt;--&lt;name&gt; spark-02:.cache/huggingface/hub/</code>，走 200G 約十幾分鐘），否則 spark-02 那半會載不起來。</li>
         <li><b>告訴 Loop</b>：<code>loop config set local_spark_nodes 2</code>，然後在「模型」分頁切到一個兩台的模型；切回單機模型時，確認兩台的容器都停了。</li>
       </ol>
-      <p>這台（head）另外跑著桌面、Loop 與 vLLM 的 API 伺服器，可用記憶體比 spark-02 少約 6–7 GiB，而且沒有 swap；容器裡的 earlyoom 在可用記憶體低於 512 MiB 時會砍掉 vLLM。知識庫檢索用的 embedding 模型（bge-m3）也跑在這台，第一次查知識庫時啟動，約佔 2.4 GB GPU 記憶體加 1.5 GB，閒置 10 分鐘才結束。所以剛好塞滿兩台的模型不適合當日常對話模型：例如 GLM-5.3 Flash 照原配方載入就失敗；縮小 KV 快取與上下文的「GLM-5.3-Flash-NVFP4-Spark (精簡版)」（vLLM repo 的 <code>recipes/glm-5.3-flash-kv4g.yaml</code>：KV 2G、上下文 128K、最多同時 2 個請求）能載入、也答得比 Qwen3.8 準，但一用「引用知識庫」就會記憶體不足而停掉。挑兩台的模型時，這台要留約 4 GB 給 embedding。</p>
+      <p>這台（head）另外跑著桌面、Loop 與 vLLM 的 API 伺服器，可用記憶體比 spark-02 少約 6–7 GiB，而且沒有 swap；容器裡的 earlyoom 在可用記憶體低於 512 MiB 時會砍掉 vLLM。知識庫檢索用的 embedding 模型（bge-m3）也跑在這台，第一次查知識庫時啟動，約佔 2.4 GB GPU 記憶體加 1.5 GB，閒置 10 分鐘才結束。所以剛好塞滿兩台的模型不適合當日常對話模型：例如 GLM-5.3 Flash 照原配方載入就失敗；縮小 KV 快取與上下文的「GLM-5.3-Flash-NVFP4-Spark (精簡版・限純問答)」（vLLM repo 的 <code>recipes/glm-5.3-flash-kv4g.yaml</code>：KV 2G、上下文 128K、最多同時 2 個請求）能載入、也答得比 Qwen3.8 準，但一用「引用知識庫」或「上網／工具」（GPU 沙盒）就會記憶體不足而停掉，只適合把這兩個都關掉做純問答測試。挑兩台的模型時，這台要留約 4 GB 給 embedding。</p>
 
       <h3>對話工作台（首頁 <code>/</code>）</h3>
       <ul>

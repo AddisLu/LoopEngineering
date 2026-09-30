@@ -99,17 +99,31 @@ export function getLocalModelByRecipe(db: Database.Database, recipe: string): Lo
  * it). Lazy on purpose: `local:*` ids also fill the chat and benchmark model pickers, so the 20-odd
  * recipes on disk must not all appear there. The id is the recipe file name.
  */
+/** registerRecipe's mark on the rows it creates: their name is the recipe's, not a hand-written one. */
+export const PANEL_NOTE = '由模型面板登錄';
+
+/**
+ * A panel-registered model is named after its recipe, so a renamed recipe (a trimmed variant that
+ * learned its limits) renames it too — the model pickers and 目前模型 read this row, the list reads
+ * the recipe, and the two used to disagree. Hand-written (seeded) names are left alone.
+ */
+export function syncRecipeName(db: Database.Database, row: LocalModel, name: string): LocalModel {
+  if (row.notes !== PANEL_NOTE || !name || row.display_name === name) return row;
+  db.prepare('UPDATE local_models SET display_name = ? WHERE id = ?').run(name, row.id);
+  return { ...row, display_name: name };
+}
+
 export function registerRecipe(db: Database.Database, entry: { recipe: string; name: string | null; model: string }): LocalModel {
   const existing = getLocalModelByRecipe(db, entry.recipe);
   if (existing) {
     if (!existing.enabled) db.prepare('UPDATE local_models SET enabled = 1 WHERE id = ?').run(existing.id);
-    return { ...existing, enabled: 1 };
+    return syncRecipeName(db, { ...existing, enabled: 1 }, entry.name || entry.recipe);
   }
   const id = entry.recipe.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || `recipe-${Date.now()}`;
   db.prepare(
     `INSERT INTO local_models (id, display_name, recipe, served_model_id, enabled, notes)
      VALUES (?, ?, ?, ?, 1, ?)`,
-  ).run(id, entry.name || entry.recipe, entry.recipe, entry.model, '由模型面板登錄');
+  ).run(id, entry.name || entry.recipe, entry.recipe, entry.model, PANEL_NOTE);
   return getLocalModel(db, id)!;
 }
 

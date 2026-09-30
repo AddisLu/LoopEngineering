@@ -3,7 +3,7 @@ import type Database from 'better-sqlite3';
 import { listRecipes, recipeInfo } from './recipes.js';
 import { imageExists, type DockerProbe } from './images.js';
 import { hubDir, weightInfo } from './weights.js';
-import { listLocalModels, type LocalModel } from './models.js';
+import { listLocalModels, syncRecipeName, type LocalModel } from './models.js';
 import type { ModelManagerState } from './modelManager.js';
 import type { JobView } from './jobs.js';
 
@@ -237,6 +237,7 @@ export async function buildCatalog(
   const entries: CatalogEntry[] = recipes.map((recipe) => {
     const info = infos.get(recipe) ?? null;
     const row = registered.get(recipe);
+    if (row && info?.name) syncRecipeName(db, row, info.name);
     const model = info?.model ?? null;
     const weights = model ? weightInfo(model, hub) : { downloaded: false, partial: false, disk_bytes: null };
     const nodes = info?.nodes ?? 1;

@@ -224,12 +224,29 @@ describe('registerRecipe', () => {
     expect(seed.id).toBe('qwen38-flash');
     const fresh = registerRecipe(db, { recipe: 'qwen3.6-35b-a3b-fp8-dflash', name: 'Qwen36-35B-A3B', model: 'Qwen/Qwen3.6-35B-A3B-FP8' });
     expect(fresh).toMatchObject({ id: 'qwen3.6-35b-a3b-fp8-dflash', display_name: 'Qwen36-35B-A3B', enabled: 1 });
-    expect(registerRecipe(db, { recipe: 'qwen3.6-35b-a3b-fp8-dflash', name: 'other', model: 'x' }).id).toBe(fresh.id);
+    expect(registerRecipe(db, { recipe: 'qwen3.6-35b-a3b-fp8-dflash', name: 'Qwen36-35B-A3B', model: 'x' }).id).toBe(fresh.id);
     expect(getLocalModel(db, fresh.id)!.display_name).toBe('Qwen36-35B-A3B');
     // a disabled seed (glm) is re-enabled when the operator acts on it
     db.prepare(`UPDATE local_models SET enabled = 0 WHERE id = 'glm53-flash'`).run();
     expect(registerRecipe(db, { recipe: 'glm-5.3-flash', name: null, model: 'm' }).enabled).toBe(1);
     expect(getLocalModel(db, 'glm53-flash')!.enabled).toBe(1);
+  });
+});
+
+describe('a model registered from the panel is named after its recipe', () => {
+  it('follows a renamed recipe, while a hand-written seed name stays', async () => {
+    const fresh = registerRecipe(db, { recipe: 'qwen3.6-35b-a3b-fp8', name: 'Qwen36 (KV 4G)', model: 'Qwen/Qwen3.6-35B-A3B-FP8' });
+    expect(registerRecipe(db, { recipe: 'qwen3.6-35b-a3b-fp8', name: 'Qwen36 (精簡版・限純問答)', model: 'x' }).display_name).toBe('Qwen36 (精簡版・限純問答)');
+    expect(getLocalModel(db, fresh.id)!.display_name).toBe('Qwen36 (精簡版・限純問答)');
+    registerRecipe(db, { recipe: 'glm-5.3-flash', name: 'GLM-5.3-Flash', model: 'm' });
+    expect(getLocalModel(db, 'glm53-flash')!.display_name).toBe('GLM-5.3 Flash (NVFP4, 雙機)');
+
+    // renamed on disk only: listing the catalog is enough, no load needed for the pickers to agree
+    const repo = fakeRepo();
+    const state = { loaded: null, wanted: null, status: 'idle' as const, since: null, error: null };
+    await buildCatalog(db, repo, 2, state, null, { hubDir: fakeHub(), dockerProbe: () => true, fetch: null, diskFree: () => null });
+    expect(getLocalModel(db, fresh.id)!.display_name).toBe('Qwen36-35B-A3B'); // the fake repo's recipe name
+    expect(getLocalModel(db, 'glm53-flash')!.display_name).toBe('GLM-5.3 Flash (NVFP4, 雙機)');
   });
 });
 
