@@ -15,6 +15,13 @@ export default defineConfig({
       LOOP_API_TOKEN: '',
       // local model weights are looked up here: an empty cache, never the machine's real one
       HF_HOME: path.join(TEST_DATA, 'hf'),
+      // No Claude login and no TokenBar: a usage read that reaches past the cache must find nothing
+      // to send. With this host's login it hit the account's usage endpoint, and the 429s it earned
+      // lock the real engine out too.
+      CLAUDE_CONFIG_DIR: path.join(TEST_DATA, 'claude'),
+      CLAUDE_CODE_OAUTH_TOKEN: '',
+      TOKENBAR_MCP_DIR: '',
+      TOKENBAR_TOKEN_CACHE: path.join(TEST_DATA, 'tokenbar-token'),
     },
     testTimeout: 20_000,
     hookTimeout: 20_000,

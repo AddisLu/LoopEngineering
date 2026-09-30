@@ -52,7 +52,8 @@ export const paths = {
     process.env.TOKENBAR_HISTORY ??
       path.join(os.homedir(), '.local', 'share', 'claude-usage-mcp', 'history.jsonl'),
   ),
-  credentials: expand(path.join(os.homedir(), '.claude', '.credentials.json')),
+  // Claude Code's own CLAUDE_CONFIG_DIR moves the login; the test suite points it at an empty dir
+  credentials: expand(path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), '.credentials.json')),
 } as const;
 
 export function ensureDirs(): void {

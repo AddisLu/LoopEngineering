@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { USAGE_CACHE_FILE } from '../config.js';
+import { USAGE_CACHE_FILE, paths } from '../config.js';
 import { readUsage, _deps, COOLDOWN_GRACE_MS } from '../token/usage.js';
 
 /**
@@ -409,5 +409,16 @@ describe('readUsage credentials', () => {
     expect(coreWasReached()).toBe(false);
     expect(got.ok).toBe(false);
     expect(got.error).toMatch(/not logged in/);
+  });
+});
+
+describe('the test suite itself', () => {
+  it('has no Claude login and no TokenBar to reach the usage endpoint with', () => {
+    const data = process.env.LOOP_DATA_DIR!;
+    expect(data).toBeTruthy();
+    expect(paths.credentials.startsWith(data)).toBe(true);
+    expect(paths.tokenCache.startsWith(data)).toBe(true);
+    expect(paths.tokenbarMcpDir).toBeNull();
+    expect(savedEnvToken ?? '').toBe('');
   });
 });
