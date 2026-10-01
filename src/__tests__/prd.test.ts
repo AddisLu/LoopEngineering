@@ -181,6 +181,7 @@ describe('PRD intake', () => {
     });
     expect(JSON.parse(r.task.verification_steps)).toEqual(['npm test']);
     expect(r.task.verify_rubric).toContain('accents are stripped');
+    expect(r.task.domain).toBe('typescript'); // the PRD's 領域 is kept for domain_routing
     expect(fs.readFileSync(r.plan_ref, 'utf8')).toContain('## 非範圍 (Non-goals)');
   });
 
