@@ -119,7 +119,7 @@ describe('from the chat to a 問題單', () => {
     const hand = read('fix-handoff.js');
     expect(hand).toContain('sessionStorage.setItem(HANDOFF_KEY');
     expect(hand).toContain("window.open('/fix.html?handoff=1', '_blank')");
-    expect(hand).not.toMatch(/noopener/); // the new tab needs the copy of this tab's sessionStorage
+    expect(hand).not.toMatch(/window\.open\([^)]*noopener/); // the new tab needs the copy of this tab's sessionStorage
     expect(hand).not.toMatch(/encodeURIComponent\(\s*description/);
     expect(read('index.html')).toContain('id="ticket-chip"');
     expect(read('chat.js')).toContain('openTicket({ description:');
