@@ -328,3 +328,18 @@ export function causesOf(task: Pick<Task, 'analysis_json'>): string[] {
     return [];
   }
 }
+
+const SHOWN_PREFIX = '規範與經驗提示：';
+
+/** Remember which learned nodes a run was shown (a note on the task), so a pass can be credited to them. */
+export function noteShown(db: Database.Database, taskId: string, runId: string, ids: string[]): void {
+  if (!ids.length) return;
+  logEvent(db, { task_id: taskId, run_id: runId, kind: 'note', detail: `${SHOWN_PREFIX}${ids.join(',')}` });
+}
+
+/** The run passed its checks: every node it was shown counts one pass. */
+export function creditShown(db: Database.Database, taskId: string, runId: string): void {
+  const row = db.prepare('SELECT detail FROM task_events WHERE task_id = ? AND run_id = ? AND detail LIKE ? ORDER BY id DESC LIMIT 1').get(taskId, runId, `${SHOWN_PREFIX}%`) as { detail: string } | undefined;
+  if (!row) return;
+  recordHits(db, row.detail.slice(SHOWN_PREFIX.length).split(',').filter(Boolean), true);
+}

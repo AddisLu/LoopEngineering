@@ -58,7 +58,8 @@ import { reportIssue } from '../integrations/giteaIssues.js';
 import { checkStepRunner, hasCheckSteps, pushForMachineChecks, type CheckDeps } from '../checks/runner.js';
 import { verifyKindFor } from '../checks/runs.js';
 import { failingFirst } from '../checks/failingFirst.js';
-import { seenBefore } from '../knowledge/learn.js';
+import { creditShown, seenBefore } from '../knowledge/learn.js';
+import { profileContextFor } from '../repo/profileContext.js';
 
 /**
  * MCP servers a local-model task may use (mcp_servers_json), with the runtime env the chat page
@@ -303,6 +304,7 @@ export async function runTask(
     similarFixes: similarFixesFor(db, task),
     checks: checkLinesFor(task),
     machines: machineLinesFor(db, task),
+    repoKnowledge: profileContextFor(db, task, run.id),
   };
   const taskFilePath = writeTaskFile(worktreePath, task, taskFileExtras);
   if (!isMock && !isGeneric) {
@@ -528,6 +530,7 @@ export async function runTask(
   const verifyOutcome = await runVerifyPipeline(db, task, worktreePath, run.id, task.base_branch, undefined, undefined, opts.checkDeps);
   reportIssue(db, task, 'verify'); // an issue-sourced ticket: the live check-status comment on Gitea
   if (verifyOutcome === 'fail') return; // already routed to blocked/attention inside the pipeline
+  creditShown(db, task.id, run.id); // the pitfalls / playbooks this run was shown helped it pass
   // 本地自評 (local_self_review, off by default): a local model summarises the diff for the reviewer
   if (getBool(db, 'local_self_review', false) && !isGeneric && !isMock) {
     await runSelfReview(db, task, worktreePath, task.base_branch, run.id).catch(() => null);

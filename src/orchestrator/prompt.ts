@@ -81,6 +81,8 @@ export function writeTaskFile(
     checks?: string[] | null;
     /** 機台與環境: where the agent works and each box the checks run on, with its 規格 (src/intake/context.ts machineLinesFor) */
     machines?: string[] | null;
+    /** 這個 repo 的規範與經驗: pitfalls, style, playbooks, params, requirements (src/repo/profileContext.ts) */
+    repoKnowledge?: string | null;
   },
 ): string {
   const steps = parseSteps(task);
@@ -153,6 +155,9 @@ export function writeTaskFile(
   const repoMapBlock = extras?.repoMap
     ? `\n## Repo 地圖（引擎產生，先看這個再決定讀哪些檔案）\n${extras.repoMap.replace(/^# .*\n/, '').trim()}\n`
     : '';
+  const repoKnowledgeBlock = extras?.repoKnowledge
+    ? `\n## 這個 repo 的規範與經驗（Loop 從這個 repo 與過去的任務整理，已由人核可）\n${extras.repoKnowledge.trim()}\n`
+    : '';
   const fixesBlock = extras?.similarFixes
     ? `\n## 這個 repo 過去類似的修法（參考，不一定適用）\n${extras.similarFixes}\n`
     : '';
@@ -175,7 +180,7 @@ export function writeTaskFile(
 
 ## Goal
 ${task.goal}
-${attachmentsBlock}${knowledgeBlock}${ragBlock}${repoMapBlock}${fixesBlock}${askBlock}${execBlock}
+${attachmentsBlock}${knowledgeBlock}${ragBlock}${repoKnowledgeBlock}${repoMapBlock}${fixesBlock}${askBlock}${execBlock}
 ## Plan
 ${planContent(task)}
 ${reproBlock}

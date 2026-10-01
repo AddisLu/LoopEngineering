@@ -380,6 +380,7 @@ export function ticketView(db: Database.Database, task: Task, who?: TicketActor 
       error: eff.stale ? STALE_ERROR : state.error,
       model_used: state.model_used,
       took_ms: state.took_ms,
+      pitfalls: state.pitfalls ?? [],
     };
   }
   return {

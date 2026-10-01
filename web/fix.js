@@ -1060,6 +1060,7 @@ function paintCard() {
   paintChecks();
   paintConditions();
   paintQuestions();
+  paintPitfalls();
 }
 
 function paintCardHead() {
@@ -1281,6 +1282,19 @@ function paintQuestions() {
     return h('div', null, line, h('div.fx-q-form', null, ta, h('div.fx-row', null, h('button.btn.primary', { type: 'button', disabled: S.busy, onclick: () => sendAnswer(i) }, '送出並重新分析'), h('button.btn', { type: 'button', onclick: () => ((S.answer = null), paintQuestions()) }, '取消'))));
   };
   fill(sec, h('h3', null, 'Loop 還不確定'), qs.map(row));
+}
+
+// 可能卡在哪: what this repo's approved 陷阱 say about this kind of problem (they also go to the model)
+function paintPitfalls() {
+  const sec = $('sec-pitfalls');
+  const ps = (analysis().pitfalls || []).filter((p) => p && p.title);
+  sec.hidden = !ps.length;
+  if (sec.hidden) return;
+  fill(
+    sec,
+    secHead('可能卡在哪', '這個 repo 以前在類似的地方卡過；開始修時會先提醒模型', null, h('a.fx-side-link', { href: `/brain.html#profile&repo=${encodeURIComponent((S.t && S.t.repo && S.t.repo.id) || '')}` }, '看 Repo 檔案')),
+    ps.map((p) => h('div.fx-q', null, h('span', null, h('b', null, p.title), `：${p.body}`))),
+  );
 }
 
 // ---- the footer (on a phone: the fixed action bar) ---------------------------------------------------

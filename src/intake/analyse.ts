@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { matchPitfalls, matchPlaybooks, renderLearned } from '../knowledge/learn.js';
 import { machineBoxLines } from './context.js';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -134,10 +135,14 @@ export interface TicketAnalysis {
   /** which local model analysed (null = rules only) */
   model_used: string | null;
   took_ms: number | null;
+  /** 「可能卡在哪」: approved 陷阱 of this repo that fit the ticket (repo_profile_inject) */
+  pitfalls?: Array<{ id: string; title: string; body: string }>;
 }
 
 /** What analysis_json stores: the card plus the bookkeeping behind it. */
 export interface AnalysisState {
+  /** 「可能卡在哪」 (repo_profile_inject): the repo's approved pitfalls that fit, shown on the card */
+  pitfalls?: Array<{ id: string; title: string; body: string }>;
   steps: AnalysisStep[];
   causes: Cause[];
   repro: Repro | null;
@@ -504,6 +509,21 @@ function excerpt(text: string, max: number): string {
   return `${text.slice(0, cut > 0 ? cut : max)}\n- …（其餘省略）`;
 }
 
+/** The repo's approved pitfalls / playbooks that fit a ticket: into the proposal prompt, and the pitfalls onto the card (「可能卡在哪」). */
+function learnedForAnalysis(db: Database.Database, repo: Repo, description: string, files: string[], kind: string | null, state: { pitfalls?: Array<{ id: string; title: string; body: string }> }): string | null {
+  if (!getBool(db, 'repo_profile_inject', false)) return null;
+  try {
+    const q = { text: description, files, kind };
+    const pits = matchPitfalls(db, repo.local_path, q, 4);
+    const books = matchPlaybooks(db, repo.local_path, q, 2);
+    state.pitfalls = pits.map((n) => ({ id: n.id, title: n.title, body: n.body }));
+    const lines = [...(pits.length ? ['陷阱：', ...renderLearned(pits)] : []), ...(books.length ? ['解法：', ...renderLearned(books)] : [])];
+    return lines.length ? lines.join('\n') : null;
+  } catch {
+    return null;
+  }
+}
+
 export function buildProposePrompt(o: {
   description: string;
   imageTexts: string[];
@@ -513,6 +533,8 @@ export function buildProposePrompt(o: {
   similar: FixEntry[];
   repo: Pick<Repo, 'name' | 'build_cmd' | 'test_cmd'>;
   kindHint: TicketKind | null;
+  /** approved 陷阱／解法 / style lines of this repo that fit (repo_profile_inject) */
+  learned?: string | null;
   /** where this repo is verified (machineBoxLines): the repro command has to run there */
   machine?: string[] | null;
 }): string {
@@ -543,6 +565,7 @@ export function buildProposePrompt(o: {
   if (fixes) parts.push(`## 這個 repo 過去類似的修法\n${fixes}`);
   const cmds = [...(o.repo.build_cmd ? [`- 建置：\`${o.repo.build_cmd}\``] : []), ...(o.repo.test_cmd ? [`- 測試：\`${o.repo.test_cmd}\``] : [])];
   if (cmds.length) parts.push(`## ${o.repo.name} 的指令\n${cmds.join('\n')}`);
+  if (o.learned) parts.push(`## 這個 repo 的規範與經驗（人核可過；提重現方式與原因時參考）\n${o.learned}`);
   if (o.machine?.length) parts.push(`## 驗證機台（重現指令要能在這台跑：語法、路徑、已裝軟體都要對）\n${o.machine.join('\n')}`);
   return parts.join('\n\n');
 }
@@ -1077,7 +1100,7 @@ async function runAnalysis(db: Database.Database, taskId: string, deps: AnalyseD
     try {
       reply = await chat(db, {
         system: PROPOSE_SYSTEM,
-        user: buildProposePrompt({ description: intake.description, imageTexts, clues, candidates, mapMarkdown: map.markdown, similar, repo, kindHint: intake.kind_hint, machine: machineBoxLines(db, repo.machine) }),
+        user: buildProposePrompt({ description: intake.description, imageTexts, clues, candidates, mapMarkdown: map.markdown, similar, repo, kindHint: intake.kind_hint, machine: machineBoxLines(db, repo.machine), learned: learnedForAnalysis(db, repo, intake.description, candidates.map((c) => c.file), intake.kind_hint, state) }),
         maxTokens: 1500,
         thinking: false,
       });
