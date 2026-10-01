@@ -176,8 +176,9 @@ export const isLocal = (m) => String(m || '').startsWith('local:');
 
 const NAV = [
   ['chat', '對話', '/', 'chat'],
+  // 問題單 replaced 工作流程 here; /flow.html stays reachable from the links that still point at it
+  ['fix', '問題單', '/fix.html', 'ticket'],
   ['board', '總覽', '/board.html', 'overview'],
-  ['flow', '工作流程', '/flow.html', 'flow'],
   ['bench', '評比', '/benchmarks.html', 'bench'],
   ['plans', '驗證方案', '/plans.html', 'shield', 'minor'],
   ['brain', '知識星圖', '/brain.html', 'stars', 'minor'],

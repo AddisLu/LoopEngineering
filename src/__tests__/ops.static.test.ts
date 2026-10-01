@@ -62,10 +62,10 @@ describe('operator pages: 驗收 / 驗證方案 / 晨報', () => {
 
   it('are reachable from the app rail, the chat, the board and the morning report', () => {
     const index = read('index.html');
-    // 新工作 is the start of 工作流程 now; /job.html forwards there with its prefill
-    expect(index).toMatch(/href="\/flow\.html#new"/);
+    // new work starts at 問題單; /job.html still forwards old links to 工作流程 with their prefill
+    expect(index).toMatch(/href="\/fix\.html"/);
     expect(read('frame.js')).toContain("'/plans.html'");
-    expect(read('board.html')).toMatch(/href="\/flow\.html#new"/);
+    expect(read('board.html')).toMatch(/href="\/fix\.html"/);
     const job = read('job.html');
     expect(job).toContain("location.replace('/flow.html'");
     expect(job).toContain("'#new'");

@@ -422,7 +422,7 @@ function paintCanvas() {
     }),
     nodes,
     edges,
-    empty: '總覽上還沒有任務。按右上角「新工作流程」開始。',
+    empty: '總覽上還沒有任務。按右上角「新問題單」開始。',
   });
 }
 

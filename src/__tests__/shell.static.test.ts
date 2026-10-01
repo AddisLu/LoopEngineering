@@ -123,7 +123,7 @@ describe('chat-first shell', () => {
     // the chat is a page of the app frame: frame.js builds its rail with every page in it
     expect(read('index.html')).toMatch(/<body class="app chat-page" data-nav="chat">/);
     const frame = read('frame.js');
-    for (const href of ['/', '/board.html', '/brain.html', '/flow.html', '/benchmarks.html', '/plans.html', '/morning.html']) {
+    for (const href of ['/', '/fix.html', '/board.html', '/brain.html', '/benchmarks.html', '/plans.html', '/morning.html']) {
       expect(frame, `rail does not link ${href}`).toContain(`'${href}'`);
     }
     expect(read('index.html')).toContain('href="/docs/操作說明.html"');
@@ -192,10 +192,11 @@ describe('chat-first shell', () => {
     // the toggle away: it is in the frame's top bar, outside the dock
     expect(page.indexOf('id="dock-toggle"')).toBeLessThan(dockStart);
     expect(page.slice(0, page.indexOf('</header>'))).toContain('id="dock-toggle"');
-    // 需要你處理 is 總覽's inbox (one module), with 開啟總覽 and ＋ 新工作流程 on top
+    // 需要你處理 is 總覽's inbox (one module), with 開啟總覽 and ＋ 新問題單 on top
     const tasks = page.slice(page.indexOf('id="pane-tasks"'), page.indexOf('id="pane-tune"'));
     expect(tasks).toContain('href="/board.html"');
-    expect(tasks).toContain('href="/flow.html#new"');
+    expect(tasks).toContain('href="/fix.html"');
+    expect(tasks).toContain('＋ 新問題單');
     expect(read('dock.js')).toContain("from './inbox.js'");
     expect(read('board-flow.js')).toContain("from './inbox.js'");
   });
