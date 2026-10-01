@@ -53,7 +53,7 @@ import { evaluateAcceptance, extractMetrics, formatAcceptance, formatSpecs, pars
 import { cloudAllowed, isCloudModel, localFallbackModel } from '../local/backend.js';
 import { benchmarkRecommendations } from '../benchmark/store.js';
 import { runSelfReview } from '../review/selfReview.js';
-import { attachmentsFor, checkLinesFor, repoMapFor, similarFixesFor } from '../intake/context.js';
+import { attachmentsFor, checkLinesFor, machineLinesFor, repoMapFor, similarFixesFor } from '../intake/context.js';
 import { reportIssue } from '../integrations/giteaIssues.js';
 import { checkStepRunner, hasCheckSteps, pushForMachineChecks, type CheckDeps } from '../checks/runner.js';
 import { verifyKindFor } from '../checks/runs.js';
@@ -301,6 +301,7 @@ export async function runTask(
     repoMap: repoMapFor(db, task),
     similarFixes: similarFixesFor(db, task),
     checks: checkLinesFor(task),
+    machines: machineLinesFor(db, task),
   };
   const taskFilePath = writeTaskFile(worktreePath, task, taskFileExtras);
   if (!isMock && !isGeneric) {

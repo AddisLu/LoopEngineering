@@ -79,6 +79,8 @@ export function writeTaskFile(
     reproBefore?: string | null;
     /** human lines for the repo's checks (src/checks/render.ts describeChecks) */
     checks?: string[] | null;
+    /** 機台與環境: where the agent works and each box the checks run on, with its 規格 (src/intake/context.ts machineLinesFor) */
+    machines?: string[] | null;
   },
 ): string {
   const steps = parseSteps(task);
@@ -161,6 +163,11 @@ export function writeTaskFile(
   const stepsList = checkLines
     ? [...checkLines, ...steps.filter((s) => !s.startsWith('check:')).map((s) => `- \`${s}\``)].join('\n')
     : steps.map((s) => `- \`${s}\``).join('\n') || '- (none)';
+  const machinesBlock = extras?.machines?.length
+    ? `\n## 機台與環境（驗收檢查在這些地方跑）\n${extras.machines.join('\n')}\n` +
+      `- 指令、路徑與建置要符合跑它的那一台：Windows 用 PowerShell／cmd 語法和反斜線路徑，Linux 用 bash；aarch64 和 x86_64 的執行檔不能互用；上面沒列出的軟體、函式庫或 CUDA 版本不要假設那台有。\n` +
+      `- 你自己只能在「你現在所在的環境」裡跑；標了其他機台的檢查由引擎代跑，沒過時結果會交回給你。\n`
+    : '';
   const checksRule = checkLines
     ? '\n- 驗收檢查由引擎執行（標明機台的在那台機台上跑）；你在本地能跑的（建置、測試、重現）自己先跑到綠再結束。'
     : '';
@@ -174,7 +181,7 @@ ${planContent(task)}
 ${reproBlock}
 ## Verification steps (must all pass before you finish)
 ${stepsList}
-${acceptanceBlock}${metricsBlock}${protectedBlock}${artifactsBlock}
+${machinesBlock}${acceptanceBlock}${metricsBlock}${protectedBlock}${artifactsBlock}
 ## Rules
 - Only modify files needed for this task; do not touch anything outside its scope.
 - Commit your work in small, conventional commits.

@@ -4,6 +4,9 @@ import type { Task } from '../types.js';
 import { getBool, getNum } from '../db/index.js';
 import { renderSimilarFixes, similarFixes } from '../repo/ledger.js';
 import { describeChecks, parseCheckSnapshots } from '../checks/render.js';
+import { SANDBOX_MACHINE_RE } from '../checks/store.js';
+import { getMachine } from '../exec/machines.js';
+import { describeBox, getHostSpecs, readSpecs } from '../exec/specs.js';
 
 /**
  * What a ticket adds to LOOP_TASK.md, read at dispatch. Every helper returns null for a task that is
@@ -66,6 +69,49 @@ export function checkLinesFor(task: Task): string[] | null {
   try {
     const snap = parseCheckSnapshots(task);
     return snap.length ? describeChecks(snap) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The engine host — where the agent itself works — as describeBox lines. */
+export function engineBoxLines(db: Database.Database, head = '引擎主機（你現在所在的環境）'): string[] {
+  const row = getHostSpecs(db, 'local');
+  return describeBox(head, readSpecs(row?.specs_json), { software: row?.software });
+}
+
+/** A check's machine (null = the engine host, a machines.name, or sandbox:<host>) as describeBox lines. */
+export function machineBoxLines(db: Database.Database, machine: string | null, checks: string[] = []): string[] {
+  const runs = checks.length ? `；跑：${checks.join('、')}` : '';
+  if (!machine) return engineBoxLines(db, `引擎主機（你現在所在的環境）${runs}`);
+  const sb = SANDBOX_MACHINE_RE.exec(machine);
+  if (sb) {
+    const row = getHostSpecs(db, sb[1]!);
+    return describeBox(`GPU 沙盒 ${sb[1]}（Docker 容器，沒有網路）${runs}`, readSpecs(row?.specs_json), { software: row?.software });
+  }
+  const m = getMachine(db, machine);
+  if (!m) return [`- ${machine}（找不到這台機台）${runs}`];
+  const os = m.os === 'windows' ? `Windows，${m.shell === 'cmd' ? 'cmd' : 'PowerShell'}` : m.os === 'linux' ? 'Linux，bash' : '作業系統未偵測';
+  return describeBox(`${m.name}（${os}，引擎透過 SSH 代跑）${runs}`, readSpecs(m.specs_json), { software: m.software, description: m.description });
+}
+
+/**
+ * LOOP_TASK.md「## 機台與環境」: where the agent works, then every box the task's checks run on with
+ * its 規格, so commands, paths and builds fit each one. Null for a task without checks.
+ */
+export function machineLinesFor(db: Database.Database, task: Task): string[] | null {
+  if (!task.checks_json) return null;
+  try {
+    const snap = parseCheckSnapshots(task).filter((c) => c.kind !== 'manual');
+    if (!snap.length) return null;
+    const byBox = new Map<string, string[]>();
+    for (const c of snap) {
+      const k = c.machine ?? '';
+      byBox.set(k, [...(byBox.get(k) ?? []), c.name]);
+    }
+    const lines = byBox.has('') ? machineBoxLines(db, null, byBox.get('')!) : engineBoxLines(db);
+    for (const [k, names] of byBox) if (k) lines.push(...machineBoxLines(db, k, names));
+    return lines;
   } catch {
     return null;
   }

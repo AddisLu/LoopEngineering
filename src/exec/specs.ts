@@ -213,3 +213,28 @@ export async function probeHostSpecs(db: Database.Database, name: string, exec: 
   ).run(name, JSON.stringify(specs));
   return { specs, error: null };
 }
+
+// ---- for the model (LOOP_TASK.md, the analysis prompt) -----------------------------------------
+
+const TOOL_NAMES: Record<string, string> = { python: 'Python', gcc: 'GCC', msvc: 'Visual Studio', cmake: 'CMake', docker: 'Docker' };
+
+/**
+ * One box for a model to plan around: a head line (who it is · what it is), then the details a
+ * command or a build depends on — CUDA toolkit vs driver, the tools, the person's own software.
+ */
+export function describeBox(head: string, s: MachineSpecs | null, o: { software?: string | null; description?: string | null } = {}): string[] {
+  const lines = [`- ${head}`, `  - 規格：${specsSummary(s) ?? '還沒讀過（機台頁按「檢查」或「讀取規格」）'}`];
+  if (s) {
+    if (s.cpu) lines.push(`  - CPU：${s.cpu}`);
+    if (s.disk_free_gb) lines.push(`  - 磁碟：可用 ${fmtGb(s.disk_free_gb)}${s.disk_total_gb ? ` / 共 ${fmtGb(s.disk_total_gb)}` : ''}`);
+    if (s.gpus.length || s.cuda_driver) {
+      const cuda = [s.cuda_toolkit ? `CUDA Toolkit ${s.cuda_toolkit}` : '沒有 CUDA Toolkit（nvcc）', s.cuda_driver ? `驅動支援到 CUDA ${s.cuda_driver}` : null, s.driver ? `驅動 ${s.driver}` : null];
+      lines.push(`  - CUDA：${cuda.filter(Boolean).join('，')}`);
+    }
+    const tools = Object.entries(s.tools).map(([k, v]) => (k === 'msvc' && /^Visual Studio/.test(v) ? v : `${TOOL_NAMES[k] ?? k} ${v}`));
+    lines.push(`  - 已裝工具：${tools.length ? tools.join('、') : '（沒有偵測到 Python／GCC／Visual Studio／CMake／Docker）'}`);
+  }
+  if (o.software?.trim()) lines.push(`  - 其他軟體（使用者填的）：${o.software.trim().replace(/\s*\n\s*/g, '；')}`);
+  if (o.description?.trim()) lines.push(`  - 說明：${o.description.trim().replace(/\s*\n\s*/g, '；')}`);
+  return lines;
+}

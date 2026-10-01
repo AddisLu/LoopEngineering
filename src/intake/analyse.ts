@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { machineBoxLines } from './context.js';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import type Database from 'better-sqlite3';
@@ -512,6 +513,8 @@ export function buildProposePrompt(o: {
   similar: FixEntry[];
   repo: Pick<Repo, 'name' | 'build_cmd' | 'test_cmd'>;
   kindHint: TicketKind | null;
+  /** where this repo is verified (machineBoxLines): the repro command has to run there */
+  machine?: string[] | null;
 }): string {
   const list = (label: string, xs: string[]) => (xs.length ? [`- ${label}：${xs.join('、')}`] : []);
   const parts: string[] = [`## 問題描述\n${o.description.trim()}`];
@@ -540,6 +543,7 @@ export function buildProposePrompt(o: {
   if (fixes) parts.push(`## 這個 repo 過去類似的修法\n${fixes}`);
   const cmds = [...(o.repo.build_cmd ? [`- 建置：\`${o.repo.build_cmd}\``] : []), ...(o.repo.test_cmd ? [`- 測試：\`${o.repo.test_cmd}\``] : [])];
   if (cmds.length) parts.push(`## ${o.repo.name} 的指令\n${cmds.join('\n')}`);
+  if (o.machine?.length) parts.push(`## 驗證機台（重現指令要能在這台跑：語法、路徑、已裝軟體都要對）\n${o.machine.join('\n')}`);
   return parts.join('\n\n');
 }
 
@@ -1073,7 +1077,7 @@ async function runAnalysis(db: Database.Database, taskId: string, deps: AnalyseD
     try {
       reply = await chat(db, {
         system: PROPOSE_SYSTEM,
-        user: buildProposePrompt({ description: intake.description, imageTexts, clues, candidates, mapMarkdown: map.markdown, similar, repo, kindHint: intake.kind_hint }),
+        user: buildProposePrompt({ description: intake.description, imageTexts, clues, candidates, mapMarkdown: map.markdown, similar, repo, kindHint: intake.kind_hint, machine: machineBoxLines(db, repo.machine) }),
         maxTokens: 1500,
         thinking: false,
       });
