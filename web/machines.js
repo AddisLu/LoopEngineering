@@ -84,7 +84,7 @@ function row(m) {
         if (!e.target.closest('button, a')) select(m.name);
       },
     },
-    h('td', null, h('a.mc-name', { href: `#${enc(m.name)}`, onclick: (e) => (e.preventDefault(), select(m.name)) }, m.name)),
+    h('td.nowrap', null, h('a.mc-name', { href: `#${enc(m.name)}`, onclick: (e) => (e.preventDefault(), select(m.name)) }, m.name)),
     h('td.mono', null, sshText(m)),
     h('td.nowrap', null, osLabel(m) || '—'),
     h('td', null, (m.labels_list || []).length ? h('span.rp-tags', null, m.labels_list.map((l) => h('span.rp-tag', null, l))) : h('span.rp-muted', null, '—')),
@@ -293,6 +293,7 @@ async function saveDialog() {
     selected = row.name;
     $('md-name').disabled = true;
     $('md-title').textContent = `編輯機台 ${row.name}`;
+    $('md-name-hint').textContent = '機台不能改名（要改就刪掉再加一台）';
     paint();
     return row;
   } catch (err) {

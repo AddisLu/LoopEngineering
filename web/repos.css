@@ -80,7 +80,8 @@ body.app a.rp-card { color: var(--text); }
 .rp-grid3 { display: grid; grid-template-columns: 150px minmax(0, 1fr) minmax(0, 1fr); gap: 14px 16px; }
 .rp-f { display: flex; flex-direction: column; gap: 6px; min-width: 0; margin: 0; font-size: 13px; color: var(--text-2); font-weight: 400; }
 .rp-f > .cap { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
-.rp-in, .rp-f input:not([type="checkbox"]):not([type="radio"]), .rp-f select, .rp-f textarea {
+/* :where() keeps these at one class + one element, so .rp-in.mono / .rp-in.num below still win */
+.rp-in, .rp-f input:where(:not([type="checkbox"]):not([type="radio"])), .rp-f select, .rp-f textarea {
   font: inherit; font-size: 14px; color: var(--text); min-width: 0; width: 100%;
   padding: 8px 11px; min-height: 38px; border: 1px solid var(--border-2); border-radius: 9px; background: var(--surface-2);
 }
@@ -88,13 +89,14 @@ body.app a.rp-card { color: var(--text); }
 .rp-in.mono, .rp-f .mono { font-family: var(--mono); font-size: 13px; }
 .rp-in:focus, .rp-f input:focus, .rp-f select:focus, .rp-f textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .rp-in[disabled], .rp-f input[disabled] { background: var(--surface-sunk); color: var(--text-2); }
-.rp-in.num { width: 90px; }
+.rp-in.num { width: 90px; flex: 0 0 auto; }
 .rp-ro { font-family: var(--mono); font-size: 13px; color: var(--text); padding: 8px 11px; min-height: 38px; border-radius: 9px; background: var(--surface-sunk); overflow-wrap: anywhere; display: flex; align-items: center; gap: 8px; }
 /* a checkbox / radio beside its words (styles.css stacks every dialog label in a column) */
 .rp-opt { display: flex; flex-direction: row; align-items: center; gap: 9px; min-height: 30px; margin: 0; font-size: 14px; color: var(--text); cursor: pointer; }
 .rp-opt input { width: 17px; height: 17px; margin: 0; flex: 0 0 auto; accent-color: var(--accent); }
 .rp-opt .rp-hint { margin-left: 2px; }
-fieldset.rp-radios { border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.rp-radios { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+fieldset.rp-radios { border: 0; margin: 0; padding: 0; gap: 2px; }
 fieldset.rp-radios legend { padding: 0; margin-bottom: 4px; font-size: 13px; color: var(--text-2); }
 .rp-kv { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 8px 14px; font-size: 14px; align-items: baseline; }
 .rp-kv .k { color: var(--text-2); font-size: 13px; }
