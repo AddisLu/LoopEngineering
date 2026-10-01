@@ -161,4 +161,20 @@ describe('the manual documents the 問題單 flow', () => {
     }
     for (const s of ['repo import', 'repo list', 'machine add', 'machine check', 'machine list', 'check list', 'check trial', 'check baseline']) expect(cli, s).toContain(s);
   });
+
+  it('starting work points at 問題單 while 工作流程 / 驗證方案 stay for benchmarks', () => {
+    const m = manual();
+    const newtask = m.slice(m.indexOf('<section id="newtask">'), m.indexOf('</section>', m.indexOf('<section id="newtask">')));
+    expect(newtask).toContain('/fix.html');
+    expect(newtask).toContain('留給評比與進階用途');
+    expect(m).toContain('對話・問題單・總覽・Repo・機台・評比・知識星圖・晨報');
+    expect(m).not.toContain('這個模式<b>還沒做</b>');
+  });
+});
+
+describe('the manual documents the two-Spark weight sync', () => {
+  it('a finished download continues with a sync job, and a switch without the weights is refused', () => {
+    const m = fs.readFileSync(path.join(__dirname, '..', '..', 'docs', '操作說明.html'), 'utf8');
+    for (const s of ['scripts/sync-weights.sh', '另一台 Spark 還沒有這個模型的權重', '現在同步到另一台嗎？', "{kind: 'sync', recipe}"]) expect(m, s).toContain(s);
+  });
 });
