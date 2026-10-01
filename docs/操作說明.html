@@ -161,6 +161,7 @@
     <a href="#board">5 · 對話工作台與任務看板</a>
     <a href="#redesign">5a · 介面改版：總覽・工作流程・評比</a>
     <a href="#tickets">5b · 問題單：從問題到 PR</a>
+    <a href="#repoknow">5c · Repo 檔案、解法與陷阱、機況診斷</a>
     <a href="#newtask">6 · 新增任務與入場審核</a>
     <a href="#cli">7 · CLI 指令參考</a>
     <a href="#settings">8 · 設定與環境變數</a>
@@ -374,7 +375,7 @@
         <li><b>驗證方案</b>（<code>/plans.html</code>，舊版，已離開左側欄）：「＋ 新增」在標題列；<code>/plans.html#vp_…</code> 直接打開那個方案（對話操作的「查看」就是連到這裡），找不到時會說。問題單改用每個 repo 的「檢查」（第 5b 章）。</li>
         <li><b>晨報</b>（<code>/morning.html</code>）：時間範圍與重新整理在標題列。</li>
         <li><b>驗收</b>（<code>/task.html?id=…</code>）：算在「總覽」底下，標題列是「總覽 › 任務名 狀態」，下面照舊是 結果／程式碼／試跑／需求 分頁。問題單的結果頁就是這一頁（第 5b 章）。</li>
-        <li><b>知識星圖</b>（<code>/brain.html</code>）：擷取、推斷關聯、＋ 新增、清單都在標題列，星圖填滿其餘的畫面；左邊的篩選與右邊的清單抽屜照舊。</li>
+        <li><b>知識星圖</b>（<code>/brain.html</code>）：標題列的分頁是 Repo 檔案（預設）・待核可・機況診斷・全覽（見第 5c 章）；全覽就是原本的星圖，擷取、推斷關聯、＋ 新增、清單在它的標題列，左邊的篩選與右邊的清單抽屜照舊。</li>
       </ul>
 
       <h3>總覽（<code>/board.html</code>）</h3>
@@ -728,6 +729,46 @@ loop machine list             # 每台的設定與上次檢查結果</code></pre
       </ul>
     </section>
 
+    <section id="repoknow">
+      <h2><span class="num">05c</span>Repo 檔案、解法與陷阱、機況診斷</h2>
+      <p>目標：讓本地模型（vLLM）<b>一次改對</b>。它要先知道這個 repo 需要什麼環境、照什麼寫法、怎麼驗證、以前在哪裡卡過、這類問題通常怎麼解；機況異常時，要能把機台的 log 與參數對到程式碼。這些都放在知識星圖頁（<code>/brain.html</code>），分成四個分頁：<b>Repo 檔案</b>（預設）、<b>待核可</b>、<b>機況診斷</b>、<b>全覽</b>（原本的星圖）。</p>
+
+      <h3>Repo 檔案：匯入後幾秒就拆好</h3>
+      <p>匯入 repo、以及之後分析問題單時發現 HEAD 變了，Loop 會自動分析一次（<code>repo_profile_auto</code>，不用模型；cf-aoi 約 0.3 秒）。也可以按「重新分析」。分成這些卡片：</p>
+      <ul>
+        <li><b>環境需求</b>：從專案檔讀出來的，每一項都附檔案:行。MSVC（<code>.vcxproj</code> 的 PlatformToolset、Windows SDK、x64、SubSystem、CUDA props、<code>sm_86</code> 這類最低 GPU 架構、連結的 .lib）、CMake（版本、<code>find_package</code>、CUDA 架構、C++ 標準）、<b>MIL</b>（<code>Mil.h</code>／<code>mil.lib</code>、用到哪些模組、<code>M_SYSTEM_RAPIXO…</code> 這類擷取卡＝需要 Matrox 卡與 runtime 授權；只用 <code>M_SYSTEM_HOST</code> 就能在沒有擷取卡的機台跑）、C#（TargetFramework、WinForms／WPF／Avalonia、NuGet）、Python（requirements／pyproject）。<b>「哪台機台適合」</b>把這些需求和每台機台的規格與「其他軟體」比對：✓ 符合、✗ 不符（附原因）、？ 不確定——不確定通常是機台頁的「其他軟體」還沒寫到（MIL、Halcon、相機 SDK、授權）。</li>
+        <li><b>寫法</b>：逐模組抽樣統計：<b>編碼</b>（UTF-8／BOM／Big5——存錯編碼最容易整檔壞掉）、換行、縮排、大括號、命名、<code>#pragma once</code>、註解語言、錯誤處理、log 與字串型別，以及 <code>.clang-format</code>／<code>.editorconfig</code> 等設定檔。</li>
+        <li><b>架構</b>：sln 專案、CMake target、Python 套件與它們的依賴、進入點。</li>
+        <li><b>驗證方式</b>：測試框架、建置與測試指令、有沒有命令列入口（沒有的標「只有 GUI」）、評估腳本與答案檔（建議設成保護路徑）。</li>
+        <li><b>參數與告警</b>：一個可搜尋的索引——設定檔的每個參數（含上方註解當說明）與程式在哪裡讀它、log 字串、flight recorder 的 incident 種類、錯誤碼。機況診斷就是靠它把 log 與參數對到程式碼。</li>
+        <li><b>熱點</b>：最常被「fix／修」commit 改到的檔案。</li>
+        <li><b>陷阱</b>、<b>解法</b>、<b>機況案例</b>：見下面。</li>
+      </ul>
+      <p>「本地模型補充」（或開 <code>repo_profile_infer</code> 讓它在匯入後自動跑）會讓本地模型用幾次短呼叫補上統計看不出來的：每個模組的用途、寫成「照這樣寫」的規則、從 TODO／FIXME／HACK、編碼、只有 GUI、硬體需求整理出的陷阱、以及設定參數的意義與合理範圍。<b>這些都是草稿</b>，在卡片或「待核可」分頁核可後才會交給模型；重跑不會覆蓋你已核可或拒絕的那一條。</p>
+
+      <h3>解法與陷阱：從自己的失敗學</h3>
+      <p>開 <code>learn_from_runs</code> 後，任務結案、合併或被退回時，只要它<b>沒有一次過</b>（某次檢查沒過、換過模型、被退回修改、重現指令在修改前就過了），本地模型會讀這張單的歷程——每次沒過的檢查與錯誤尾段、哪個模型錯在哪、人退回的意見、最後改了哪些檔——整理成最多兩條<b>陷阱</b>（會看到什麼錯、為什麼、怎麼避免、用哪些字辨認）與兩條<b>解法</b>（這類問題先做什麼、再做什麼、怎麼驗證）。相同的教訓不會重複出現，只會多一筆來源。全部是草稿，要核可。</p>
+      <p>開 <code>repo_profile_inject</code> 後，核可過的知識會用在四個地方：</p>
+      <ol>
+        <li><b>派工</b>：LOOP_TASK.md 多一段「這個 repo 的規範與經驗」——先列對中的陷阱，再是這次會改到的模組的寫法、這類問題的解法、任務提到的參數意義、建置需要的環境（<code>repo_profile_budget_chars</code> 字以內）。</li>
+        <li><b>分析</b>：本地模型提原因與重現方式時參考；分析卡多一塊<b>「可能卡在哪」</b>。</li>
+        <li><b>卡住當下</b>：驗證沒過要續跑或換模型時，用錯誤尾段比對陷阱，在 LOOP_RESUME_CONTEXT.md 加「這個錯誤以前見過」。</li>
+        <li><b>自評</b>：本地自評會拿差異去對寫法與陷阱，違反的寫進風險。</li>
+      </ol>
+      <p>每條陷阱記錄「提示過幾次、之後過了幾次」；提示很多次卻從沒幫上忙的會往後排。Repo 檔案頁首顯示這個 repo 的<b>一次改對率</b>：結案的問題單裡，第一次嘗試就全部綠燈、而且沒被退回的比例。</p>
+
+      <h3>機況診斷</h3>
+      <p>知識星圖頁的「機況診斷」分頁（或對話輸入框出現的「機況分析」晶片）：貼上或拖進機台產生的東西——cf-aoi 的 <code>_diag/*.jsonl</code>、<code>incident_*.json</code>、機台目前的 <code>.ini</code>、應用程式 log、C#／Python 的堆疊、MIL 錯誤，或截圖辨識出的文字——選 repo、寫一句現象，按「分析」。</p>
+      <ol>
+        <li><b>解析</b>（不用模型）：機台 session（IP、模式、ini、recipe、GPU）、incident 種類與次數（含節流抑制的次數）、錯誤碼、堆疊裡的檔案:行。</li>
+        <li><b>對到程式碼</b>：incident 的 src、堆疊位置、錯誤碼與 log 字串，透過「參數與告警」索引找到程式碼位置；機台的 ini 和 repo 的預設設定檔比對，列出<b>改過的參數</b>、意義與程式讀取處（機台檔沒寫的參數會用程式預設值，不算差異）。</li>
+        <li><b>對知識</b>：特徵相同的機況案例、對中的陷阱。</li>
+        <li><b>歸因</b>（本地模型，約 15–30 秒）：參數設定／環境・硬體／程式 bug／資料（圖資、recipe），每一條附證據；它會被告知哪些參數的讀取處和出事的程式碼無關，避免把同時出現當成因果。沒有模型時用規則判斷。</li>
+        <li><b>下一步</b>：參數建議（只是建議，<b>不會寫入機台</b>）、「開問題單」（帶著原因與程式位置）、「記成案例」（寫一句確認的原因與處置，下次特徵相同的機況會先找到它）。</li>
+      </ol>
+      <p><b>機況監看</b>：在設定對話框的「Repo 檔案與經驗」填 <code>diag_watch_dirs</code>（每行 <code>repo 名稱=資料夾</code>），機台把 _diag 輸出放進那個共用資料夾，或推到一個 Gitea repo、這裡填 Loop 的 clone（會先 <code>git pull --ff-only</code>）。每 <code>diag_watch_interval_min</code> 分鐘看一次，新的 incident 或錯誤會自動開一份診斷；只有 session 紀錄的檔案只記下來，不開診斷。</p>
+    </section>
+
     <section id="newtask">
       <h2><span class="num">06</span>新增任務與入場審核</h2>
       <p>修 bug、加功能、調效能、改演算法，請開<b>問題單</b>（<code>/fix.html</code>，見第 5b 章）：給 repo 或 issue 網址、描述與截圖，Loop 提出分析，驗收由 repo 設好的檢查負責；按「開始修」時一樣要過下面的入場審核。<b>工作流程</b>（<code>/flow.html#new</code>，見第 5a 章）與驗證方案還在，留給評比與進階用途，之後會移除。要直接填任務欄位（產出檔案、部署這類工具），用總覽標題列 ⋯ →「新增單一任務（進階）」。<b>入場審核（gate）</b>會逐項檢查；未通過的任務無法加入排程，卡片上會標紅缺項。</p>
@@ -1036,6 +1077,20 @@ npm run loop -- check baseline ck_… cr_…    # 把那次試跑設為基準</c
           <tr><td><code>repo_map_budget_chars</code></td><td>8000</td><td>repo 地圖放進 LOOP_TASK.md 的字數上限。</td></tr>
           <tr><td><code>fix_ledger_inject</code></td><td>false</td><td>把這個 repo 過去類似的修法放進 LOOP_TASK.md。</td></tr>
           <tr><td><code>domain_routing</code></td><td>false</td><td>依領域戰績（評比與快篩）自動挑本地模型；任務自己指定的模型仍然優先。</td></tr>
+        </tbody>
+      </table></div>
+
+      <h3>Repo 檔案、解法與陷阱、機況（見<a href="#repoknow">第 5c 章</a>）</h3>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>鍵</th><th>預設</th><th>說明</th></tr></thead>
+        <tbody>
+          <tr><td><code>repo_profile_auto</code></td><td>true</td><td>匯入 repo、以及分析時 HEAD 變了，自動做 Repo 檔案的確定性分析（不用模型）。</td></tr>
+          <tr><td><code>repo_profile_infer</code></td><td>false</td><td>分析後讓本地模型補模組摘要、寫法規則、陷阱種子、參數意義（草稿）。</td></tr>
+          <tr><td><code>repo_profile_inject</code></td><td>false</td><td>把核可過的規範、陷阱、解法交給模型：LOOP_TASK.md「這個 repo 的規範與經驗」、分析卡「可能卡在哪」、續跑的「這個錯誤以前見過」、自評。關＝和以前完全一樣。</td></tr>
+          <tr><td><code>repo_profile_budget_chars</code></td><td>3500</td><td>「這個 repo 的規範與經驗」最多幾個字。</td></tr>
+          <tr><td><code>learn_from_runs</code></td><td>false</td><td>任務沒有一次過時，結案整理成陷阱與解法草稿。</td></tr>
+          <tr><td><code>diag_watch_dirs</code></td><td>（空）</td><td>機況監看的資料夾，每行 <code>repo=資料夾</code>；空＝不監看。</td></tr>
+          <tr><td><code>diag_watch_interval_min</code></td><td>10</td><td>機況監看每幾分鐘看一次。</td></tr>
         </tbody>
       </table></div>
 
@@ -2508,6 +2563,14 @@ loop config set ops_allowed_users ts:&lt;你的 Tailscale 帳號&gt;</code></pre
           <tr><td>POST</td><td><code>/api/machines/:name/check</code></td><td>機台健康檢查（含規格），結果存在機台上</td></tr>
           <tr><td>POST</td><td><code>/api/machines/sandbox/:name/specs</code></td><td>讀取 GPU 沙盒主機的規格（<code>local</code>＝這台 Spark）</td></tr>
           <tr><td>PATCH</td><td><code>/api/machines/sandbox/:name</code></td><td><code>{software}</code>：沙盒主機的其他軟體</td></tr>
+          <tr><td>GET</td><td><code>/api/repos/:id/profile</code></td><td>Repo 檔案：需求、寫法、架構、驗證、熱點、機台適配、陷阱／解法／案例、一次改對率</td></tr>
+          <tr><td>POST</td><td><code>/api/repos/:id/profile</code></td><td><code>{infer?}</code>：重新分析（<code>infer</code>＝再請本地模型補充草稿）</td></tr>
+          <tr><td>GET</td><td><code>/api/repos/:id/index?q=&amp;kind=</code></td><td>參數與告警索引搜尋（kind：param／param_use／log／incident／error_code）</td></tr>
+          <tr><td>GET</td><td><code>/api/knowledge/facet-drafts</code></td><td>各 repo 待核可的推論與學到的知識</td></tr>
+          <tr><td>POST</td><td><code>/api/knowledge/approve-many</code></td><td><code>{ids}</code>：批次核可</td></tr>
+          <tr><td>POST</td><td><code>/api/diag</code></td><td><code>{repo_id?, note?, inputs:[{name,text}]}</code>：機況診斷（先解析，之後歸因）</td></tr>
+          <tr><td>GET</td><td><code>/api/diag</code>、<code>/api/diag/:id</code></td><td>最近的診斷／一份診斷</td></tr>
+          <tr><td>POST</td><td><code>/api/diag/:id/case</code></td><td><code>{cause, resolution?}</code>：記成機況案例</td></tr>
           <tr><td>GET</td><td><code>/api/whoami</code></td><td>引擎認定的你是誰：Tailscale 登入優先，其次是頁面填的名字，都沒有就是 <code>local</code></td></tr>
           <tr><td>GET</td><td><code>/api/tasks/:id/result</code></td><td>PR 連結、gap-review、失敗原因、log 尾巴</td></tr>
           <tr><td>DELETE</td><td><code>/api/tasks/:id</code></td><td>永久刪除任務＋磁碟產物（<code>?force=1</code>）</td></tr>
