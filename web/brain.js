@@ -1386,7 +1386,12 @@ captureForm.addEventListener('submit', async (e) => {
 // Graph-first: the immersive whole-graph view opens immediately (the page IS the graph);
 // the curated list is fetched lazily when the ☰ 清單 drawer is first opened. Source metadata
 // is loaded up front so source chips/tooltips show friendly names from the very first paint.
-(async () => {
+// The graph starts the first time 全覽 is opened (web/knowledge-profile.js), not on page load:
+// Repo 檔案 is the default tab and needs none of it.
+let graphBooted = false;
+async function bootGraph() {
+  if (graphBooted) return;
+  graphBooted = true;
   await loadSourceMeta();
   await openGraphView(null);
   // whoever left in 立體 comes back to it — three.js is still only fetched in that case
@@ -1395,4 +1400,6 @@ captureForm.addEventListener('submit', async (e) => {
     want3d = localStorage.getItem('loop_graph_3d') === '1';
   } catch (e) { /* private mode */ }
   if (want3d) await enter3D().catch(() => exit3D());
-})();
+}
+window.addEventListener('loop:graph-show', () => void bootGraph());
+if (document.body.dataset.ktab === 'graph' || /^#graph/.test(location.hash)) void bootGraph();

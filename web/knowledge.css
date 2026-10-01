@@ -1,0 +1,69 @@
+/* 知識 page: tabs, Repo 檔案 cards, 待核可, 機況診斷. Colours are the shared tokens only (styles.css),
+   so dark mode follows the theme. */
+
+.graph-stage[hidden] { display: none; }
+
+.ktabs { display: flex; gap: 2px; margin-left: 12px; background: var(--surface-sunk); border-radius: 999px; padding: 3px; }
+.ktabs button { border: 0; background: transparent; color: var(--text-2); font: inherit; font-size: 13.5px; padding: 5px 14px; border-radius: 999px; cursor: pointer; white-space: nowrap; }
+.ktabs button[aria-selected="true"] { background: var(--surface-2); color: var(--text); font-weight: 600; box-shadow: 0 1px 2px rgb(0 0 0 / 0.12); }
+.ktabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.kstage { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 18px 24px 40px; background: var(--bg); }
+.kstage[hidden] { display: none; }
+.kp-lead { color: var(--text-2); margin: 0 0 14px; font-size: 14px; }
+
+.kp-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+.kp-repo-l { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; }
+.kp-repo-l select, .kp-kind, .kp-search { font: inherit; font-size: 14px; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text); }
+.kp-search { flex: 1 1 260px; min-width: 0; }
+.kp-status { display: inline-flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.kp-muted { color: var(--text-2); font-size: 12.5px; }
+.kp-note { color: var(--text-2); font-size: 12.5px; margin-top: 2px; }
+.kp-warn { color: var(--st-attention); font-weight: 600; }
+.kp-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 8px 0; }
+.kp-row .grow, .kp-bar .grow { flex: 1 1 auto; }
+.kp-link { font-size: 13px; }
+
+.kp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 520px), 1fr)); gap: 16px; align-items: start; }
+.kp-card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 16px 18px; display: grid; gap: 10px; min-width: 0; }
+.kp-hd { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.kp-hd h2 { margin: 0; font-size: 16px; }
+.kp-sub { color: var(--text-2); font-size: 12.5px; }
+.kp-card h3 { margin: 6px 0 2px; font-size: 13.5px; }
+
+.kp-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.kp-table th { text-align: left; color: var(--text-2); font-weight: 600; padding: 4px 8px; }
+.kp-table td { padding: 6px 8px; border-top: 1px solid var(--surface-sunk); vertical-align: top; overflow-wrap: anywhere; }
+.kp-table td.nowrap { white-space: nowrap; }
+.kp-table td.mono, .kp-table .mono { font-family: var(--mono); font-size: 12px; white-space: pre-wrap; }
+.kp-ev { font-family: var(--mono); font-size: 11.5px; color: var(--text-2); }
+
+.kp-facts { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 4px 12px; font-size: 13px; }
+.kp-facts .k { color: var(--text-2); }
+.kp-facts .v { overflow-wrap: anywhere; white-space: pre-wrap; }
+.kp-style + .kp-style { border-top: 1px solid var(--surface-sunk); padding-top: 8px; }
+
+.kp-fit { border-top: 1px solid var(--surface-sunk); padding: 6px 0; font-size: 13px; }
+.kp-fit summary { cursor: pointer; display: flex; gap: 8px; align-items: baseline; }
+.kp-fit ul { margin: 6px 0 0; padding-left: 18px; }
+[data-fit="ok"] { color: var(--ok); }
+[data-fit="bad"] { color: var(--danger); }
+[data-fit="unknown"] { color: var(--st-attention); }
+.kp-fit li[data-fit] { color: var(--text); }
+.kp-fit li[data-fit="bad"] { color: var(--danger); }
+
+.kp-nodes { display: grid; gap: 8px; }
+.kp-node { border: 1px solid var(--surface-sunk); border-radius: 10px; padding: 10px 12px; display: grid; gap: 4px; font-size: 13.5px; }
+.kp-node.draft { border-style: dashed; }
+.kp-node p { margin: 0; line-height: 1.55; }
+.kp-node-hd { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.kp-acts { display: flex; gap: 6px; margin-top: 4px; }
+.kp-results { display: grid; gap: 6px; }
+
+.kp-empty { text-align: center; padding: 60px 16px; color: var(--text-2); display: grid; gap: 12px; justify-items: center; }
+
+@media (max-width: 820px) {
+  .ktabs { margin-left: 0; overflow-x: auto; max-width: 100%; }
+  .kstage { padding: 12px 16px 32px; }
+  .kp-facts { grid-template-columns: 72px minmax(0, 1fr); }
+}

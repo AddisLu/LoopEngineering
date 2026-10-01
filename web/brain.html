@@ -3,29 +3,59 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>知識星圖 · Loop Engineering</title>
+    <title>知識 · Loop Engineering</title>
     <script src="/theme-boot.js"></script>
     <link rel="stylesheet" href="/styles.css" />
     <link rel="stylesheet" href="/frame.css" />
+    <link rel="stylesheet" href="/knowledge.css" />
   </head>
   <body class="app brain-page" data-nav="brain">
     <nav id="app-rail" class="app-rail"><a href="/">回到對話</a></nav>
     <div class="app-main">
       <header class="app-top">
         <h1>知識星圖</h1>
-        <span id="graph-title" class="top-sub hide-sm">整體知識圖譜</span>
+        <nav class="ktabs" role="tablist" aria-label="知識">
+          <button type="button" role="tab" data-ktab="profile" aria-selected="true">Repo 檔案</button>
+          <button type="button" role="tab" data-ktab="drafts" aria-selected="false">待核可</button>
+          <button type="button" role="tab" data-ktab="diag" aria-selected="false">機況診斷</button>
+          <button type="button" role="tab" data-ktab="graph" aria-selected="false">全覽</button>
+        </nav>
+        <span id="graph-title" class="top-sub hide-sm graph-only" hidden>整體知識圖譜</span>
         <span class="grow"></span>
         <span class="ops-who hide-sm" id="ops-who"></span>
-        <button id="capture-btn" class="btn" type="button">擷取</button>
-        <button id="relate-btn" class="btn" type="button">推斷關聯</button>
-        <button id="new-node-btn" class="btn primary" type="button">＋ 新增</button>
-        <button id="manage-toggle" class="btn" type="button" aria-controls="manage-drawer">清單</button>
+        <button id="capture-btn" class="btn graph-only" type="button" hidden>擷取</button>
+        <button id="relate-btn" class="btn graph-only" type="button" hidden>推斷關聯</button>
+        <button id="new-node-btn" class="btn primary graph-only" type="button" hidden>＋ 新增</button>
+        <button id="manage-toggle" class="btn graph-only" type="button" aria-controls="manage-drawer" hidden>清單</button>
       </header>
+
+      <!-- Repo 檔案: what a local model is told about a repo (web/knowledge-profile.js) -->
+      <main id="profile-stage" class="kstage">
+        <div class="kp-bar">
+          <label class="kp-repo-l">Repo <select id="kp-repo" aria-label="Repo"></select></label>
+          <span id="kp-status" class="kp-status"></span>
+          <span class="grow"></span>
+          <button id="kp-infer" class="btn" type="button" title="本地模型整理模組摘要、寫法規則、陷阱與參數意義（草稿，要核可）">本地模型補充</button>
+          <button id="kp-run" class="btn primary" type="button">重新分析</button>
+        </div>
+        <div id="kp-body"></div>
+      </main>
+
+      <!-- 待核可: drafts from the local model and from runs, across repos -->
+      <main id="drafts-stage" class="kstage" hidden>
+        <p class="kp-lead">模型推論與從任務學到的知識要人核可才會交給模型；確定的事實（從專案檔讀到的）不用核可。</p>
+        <div id="drafts-body"></div>
+      </main>
+
+      <!-- 機況診斷: what a machine produced → events → code → past cases (web/diag.js) -->
+      <main id="diag-stage" class="kstage" hidden>
+        <div id="diag-body"></div>
+      </main>
 
       <!-- The graph fills the content area: a dark canvas with floating glass chrome over it
            (filters on the left, view controls bottom-right). The curated-node management UI
            lives in a slide-in drawer (清單). -->
-      <main id="graph-stage" class="graph-stage">
+      <main id="graph-stage" class="graph-stage" hidden>
         <canvas id="graph-canvas" class="graph-canvas" width="1280" height="800"></canvas>
         <!-- 3D view: same graph, WebGL. Hidden until 立體 is switched on (web/brain3d.js). -->
         <canvas id="graph-canvas-3d" class="graph-canvas" hidden></canvas>
@@ -163,6 +193,8 @@
     </dialog>
 
     <script src="/ops.js"></script>
+    <script type="module" src="/knowledge-profile.js"></script>
+    <script type="module" src="/diag.js"></script>
     <script type="module" src="/brain.js"></script>
     <script type="module" src="/frame-boot.js"></script>
   </body>
