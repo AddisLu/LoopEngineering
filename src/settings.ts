@@ -38,7 +38,7 @@ export const NONNEG_KEYS = new Set([
   // 對話操作 (src/chatops/*)
   'ops_confirm_ttl_min', 'ops_chat_max_rounds', 'ops_chat_wall_ms', 'ops_git_timeout_sec', 'ops_git_clone_timeout_sec',
   // 問題單 / 檢查 (src/intake/*, src/checks/*)
-  'repo_map_budget_chars', 'check_timeout_min', 'gitea_poll_interval_min',
+  'repo_map_budget_chars', 'repo_profile_budget_chars', 'check_timeout_min', 'gitea_poll_interval_min',
 ]);
 // values must be a number in [0, 1] (a fraction/weight, unlike the 0-100 PERCENT_KEYS)
 export const UNIT_INTERVAL_KEYS = new Set(['rag_hybrid_alpha']);
@@ -93,6 +93,7 @@ export const BOOL_KEYS = new Set([
   // 問題單 → 分析 → 檢查 (src/intake/*, src/checks/*, src/repo/*) — every one off = prior behaviour
   'repo_map_inject', 'repo_auto_ingest', 'failing_first', 'local_self_review', 'domain_routing', 'fix_ledger_inject',
   'cloud_llm_allowed', 'checks_baseline_refresh', 'gitea_issue_comments', 'gitea_merge_via_pr', 'checks_migrated',
+  'repo_profile_auto', 'repo_profile_infer', 'repo_profile_inject', 'learn_from_runs',
 ]);
 
 /** Accepted `integration_provider` values ('none' = the bridge is fully off). */
@@ -134,6 +135,7 @@ export const TUNABLE_KEYS = [
   // 角色與核可 / 機密 / 準確度 (the 問題單 flow)
   'approval_mode', 'manager_users', 'cloud_llm_allowed',
   'failing_first', 'local_self_review', 'repo_map_inject', 'fix_ledger_inject', 'domain_routing', 'fix_attempts', 'fix_escalation',
+  'repo_profile_auto', 'repo_profile_infer', 'repo_profile_inject', 'learn_from_runs',
 ] as const;
 
 /** Accepted model aliases for coding runs ('' / 'default' = the claude CLI default). */

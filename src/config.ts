@@ -547,6 +547,12 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   local_self_review: 'false',      // a local model reviews the diff after verification passes
   domain_routing: 'false',         // pick the local model by the domain's 戰績
   fix_ledger_inject: 'false',      // LOOP_TASK.md gets similar past fixes of this repo
+  // Repo 檔案／解法與陷阱／機況診斷 (src/repo/profile/*, src/knowledge/learn.ts, src/diag/*)
+  repo_profile_auto: 'true',       // analyse a repo (stage A, no model) on import and when HEAD moves
+  repo_profile_infer: 'false',     // stage B: the local model drafts module summaries, style rules, pitfalls, param meanings
+  repo_profile_inject: 'false',    // LOOP_TASK.md / 分析 / 續跑 get the repo's requirements, style, pitfalls and playbooks
+  repo_profile_budget_chars: '3500',
+  learn_from_runs: 'false',        // a task that did not go right first time leaves pitfall / playbook drafts
   llm_judge_backend: 'claude',     // claude | local
   knowledge_distill_backend: 'claude', // claude | local | off
   planner_backend: 'claude',       // claude | local

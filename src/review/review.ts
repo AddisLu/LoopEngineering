@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { learnFromTask } from '../knowledge/learn.js';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import type Database from 'better-sqlite3';
@@ -399,6 +400,7 @@ export async function approveTask(
   db.prepare("UPDATE tasks SET approved_by = ?, approved_at = datetime('now') WHERE id = ?").run(by, task.id);
   logEvent(db, { task_id: task.id, kind: 'note', detail: `核可（${by}）：${detail}` });
   recordFix(db, getTask(db, task.id) ?? task, 'merged');
+  void learnFromTask(db, getTask(db, task.id) ?? task, 'merged');
   reportIssue(db, task.id, 'done', { closeIssue: deps.closeIssue });
   return { merged, detail };
 }
@@ -422,6 +424,8 @@ export function requestChanges(db: Database.Database, task: Task, feedback: stri
   reportIssue(db, task.id, 'returned', { feedback: fb });
   removeTrialWorkspace(task);
   setStatus(db, task.id, 'queued', { detail: `退回修改（${by}）：${fb.slice(0, 200)}` });
+  // after the status note, so the lesson reads the person's feedback
+  void learnFromTask(db, task, 'returned');
   return getTask(db, task.id)!;
 }
 

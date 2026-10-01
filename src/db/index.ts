@@ -271,6 +271,14 @@ function migrate(db: Database.Database): void {
   db.exec('CREATE INDEX IF NOT EXISTS idx_tasks_repo ON tasks(repo_id)');
   // a served model that accepts image_url parts (screenshots at intake go to it directly)
   add('local_models', [['vision', 'INTEGER NOT NULL DEFAULT 0']]);
+  // Repo 檔案／解法與陷阱: which facet a node belongs to (requirement, style, module, verify,
+  // pitfall, playbook, param, case…) and its structured extras (trigger, evidence, hits). NULL facet =
+  // an ordinary node, selected exactly as before.
+  add('knowledge_nodes', [
+    ['facet', 'TEXT'],
+    ['meta_json', 'TEXT'],
+  ]);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_know_facet ON knowledge_nodes(facet)');
   // 機台 規格: what the health check's probe found (OS, CPU, RAM, disk, GPU, CUDA, tools), and the
   // software a person lists that the probe cannot see
   add('machines', [

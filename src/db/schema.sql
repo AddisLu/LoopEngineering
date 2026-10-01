@@ -656,6 +656,63 @@ CREATE TABLE IF NOT EXISTS machines (
   updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Repo 檔案 (src/repo/profile/*): stage A = deterministic facts (requirements, style, modules,
+-- verification, hotspots) as JSON; stage B = the local model's drafts, stored as knowledge_nodes
+-- with a facet. One row per repo, rebuilt when HEAD moves.
+CREATE TABLE IF NOT EXISTS repo_profiles (
+  repo_id         TEXT PRIMARY KEY REFERENCES repos(id) ON DELETE CASCADE,
+  sha             TEXT,                           -- HEAD the facts describe
+  facets_json     TEXT,                           -- RepoProfileFacets
+  status          TEXT NOT NULL DEFAULT 'idle',   -- idle | running | ready | failed
+  stage           TEXT,                           -- what is running: a | b
+  error           TEXT,
+  built_at        TEXT,                           -- stage A finished
+  inferred_sha    TEXT,                           -- HEAD stage B last ran on
+  inferred_at     TEXT
+);
+
+-- 參數／告警／log 索引: where an ini key is defined and read, where a log line / incident kind /
+-- error code comes from. What 機況診斷 maps a machine's log or parameter to code with.
+CREATE TABLE IF NOT EXISTS code_index (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  repo_id         TEXT NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
+  kind            TEXT NOT NULL,                  -- param | param_use | log | incident | error_code
+  key             TEXT NOT NULL,
+  section         TEXT,
+  file            TEXT NOT NULL,
+  line            INTEGER,
+  text            TEXT,
+  value           TEXT,
+  meaning         TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_code_index_key ON code_index(repo_id, kind, key);
+CREATE VIRTUAL TABLE IF NOT EXISTS code_index_fts USING fts5(
+  key, text, meaning, content='code_index', content_rowid='id', tokenize='trigram'
+);
+CREATE TRIGGER IF NOT EXISTS code_index_ai AFTER INSERT ON code_index BEGIN
+  INSERT INTO code_index_fts(rowid, key, text, meaning) VALUES (new.id, new.key, new.text, new.meaning);
+END;
+CREATE TRIGGER IF NOT EXISTS code_index_ad AFTER DELETE ON code_index BEGIN
+  INSERT INTO code_index_fts(code_index_fts, rowid, key, text, meaning) VALUES ('delete', old.id, old.key, old.text, old.meaning);
+END;
+
+-- 機況診斷: one report per analysis of what a machine produced (pasted / uploaded / watched).
+CREATE TABLE IF NOT EXISTS diag_reports (
+  id              TEXT PRIMARY KEY,               -- dg_<nanoid(10)>
+  repo_id         TEXT REFERENCES repos(id) ON DELETE SET NULL,
+  source          TEXT NOT NULL DEFAULT 'upload', -- upload | chat | watch
+  created_by      TEXT,
+  inputs_json     TEXT NOT NULL DEFAULT '[]',     -- [{name, bytes}]
+  parsed_json     TEXT,                           -- ParsedDiag (capped)
+  result_json     TEXT,                           -- the 診斷卡
+  signature       TEXT,                           -- space-joined signature keys (for 相同案例)
+  status          TEXT NOT NULL DEFAULT 'pending',-- pending | running | ready | failed
+  case_id         TEXT,                           -- knowledge_nodes id once recorded as a 案例
+  task_id         TEXT,                           -- 問題單 opened from it
+  created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_diag_reports_repo ON diag_reports(repo_id, created_at);
+
 -- 規格 of the GPU 沙盒 hosts ('local' = this Spark, else an exec_hosts name): what the spec probe
 -- found (src/exec/specs.ts) and the software a person added that the probe cannot see.
 CREATE TABLE IF NOT EXISTS host_specs (

@@ -10,11 +10,20 @@ export const KIND = [
   'fact',
   'person',
   'repo',
+  // Repo 檔案 and what Loop learns from its own runs (facet nodes; kept out of the generic
+  // Knowledge section — they go into their own LOOP_TASK.md sections)
+  'requirement',
+  'style',
+  'module',
+  'pitfall',
+  'playbook',
+  'param',
+  'case',
 ] as const;
 export type Kind = (typeof KIND)[number];
 
 /** knowledge_nodes.source — where a node came from. */
-export const SOURCE = ['manual', 'mcp', 'distilled', 'seed'] as const;
+export const SOURCE = ['manual', 'mcp', 'distilled', 'seed', 'detected', 'inferred', 'learned'] as const;
 export type Source = (typeof SOURCE)[number];
 
 /** knowledge_nodes.status — review state (independent of bi-temporal invalidation). */

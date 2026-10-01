@@ -17,6 +17,14 @@ const KIND_RANK: Record<Kind, number> = {
   tech: 3,
   fact: 4,
   person: 5,
+  // facet nodes never reach this section (selectKnowledge skips them); ranks only satisfy the type
+  requirement: 9,
+  style: 9,
+  module: 9,
+  pitfall: 9,
+  playbook: 9,
+  param: 9,
+  case: 9,
 };
 
 /** Single-line + minimal markdown escape so a node's free-text body can't break the list layout. */
@@ -143,14 +151,14 @@ export function selectKnowledge(db: Database.Database, task: Task): KnowledgeSel
   const tier0 = db
     .prepare(
       `SELECT * FROM knowledge_nodes
-        WHERE status = 'approved' AND invalid_at IS NULL AND scope IN (${seedPlaceholders})`,
+        WHERE status = 'approved' AND invalid_at IS NULL AND facet IS NULL AND scope IN (${seedPlaceholders})`,
     )
     .all(...seedScopes) as KnowledgeNode[];
 
   const skipped = db
     .prepare(
       `SELECT scope, COUNT(*) AS count FROM knowledge_nodes
-        WHERE status = 'approved' AND invalid_at IS NULL AND scope NOT IN (${seedPlaceholders})
+        WHERE status = 'approved' AND invalid_at IS NULL AND facet IS NULL AND scope NOT IN (${seedPlaceholders})
         GROUP BY scope ORDER BY count DESC`,
     )
     .all(...seedScopes) as Array<{ scope: string; count: number }>;
@@ -178,7 +186,7 @@ export function selectKnowledge(db: Database.Database, task: Task): KnowledgeSel
       tier1 = db
         .prepare(
           `SELECT * FROM knowledge_nodes
-            WHERE status = 'approved' AND invalid_at IS NULL AND id IN (${nPlaceholders})`,
+            WHERE status = 'approved' AND invalid_at IS NULL AND facet IS NULL AND id IN (${nPlaceholders})`,
         )
         .all(...nIds) as KnowledgeNode[];
     }

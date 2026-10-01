@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import { learnFromTask } from './knowledge/learn.js';
 import { getNum, getSetting } from './db/index.js';
 import { activeRuns, countByStatus, deleteTask, getTask, latestRun, setStatus } from './tasks.js';
 import { validateTask } from './gate/validateTask.js';
@@ -137,6 +138,7 @@ export function closeTask(db: Database.Database, id: string, o: { distillExec?: 
   const material = collectDistillMaterial(db, t);
   // 過去修法: a ticket's outcome, while its shas still resolve (only tasks of an imported repo)
   recordFix(db, t, t.merge_status === 'merged' ? 'merged' : 'abandoned');
+  void learnFromTask(db, t, t.merge_status === 'merged' ? 'merged' : 'abandoned');
   if (t.merge_status === 'merged') reportIssue(db, t.id, 'done');
   setStatus(db, id, 'closed', { detail: 'closed via api' });
   cleanupWorktree(db, t);

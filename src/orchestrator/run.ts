@@ -58,6 +58,7 @@ import { reportIssue } from '../integrations/giteaIssues.js';
 import { checkStepRunner, hasCheckSteps, pushForMachineChecks, type CheckDeps } from '../checks/runner.js';
 import { verifyKindFor } from '../checks/runs.js';
 import { failingFirst } from '../checks/failingFirst.js';
+import { seenBefore } from '../knowledge/learn.js';
 
 /**
  * MCP servers a local-model task may use (mcp_servers_json), with the runtime env the chat page
@@ -927,8 +928,10 @@ function handleVerifyFailure(
   // hands the same branch to the next local model. Empty (default) = the path below, unchanged.
   const fixBudget = (getSetting(db, 'fix_attempts') ?? '').trim();
   if (fixBudget !== '') return handleFixBudget(db, task, runId, worktreePath, failedStep, tail, Number(fixBudget), finishedRun.session_id);
+  // learned pitfalls that fit this failure (repo_profile_inject; [] = the file is unchanged)
+  const seen = seenBefore(db, task, failedStep, tail);
   if (finishedRun.session_id && task.resume_count < maxResumes) {
-    writeResumeContext(worktreePath, failedStep, tail);
+    writeResumeContext(worktreePath, failedStep, tail, seen.length ? { seen } : {});
     bumpResume(db, task.id);
     setStatus(db, task.id, 'blocked', {
       run_id: runId,
@@ -936,7 +939,7 @@ function handleVerifyFailure(
     });
     return;
   }
-  writeResumeContext(worktreePath, failedStep, tail); // a manual 續跑 resume still gets the context
+  writeResumeContext(worktreePath, failedStep, tail, seen.length ? { seen } : {}); // a manual 續跑 resume still gets the context
   setStatus(db, task.id, 'attention', { run_id: runId, detail: `verify failed at: ${failedStep}\n${tail}` });
 }
 
@@ -961,8 +964,9 @@ function handleFixBudget(
 ): void {
   const used = task.fix_attempts ?? 0;
   const history = attemptHistory(db, task.id);
+  const seen = seenBefore(db, task, failedStep, tail);
   if (sessionId && used < budget) {
-    writeResumeContext(worktreePath, failedStep, tail, { history });
+    writeResumeContext(worktreePath, failedStep, tail, { history, seen });
     db.prepare('UPDATE tasks SET fix_attempts = fix_attempts + 1 WHERE id = ?').run(task.id);
     setStatus(db, task.id, 'blocked', {
       run_id: runId,
@@ -987,13 +991,14 @@ function handleFixBudget(
   if (next) {
     writeResumeContext(worktreePath, failedStep, tail, {
       history,
+      seen,
       handover: `前一個模型（${current || '預設模型'}）用完了 ${budget} 次修正機會還是沒過。你是接手的模型：先讀懂上面每一次失敗的原因，換一個做法，不要重複同樣的修改；分支上已經有前一個模型的提交，可以沿用、也可以改掉。`,
     });
     db.prepare('UPDATE tasks SET model = ?, ladder_step = ?, fix_attempts = 0 WHERE id = ?').run(next, nextStep, task.id);
     setStatus(db, task.id, 'queued', { run_id: runId, detail: `換模型重試：${next}（沒過 ${failedStep}）` });
     return;
   }
-  writeResumeContext(worktreePath, failedStep, tail, { history }); // a manual 續跑 still gets the context
+  writeResumeContext(worktreePath, failedStep, tail, { history, seen }); // a manual 續跑 still gets the context
   setStatus(db, task.id, 'attention', { run_id: runId, detail: `verify failed at: ${failedStep}（修正與換模型都用完了）\n${tail}` });
 }
 
