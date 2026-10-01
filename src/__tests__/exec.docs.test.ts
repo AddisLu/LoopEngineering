@@ -122,3 +122,70 @@ describe('the manual documents the one app frame, 模型快篩 and two Sparks', 
     for (const s of ['模型快篩', 'loop bench screen', '/api/benchmarks/screen', 'sg_…', '兩台 Spark', 'launch-cluster.sh stop', 'CLUSTER_NODES', 'cluster_only']) expect(m, s).toContain(s);
   });
 });
+
+describe('the manual documents the 問題單 flow', () => {
+  const manual = () => fs.readFileSync(path.join(__dirname, '..', '..', 'docs', '操作說明.html'), 'utf8');
+  const chapter = (m: string) => {
+    const start = m.indexOf('<section id="tickets">');
+    return start < 0 ? '' : m.slice(start, m.indexOf('</section>', start));
+  };
+
+  it('chapter 5b sits between 5a and 6, is in the TOC, and covers 問題單, 分析卡, 檢查, 機台 and 公司模式', () => {
+    const m = manual();
+    expect(m).toContain('<section id="tickets">');
+    expect(m).toContain('href="#tickets"');
+    expect(m.indexOf('<section id="redesign">')).toBeLessThan(m.indexOf('<section id="tickets">'));
+    expect(m.indexOf('<section id="tickets">')).toBeLessThan(m.indexOf('<section id="newtask">'));
+    const c = chapter(m);
+    for (const s of ['問題單', '分析卡', '檢查', '機台', '公司模式']) expect(c, s).toContain(s);
+    // the four steps, the pages they happen on, and what an engineer sets up once
+    for (const s of ['/fix.html', '/repos.html', '/machines.html', '/task.html', '開始修', '送出核可', '試跑一次', '設為基準', '紅→綠', '圖資回歸', '命令列入口', 'administrators_authorized_keys', 'GITEA_TOKEN', '再試一次（換模型）']) {
+      expect(c, s).toContain(s);
+    }
+  });
+
+  it('chapters 7 and 8 list every 問題單 setting and the repo / machine / check commands', async () => {
+    const { DEFAULT_SETTINGS } = await import('../config.js');
+    const m = manual();
+    const settings = m.slice(m.indexOf('<section id="settings">'), m.indexOf('</section>', m.indexOf('<section id="settings">')));
+    const cli = m.slice(m.indexOf('<section id="cli">'), m.indexOf('</section>', m.indexOf('<section id="cli">')));
+    const keys = [
+      'approval_mode', 'manager_users', 'cloud_llm_allowed', 'failing_first', 'fix_attempts', 'fix_escalation', 'local_self_review',
+      'domain_routing', 'repo_map_inject', 'repo_map_budget_chars', 'fix_ledger_inject', 'repo_auto_ingest', 'llm_judge_backend',
+      'knowledge_distill_backend', 'planner_backend', 'intake_vision', 'intake_ocr_cmd', 'check_timeout_min', 'checks_baseline_refresh',
+      'gitea_issue_comments', 'gitea_poll_interval_min', 'gitea_merge_via_pr',
+    ];
+    for (const k of keys) {
+      expect(DEFAULT_SETTINGS, k).toHaveProperty(k);
+      expect(settings, k).toContain(`<code>${k}</code>`);
+    }
+    for (const s of ['repo import', 'repo list', 'machine add', 'machine check', 'machine list', 'check list', 'check trial', 'check baseline']) expect(cli, s).toContain(s);
+  });
+
+  it('starting work points at 問題單 while 工作流程 / 驗證方案 stay for benchmarks', () => {
+    const m = manual();
+    const newtask = m.slice(m.indexOf('<section id="newtask">'), m.indexOf('</section>', m.indexOf('<section id="newtask">')));
+    expect(newtask).toContain('/fix.html');
+    expect(newtask).toContain('留給評比與進階用途');
+    expect(m).toContain('對話・問題單・總覽・Repo・機台・評比・知識星圖・晨報');
+    expect(m).not.toContain('這個模式<b>還沒做</b>');
+  });
+});
+
+describe('3 分鐘上手 walks 從 issue 到 PR', () => {
+  it('has the four steps above the cards and points at chapter 5b', () => {
+    const quick = fs.readFileSync(path.join(__dirname, '..', '..', 'docs', 'demo-guide.html'), 'utf8');
+    const start = quick.indexOf('id="issue-to-pr"');
+    expect(start).toBeGreaterThan(0);
+    expect(start).toBeLessThan(quick.indexOf('<div class="grid">'));
+    const section = quick.slice(start, quick.indexOf('</section>', start));
+    for (const s of ['從 issue 到 PR（3 分鐘）', '請 Loop 分析', '分析卡', '開始修', '結果頁', '合併', '→ 完整說明第 5b 章']) expect(section, s).toContain(s);
+  });
+});
+
+describe('the manual documents the two-Spark weight sync', () => {
+  it('a finished download continues with a sync job, and a switch without the weights is refused', () => {
+    const m = fs.readFileSync(path.join(__dirname, '..', '..', 'docs', '操作說明.html'), 'utf8');
+    for (const s of ['scripts/sync-weights.sh', '另一台 Spark 還沒有這個模型的權重', '現在同步到另一台嗎？', "{kind: 'sync', recipe}"]) expect(m, s).toContain(s);
+  });
+});

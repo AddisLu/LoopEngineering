@@ -71,6 +71,17 @@
   .script li b { color: var(--ink); }
   .keys { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 10px; font-size: 13.5px; color: var(--ink-2); }
   footer { text-align: center; color: var(--ink-3); font-size: 12.5px; margin-top: 26px; }
+  .flow4 { margin: 0 0 18px; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 16px 18px 14px; display: flex; flex-direction: column; gap: 10px; }
+  .flow4 h2 { font-size: 18px; margin: 0; }
+  .flow4 > p { margin: 0; color: var(--ink-2); font-size: 14.5px; }
+  .flow4 .fig { aspect-ratio: 800 / 150; }
+  .flow4 ol { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+  .flow4 li { background: var(--sunk); border-radius: 10px; padding: 9px 11px; font-size: 13.5px; color: var(--ink-2); }
+  .flow4 li b { display: flex; align-items: center; gap: 8px; color: var(--ink); font-size: 14.5px; margin-bottom: 4px; }
+  .flow4 .n { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; background: var(--accent); color: #fff; font-weight: 700; font-size: 12px; flex: 0 0 auto; }
+  .flow4 .how { font-size: 13.5px; color: var(--ink); background: var(--sunk); border-radius: 10px; padding: 8px 11px; }
+  .flow4 .how b { color: var(--accent); }
+  @media (max-width: 760px) { .flow4 ol { grid-template-columns: 1fr; } .flow4 .fig { display: none; } }
 
   /* ---- animations (CSS only, so they pause under reduced motion) ---- */
   .loop { animation-iteration-count: infinite; animation-timing-function: ease-in-out; }
@@ -93,6 +104,7 @@
   @keyframes dots { 0% { opacity: .25; } 100% { opacity: 1; } }
   @keyframes slideRight { 0%, 60% { transform: translateX(0); opacity: 1; } 78%, 100% { transform: translateX(150px); opacity: 1; } }
   @keyframes arrow { 0%, 55% { opacity: 0; } 65%, 100% { opacity: 1; } }
+  @keyframes step4 { 0%, 20% { transform: translateX(0); } 25%, 45% { transform: translateX(192px); } 50%, 70% { transform: translateX(384px); } 75%, 95% { transform: translateX(576px); } 100% { transform: translateX(0); } }
   @media (prefers-reduced-motion: reduce) { .loop { animation: none !important; } }
 </style>
 </head>
@@ -109,6 +121,44 @@
 <main>
   <h1>一個對話框，整台 Spark 都在後面</h1>
   <p class="lead">進站就是對話。查資料、看模型、開 shell、寫需求、下任務、比模型——都從這裡出發。每一頁都是同一套版面：左邊一排圖示換頁，右欄四個分頁用 <kbd>Alt</kbd>+數字直達。每張卡右下角有「完整說明」的對應章節。</p>
+
+  <!-- 問題單: the four steps -->
+  <section class="flow4" id="issue-to-pr">
+    <h2>從 issue 到 PR（3 分鐘）</h2>
+    <p>修 bug 不用填表：給 repo 或 issue 網址、一段描述、截圖。Loop 先分析，你確認後它才修；檢查在設好的機台上跑，過了就開 Gitea PR、回 issue 留言。</p>
+    <div class="fig" aria-hidden="true"><svg viewBox="0 0 800 150">
+      <rect x="10" y="8" width="780" height="134" rx="12" class="card"/>
+      <rect x="30" y="26" width="164" height="98" rx="10" class="card"/>
+      <text x="42" y="48" font-weight="700">1 問題單</text>
+      <text x="42" y="70" class="muted">issue #12 · aoi/cf-aoi</text>
+      <text x="42" y="88" class="muted">第二次載入沒生效…</text>
+      <text x="42" y="106" class="muted">截圖 2 張</text>
+      <rect x="222" y="26" width="164" height="98" rx="10" class="accs"/>
+      <text x="234" y="48" font-weight="700">2 分析卡</text>
+      <text x="234" y="70">原因：recipe_loader.cpp</text>
+      <text x="234" y="88">重現：修改前必須失敗</text>
+      <text x="234" y="106">☑ 建置 ☑ 測試 ☑ 重現</text>
+      <rect x="414" y="26" width="164" height="98" rx="10" class="blues"/>
+      <text x="426" y="48" font-weight="700">3 開始修</text>
+      <text x="426" y="70">worktree · 本地模型</text>
+      <text x="426" y="88">機台 aoi-1（Windows）</text>
+      <text x="426" y="106">✓ 建置 ✓ 測試 ✓ 紅→綠</text>
+      <rect x="606" y="26" width="164" height="98" rx="10" class="oks"/>
+      <text x="618" y="48" font-weight="700">4 結果頁</text>
+      <text x="618" y="70">4 項檢查都過</text>
+      <text x="618" y="88">PR #34 · issue #12</text>
+      <text x="618" y="106" class="ok" font-weight="700">合併</text>
+      <g class="muted" font-size="14"><text x="200" y="80">→</text><text x="392" y="80">→</text><text x="584" y="80">→</text></g>
+      <rect x="26" y="22" width="172" height="106" rx="12" fill="none" stroke="var(--accent)" stroke-width="2" class="loop" style="animation: step4 10s infinite"/>
+    </svg></div>
+    <ol>
+      <li><b><span class="n">1</span>貼上來</b>左邊「問題單」：貼 Gitea 的 issue 或 repo 網址，寫發生什麼事、期望怎樣，<kbd>Ctrl</kbd>+<kbd>V</kbd> 貼截圖 →「請 Loop 分析」。第一次用到的 repo 會先匯入（約 1 分鐘）。</li>
+      <li><b><span class="n">2</span>看分析卡</b>30 秒到 2 分鐘：可能原因與位置、重現方式、驗收清單（這個 repo 的必過檢查＋重現紅→綠）、機台與模型。哪一塊不對就按「改一下」。</li>
+      <li><b><span class="n">3</span>開始修</b>Loop 在隔離的 worktree 修，自己先跑到綠；引擎到機台跑全部檢查，修不好換下一個本地模型。主管模式按的是「送出核可」。</li>
+      <li><b><span class="n">4</span>看結果頁</b>結論色塊、Loop 的自評、檢查清單、圖資逐案例、diff、嘗試記錄。按「合併」（走 Gitea PR，可以順便關 issue），或「退回修改…」寫一句話。</li>
+    </ol>
+    <div class="how"><b>第一次之前</b>：工程師先在 Repo 頁匯入 repo、設好它的「檢查」，在機台頁登記一台機台並按「檢查」。<b>→ 完整說明第 5b 章</b></div>
+  </section>
 
   <div class="grid">
 
