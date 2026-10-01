@@ -38,7 +38,7 @@ export const NONNEG_KEYS = new Set([
   // 對話操作 (src/chatops/*)
   'ops_confirm_ttl_min', 'ops_chat_max_rounds', 'ops_chat_wall_ms', 'ops_git_timeout_sec', 'ops_git_clone_timeout_sec',
   // 問題單 / 檢查 (src/intake/*, src/checks/*)
-  'repo_map_budget_chars', 'repo_profile_budget_chars', 'check_timeout_min', 'gitea_poll_interval_min',
+  'repo_map_budget_chars', 'repo_profile_budget_chars', 'diag_watch_interval_min', 'check_timeout_min', 'gitea_poll_interval_min',
 ]);
 // values must be a number in [0, 1] (a fraction/weight, unlike the 0-100 PERCENT_KEYS)
 export const UNIT_INTERVAL_KEYS = new Set(['rag_hybrid_alpha']);
@@ -206,6 +206,13 @@ export function validateSetting(key: string, value: string): string | null {
   } else if (key === 'terminal_allowed_users' || key === 'exec_allowed_users' || key === 'ops_allowed_users' || key === 'manager_users') {
     const bad = value.split(',').map((s) => s.trim()).filter(Boolean).filter((s) => !/^(ts:\S+|name:\S+|local)$/i.test(s));
     if (bad.length) return `${key} entries must be ts:<login>, name:<name> or local (got: ${bad.join(', ')})`;
+  } else if (key === 'diag_watch_dirs') {
+    const bad = value
+      .split(/[\n,]/)
+      .map((x) => x.trim())
+      .filter(Boolean)
+      .filter((x) => !/^([^=\s]*=)?\s*[/~]\S*$/.test(x));
+    if (bad.length) return `diag_watch_dirs entries must be <repo>=<absolute folder> (got: ${bad.join(', ')})`;
   } else if (key === 'gitea_url') {
     if (value !== '' && !/^https?:\/\/[^\s/]+(\/\S*)?$/.test(value)) return 'gitea_url must be an http(s) URL (e.g. http://gitea.corp:3000) or empty';
   } else if (key === 'exec_default_host') {

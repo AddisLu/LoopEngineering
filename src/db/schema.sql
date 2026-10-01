@@ -713,6 +713,13 @@ CREATE TABLE IF NOT EXISTS diag_reports (
 );
 CREATE INDEX IF NOT EXISTS idx_diag_reports_repo ON diag_reports(repo_id, created_at);
 
+-- 機況監看 (src/diag/watch.ts): files already read from a watched folder, by mtime.
+CREATE TABLE IF NOT EXISTS diag_seen (
+  path            TEXT PRIMARY KEY,
+  mtime_ms        INTEGER NOT NULL,
+  seen_at         TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- 規格 of the GPU 沙盒 hosts ('local' = this Spark, else an exec_hosts name): what the spec probe
 -- found (src/exec/specs.ts) and the software a person added that the probe cannot see.
 CREATE TABLE IF NOT EXISTS host_specs (

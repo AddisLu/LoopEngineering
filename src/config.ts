@@ -553,6 +553,8 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   repo_profile_inject: 'false',    // LOOP_TASK.md / 分析 / 續跑 get the repo's requirements, style, pitfalls and playbooks
   repo_profile_budget_chars: '3500',
   learn_from_runs: 'false',        // a task that did not go right first time leaves pitfall / playbook drafts
+  diag_watch_dirs: '',             // 機況監看: `<repo>=<folder>` per line; '' = off
+  diag_watch_interval_min: '10',
   llm_judge_backend: 'claude',     // claude | local
   knowledge_distill_backend: 'claude', // claude | local | off
   planner_backend: 'claude',       // claude | local

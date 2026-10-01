@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import { pumpDiagWatch } from './diag/watch.js';
 import { getDb, getNum, logEvent } from './db/index.js';
 import { createEngine } from './engine.js';
 import { buildApp } from './server/app.js';
@@ -72,6 +73,8 @@ export async function main(): Promise<void> {
         return r.created ? r.task : null;
       },
     }).catch((err) => console.error('[gitea] issue poller:', err));
+    // 機況監看: new flight-recorder output in the watched folders becomes a 機況診斷 (diag_watch_dirs; off when empty)
+    void pumpDiagWatch(db).catch((err) => console.error('[diag-watch]', err));
     // 晨報: once a day at morning_report_time, push what ran overnight (src/report/morning.ts)
     void pumpMorningReport(db, new Date(), (p) => notify(db, p)).catch((err) => console.error('[morning] error:', err));
     // benchmark mode: judge benchmarks whose arms are all terminal, fire-and-forget (src/benchmark/complete.ts)
