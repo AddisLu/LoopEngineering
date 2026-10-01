@@ -1,4 +1,6 @@
 import fs from 'node:fs';
+import { verifyLines, type FacetsLike } from '../repo/profileContext.js';
+import { getProfileRow, readFacets } from '../repo/profileStore.js';
 import { refreshProfileIfStale } from '../repo/profileJob.js';
 import { matchPitfalls, matchPlaybooks, renderLearned } from '../knowledge/learn.js';
 import { machineBoxLines } from './context.js';
@@ -518,12 +520,17 @@ function learnedForAnalysis(db: Database.Database, repo: Repo, description: stri
     const pits = matchPitfalls(db, repo.local_path, q, 4);
     const books = matchPlaybooks(db, repo.local_path, q, 2);
     state.pitfalls = pits.map((n) => ({ id: n.id, title: n.title, body: n.body }));
-    const lines = [...(pits.length ? ['陷阱：', ...renderLearned(pits)] : []), ...(books.length ? ['解法：', ...renderLearned(books)] : [])];
+    const facets = readFacets<FacetsLike>(getProfileRow(db, repo.id));
+    const vlines = verifyLines(facets, files);
+    const lines = [...(pits.length ? ['陷阱：', ...renderLearned(pits)] : []), ...(books.length ? ['解法：', ...renderLearned(books)] : []), ...(vlines.length ? ['驗證方式（提重現方式、新增測試時照這個）：', ...vlines] : [])];
     return lines.length ? lines.join('\n') : null;
   } catch {
     return null;
   }
 }
+
+/** A question the code answers (location, name, framework): not one to put to the engineer. */
+const CODE_FINDABLE = /哪一行|第幾行|變數|函式名|函數名|叫什麼|在哪裡|在哪個檔|哪個檔案|測試框架|Google Test|gtest|如何取得|從哪裡取得|現成函式|是否已存在|具體機制|哪個函式|程式碼在/;
 
 export function buildProposePrompt(o: {
   description: string;
@@ -940,7 +947,11 @@ async function planTicket(
   if (check) {
     state.review_questions = dedupe([...check.llm.questions, ...check.missing.filter((m) => m.startsWith('審查：')).map((m) => m.replace(/^審查：/, ''))], 8);
   }
-  state.questions = dedupe([...state.model_questions, ...(noVerify ? [NO_VERIFY_QUESTION] : []), ...lintGaps.map((m) => `需求文件：${m}`), ...state.review_questions], 10);
+  // 「Loop 還不確定」 asks the ENGINEER: what only they know. The PRD reviewer's questions are written for
+  // the implementer — where a variable lives, which line, which test framework — and the implementing
+  // model finds those in the code itself; at most two of the others make the card.
+  const forPerson = state.review_questions.filter((q) => !CODE_FINDABLE.test(q)).slice(0, 2);
+  state.questions = dedupe([...state.model_questions, ...(noVerify ? [NO_VERIFY_QUESTION] : []), ...lintGaps.map((m) => `需求文件：${m}`), ...forPerson], 5);
 
   if (!o.review) reviewNote = '改過之後重新整理了需求文件（沒有重新複核）';
   else if (!lint.ok) reviewNote = '需求文件還有缺漏，略過複核';

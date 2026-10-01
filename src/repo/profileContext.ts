@@ -26,6 +26,55 @@ interface StyleLike {
   logging?: string[];
   strings?: string[];
 }
+interface ModuleLike {
+  name: string;
+  path: string;
+  kind?: string;
+  output?: string | null;
+}
+interface VerifyLike {
+  frameworks?: Array<{ name: string; module: string | null }>;
+  commands?: Array<{ label: string; command: string; module: string | null }>;
+  headless?: Array<{ module: string; how: string }>;
+  gui_only?: string[];
+}
+export interface FacetsLike {
+  style?: StyleLike[];
+  requirements?: RequirementLike[];
+  modules?: ModuleLike[];
+  verify?: VerifyLike;
+}
+
+/** The modules the files are in (by path); [] when nothing matched (then callers keep everything). */
+export function touchedModules(modules: ModuleLike[], files: string[]): ModuleLike[] {
+  const norm = (p: string) => p.replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/$/, '');
+  return modules.filter((m) => {
+    const dir = norm(m.path || '');
+    return dir && dir !== '.' && files.some((f) => norm(f) === dir || norm(f).startsWith(`${dir}/`));
+  });
+}
+
+/**
+ * 驗證方式 for a model: how this repo is tested — its frameworks, or, when it has none, its own
+ * convention (cf-aoi: standalone *_verify programs built by CMake) so a new test follows it instead
+ * of bringing in a framework the repo does not use.
+ */
+export function verifyLines(f: FacetsLike | null, files: string[]): string[] {
+  if (!f) return [];
+  const touched = touchedModules(f.modules ?? [], files);
+  const names = new Set(touched.map((m) => m.name));
+  const dirs = touched.map((m) => (m.path || '').replace(/\/$/, ''));
+  const mine = <T extends { module: string | null }>(xs: T[] | undefined) => (xs ?? []).filter((x) => !touched.length || !x.module || names.has(x.module));
+  const out: string[] = [];
+  const fw = mine(f.verify?.frameworks);
+  if (fw.length) out.push(`- 測試框架：${[...new Set(fw.map((x) => x.name))].join('、')}`);
+  const progs = (f.modules ?? []).filter((m) => /(_verify|_test|_tests|_check)$|^test_/i.test(m.name) && (!dirs.length || dirs.some((d) => d && (m.path || '').startsWith(d))));
+  if (progs.length) out.push(`- ${fw.length ? '另有' : '沒有測試框架；'}驗證是獨立的程式：${progs.slice(0, 8).map((m) => m.name).join('、')}${progs[0]?.path ? `（${progs[0].path}，在 CMakeLists 以 add_executable 建置）` : ''}。新增的測試照這個做法，不要引入新的測試框架。`);
+  const cmds = mine(f.verify?.commands).slice(0, 4);
+  if (cmds.length) out.push(...cmds.map((c) => `- ${c.label}：\`${c.command}\``));
+  return out;
+}
+
 interface RequirementLike {
   kind: string;
   name: string;
@@ -92,9 +141,10 @@ export function profileSectionFor(db: Database.Database, task: Task): ProfileSec
   const text = `${task.title}\n${task.goal}`;
   const pits = matchPitfalls(db, task.repo_path, { text, files, kind }, 5);
   const books = matchPlaybooks(db, task.repo_path, { text, files, kind }, 2);
-  const facets = task.repo_id ? readFacets<{ style?: StyleLike[]; requirements?: RequirementLike[] }>(getProfileRow(db, task.repo_id)) : null;
+  const facets = task.repo_id ? readFacets<FacetsLike>(getProfileRow(db, task.repo_id)) : null;
+  const touched = new Set(touchedModules(facets?.modules ?? [], files).map((m) => m.name));
   const rules = db
-    .prepare("SELECT title, body FROM knowledge_nodes WHERE scope = ? AND kind = 'style' AND status = 'approved' AND invalid_at IS NULL ORDER BY weight DESC LIMIT 8")
+    .prepare("SELECT title, body FROM knowledge_nodes WHERE scope = ? AND kind = 'style' AND status = 'approved' AND invalid_at IS NULL ORDER BY weight DESC LIMIT 4")
     .all(repoScope(task.repo_path)) as Array<{ title: string; body: string }>;
 
   const blocks: Array<{ head: string; lines: string[]; ids?: string[] }> = [];
@@ -104,7 +154,10 @@ export function profileSectionFor(db: Database.Database, task: Task): ProfileSec
   if (books.length) blocks.push({ head: '### 這類問題在這個 repo 的解法', lines: renderLearned(books), ids: books.map((n) => n.id) });
   const params = task.repo_id ? paramLines(db, task.repo_id, text) : [];
   if (params.length) blocks.push({ head: '### 任務提到的參數', lines: params });
-  const reqs = (facets?.requirements ?? []).slice(0, 10).map((r) => `- ${r.name}${r.version ? ` ${r.version}` : ''}${r.module ? `（${r.module}）` : ''}${r.note ? `：${r.note}` : ''}`);
+  const vlines = verifyLines(facets, files);
+  if (vlines.length) blocks.push({ head: '### 驗證方式（這個 repo 怎麼測）', lines: vlines });
+  // the touched modules' requirements (and repo-wide ones); all of them when the files are not known
+  const reqs = (facets?.requirements ?? []).filter((r) => !touched.size || !r.module || touched.has(r.module)).slice(0, 10).map((r) => `- ${r.name}${r.version ? ` ${r.version}` : ''}${r.module ? `（${r.module}）` : ''}${r.note ? `：${r.note}` : ''}`);
   if (reqs.length) blocks.push({ head: '### 建置與執行需要', lines: reqs });
   if (!blocks.length) return null;
 

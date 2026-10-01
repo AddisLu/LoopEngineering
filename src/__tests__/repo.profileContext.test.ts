@@ -85,3 +85,32 @@ describe('這個 repo 的規範與經驗 in LOOP_TASK.md', () => {
     expect(stylesFor(all, ['tools/x.py']).map((s) => s.module)).toEqual(['']);
   });
 });
+
+describe('驗證方式 and touched modules', () => {
+  it('a repo without a test framework: its own *_verify programs, for the touched module', async () => {
+    const { verifyLines, touchedModules } = await import('../repo/profileContext.js');
+    const f = {
+      modules: [
+        { name: 'cfaoi_ip', path: 'ip', kind: 'cmake_target', output: 'exe' },
+        { name: 'rules_verify', path: 'ip', kind: 'cmake_target', output: 'exe' },
+        { name: 'cfaoi_grab', path: 'grab', kind: 'cmake_target', output: 'exe' },
+        { name: 'grab_check', path: 'grab', kind: 'cmake_target', output: 'exe' },
+      ],
+      verify: { frameworks: [], commands: [{ label: '建置 cfaoi_ip', command: 'cmake --build ip/build', module: 'cfaoi_ip' }, { label: '建置 cfaoi_grab', command: 'cmake --build grab/build', module: 'cfaoi_grab' }] },
+    };
+    expect(touchedModules(f.modules, ['ip/src/control_server.cpp']).map((m) => m.name)).toEqual(['cfaoi_ip', 'rules_verify']);
+    expect(verifyLines(f, ['ip/src/control_server.cpp'])).toEqual([
+      '- 沒有測試框架；驗證是獨立的程式：rules_verify（ip，在 CMakeLists 以 add_executable 建置）。新增的測試照這個做法，不要引入新的測試框架。',
+      '- 建置 cfaoi_ip：`cmake --build ip/build`',
+    ]);
+  });
+
+  it('a pitfall that only shares common words is not matched', () => {
+    const scope = repoScope(dir);
+    upsertLearned(db, scope, 'pitfall', 'IP 收圖後僅回 OK，結果要從 output 讀', '會看到：拿不到偵測結果', { trigger: { words: ['OfflineReviewService'], files: ['control/src/'], kinds: [] }, evidence: [] });
+    db.prepare("UPDATE knowledge_nodes SET status = 'approved'").run();
+    const t = createTask(db, { title: 'IP 收到非 JSON 時 incident 要帶內容', goal: 'control_server 收到的內容與 OK 回覆', coding_tool: 'mock', verification_steps: ['true'], repo_path: dir });
+    setSetting(db, 'repo_profile_inject', 'true');
+    expect(profileSectionFor(db, getTask(db, t.id)!)?.text ?? '').not.toContain('IP 收圖後僅回 OK');
+  });
+});

@@ -274,8 +274,11 @@ export function matchNodes(db: Database.Database, repoPath: string, kind: 'pitfa
       const lf = f.toLowerCase();
       if (files.some((x) => x === lf || x.startsWith(lf.endsWith('/') ? lf : `${lf}/`) || lf.startsWith(x))) s += 2;
     }
+    const triggered = s > 0; // an error word or a file of the work matched
     if (q.kind && m?.trigger.kinds.includes(q.kind)) s += 1;
-    s += 2 * (fts.get(n.rowid) ?? 0);
+    // full-text overlap only ranks among pitfalls that something concrete matched (or a playbook of
+    // the same kind): on its own it pulls in whatever shares a few common words
+    if (triggered || s > 0) s += 1.5 * (fts.get(n.rowid) ?? 0);
     // a pitfall that was shown often and never helped sinks
     if (m && m.hits.shown >= 5 && m.hits.passed === 0) s *= 0.5;
     return { n, s: s + n.weight * 0.1 };
