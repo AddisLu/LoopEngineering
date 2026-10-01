@@ -638,6 +638,14 @@ function symbolFor(c: Candidate, symbols: RepoSymbol[]): string | null {
 }
 
 /** No model: the kind from the keyword heuristic, the top candidates as causes, no repro. */
+/** The command on a 「重現：…」/「repro: …」 line of the description (backticks optional), else null. */
+export function typedReproCommand(description: string): string | null {
+  const m = /^[ \t>*-]*(?:重現(?:指令|方式|步驟)?|repro(?:duce)?)[ \t]*[：:][ \t]*`?([^`\n]+?)`?[ \t]*$/im.exec(description);
+  const cmd = m?.[1]?.trim() ?? '';
+  // a sentence is not a command: it needs no CJK and at most 300 characters
+  return cmd && cmd.length <= 300 && !/[\u3400-\u9fff]/.test(cmd) ? cmd : null;
+}
+
 export function rulesProposal(description: string, candidates: Candidate[], symbols: RepoSymbol[]): { kind: TicketKind; causes: Cause[] } {
   const h = heuristicIntent(description, '');
   let kind: TicketKind = 'bugfix';
@@ -1080,9 +1088,11 @@ async function runAnalysis(db: Database.Database, taskId: string, deps: AnalyseD
     const rules = rulesProposal(intake.description, candidates, map.symbols);
     state.kind = intake.kind_hint ?? proposal?.kind ?? rules.kind;
     state.causes = proposal?.causes.length ? proposal.causes : rules.causes;
-    state.repro = proposal?.repro ?? null;
+    // a 「重現：<指令>」 line the person typed wins over anything proposed
+    const typed = typedReproCommand(intake.description);
+    state.repro = typed ? { mode: 'command', command: typed, test_file: null, description: '描述裡寫的重現指令', before: null } : (proposal?.repro ?? null);
     // a command counts as the person's only when they typed it into a ticket they opened themselves
-    state.repro_by = state.repro?.command && intake.from !== 'issue' && commandSaidByUser([intake.description], state.repro.command) ? 'person' : state.repro ? 'model' : null;
+    state.repro_by = state.repro?.command && intake.from !== 'issue' && (state.repro.command === typed || commandSaidByUser([intake.description], state.repro.command)) ? 'person' : state.repro ? 'model' : null;
     state.complexity = proposal?.complexity ?? WORK_TEMPLATES[state.kind].complexity;
     state.symptom = proposal?.symptom ?? null;
     state.expected = proposal?.expected ?? null;

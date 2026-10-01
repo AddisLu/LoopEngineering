@@ -318,3 +318,14 @@ describe('parsing the proposal', () => {
     expect(symbolsFromMap(md)).toContainEqual({ file: 'src/control/recipe_loader.cpp', name: 'apply_recipe', line: 4, kind: 'function' });
   });
 });
+
+describe('typedReproCommand', () => {
+  it('reads a 「重現：」 line the person typed, and nothing that reads like a sentence', async () => {
+    const { typedReproCommand } = await import('../intake/analyse.js');
+    expect(typedReproCommand('會當掉。\n重現：./repro.sh')).toBe('./repro.sh');
+    expect(typedReproCommand('重現指令: `python3 -m pytest tests/test_x.py -k zero`')).toBe('python3 -m pytest tests/test_x.py -k zero');
+    expect(typedReproCommand('- repro: make check')).toBe('make check');
+    expect(typedReproCommand('重現：開啟程式後按下開始')).toBeNull();
+    expect(typedReproCommand('沒有重現指令')).toBeNull();
+  });
+});

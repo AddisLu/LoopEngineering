@@ -98,6 +98,15 @@ describe('先失敗再修 (failing_first)', () => {
     expect(lastRun(id).error).toBe('repro passed before the fix');
   });
 
+  it('a command that is not there proves nothing: the task goes ahead without the section', async () => {
+    setSetting(db, 'failing_first', 'true');
+    const id = ticket('./no-such-repro.sh');
+    await runTask(db, getTask(db, id)!, {});
+    expect(getTask(db, id)!.status).toBe('review');
+    expect(fs.readFileSync(path.join(lastRun(id).worktree_path, 'LOOP_TASK.md'), 'utf8')).not.toContain('## 重現輸出');
+    expect(events(id, 'note').some((d) => d.includes('找不到或不能執行'))).toBe(true);
+  });
+
   it('only on the first run: a later run (退回修改, 換模型) does not re-run it', async () => {
     setSetting(db, 'failing_first', 'true');
     const id = ticket('exit 0');

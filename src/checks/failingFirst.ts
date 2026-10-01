@@ -54,6 +54,8 @@ export async function failingFirst(
   const r = out.result;
   const tail = (r.output ?? '').slice(-3000);
   if (r.timedOut) return { kind: 'unknown', reason: `重現指令逾時（${snap.name}）`, crId: out.crId };
+  // 126/127: the shell could not run it (no such script, not executable) — that reproduces nothing
+  if (r.exitCode === 126 || r.exitCode === 127) return { kind: 'unknown', reason: `重現指令找不到或不能執行（${snap.name}，exit ${r.exitCode}）`, crId: out.crId };
   if (r.exitCode === UNREACHABLE || r.exitCode === null) return { kind: 'unknown', reason: `重現指令沒有跑起來（${snap.name}）：${tail.split('\n').filter(Boolean).pop() ?? ''}`, crId: out.crId };
   return r.ok ? { kind: 'passed', tail, crId: out.crId } : { kind: 'red', tail, crId: out.crId };
 }
