@@ -430,3 +430,15 @@ describe('check run files', () => {
     for (const f of ['x.svg', 'x.html', 'x.bin', 'noext']) expect(checkRunFileType(f), f).toEqual({ type: 'application/octet-stream', inline: false });
   });
 });
+
+describe('嘗試記錄: a run that passed and was then sent back', () => {
+  it('reads 通過・被退回', async () => {
+    const { buildAttempts } = await import('../review/result.js');
+    const run = (id: string, started: string, finished: string) => ({ id, task_id: 't', model: 'local:x', started_at: started, finished_at: finished, verify_json: JSON.stringify([{ step: 'b', ok: true, exitCode: 0, timedOut: false, tail: '' }]) }) as never;
+    const a = buildAttempts([run('r1', '2026-10-01 09:00:00', '2026-10-01 09:13:00'), run('r2', '2026-10-01 09:20:00', '2026-10-01 09:26:00')], [], [], ['2026-10-01 09:15:00']);
+    expect(a.map((x) => [x.n, x.outcome, x.ok])).toEqual([
+      [1, '通過・被退回', false],
+      [2, '通過', true],
+    ]);
+  });
+});

@@ -219,7 +219,12 @@ function ticketParts(
     checks: buildChecks(frozen, shown, before, readVerify(shownRun)),
     dataset: buildDatasetViews(frozen, shown, before, (id) => listCheckRunFiles(paths.checkRunsDir, id)),
     review: readSelfReview(task),
-    attempts: buildAttempts(runs, frozen, rows),
+    attempts: buildAttempts(
+      runs,
+      frozen,
+      rows,
+      (db.prepare("SELECT created_at FROM task_events WHERE task_id = ? AND kind = 'status' AND detail LIKE '退回修改%'").all(task.id) as Array<{ created_at: string }>).map((e) => e.created_at),
+    ),
     issue,
     ticket: {
       repo: repo?.name ?? null,

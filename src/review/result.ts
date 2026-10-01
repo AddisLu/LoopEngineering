@@ -591,7 +591,7 @@ export interface Attempt {
 }
 
 /** Every run of the task, oldest first, with what its verification found. `rows`: the task's check_runs. */
-export function buildAttempts(runs: TaskRun[], checks: FrozenCheck[], rows: CheckRunRow[]): Attempt[] {
+export function buildAttempts(runs: TaskRun[], checks: FrozenCheck[], rows: CheckRunRow[], returnedAt: string[] = []): Attempt[] {
   const ordered = runs
     .map((r, i) => ({ r, i }))
     .sort((a, b) => tsMs(a.r.started_at) - tsMs(b.r.started_at) || a.i - b.i)
@@ -605,7 +605,12 @@ export function buildAttempts(runs: TaskRun[], checks: FrozenCheck[], rows: Chec
     const steps = readVerify(r);
     if (steps.length) {
       const bad = steps.find((s) => !s.ok);
-      if (!bad) return { ...base, ok: true, outcome: '通過' };
+      if (!bad) {
+        // passed its checks, then a person sent it back (a 退回修改 between this run and the next)
+        const next = ordered[i + 1];
+        const returned = returnedAt.some((t) => tsMs(t) >= finished && (!next || tsMs(t) <= tsMs(next.started_at)));
+        return { ...base, ok: !returned, outcome: returned ? '通過・被退回' : '通過' };
+      }
       const id = STEP_CHECK_RE.exec(bad.step)?.[1];
       const check = checks.find((c) => c.id === id || c.name === bad.step.trim());
       let detail = bad.timedOut ? '（逾時）' : '';
