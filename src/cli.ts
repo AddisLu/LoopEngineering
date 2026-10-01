@@ -1023,7 +1023,68 @@ machineCmd
   });
 
 // ---- check commands (src/checks/*): loop check list|trial|baseline ---------------------------
-// (filled in by the checks link)
+// (imports are dynamic so this section is the only part of cli.ts the checks link touches)
+const checkCmd = program
+  .command('check')
+  .description("檢查: a repo's checks — list, 試跑 on the default branch, 設為基準 (the Repo page's 檢查 tab)");
+
+checkCmd
+  .command('list <repoId>')
+  .description("a repo's checks in run order, with the last run of each")
+  .action(async (repoId: string) => {
+    const { listChecks, parseBaseline, repoExists } = await import('./checks/store.js');
+    const { latestCheckRuns } = await import('./checks/runs.js');
+    const db = getDb();
+    if (!repoExists(db, repoId)) return fail(`no such repo: ${repoId}`);
+    const checks = listChecks(db, repoId);
+    if (!checks.length) console.log('（這個 repo 還沒有檢查：在 Repo 頁的檢查分頁新增）');
+    const last = latestCheckRuns(db, checks.map((c) => c.id));
+    for (const c of checks) {
+      const r = last.get(c.id);
+      const lastRun = !r ? '未跑過' : r.finished_at === null ? `執行中 ${r.id}` : `${r.ok ? '✓' : '✗'} ${r.kind} ${r.finished_at} ${r.id}`;
+      const flags = [c.required ? '必過' : '選擇性', c.enabled ? '' : '停用'].filter(Boolean).join(' ');
+      console.log(`${c.id}  ${c.name}  [${c.kind}]  ${c.machine ?? '引擎主機'}  ${c.pass_rule}  ${flags}  最近一次：${lastRun}`);
+      if (c.command) console.log(`  指令: ${c.command}`);
+      if (c.metrics) console.log(`  門檻: ${c.metrics}`);
+      const b = parseBaseline(c);
+      if (b) console.log(`  基準: ${Object.entries(b.values).map(([k, v]) => `${k}=${v}`).join(', ')} @ ${(b.sha ?? '').slice(0, 7)}`);
+      if (c.manual_text) console.log(`  人工: ${c.manual_text}`);
+    }
+  });
+
+checkCmd
+  .command('trial <checkId>')
+  .description("run one check once on the repo's default branch, where a ticket would run it, and show what it reported")
+  .action(async (checkId: string) => {
+    const { trialCheck } = await import('./checks/baseline.js');
+    const { CheckError } = await import('./checks/store.js');
+    try {
+      const { run, discovered } = await trialCheck(getDb(), checkId);
+      console.log((run.output_tail ?? '').replace(/\s+$/, '').split('\n').slice(-40).join('\n'));
+      console.log(`${run.ok ? '✓ 通過' : '✗ 沒過'}  ${run.id}  exit=${run.exit_code ?? '-'}${run.timed_out ? '（逾時）' : ''}  ${run.ms ?? '?'} ms`);
+      if (discovered.length) console.log(`偵測到的指標：${discovered.join(', ')}${run.ok ? `\n設為基準：loop check baseline ${checkId} ${run.id}` : ''}`);
+      if (!run.ok) process.exitCode = 1;
+    } catch (err) {
+      if (err instanceof CheckError) return fail(err.message);
+      throw err;
+    }
+  });
+
+checkCmd
+  .command('baseline <checkId> <runId>')
+  .description("make a passing run's reported values (and its commit) the check's baseline, for 「不比基準差」")
+  .action(async (checkId: string, runId: string) => {
+    const { setBaseline } = await import('./checks/baseline.js');
+    const { CheckError, parseBaseline } = await import('./checks/store.js');
+    try {
+      const c = setBaseline(getDb(), checkId, runId, 'cli');
+      const b = parseBaseline(c)!;
+      console.log(`${c.name}（${c.id}）基準：${Object.entries(b.values).map(([k, v]) => `${k}=${v}`).join(', ')} @ ${(b.sha ?? '').slice(0, 7)}`);
+    } catch (err) {
+      if (err instanceof CheckError) return fail(err.message);
+      throw err;
+    }
+  });
 
 const local = program.command('local').description('本地模型: list / load / stop / download / build / jobs (see local_models_enabled)');
 

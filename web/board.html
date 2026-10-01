@@ -208,6 +208,52 @@
           <input name="local_task_window" placeholder="19:00-07:00" autocomplete="off" data-clearable />
         </label>
 
+        <div class="settings-group">角色與核可（問題單）</div>
+        <label>誰決定開始修
+          <select name="approval_mode">
+            <option value="self">自己排、自己驗收</option>
+            <option value="manager">主管核可後 Loop 才開始</option>
+          </select>
+        </label>
+        <label>主管（ts:登入 或 name:名字，逗號分隔；主管模式下只有他們能核可）
+          <input name="manager_users" placeholder="ts:boss@example.com, name:呂侑儒" autocomplete="off" data-clearable />
+        </label>
+
+        <div class="settings-group">機密</div>
+        <label>雲端模型
+          <select name="cloud_llm_allowed">
+            <option value="true">允許雲端模型</option>
+            <option value="false">公司模式：所有步驟只用本地模型</option>
+          </select>
+        </label>
+
+        <div class="settings-group">修問題的準確度（問題單）</div>
+        <div class="row">
+          <label>開始修之前，先確認重現指令在修改前會失敗
+            <select name="failing_first"><option value="false">關</option><option value="true">開</option></select>
+          </label>
+          <label>修完先讓本地模型自評（放在結果頁與 PR）
+            <select name="local_self_review"><option value="false">關</option><option value="true">開</option></select>
+          </label>
+        </div>
+        <div class="row">
+          <label>把 repo 地圖給實作模型
+            <select name="repo_map_inject"><option value="false">關</option><option value="true">開</option></select>
+          </label>
+          <label>把這個 repo 過去類似的修法給實作模型
+            <select name="fix_ledger_inject"><option value="false">關</option><option value="true">開</option></select>
+          </label>
+        </div>
+        <label>依領域戰績自動挑本地模型（評比與快篩的結果）
+          <select name="domain_routing"><option value="false">關</option><option value="true">開</option></select>
+        </label>
+        <label>驗證沒過時最多自己修幾次（留空＝和中斷續跑共用次數）
+          <input name="fix_attempts" type="number" min="0" max="20" autocomplete="off" data-clearable />
+        </label>
+        <label>修不好時依序換成這些本地模型（local:&lt;id&gt;，逗號分隔；留空＝不換）
+          <input name="fix_escalation" placeholder="local:glm-5.3-flash-kv4g, local:deepseek-v4-flash" autocomplete="off" data-clearable />
+        </label>
+
         <div class="settings-group">晨報</div>
         <label>每天推送晨報的時間（HH:MM，經 ntfy；留空＝不推送，晨報頁照常可看）
           <input name="morning_report_time" placeholder="08:00" autocomplete="off" data-clearable />

@@ -10,6 +10,7 @@ import { buildCatalog, type CatalogDeps, type CatalogEntry } from '../local/cata
 import { getJobRunner, JobBusyError, type JobKind, type LocalJobRunner } from '../local/jobs.js';
 import { activeLocalRunCount } from '../tasks.js';
 import { annotateLocalModel, localLoadGuard } from '../local/guard.js';
+import { clusterWorkers, realClusterExec, workerWeights, type ClusterExec } from '../local/cluster.js';
 
 export interface LocalRouteOptions {
   /** Test-only: a stub manager so route tests never touch docker/vLLM. */
@@ -22,6 +23,9 @@ export interface LocalRouteOptions {
   jobRunner?: Pick<LocalJobRunner, 'start' | 'current' | 'cancel' | 'tail'>;
   /** Test-only: HF size lookup (null = offline), free-disk probe and clock. */
   catalog?: Pick<CatalogDeps, 'fetch' | 'diskFree' | 'now'>;
+  /** two Sparks: how the other nodes are found and asked about their weights (tests inject both) */
+  clusterWorkers?: () => string[];
+  clusterExec?: ClusterExec;
 }
 
 export type { AnnotatedLocalModel } from '../local/guard.js';
@@ -51,6 +55,8 @@ export function registerLocalRoutes(app: FastifyInstance, db: Database.Database,
     now: opts.catalog?.now,
   });
   const catalog = () => buildCatalog(db, repo(), sparks(), mm().state(), jobs().current(), catalogDeps());
+  const workers = (): string[] => (opts.clusterWorkers ? opts.clusterWorkers() : clusterWorkers(repo()));
+  const isClusterEntry = (entry: { nodes: number }): boolean => entry.nodes > 1 && sparks() >= 2;
 
   /**
    * Why a switch must not start. Shared by the registered-model and catalog load routes so the
@@ -103,6 +109,22 @@ export function registerLocalRoutes(app: FastifyInstance, db: Database.Database,
     const model = registerRecipe(db, { recipe: entry.recipe, name: entry.name, model: entry.model });
     const guard = loadGuard(model);
     if (guard) return reply.code(guard.code).send({ error: guard.error });
+    // two Sparks: a node without the weights never joins — the head waits 10 minutes and ends up
+    // serving nothing. Ask every worker first (one ssh each) and refuse with what to do instead.
+    if (isClusterEntry(entry)) {
+      const ws = workers();
+      if (ws.length) {
+        const checked = await workerWeights(entry.model, ws, opts.clusterExec ?? realClusterExec, opts.hubDir);
+        const bad = checked.filter((w) => !w.ok);
+        if (bad.length) {
+          return reply.code(409).send({
+            error: `另一台 Spark 還沒有這個模型的權重（${bad.map((b) => b.reason).join('；')}）——先同步到另一台再切換`,
+            code: 'worker_weights',
+            workers: bad,
+          });
+        }
+      }
+    }
     return { ok: true, id: model.id, result: mm().ensureLoaded(model.id), state: mm().state() };
   });
 
@@ -112,14 +134,19 @@ export function registerLocalRoutes(app: FastifyInstance, db: Database.Database,
     if (!enabled()) return reply.code(404).send(disabled);
     const body = (req.body ?? {}) as { kind?: unknown; recipe?: unknown };
     const kind = body.kind as JobKind;
-    if (kind !== 'download' && kind !== 'build') return reply.code(400).send({ error: 'kind must be download or build' });
+    if (kind !== 'download' && kind !== 'build' && kind !== 'sync') return reply.code(400).send({ error: 'kind must be download, build or sync' });
     const recipe = typeof body.recipe === 'string' ? body.recipe.trim() : '';
     if (!recipe) return reply.code(400).send({ error: 'recipe is required' });
     const cat = await catalog();
     const entry = cat.entries.find((e) => e.recipe === recipe);
     if (!entry) return reply.code(400).send({ error: `unknown recipe: ${recipe}` });
     if (entry.nodes > cat.sparks) return reply.code(409).send({ error: entry.blocked_by });
-    if (kind === 'download') {
+    const followWorkers = isClusterEntry(entry) ? workers() : [];
+    if (kind === 'sync') {
+      if (!entry.model) return reply.code(400).send({ error: '配方缺少 model 欄位' });
+      if (!entry.downloaded) return reply.code(409).send({ error: `${entry.name} 在這台還沒下載完，先下載` });
+      if (!followWorkers.length) return reply.code(409).send({ error: '沒有其他 Spark 要同步（兩台設定：local_spark_nodes=2，且 vLLM repo 的 .env 有 CLUSTER_NODES）' });
+    } else if (kind === 'download') {
       if (!entry.model) return reply.code(400).send({ error: '配方缺少 model 欄位' });
       if (entry.gated && !entry.downloaded) return reply.code(409).send({ error: entry.blocked_by });
       if (entry.downloaded) return reply.code(409).send({ error: `${entry.name} 的權重已經下載好了` });
@@ -135,7 +162,14 @@ export function registerLocalRoutes(app: FastifyInstance, db: Database.Database,
       if (entry.image_ready) return reply.code(409).send({ error: `映像 ${entry.container} 已經建好了` });
     }
     try {
-      const job = jobs().start(kind, recipe, { model: entry.model, container: entry.container, size_bytes: entry.size_bytes, repo: repo() });
+      // a two-Spark model's download continues with the copy to the other node(s) by itself
+      const job = jobs().start(kind, recipe, {
+        model: entry.model,
+        container: entry.container,
+        size_bytes: entry.size_bytes,
+        repo: repo(),
+        ...(kind !== 'build' && followWorkers.length ? { workers: followWorkers } : {}),
+      });
       return reply.code(202).send({ ok: true, job });
     } catch (err) {
       if (err instanceof JobBusyError) return reply.code(409).send({ error: err.message });

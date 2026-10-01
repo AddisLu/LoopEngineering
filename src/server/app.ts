@@ -13,7 +13,7 @@ import { readUsage } from '../token/usage.js';
 import { resolvePolicy } from '../scheduler/policy.js';
 import { killRun } from '../orchestrator/kill.js';
 import { pruneTaskArtifacts } from '../git/worktree.js';
-import { TaskActionError, abandonTask, abortTask, closeTask, deleteTaskSafe, holdTask, killTaskRuns, queueTask, restartTask, resumeTask } from '../taskActions.js';
+import { TaskActionError, abandonTask, abortTask, closeTask, deleteTaskSafe, escalateTask, holdTask, killTaskRuns, queueTask, restartTask, resumeTask } from '../taskActions.js';
 import { mergeBlocker, mergeReviewedTask, MergeInProgressError } from '../orchestrator/mergeFlow.js';
 import { updateVerification, TaskEditError, type VerificationPatch } from '../taskEdit.js';
 import { identityOf, IdentityError } from './identity.js';
@@ -123,6 +123,9 @@ export interface AppOptions {
   dockerProbe?: LocalRouteOptions['dockerProbe'];
   /** Test-only: a stub download/build runner (never spawns uvx/docker). */
   localJobRunner?: LocalRouteOptions['jobRunner'];
+  /** two Sparks: the other nodes and how to ask them about their weights (tests) */
+  localClusterWorkers?: LocalRouteOptions['clusterWorkers'];
+  localClusterExec?: LocalRouteOptions['clusterExec'];
   /** Test-only: HF size lookup / free-disk probe / clock for the model catalog. */
   localCatalog?: LocalRouteOptions['catalog'];
   /** Test-only: fake pty factory / identity for the terminal drawer (never spawns a shell). */
@@ -439,6 +442,17 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
     }
   });
 
+  // 再試一次（換模型）: the same branch, the next model on the escalation ladder (or the one picked)
+  app.post('/api/tasks/:id/escalate', async (req, reply) => {
+    const model = ((req.body ?? {}) as { model?: unknown }).model;
+    try {
+      const t = escalateTask(db, (req.params as any).id, { model: typeof model === 'string' ? model : null, by: identityOf(req).label });
+      return { ok: true, model: t.model, status: t.status };
+    } catch (err) {
+      return actionError(reply, err);
+    }
+  });
+
   // ?cleanup=1 also reclaims the worktree
   app.post('/api/tasks/:id/abandon', async (req, reply) => {
     const cleanup = (req.query as any)?.cleanup === '1' || (req.query as any)?.cleanup === 'true';
@@ -583,6 +597,8 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
     hubDir: opts.localHubDir,
     dockerProbe: opts.dockerProbe,
     jobRunner: opts.localJobRunner,
+    clusterWorkers: opts.localClusterWorkers,
+    clusterExec: opts.localClusterExec,
     catalog: opts.localCatalog,
   });
   registerBenchmarkRoutes(app, db, {

@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { openTestDb, getSetting } from '../db/index.js';
 import { validateSetting, TUNABLE_KEYS } from '../settings.js';
 import { DEFAULT_SETTINGS } from '../config.js';
+import fs from 'node:fs';
+import path from 'node:path';
 
 describe('問題單 flow settings', () => {
   it('ships every flag at its zero-impact default and the board can tune the role/accuracy keys', () => {
@@ -50,5 +52,13 @@ describe('問題單 flow settings', () => {
     }
     expect(validateSetting('check_timeout_min', '20')).toBeNull();
     expect(validateSetting('check_timeout_min', '-2')).not.toBeNull();
+  });
+
+  it('the board settings dialog has a field for every role, confidentiality and accuracy key', () => {
+    const html = fs.readFileSync(path.join(process.cwd(), 'web', 'board.html'), 'utf8');
+    for (const key of ['approval_mode', 'manager_users', 'cloud_llm_allowed', 'failing_first', 'local_self_review', 'repo_map_inject', 'fix_ledger_inject', 'domain_routing', 'fix_attempts', 'fix_escalation']) {
+      expect(html, key).toContain(`name="${key}"`);
+      expect(TUNABLE_KEYS as readonly string[], key).toContain(key);
+    }
   });
 });
