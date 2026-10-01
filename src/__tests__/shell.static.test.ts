@@ -123,7 +123,7 @@ describe('chat-first shell', () => {
     // the chat is a page of the app frame: frame.js builds its rail with every page in it
     expect(read('index.html')).toMatch(/<body class="app chat-page" data-nav="chat">/);
     const frame = read('frame.js');
-    for (const href of ['/', '/fix.html', '/board.html', '/brain.html', '/benchmarks.html', '/plans.html', '/morning.html']) {
+    for (const href of ['/', '/fix.html', '/board.html', '/repos.html', '/machines.html', '/brain.html', '/benchmarks.html', '/morning.html']) {
       expect(frame, `rail does not link ${href}`).toContain(`'${href}'`);
     }
     expect(read('index.html')).toContain('href="/docs/操作說明.html"');

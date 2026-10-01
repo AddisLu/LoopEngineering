@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="zh-Hant" data-mode="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>機台 · Loop Engineering</title>
+    <script src="/theme-boot.js"></script>
+    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/frame.css" />
+    <link rel="stylesheet" href="/repos.css" />
+  </head>
+  <body class="app" data-nav="machines">
+    <nav id="app-rail" class="app-rail"><a href="/">回到對話</a></nav>
+    <div class="app-main">
+      <header class="app-top">
+        <h1>機台</h1>
+        <span class="grow"></span>
+        <span class="ops-who hide-sm" id="ops-who"></span>
+        <button class="btn primary" type="button" id="add-btn">新增機台</button>
+      </header>
+
+      <div class="app-scroll">
+        <main class="app-body rp-body">
+          <p class="err-line" id="page-err" hidden></p>
+          <div class="mc-layout">
+            <section class="mc-main">
+              <p class="rp-lead">能 SSH 進去、裝了 git 的電腦就能當機台；Loop 會在上面跑 repo 的檢查（Linux、Windows 都可以）。</p>
+              <div class="rp-tablewrap" id="machine-table-wrap" hidden>
+                <table class="rp-table" id="machine-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">名稱</th>
+                      <th scope="col">SSH</th>
+                      <th scope="col">作業系統</th>
+                      <th scope="col">標籤</th>
+                      <th scope="col">狀態</th>
+                      <th scope="col">用它的 repo</th>
+                      <th scope="col" class="th-more"><span class="rp-sr">更多動作</span>⋯</th>
+                    </tr>
+                  </thead>
+                  <tbody id="machine-rows"></tbody>
+                </table>
+              </div>
+              <div class="rp-empty" id="machine-empty" hidden>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 4h15A1.5 1.5 0 0 1 21 5.5v4a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 9.5v-4A1.5 1.5 0 0 1 4.5 4z" /><path d="M4.5 13h15a1.5 1.5 0 0 1 1.5 1.5v4a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5v-4A1.5 1.5 0 0 1 4.5 13z" /><path d="M7 7.5h.01" /><path d="M7 16.5h.01" /></svg>
+                <p>還沒有機台。加一台能 SSH 進去、裝了 git 的電腦。</p>
+                <p class="rp-hint">沒有機台時，檢查都在引擎主機（這台 Spark）上跑。</p>
+                <div class="rp-row"><button class="btn primary" type="button" id="empty-add-btn">新增機台</button></div>
+              </div>
+
+              <details class="mc-sandbox" id="sandbox-box">
+                <summary>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
+                  <b>GPU 沙盒主機（進階）</b>
+                  <span id="sandbox-count">· 唯讀</span>
+                </summary>
+                <div class="body">
+                  <p class="rp-hint">Docker GPU 沙盒（exec_hosts）：對話頁的 sandbox 工具與 <code>sandbox:</code> 驗證步驟用的，和上面的機台是兩回事。這裡只顯示；要改用 <code>loop exec host</code>。</p>
+                  <div id="sandbox-list"></div>
+                </div>
+              </details>
+            </section>
+
+            <aside class="mc-aside" id="machine-detail" aria-live="polite"></aside>
+          </div>
+        </main>
+      </div>
+    </div>
+
+    <!-- 新增／編輯機台 -->
+    <dialog class="rp-dialog" id="machine-dialog" aria-labelledby="md-title">
+      <form id="machine-form" autocomplete="off">
+        <div class="dlg-head">
+          <h2 id="md-title">新增機台</h2>
+          <span class="grow"></span>
+          <button class="btn icon" type="button" id="md-close" aria-label="關閉"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12" /><path d="M18 6L6 18" /></svg></button>
+        </div>
+        <div class="dlg-body">
+          <div class="rp-grid2">
+            <label class="rp-f"><span class="cap">名稱 <span class="rp-hint" id="md-name-hint">小寫英數、_、-，例 aoi-1</span></span><input id="md-name" class="mono" type="text" maxlength="40" spellcheck="false" required /></label>
+            <label class="rp-f"><span class="cap">SSH 目標</span><input id="md-ssh" class="mono" type="text" maxlength="200" spellcheck="false" placeholder="aoi@10.20.1.31" required /></label>
+          </div>
+          <div class="rp-grid3">
+            <label class="rp-f"><span class="cap">埠</span><input id="md-port" type="number" min="1" max="65535" placeholder="22" /></label>
+            <label class="rp-f"><span class="cap">作業系統</span>
+              <select id="md-os">
+                <option value="auto">自動偵測</option>
+                <option value="linux">Linux</option>
+                <option value="windows">Windows</option>
+              </select>
+            </label>
+            <label class="rp-f"><span class="cap">Shell</span>
+              <select id="md-shell">
+                <option value="auto">自動</option>
+                <option value="bash">bash</option>
+                <option value="powershell">PowerShell</option>
+                <option value="cmd">cmd</option>
+              </select>
+            </label>
+          </div>
+          <label class="rp-f"><span class="cap">工作目錄 <span class="rp-hint">repo 複本與圖資快取放這裡</span></span><input id="md-root" class="mono" type="text" maxlength="200" spellcheck="false" placeholder="/srv/loop" required /></label>
+          <label class="rp-f"><span class="cap">標籤 <span class="rp-hint">逗號分隔：cuda、aoi-v3、camera…</span></span><input id="md-labels" class="mono" type="text" maxlength="400" spellcheck="false" placeholder="cuda, gpu" /></label>
+          <label class="rp-f"><span class="cap">說明 <span class="rp-hint">給模型看：這台有什麼（相機、授權、特殊驅動）</span></span><textarea id="md-desc" rows="3" maxlength="2000"></textarea></label>
+          <div class="rp-lines" id="md-lines" hidden></div>
+          <p class="err-line" id="md-err" hidden role="alert"></p>
+        </div>
+        <div class="dlg-foot">
+          <button class="btn" type="button" id="md-check">檢查</button>
+          <span class="rp-hint">檢查前會先儲存；失敗會直接給你要跑的指令</span>
+          <span class="grow"></span>
+          <button class="btn" type="button" id="md-cancel">取消</button>
+          <button class="btn primary" type="submit" id="md-save">儲存</button>
+        </div>
+      </form>
+    </dialog>
+
+    <script src="/ops.js"></script>
+    <script type="module" src="/machines.js"></script>
+    <script type="module" src="/frame-boot.js"></script>
+  </body>
+</html>

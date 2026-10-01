@@ -9,11 +9,11 @@
     <link rel="stylesheet" href="/frame.css" />
     <link rel="stylesheet" href="/ops.css" />
   </head>
-  <body class="app" data-nav="plans">
+  <body class="app" data-nav="repos">
     <nav id="app-rail" class="app-rail"><a href="/">回到對話</a></nav>
     <div class="app-main">
       <header class="app-top">
-        <h1>驗證方案</h1>
+        <h1>驗證方案 <span class="chip-s warn">舊版</span></h1>
         <span class="grow"></span>
         <span class="ops-who" id="ops-who"></span>
         <button class="btn primary" type="button" id="new-btn">＋ 新增</button>
@@ -25,6 +25,7 @@
             <span class="kicker">工程師設定一次</span>
             <p>一個方案回答「這套軟體改完，怎麼證明是好的」：在哪台機台跑、跑哪些指令、用哪裡的圖資、門檻多少、哪些檔案不能動、要收回哪些產出物。操作人員開新工作時只要挑方案與圖資。</p>
           </div>
+          <p class="muted">驗證方案是舊版做法：新的問題單用每個 repo 的「檢查」（<a href="/repos.html">Repo</a> → 檢查）。這一頁留著給已經在用的方案和評比。</p>
           <p class="err" id="page-err" hidden></p>
           <div class="plans-layout">
             <aside class="stack">

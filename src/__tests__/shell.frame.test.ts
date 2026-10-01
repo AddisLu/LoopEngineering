@@ -9,13 +9,13 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WEB = path.join(__dirname, '..', '..', 'web');
 const read = (f: string) => fs.readFileSync(path.join(WEB, f), 'utf8');
 const NAV_KEYS = [...read('frame.js').matchAll(/\['(\w+)', '[^']+', '(\/[^']*)'/g)].map((m) => m[1]!);
-const SHELL_PAGES = ['index.html', 'fix.html', 'board.html', 'flow.html', 'benchmarks.html', 'plans.html', 'morning.html', 'task.html', 'brain.html'];
+const SHELL_PAGES = ['index.html', 'fix.html', 'board.html', 'repos.html', 'machines.html', 'flow.html', 'benchmarks.html', 'plans.html', 'morning.html', 'task.html', 'brain.html'];
 
 describe('the app shell', () => {
   it('frame.js builds the rail into #app-rail, with every page in it', () => {
     const js = read('frame.js');
     expect(js).toContain("document.getElementById('app-rail')");
-    expect(NAV_KEYS).toEqual(['chat', 'fix', 'board', 'bench', 'plans', 'brain', 'morning']);
+    expect(NAV_KEYS).toEqual(['chat', 'fix', 'board', 'repos', 'machines', 'bench', 'brain', 'morning']);
   });
 
   it.each(SHELL_PAGES)('%s: body.app with a rail item, the rail, 你是, and the scripts in order', (page) => {

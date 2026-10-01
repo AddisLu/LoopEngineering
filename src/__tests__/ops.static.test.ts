@@ -64,7 +64,10 @@ describe('operator pages: 驗收 / 驗證方案 / 晨報', () => {
     const index = read('index.html');
     // new work starts at 問題單; /job.html still forwards old links to 工作流程 with their prefill
     expect(index).toMatch(/href="\/fix\.html"/);
-    expect(read('frame.js')).toContain("'/plans.html'");
+    // 驗證方案 left the rail for the Repo page's 檢查; the page says 舊版 and links there
+    expect(read('frame.js')).not.toContain("'/plans.html'");
+    expect(read('frame.js')).toContain("'/repos.html'");
+    expect(read('plans.html')).toContain('舊版');
     expect(read('board.html')).toMatch(/href="\/fix\.html"/);
     const job = read('job.html');
     expect(job).toContain("location.replace('/flow.html'");
