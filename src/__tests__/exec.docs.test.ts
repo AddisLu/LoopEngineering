@@ -143,4 +143,22 @@ describe('the manual documents the 問題單 flow', () => {
       expect(c, s).toContain(s);
     }
   });
+
+  it('chapters 7 and 8 list every 問題單 setting and the repo / machine / check commands', async () => {
+    const { DEFAULT_SETTINGS } = await import('../config.js');
+    const m = manual();
+    const settings = m.slice(m.indexOf('<section id="settings">'), m.indexOf('</section>', m.indexOf('<section id="settings">')));
+    const cli = m.slice(m.indexOf('<section id="cli">'), m.indexOf('</section>', m.indexOf('<section id="cli">')));
+    const keys = [
+      'approval_mode', 'manager_users', 'cloud_llm_allowed', 'failing_first', 'fix_attempts', 'fix_escalation', 'local_self_review',
+      'domain_routing', 'repo_map_inject', 'repo_map_budget_chars', 'fix_ledger_inject', 'repo_auto_ingest', 'llm_judge_backend',
+      'knowledge_distill_backend', 'planner_backend', 'intake_vision', 'intake_ocr_cmd', 'check_timeout_min', 'checks_baseline_refresh',
+      'gitea_issue_comments', 'gitea_poll_interval_min', 'gitea_merge_via_pr',
+    ];
+    for (const k of keys) {
+      expect(DEFAULT_SETTINGS, k).toHaveProperty(k);
+      expect(settings, k).toContain(`<code>${k}</code>`);
+    }
+    for (const s of ['repo import', 'repo list', 'machine add', 'machine check', 'machine list', 'check list', 'check trial', 'check baseline']) expect(cli, s).toContain(s);
+  });
 });

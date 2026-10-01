@@ -484,7 +484,7 @@
       <p>編輯器（對話框）的類型分段有五種：<b>建置 · 測試 · 重現腳本 · 圖資回歸 · 自訂</b>，欄位隨類型改變。其他欄位：在哪裡跑（引擎主機或某台機台，帶作業系統與健康點）、怎麼算過（<code>exit 0</code>／指標門檻／不比基準差）、逾時（分鐘，預設 20，<code>check_timeout_min</code>）、產出物、保護路徑（提示：量尺、評估程式、答案檔）、必過。</p>
       <p>檢查清單每一列：名稱 · 類型 · 在哪跑 · 怎麼算過 · 最近一次（✓ 2 小時前／✗／未跑過）· 必過 · ⋯（試跑一次／編輯／停用／刪除），可以拖曳排序（建置排在測試前面）。還沒有檢查時會寫「還沒有檢查。先加一個建置或測試檢查；之後每張問題單都會跑它們。」，旁邊的「用偵測到的指令建立」一次建好建置與測試兩項。</p>
       <ul>
-        <li><b>試跑一次＝偵測指標</b>：編輯器頁尾的「試跑一次」在 repo 的預設分支跑一次，輸出即時顯示，結束時列出「偵測到的指標」晶片。<b>指標門檻的名稱只能從這些晶片選</b>，還沒試跑過會先請你試跑，不必再猜名字。圖資回歸的指標名稱固定：<code>correct_rate</code>、<code>mismatches</code>、<code>missing</code>、<code>total</code>、<code>time_ms</code>。</li>
+        <li><b>試跑一次＝偵測指標</b>：編輯器頁尾的「試跑一次」在 repo 的預設分支跑一次，輸出即時顯示，結束時列出「偵測到的指標」晶片。<b>指標門檻的名稱只能從這些晶片選</b>，還沒試跑過會先請你試跑，不必再猜名字。圖資回歸的指標名稱固定：<code>correct_rate</code>、<code>mismatches</code>、<code>missing</code>、<code>total</code>、<code>time_ms</code>。CLI 做同樣的事：<code>loop check list &lt;repo id&gt;</code>、<code>loop check trial &lt;檢查 id&gt;</code>、<code>loop check baseline &lt;檢查 id&gt; &lt;run id&gt;</code>（第 7 章）。</li>
         <li><b>基準</b>：圖資回歸試跑完會顯示「基準：正確率 98.7%，5.1 s（@ 3f2a1c）」，按「設為基準」記下那個 commit 與數值。「不比基準差」在建立任務時換算成具體門檻（正確率 ≥ 基準、<code>time_ms</code> ≤ 基準 ×1.1），所以之後改基準不會影響已排入的任務。<code>checks_baseline_refresh</code>（預設關）打開後，夜間會自動重量預設分支已經往前走的基準。</li>
         <li><b>重現紅→綠</b>：驗收時，引擎把測試檔（這次新增的，加上符合 glob 的）放到 base 的暫存 worktree 跑，必須<b>失敗</b>；再在修改後的版本跑，必須<b>通過</b>。結果寫成「修改前：✗ exit 1 · 修改後：✓ exit 0」。在機台上跑的重現檢查，兩次都在那台跑。這是給本地模型最硬的護欄：它不能靠改測試過關。</li>
         <li><b>圖資回歸</b>：圖資是一個 Gitea repo，放原圖資料夾與答案檔，在 Repo 頁的「圖資」分頁連結。執行時：機台上 clone 或更新圖資 repo（有 LFS 就 <code>git lfs pull</code>，機台要裝 git-lfs）→ 代入 <code>{images}</code> <code>{answers}</code> <code>{out}</code> 執行 → 把 <code>{out}</code> 拉回 Spark → 引擎比對：答案檔的 json、csv、labels（每張圖一個 YOLO <code>.txt</code>）三種格式自動判斷，標籤相同才算對，兩邊都有框時 IoU 要 ≥ 0.5 → 產生指標與逐案例結果。軟體輸出在 <code>{out}/overlays/</code> 的覆蓋圖會一起收回。比對在引擎主機做，機台不需要 Python。</li>
@@ -706,7 +706,8 @@ loop machine list             # 每台的設定與上次檢查結果</code></pre
       <ul>
         <li>問題單：<code>POST /api/tickets</code>、<code>GET /api/tickets?mine=1</code>、<code>GET|PATCH /api/tickets/:id</code>、<code>POST /api/tickets/:id/analyse</code>、<code>/start</code>、<code>/approve-start</code>、<code>/reject-start</code>、<code>/cancel</code>、<code>POST /api/tickets/resolve-link</code>、<code>GET /api/tickets/:id/images/:n</code>、<code>GET /api/tickets/:id/plan</code></li>
         <li>Repo：<code>GET /api/repos</code>、<code>POST /api/repos/import</code>（回 202 與匯入工作，<code>GET /api/repos/import/:jobId</code> 看進度）、<code>GET|PATCH|DELETE /api/repos/:id</code>、<code>POST /api/repos/:id/redetect</code>、<code>GET /api/repos/:id/fixes</code></li>
-        <li>檢查：<code>/api/repos/:id/checks</code>、<code>POST /api/checks/:id/trial</code>、<code>POST /api/checks/:id/baseline</code>、<code>GET /api/checks/:id/runs</code></li>
+        <li>檢查：<code>GET|POST /api/repos/:id/checks</code>、<code>POST /api/repos/:id/checks/reorder</code>、<code>POST /api/repos/:id/checks/from-detected</code>（用偵測到的指令建立）、<code>GET|PATCH|DELETE /api/checks/:id</code>、<code>POST /api/checks/:id/trial</code>（試跑一次，立刻回 202 與 <code>run_id</code>，再輪詢 <code>GET /api/check-runs/:id</code>）、<code>POST /api/checks/:id/baseline</code>（<code>{run_id}</code>，設為基準）、<code>GET /api/checks/:id/runs</code></li>
+        <li>圖資：<code>GET|POST /api/datasets</code>、<code>PATCH|DELETE /api/datasets/:id</code></li>
         <li>機台：<code>GET|POST /api/machines</code>、<code>GET|PATCH|DELETE /api/machines/:name</code>、<code>POST /api/machines/:name/check</code>（清單另外附唯讀的 GPU 沙盒主機 <code>sandbox_hosts</code>）</li>
         <li>換模型重試：<code>POST /api/tasks/:id/escalate</code>（<code>{model?}</code>；不給就用 <code>fix_escalation</code> 的下一個）</li>
       </ul>
@@ -796,7 +797,15 @@ loop machine list             # 每台的設定與上次檢查結果</code></pre
           <tr><td><code>exec run [--host &lt;名&gt;] [--dir &lt;path&gt;] [--timeout &lt;秒&gt;] &lt;指令…&gt;</code></td><td>在沙盒裡跑一行指令（預設工作目錄 <code>&lt;資料目錄&gt;/exec/cli</code>），exit code 照實回傳。<code>--host</code> 時先把目錄同步到那台再執行。</td></tr>
           <tr><td><code>exec host add &lt;名&gt; --ssh &lt;user@host&gt; --work-root &lt;dir&gt;</code></td><td>登記（或更新）遠端沙盒主機。選填：<code>--port</code> <code>--image</code> <code>--gpus</code> <code>--memory</code> <code>--cpus</code> <code>--data &lt;那台路徑:容器路徑,…&gt;</code>（唯讀）<code>--desc</code> <code>--disabled</code>。</td></tr>
           <tr><td><code>exec host list｜rm &lt;名&gt;｜prune &lt;名&gt; [--days 7]</code></td><td>列出主機（* ＝ <code>exec_default_host</code>）、移除登記、刪掉那台上超過 N 天沒動的工作區。</td></tr>
-          <tr><td><code>verify-plan list [--repo]｜show &lt;id&gt;｜rm &lt;id&gt;</code></td><td>驗證方案（見第 26d 章）：列出、看內容、刪除。刪除不影響已經建立的任務。</td></tr>
+          <tr><td><code>repo import &lt;url&gt; [--name &lt;名稱&gt;] [--domain &lt;領域&gt;]</code></td><td>匯入 repo（見第 5b 章）：clone 到 <code>git_clone_root</code>（Gitea 的 token 經 <code>GIT_ASKPASS</code>，不進指令列）、偵測預設分支、建置／測試／前置指令與語言比例，登錄並加進 <code>prd_repo_allowlist</code>；<code>repo_auto_ingest</code> 開著時也加進知識庫（背景讀取）。印出每一步與 repo id。</td></tr>
+          <tr><td><code>repo list｜rm &lt;id&gt;</code></td><td>列出已登錄的 repo（id、名稱、預設分支、領域、本機路徑、語言比例）；移除登錄與 repo 選單的項目，clone 留在磁碟上。</td></tr>
+          <tr><td><code>machine add &lt;名&gt; --ssh &lt;user@host&gt; [--work-root &lt;dir&gt;]</code></td><td>登記（或更新）機台（見第 5b 章）。選填：<code>--port</code> <code>--os auto|linux|windows</code> <code>--shell auto|bash|powershell|cmd</code> <code>--labels &lt;csv&gt;</code> <code>--transport auto|gitea|copy</code> <code>--desc</code> <code>--disabled</code>。沒給 <code>--work-root</code> 時，Linux 用 <code>/srv/loop</code>，<code>--os windows</code> 用 <code>C:\loop</code>。</td></tr>
+          <tr><td><code>machine check &lt;名&gt;</code></td><td>機台健康檢查：SSH 登入與作業系統、git、能不能讀 Gitea、工作目錄、Python、GPU、repo 複本、圖資快取。結果存在機台上，還是 auto 的作業系統／shell／取碼方式會記住偵測結果；有 ❌ 時 exit code 1。</td></tr>
+          <tr><td><code>machine list｜rm &lt;名&gt;</code></td><td>列出機台與上次檢查（● 正常／● 有問題／○ 未檢查）；刪除登記（機台上的複本留著）。</td></tr>
+          <tr><td><code>check list &lt;repoId&gt;</code></td><td>這個 repo 的檢查（見第 5b 章），照執行順序：id、名稱、類型、在哪跑（機台或引擎主機）、怎麼算過、必過與否、最近一次，以及指令、門檻、基準、人工項目。</td></tr>
+          <tr><td><code>check trial &lt;checkId&gt;</code></td><td>試跑一次：在 repo 的預設分支、問題單會跑的同一個地方跑這項檢查，印出輸出最後 40 行、結果與 run id，以及偵測到的指標；沒過時 exit code 1。</td></tr>
+          <tr><td><code>check baseline &lt;checkId&gt; &lt;runId&gt;</code></td><td>設為基準：把一次通過的試跑回報的數值與 commit 記成這項檢查的基準（給「不比基準差」用）。</td></tr>
+          <tr><td><code>verify-plan list [--repo]｜show &lt;id&gt;｜rm &lt;id&gt;</code></td><td>驗證方案（見第 26d 章）：列出、看內容、刪除。刪除不影響已經建立的任務。問題單改用 repo 的檢查（第 5b 章）。</td></tr>
           <tr><td><code>verify-plan add --name* --step* [--repo] [--host] [--dataset-root] [--dataset-default] [--metrics] [--protect] [--artifacts] [--check] [--domain] [--setup] [--desc] [--id]</code></td><td>新增驗證方案，加 <code>--id</code> 則修改。<code>--step</code> 和 <code>--check</code> 可以重複；步驟裡的 <code>{dataset}</code> 會換成人員選的圖資資料夾。</td></tr>
           <tr><td><code>verify-plan datasets &lt;id&gt;</code></td><td>列出這個方案的圖資資料夾和張數（遠端機台用一次 ssh 查）。</td></tr>
           <tr><td><code>morning [--hours 24] [--json]</code></td><td>晨報：這段時間跑過的任務、驗證步驟、指標與門檻、PR、要人處理的原因（見第 26c 章）。</td></tr>
@@ -827,7 +836,15 @@ npm run loop -- add --title "修 auth bug" --goal "修正登入逾時" \
 npm run loop -- gate &lt;id&gt;      # 看審核清單
 npm run loop -- queue &lt;id&gt;     # 審核 + 入列
 npm run loop -- status         # 排程與用量總覽
-npm run loop -- list --status review</code></pre>
+npm run loop -- list --status review
+
+# 問題單的準備（見第 5b 章）
+npm run loop -- repo import http://gitea.corp:3000/aoi/cf-aoi.git
+npm run loop -- machine add aoi-1 --ssh aoi@aoi-1 --os windows --work-root 'C:\loop'
+npm run loop -- machine check aoi-1
+npm run loop -- check list r_…              # 這個 repo 的檢查
+npm run loop -- check trial ck_…            # 試跑一次，看偵測到的指標
+npm run loop -- check baseline ck_… cr_…    # 把那次試跑設為基準</code></pre>
     </section>
 
     <section id="settings">
@@ -835,7 +852,7 @@ npm run loop -- list --status review</code></pre>
       <h3>調度設定（存於 SQLite <code>settings</code> 表）</h3>
       <p>首次執行時由 <code>src/config.ts</code> 播種進 SQLite。門檻為 session/weekly 用量<b>百分比</b>。</p>
       <div class="note tip"><span class="ic">🎛️</span><span><b>兩種即時調整方式（免重啟）——排程器每個 tick 都重讀設定，所以最多 60 秒生效：</b><br>
-      1. <b>排程設定</b>：左側導覽的齒輪，或總覽 ⋯ →「排程設定」→ 改日夜門檻 → 儲存（Mac/手機遠端可改）。<br>
+      1. <b>排程設定</b>：左側導覽的齒輪，或總覽 ⋯ →「排程設定」→ 改日夜門檻 → 儲存（Mac/手機遠端可改）。問題單的「角色與核可」「機密」「修問題的準確度」三組也在這個對話框（第 5b 章）。<br>
       2. <b>CLI</b>：<code>loop config set day_session_max 88</code>（或 <code>loop config list</code> 看全部）。<br>
       兩者共用同一份驗證（<code>src/settings.ts</code>）。<b>卡住不派工時</b>，通常就是用量已達當前時段門檻——把該時段上限調高即可解卡。</span></div>
       <div class="tbl-wrap">
@@ -968,12 +985,56 @@ npm run loop -- list --status review</code></pre>
           <tr><td><code>local_task_window</code></td><td>（空）</td><td>本地模型任務只在這段時間開始，<code>HH:MM-HH:MM</code>，可跨午夜（例如 <code>19:00-07:00</code>）。空＝任何時間。</td></tr>
           <tr><td><code>morning_report_time</code></td><td>（空）</td><td>每天經 ntfy 推播晨報的時間 <code>HH:MM</code>；空＝不推播（晨報頁與 <code>loop morning</code> 照常可用）。</td></tr>
           <tr><td><code>artifacts_max_mb</code></td><td>1024</td><td>每次 run 收回產出物的總大小上限（MB）；超過的檔案列為「略過」。</td></tr>
-          <tr><td><code>gitea_url</code></td><td>（空）</td><td>公司內部 Gitea 的網址。任務 repo 的 origin 在這台時，PR 經 Gitea API 開，描述附上驗證結果。token 放 <code>GITEA_TOKEN</code>。</td></tr>
+          <tr><td><code>gitea_url</code></td><td>（空）</td><td>公司內部 Gitea 的網址。任務 repo 的 origin 在這台時，PR 經 Gitea API 開，描述附上驗證結果。token 放 <code>GITEA_TOKEN</code>。問題單也用它：匯入 repo（<code>http://</code> 只接受這台）、clone／fetch／push 帶 token、issue 接單與留言、合併 PR（見<a href="#tickets">第 5b 章</a>）。</td></tr>
         </tbody>
       </table></div>
 
       <h3>對話操作（見<a href="#chatops">第 26e 章</a>）</h3>
       <p>全部預設關閉；不開就和改版前完全一樣。完整說明見第 26e 章的設定表。主要是 <code>ops_chat_enabled</code>（總開關）、<code>ops_allowed_users</code>（誰能執行）、<code>ops_external_enabled</code>（loop-ops MCP 能不能準備與執行）。</p>
+
+      <h3>問題單：Repo、檢查與 Gitea issue（見<a href="#tickets">第 5b 章</a>）</h3>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>鍵</th><th>預設</th><th>說明</th></tr></thead>
+        <tbody>
+          <tr><td><code>repo_auto_ingest</code></td><td>true</td><td>匯入 repo 時一併登錄成知識庫來源，在背景讀取。只有匯入 repo 會觸發，其他地方不受影響。</td></tr>
+          <tr><td><code>check_timeout_min</code></td><td>20</td><td>檢查的預設逾時（分）；單一檢查可以在編輯器自己設。</td></tr>
+          <tr><td><code>checks_baseline_refresh</code></td><td>false</td><td>夜間自動重量圖資回歸的基準（預設分支往前走了才量）。</td></tr>
+          <tr><td><code>intake_vision</code></td><td>auto</td><td>問題單的截圖怎麼讀：<code>auto</code>（能看圖的本地模型 → OCR → 標「截圖未辨識」）／<code>model</code>／<code>ocr</code>／<code>off</code>。</td></tr>
+          <tr><td><code>intake_ocr_cmd</code></td><td>（空）</td><td>OCR 指令，<code>{file}</code> 是截圖路徑，例 <code>tesseract {file} - -l eng+chi_tra</code>；要先在 Spark 上安裝。</td></tr>
+          <tr><td><code>gitea_issue_comments</code></td><td>true</td><td>從 issue 來的問題單把進度留言回 issue（各 repo 另有「留言回報進度」）。不是從 issue 來的任務不受影響。</td></tr>
+          <tr><td><code>gitea_poll_interval_min</code></td><td>10</td><td>標籤自動接單多久掃一次（分）。沒有任何 repo 設標籤時完全不跑。</td></tr>
+          <tr><td><code>gitea_merge_via_pr</code></td><td>true</td><td>匯入的 Gitea repo 按「合併」時，在 Gitea 上合併 PR（main 有分支保護也能用）；不是從 Gitea 匯入的 repo 維持 FF-only 併回。</td></tr>
+          <tr><td><code>checks_migrated</code>／<code>gitea_issue_cursor</code></td><td>false／（空）</td><td>引擎自己記的狀態（驗證方案已經轉成檢查、標籤輪詢看到哪裡），不用改。</td></tr>
+        </tbody>
+      </table></div>
+
+      <h3>修問題的準確度（見<a href="#tickets">第 5b 章</a>；全部預設關＝和以前一樣）</h3>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>鍵</th><th>預設</th><th>說明</th></tr></thead>
+        <tbody>
+          <tr><td><code>failing_first</code></td><td>false</td><td>開始修之前，先確認重現指令在修改前會失敗；修改前就通過 → 停在需要處理，不花算力。</td></tr>
+          <tr><td><code>fix_attempts</code></td><td>（空）</td><td>驗證沒過時自己修幾次；空＝和中斷續跑共用 <code>max_resumes</code>（和以前一樣）。</td></tr>
+          <tr><td><code>fix_escalation</code></td><td>（空）</td><td>修不好時依序換成這些本地模型（<code>local:&lt;id&gt;</code>，逗號分隔），在同一個分支冷啟動；要先設 <code>fix_attempts</code> 才會自動換。</td></tr>
+          <tr><td><code>local_self_review</code></td><td>false</td><td>修完先讓本地模型自評：改了什麼、為什麼、風險、範圍外的改動，放在結果頁與 PR。</td></tr>
+          <tr><td><code>repo_map_inject</code></td><td>false</td><td>把 repo 地圖放進 LOOP_TASK.md 給實作模型。</td></tr>
+          <tr><td><code>repo_map_budget_chars</code></td><td>8000</td><td>repo 地圖放進 LOOP_TASK.md 的字數上限。</td></tr>
+          <tr><td><code>fix_ledger_inject</code></td><td>false</td><td>把這個 repo 過去類似的修法放進 LOOP_TASK.md。</td></tr>
+          <tr><td><code>domain_routing</code></td><td>false</td><td>依領域戰績（評比與快篩）自動挑本地模型；任務自己指定的模型仍然優先。</td></tr>
+        </tbody>
+      </table></div>
+
+      <h3>角色與公司模式（見<a href="#tickets">第 5b 章</a>）</h3>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>鍵</th><th>預設</th><th>說明</th></tr></thead>
+        <tbody>
+          <tr><td><code>approval_mode</code></td><td>self</td><td><code>self</code>＝自己排、自己驗收；<code>manager</code>＝主管核可後 Loop 才開始。</td></tr>
+          <tr><td><code>manager_users</code></td><td>（空）</td><td>主管，逗號分隔的 <code>ts:&lt;登入&gt;</code>、<code>name:&lt;名字&gt;</code>、<code>local</code>；主管模式下只有他們能核可。</td></tr>
+          <tr><td><code>cloud_llm_allowed</code></td><td>true</td><td><code>false</code>＝公司模式：所有 LLM 步驟只用本地模型，一定要雲端的功能會拒絕。</td></tr>
+          <tr><td><code>llm_judge_backend</code></td><td>claude</td><td>驗證模式 <code>llm</code> 的評審：<code>claude</code>（雲端，照舊）或 <code>local</code>。公司模式時視同 <code>local</code>。</td></tr>
+          <tr><td><code>knowledge_distill_backend</code></td><td>claude</td><td>結案時的知識蒸餾：<code>claude</code>／<code>local</code>／<code>off</code>。公司模式時 <code>claude</code> 視同 <code>local</code>。</td></tr>
+          <tr><td><code>planner_backend</code></td><td>claude</td><td>拆成多個任務的規劃器：<code>claude</code> 或 <code>local</code>。公司模式時視同 <code>local</code>。</td></tr>
+        </tbody>
+      </table></div>
 
       <h3>環境變數（<code>~/.config/loop-engineering/env</code>）</h3>
       <div class="tbl-wrap">
@@ -986,8 +1047,8 @@ npm run loop -- list --status review</code></pre>
           <tr><td><code>TOKENBAR_MCP_DIR</code></td><td>TokenBar 的 <code>mcp/</code> 安裝目錄，重用 usage-core 與共享快取。</td></tr>
           <tr><td><code>TOKENBAR_TOKEN_CACHE</code> / <code>TOKENBAR_HISTORY</code></td><td>共享 token 快取 / 歷史 ledger 路徑。</td></tr>
           <tr><td><code>NTFY_SERVER</code> / <code>NTFY_TOPIC</code></td><td>ntfy 推播（含一鍵暫停動作）。</td></tr>
-          <tr><td><code>LOOP_PUBLIC_URL</code></td><td>公開網址（例如 Tailscale 網址）。用在 ntfy 的暫停動作、晨報推播連結，以及 PR 描述裡指向驗收頁的連結。</td></tr>
-          <tr><td><code>GITEA_TOKEN</code></td><td>公司內部 Gitea 的 access token（repository 讀寫），搭配 <code>gitea_url</code> 開 PR（見第 26c 章）。</td></tr>
+          <tr><td><code>LOOP_PUBLIC_URL</code></td><td>公開網址（例如 Tailscale 網址）。用在 ntfy 的暫停動作、晨報推播連結，以及 PR 描述裡指向驗收頁的連結，以及 Gitea issue 留言裡的分析卡與結果頁連結（第 5b 章）。</td></tr>
+          <tr><td><code>GITEA_TOKEN</code></td><td>公司內部 Gitea 的 access token（repository 讀寫），搭配 <code>gitea_url</code> 開 PR（見第 26c 章）。問題單另外要 issue 留言、標籤、關閉與合併 PR 的權限；git 經 <code>GIT_ASKPASS</code> 取用，不進指令列、不寫進 <code>.git/config</code>（見第 5b 章）。</td></tr>
           <tr><td><code>GITHUB_TOKEN</code> / <code>GITHUB_API_URL</code></td><td>GitHub PAT；<code>GITHUB_API_URL</code> 選填，指向 GHES 時覆寫預設的 <code>api.github.com</code>（見第 21 章）。</td></tr>
           <tr><td><code>ADO_PAT</code> / <code>ADO_ORG</code> / <code>ADO_PROJECT</code></td><td>Azure DevOps PAT ＋ 組織／專案；三者需同時存在才會啟用 <code>ado</code> provider（見第 21 章）。</td></tr>
           <tr><td><code>LOOP_VOICE_PYTHON</code></td><td>faster-whisper venv 的 python 執行檔路徑；預設 <code>~/.local/share/loop-engineering/voice-venv/bin/python</code>（見第 22 章）。</td></tr>
@@ -2413,6 +2474,21 @@ loop config set ops_allowed_users ts:&lt;你的 Tailscale 帳號&gt;</code></pre
           <tr><td>POST</td><td><code>/api/tasks/:id/hold</code></td><td>blocked → 轉待確認（停止自動續跑）</td></tr>
           <tr><td>POST</td><td><code>/api/tasks/:id/merge</code></td><td>review 待合併/衝突 → 先把最新 base 併進任務分支、有變動就重新驗證（記錄在 run 上），通過才併回 base；沒通過回 <code>pending</code>、衝突回 <code>conflict</code>（並排入解衝突任務）</td></tr>
           <tr><td>PATCH</td><td><code>/api/tasks/:id</code></td><td>修改驗證設定：<code>verification_steps</code>、<code>verify_mode</code>、<code>acceptance_metrics</code>、<code>artifacts</code>、<code>protected_paths</code>、<code>verify_timeout_min</code>（執行中回 409）</td></tr>
+          <tr><td>POST</td><td><code>/api/tasks/:id/escalate</code></td><td>再試一次（換模型）：<code>{model?}</code>，不給就用 <code>fix_escalation</code> 的下一個本地模型，在同一個分支冷啟動重新排入（見第 5b 章）</td></tr>
+          <tr><td>GET/POST</td><td><code>/api/tickets</code></td><td>問題單：列出（<code>?mine=1</code>）／開一張（描述、repo、截圖、issue 連結），背景開始分析（見第 5b 章）</td></tr>
+          <tr><td>GET/PATCH</td><td><code>/api/tickets/:id</code></td><td>問題單與分析卡；改描述或回答「Loop 還不確定」會重新分析</td></tr>
+          <tr><td>POST</td><td><code>/api/tickets/:id/start</code> · <code>/approve-start</code> · <code>/reject-start</code> · <code>/analyse</code> · <code>/cancel</code></td><td>開始修（主管模式變待核可）、主管核可／退回、重新分析、取消草稿</td></tr>
+          <tr><td>POST</td><td><code>/api/tickets/resolve-link</code></td><td>貼上的 Gitea 網址是 repo、issue 還是 PR，repo 匯入了沒</td></tr>
+          <tr><td>GET/POST</td><td><code>/api/repos</code> · <code>/api/repos/import</code></td><td>已登錄的 repo；匯入（回 202 與匯入工作，<code>GET /api/repos/import/:jobId</code> 看進度）</td></tr>
+          <tr><td>GET/PATCH/DELETE</td><td><code>/api/repos/:id</code></td><td>repo 設定；刪除只移除登錄，clone 留著。另有 <code>POST /api/repos/:id/redetect</code>、<code>GET /api/repos/:id/fixes</code>（過去修法）</td></tr>
+          <tr><td>GET/POST</td><td><code>/api/repos/:id/checks</code></td><td>這個 repo 的檢查；<code>/reorder</code> 排序、<code>/from-detected</code> 用偵測到的指令建立</td></tr>
+          <tr><td>GET/PATCH/DELETE</td><td><code>/api/checks/:id</code></td><td>單一檢查</td></tr>
+          <tr><td>POST</td><td><code>/api/checks/:id/trial</code> · <code>/baseline</code></td><td>試跑一次（回 202 與 <code>run_id</code>，輪詢 <code>GET /api/check-runs/:id</code>）；設為基準（<code>{run_id}</code>）</td></tr>
+          <tr><td>GET</td><td><code>/api/checks/:id/runs</code> · <code>/api/check-runs/:id</code></td><td>檢查的執行紀錄；單次執行（輸出、指標）</td></tr>
+          <tr><td>GET/POST</td><td><code>/api/datasets</code></td><td>圖資登錄（另有 <code>PATCH/DELETE /api/datasets/:id</code>）</td></tr>
+          <tr><td>GET/POST</td><td><code>/api/machines</code></td><td>機台清單（另附唯讀的 GPU 沙盒主機 <code>sandbox_hosts</code>）；新增機台</td></tr>
+          <tr><td>GET/PATCH/DELETE</td><td><code>/api/machines/:name</code></td><td>單一機台</td></tr>
+          <tr><td>POST</td><td><code>/api/machines/:name/check</code></td><td>機台健康檢查，結果存在機台上</td></tr>
           <tr><td>GET</td><td><code>/api/whoami</code></td><td>引擎認定的你是誰：Tailscale 登入優先，其次是頁面填的名字，都沒有就是 <code>local</code></td></tr>
           <tr><td>GET</td><td><code>/api/tasks/:id/result</code></td><td>PR 連結、gap-review、失敗原因、log 尾巴</td></tr>
           <tr><td>DELETE</td><td><code>/api/tasks/:id</code></td><td>永久刪除任務＋磁碟產物（<code>?force=1</code>）</td></tr>
