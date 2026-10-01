@@ -30,6 +30,13 @@ export const ICONS = {
   chip: ['M8 6h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2z', 'M9 2v4', 'M15 2v4', 'M9 18v4', 'M15 18v4', 'M2 9h4', 'M2 15h4', 'M18 9h4', 'M18 15h4'],
   code: ['M8 7l-5 5 5 5', 'M16 7l5 5-5 5'],
   doc: ['M6 3h8l4 4v14H6z', 'M14 3v4h4', 'M9 12h6', 'M9 16h6'],
+  // 問題單 (fix.js): the rail item, 改一下, a pasted link, the import hint, 重現 before-run results
+  ticket: ['M4 8a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2a2 2 0 0 0 0 4v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-2a2 2 0 0 0 0-4z', 'M13 8v8'],
+  pencil: ['M4 20h4l10-10-4-4L4 16v4z', 'M13 7l4 4'],
+  link: ['M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1.5 1.5', 'M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1.5-1.5'],
+  info: ['M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18', 'M12 11v5', 'M12 8h.01'],
+  alert: ['M12 3l9.5 17h-19z', 'M12 10v4', 'M12 17.5v.5'],
+  circleCheck: ['M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18', 'M8.5 12.5l2.5 2.5 4.5-5'],
   bolt: ['M13 2L4 14h7l-1 8 9-12h-7z'],
   box: ['M3 7.5l9-4.5 9 4.5-9 4.5z', 'M3 7.5v9l9 4.5 9-4.5v-9', 'M12 12v9'],
   spark: ['M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z', 'M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z'],
@@ -169,8 +176,9 @@ export const isLocal = (m) => String(m || '').startsWith('local:');
 
 const NAV = [
   ['chat', '對話', '/', 'chat'],
+  // 問題單 replaced 工作流程 here; /flow.html stays reachable from the links that still point at it
+  ['fix', '問題單', '/fix.html', 'ticket'],
   ['board', '總覽', '/board.html', 'overview'],
-  ['flow', '工作流程', '/flow.html', 'flow'],
   ['bench', '評比', '/benchmarks.html', 'bench'],
   ['plans', '驗證方案', '/plans.html', 'shield', 'minor'],
   ['brain', '知識星圖', '/brain.html', 'stars', 'minor'],
