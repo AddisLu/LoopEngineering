@@ -254,6 +254,27 @@
           <input name="fix_escalation" placeholder="local:glm-5.3-flash-kv4g, local:deepseek-v4-flash" autocomplete="off" data-clearable />
         </label>
 
+        <div class="settings-group">Repo 檔案與經驗（知識星圖）</div>
+        <div class="row">
+          <label>匯入 repo 與 HEAD 變動時自動分析（不用模型，幾秒）
+            <select name="repo_profile_auto"><option value="true">開</option><option value="false">關</option></select>
+          </label>
+          <label>分析後讓本地模型補模組摘要、寫法規則、陷阱與參數意義（草稿）
+            <select name="repo_profile_infer"><option value="false">關</option><option value="true">開</option></select>
+          </label>
+        </div>
+        <div class="row">
+          <label>把核可過的規範、陷阱與解法給實作模型（派工、分析、驗證失敗時）
+            <select name="repo_profile_inject"><option value="false">關</option><option value="true">開</option></select>
+          </label>
+          <label>任務沒有一次過時，結案整理成陷阱與解法草稿
+            <select name="learn_from_runs"><option value="false">關</option><option value="true">開</option></select>
+          </label>
+        </div>
+        <label>給實作模型的規範與經驗最多幾個字
+          <input name="repo_profile_budget_chars" type="number" min="800" max="20000" autocomplete="off" />
+        </label>
+
         <div class="settings-group">晨報</div>
         <label>每天推送晨報的時間（HH:MM，經 ntfy；留空＝不推送，晨報頁照常可看）
           <input name="morning_report_time" placeholder="08:00" autocomplete="off" data-clearable />

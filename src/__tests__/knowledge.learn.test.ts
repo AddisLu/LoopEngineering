@@ -128,3 +128,24 @@ describe('using what was learned', () => {
     expect(sel.items.map((i) => i.id)).toEqual(['k_plain']);
   });
 });
+
+describe('全覽: links derived from facet nodes', () => {
+  it('pitfall → module by directory, pitfall → playbook by shared files', async () => {
+    const { facetEdges } = await import('../knowledge/store.js');
+    const n = (id: string, kind: string, meta: unknown) => ({ id, kind, facet: kind, scope: 'repo:/r', meta_json: JSON.stringify(meta) }) as never;
+    const edges = facetEdges([
+      n('k_mod', 'module', { evidence: [{ file: 'ip/src/main.cpp' }] }),
+      n('k_grab', 'module', { evidence: [{ file: 'grab/src/main.cpp' }] }),
+      n('k_pit', 'pitfall', { trigger: { files: ['ip/src/config/'] } }),
+      n('k_book', 'playbook', { trigger: { files: ['ip/src/config/config_parser.h'] } }),
+    ]);
+    expect(edges).toEqual(
+      expect.arrayContaining([
+        { src: 'k_pit', dst: 'k_mod', relation: 'applies-to' },
+        { src: 'k_book', dst: 'k_mod', relation: 'applies-to' },
+        { src: 'k_pit', dst: 'k_book', relation: 'solved-by' },
+      ]),
+    );
+    expect(edges.some((e) => e.dst === 'k_grab')).toBe(false);
+  });
+});

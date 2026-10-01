@@ -1,4 +1,5 @@
 import { execFile, execFileSync } from 'node:child_process';
+import { backendFor, localPrompt } from '../local/backend.js';
 import { promisify } from 'node:util';
 import type Database from 'better-sqlite3';
 import { getNum } from '../db/index.js';
@@ -72,7 +73,7 @@ interface ApprovedNode extends KnowledgeNode {
  * already relies on via content_rowid='rowid'). */
 function loadApprovedNodes(db: Database.Database): ApprovedNode[] {
   return db
-    .prepare(`SELECT rowid AS rowid, * FROM knowledge_nodes WHERE status = 'approved' AND invalid_at IS NULL`)
+    .prepare(`SELECT rowid AS rowid, * FROM knowledge_nodes WHERE status = 'approved' AND invalid_at IS NULL AND facet IS NULL`)
     .all() as ApprovedNode[];
 }
 
@@ -239,9 +240,15 @@ export async function suggestRelations(
   db: Database.Database,
   opts: SuggestRelationsOptions = {},
 ): Promise<KnowledgeEdge[] | null> {
-  if (!opts.llmExec && !hasClaudeCli()) return null;
-  const hardLimit = getNum(db, 'hard_limit_pct', 95);
-  if (readUsage().session.percent >= hardLimit) return null;
+  // knowledge_distill_backend: claude (as before) | local (the served model; no usage guard) | off.
+  // 公司模式 (cloud_llm_allowed=false) turns claude into local.
+  const backend = opts.llmExec ? 'claude' : backendFor(db, 'knowledge_distill_backend');
+  if (backend === 'off') return null;
+  if (backend === 'claude') {
+    if (!opts.llmExec && !hasClaudeCli()) return null;
+    const hardLimit = getNum(db, 'hard_limit_pct', 95);
+    if (readUsage().session.percent >= hardLimit) return null;
+  }
   if (!isVecAvailable(db)) return null;
 
   const nodes = loadApprovedNodes(db);
@@ -253,7 +260,7 @@ export async function suggestRelations(
     if (!pairs.length) return null;
 
     const nodeById = new Map<string, KnowledgeNode>(nodes.map((n) => [n.id, n]));
-    const run = opts.llmExec ?? defaultExec;
+    const run = opts.llmExec ?? (backend === 'local' ? (prompt: string) => localPrompt(db, prompt) : defaultExec);
     const out = await run(buildPrompt(pairs, nodeById));
     if (!out) return null;
 

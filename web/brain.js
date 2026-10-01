@@ -50,9 +50,11 @@ async function actEdge(path, method = 'POST') {
 const KIND_ZH = {
   environment: '環境', constraint: '限制', preference: '偏好',
   project: '專案', tech: '技術', fact: '事實', person: '人物', repo: '儲存庫',
+  // Repo 檔案 and what Loop learned (知識 page → Repo 檔案)
+  requirement: '需求', style: '寫法', module: '模組', pitfall: '陷阱', playbook: '解法', param: '參數', case: '機況案例',
 };
 // curated-node provenance (knowledge_nodes.source) -> 中文
-const NODE_SOURCE_ZH = { seed: '種子', distilled: 'AI 草稿', manual: '手動', mcp: 'MCP' };
+const NODE_SOURCE_ZH = { seed: '種子', distilled: 'AI 草稿', manual: '手動', mcp: 'MCP', detected: '偵測', inferred: '推論', learned: '學到' };
 // friendly overrides for a registered source's uri basename (else the basename is used as-is)
 const SOURCE_BASENAME_ZH = { SSoT: 'SSoT 筆記', OpenProject_Exec_Report: 'OpenProject 報表' };
 
@@ -81,6 +83,7 @@ function friendlySource(id) {
 const KIND_CHIPS = [
   ['all', '全部'], ['environment', '環境'], ['constraint', '限制'],
   ['preference', '偏好'], ['project', '專案'], ['tech', '技術'], ['fact', '事實'],
+  ['pitfall', '陷阱'], ['playbook', '解法'], ['style', '寫法'], ['module', '模組'], ['param', '參數'], ['case', '機況案例'],
 ];
 const STATUS_CHIPS = [['all', '全部'], ['approved', '核可'], ['draft', '草稿']];
 

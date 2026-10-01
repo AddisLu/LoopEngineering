@@ -316,7 +316,51 @@ export type GraphView = 'default' | 'brain' | 'brain-full';
 
 /** default view's edges are always curated KnowledgeEdge rows; brain/brain-full additionally
  * synthesize cross-layer BridgeEdge entries (see bridge.ts) that were never persisted. */
-export type GraphEdge = KnowledgeEdge | BridgeEdge;
+/** A link the 全覽 graph derives from Repo 檔案 facet nodes (never stored): 陷阱／解法／案例 → 模組, 陷阱 → 解法. */
+export interface FacetEdge {
+  src: string;
+  dst: string;
+  relation: 'applies-to' | 'solved-by';
+}
+export type GraphEdge = KnowledgeEdge | BridgeEdge | FacetEdge;
+
+/** Files a facet node is about: its trigger files, else its evidence files. */
+function facetFiles(n: KnowledgeNode & { meta_json?: string | null }): string[] {
+  try {
+    const m = JSON.parse(n.meta_json ?? '{}') as { trigger?: { files?: string[] }; evidence?: Array<{ file?: string }> };
+    const files = [...(m.trigger?.files ?? []), ...(m.evidence ?? []).map((e) => e.file ?? '')].filter(Boolean);
+    return [...new Set(files.map((f) => f.replace(/\\/g, '/').replace(/^\.\//, '')))];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * The 全覽 graph's links between a repo's facet nodes: a pitfall / playbook / case touching files of
+ * a module points at the module (its entry files' top directory), and a pitfall points at the
+ * playbooks that work on the same files.
+ */
+export function facetEdges(nodes: Array<KnowledgeNode & { meta_json?: string | null; facet?: string | null }>): FacetEdge[] {
+  const out: FacetEdge[] = [];
+  const top = (f: string) => f.split('/')[0] ?? '';
+  const byScope = new Map<string, typeof nodes>();
+  for (const n of nodes) if (n.facet) byScope.set(n.scope, [...(byScope.get(n.scope) ?? []), n]);
+  for (const group of byScope.values()) {
+    const modules = group.filter((n) => n.kind === 'module').map((n) => ({ id: n.id, dirs: new Set(facetFiles(n).map(top).filter(Boolean)) }));
+    const learned = group.filter((n) => n.kind === 'pitfall' || n.kind === 'playbook' || n.kind === 'case');
+    for (const n of learned) {
+      const dirs = new Set(facetFiles(n).map(top).filter(Boolean));
+      for (const m of modules) if ([...dirs].some((d) => m.dirs.has(d))) out.push({ src: n.id, dst: m.id, relation: 'applies-to' });
+    }
+    const pits = learned.filter((n) => n.kind === 'pitfall');
+    const books = learned.filter((n) => n.kind === 'playbook');
+    for (const p of pits) {
+      const pf = facetFiles(p);
+      for (const b of books) if (facetFiles(b).some((f) => pf.some((g) => f === g || f.startsWith(g) || g.startsWith(f)))) out.push({ src: p.id, dst: b.id, relation: 'solved-by' });
+    }
+  }
+  return out;
+}
 
 export interface GraphOpts {
   kind?: Kind;
@@ -550,7 +594,7 @@ export function graph(
     const draftEdges = edgesFor(db, [...baseNodeIds], { status: 'draft' }).filter(
       (e) => baseNodeIds.has(e.src) && baseNodeIds.has(e.dst),
     );
-    edges = [...edges, ...draftEdges, ...bridgeEdgesCached(db)];
+    edges = [...edges, ...draftEdges, ...bridgeEdgesCached(db), ...facetEdges(nodes as Array<KnowledgeNode & { meta_json?: string | null; facet?: string | null }>)];
   }
   let documents = loadGraphDocuments(db, view);
 
