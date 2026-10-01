@@ -44,6 +44,8 @@ export interface ImportDeps {
   timeoutMs?: number;
   /** the knowledge ingest of the repo's git source (default ingestOne); runs in the background */
   ingest?: (db: Database.Database, sourceId: string) => Promise<unknown>;
+  /** after a successful import: the Repo 檔案 job (default src/repo/profileJob.ts runProfile; tests inject) */
+  afterImport?: (db: Database.Database, repoId: string) => void;
   /** the Gitea host (default: from gitea_url) */
   giteaHost?: string | null;
 }
@@ -256,6 +258,17 @@ async function runImport(db: Database.Database, job: ImportJob, deps: ImportDeps
     }
     job.status = 'done';
     note(db, `repo 匯入：${repo.name}（${repo.id}）← ${redactUrl(job.url)} → ${job.dest}${job.by ? ` by ${job.by}` : ''}`);
+    // Repo 檔案 (stage A in seconds; stage B only with repo_profile_infer), in the background
+    if (getBool(db, 'repo_profile_auto', true)) {
+      const infer = getBool(db, 'repo_profile_infer', false);
+      const after =
+        deps.afterImport ??
+        ((d: Database.Database, id: string) =>
+          void import('./profileJob.js')
+            .then((m) => m.runProfile(d, id, { infer }))
+            .catch(() => undefined));
+      after(db, repo.id);
+    }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     const cur = job.steps.at(-1);

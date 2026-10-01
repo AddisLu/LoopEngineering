@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { refreshProfileIfStale } from '../repo/profileJob.js';
 import { matchPitfalls, matchPlaybooks, renderLearned } from '../knowledge/learn.js';
 import { machineBoxLines } from './context.js';
 import path from 'node:path';
@@ -1027,6 +1028,8 @@ async function runAnalysis(db: Database.Database, taskId: string, deps: AnalyseD
     let map: MapInfo = { markdown: '', symbols: [], sha: null, rebuilt: false };
     try {
       map = refreshRepoMap(db, repo, deps.git);
+      // the Repo 檔案 feeds the prompts only with repo_profile_inject: keep it current with HEAD then
+      if (getBool(db, 'repo_profile_inject', false)) refreshProfileIfStale(db, repo);
       mark('map', 'done', `${repo.name} @ ${branch}，${map.rebuilt ? '地圖已更新' : '地圖是最新的'}${map.sha ? `（${map.sha.slice(0, 7)}）` : ''}`);
     } catch (err) {
       mark('map', 'failed', `地圖產生失敗：${errText(err)}`);

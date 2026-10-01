@@ -64,7 +64,10 @@ function paramLines(db: Database.Database, repoId: string, text: string): string
   const rows = db.prepare("SELECT key, section, file, line, value, meaning FROM code_index WHERE repo_id = ? AND kind = 'param'").all(repoId) as Array<{ key: string; section: string | null; file: string; line: number; value: string | null; meaning: string | null }>;
   const named = rows.filter((r) => r.key.length >= 4 && new RegExp(`\\b${r.key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(text)).slice(0, 8);
   const use = db.prepare("SELECT file, line FROM code_index WHERE repo_id = ? AND kind = 'param_use' AND key = ? LIMIT 2");
+  const repoPath = (db.prepare('SELECT local_path FROM repos WHERE id = ?').get(repoId) as { local_path: string } | undefined)?.local_path;
+  const inferred = db.prepare("SELECT body FROM knowledge_nodes WHERE scope = ? AND kind = 'param' AND status = 'approved' AND invalid_at IS NULL AND title = ? LIMIT 1");
   return named.map((r) => {
+    if (!r.meaning && repoPath) r.meaning = (inferred.get(repoScope(repoPath), `[${r.section ?? ''}] ${r.key}`) as { body: string } | undefined)?.body ?? null;
     const where = (use.all(repoId, r.key) as Array<{ file: string; line: number }>).map((u) => `${u.file}:${u.line}`).join('、');
     return `- \`[${r.section ?? ''}] ${r.key}\`（預設 ${r.value ?? '—'}，定義在 ${r.file}:${r.line}${where ? `，程式在 ${where} 讀取` : ''}）${r.meaning ? `：${r.meaning.replace(/\s+/g, ' ').slice(0, 160)}` : ''}`;
   });

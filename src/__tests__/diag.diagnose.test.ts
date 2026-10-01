@@ -147,6 +147,6 @@ describe('Repo 檔案 reads', () => {
     expect(drafts).toEqual([expect.objectContaining({ id: d.id, repo: { id: repo.id, name: 'cf-aoi' } })]);
     expect((await app.inject({ method: 'POST', url: '/api/knowledge/approve-many', payload: { ids: [d.id] } })).json()).toEqual({ ok: true, approved: 1 });
     expect((await app.inject({ method: 'GET', url: `/api/repos/${repo.id}/profile` })).json().nodes.pitfall[0]).toMatchObject({ id: d.id, status: 'approved' });
-    expect((await app.inject({ method: 'POST', url: `/api/repos/${repo.id}/profile`, payload: {} })).statusCode).toBe(501);
+
   });
 });

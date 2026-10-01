@@ -5,6 +5,7 @@ import { identityOf, IdentityError } from './identity.js';
 import { getRepo, listRepos } from '../repo/store.js';
 import { profileView, searchIndex } from '../repo/profileStore.js';
 import { repoScope } from '../knowledge/types.js';
+import { runProfile } from '../repo/profileJob.js';
 import { createReport, DiagError, getReport, listReports, recordCase, runDiagnosis, type DiagnoseDeps } from '../diag/diagnose.js';
 import type { DiagInput } from '../diag/types.js';
 
@@ -53,9 +54,9 @@ export function registerProfileRoutes(app: FastifyInstance, db: Database.Databas
   app.post('/api/repos/:id/profile', async (req, reply) => {
     const repo = getRepo(db, idOf(req));
     if (!repo) return reply.code(404).send({ error: '沒有這個 repo' });
-    if (!opts.runProfile) return reply.code(501).send({ error: '這個版本還不能分析 repo' });
     const infer = ((req.body ?? {}) as { infer?: unknown }).infer === true;
-    void opts.runProfile(db, repo.id, { infer }).catch((err) => console.error('[profile]', err));
+    const run = opts.runProfile ?? ((d: Database.Database, id: string, o: { infer: boolean }) => runProfile(d, id, o));
+    void run(db, repo.id, { infer }).catch((err) => console.error('[profile]', err));
     logEvent(db, { kind: 'note', detail: `Repo 檔案：${repo.name} ${infer ? '本地模型補充' : '重新分析'} by ${who(req)}` });
     return reply.code(202).send({ ok: true });
   });
