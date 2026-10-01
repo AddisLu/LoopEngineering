@@ -136,33 +136,40 @@ function paintProfile() {
 
 function requirementsCard(f, fit) {
   const reqs = f.requirements || [];
-  const rows = reqs.map((r) =>
-    h('tr', null, h('td.nowrap', null, KIND_ZH[r.kind] || r.kind), h('td', null, h('b', null, r.name), r.version ? ` ${r.version}` : '', r.module ? h('span.kp-muted', null, ` · ${r.module}`) : null, r.note ? h('div.kp-note', null, r.note) : null), h('td', null, evList(r.evidence))),
+  const row = (r) =>
+    h('tr', null, h('td.nowrap', null, KIND_ZH[r.kind] || r.kind), h('td', null, h('b', null, r.name), r.version ? ` ${r.version}` : '', r.note ? h('div.kp-note', null, r.note) : null), h('td', null, evList(r.evidence)));
+  // grouped by module (one build), each folded except the first two
+  const groups = new Map();
+  for (const r of reqs) groups.set(r.module || '整個 repo', [...(groups.get(r.module || '整個 repo') || []), r]);
+  const blocks = [...groups].map(([mod, list], i) =>
+    h('details.kp-group', { open: i < 2 }, h('summary', null, h('b', null, mod), h('span.kp-muted', null, ` · ${list.length} 項：${[...new Set(list.map((r) => r.name))].slice(0, 5).join('、')}${list.length > 5 ? '…' : ''}`)), h('table.kp-table', null, h('tbody', null, list.map(row)))),
   );
   const fitRows = (fit || []).map((m) => {
     const bad = m.items.filter((i) => i.state === 'bad');
     const unk = m.items.filter((i) => i.state === 'unknown');
     return h(
       'details.kp-fit',
-      { open: false },
+      null,
       h('summary', null, h('span', { dataset: { fit: bad.length ? 'bad' : unk.length ? 'unknown' : 'ok' } }, bad.length ? '✗' : unk.length ? '？' : '✓'), h('b', null, m.name), h('span.kp-muted', null, ` 符合 ${m.ok}/${m.items.length}${bad.length ? `，不符 ${bad.length}` : ''}${unk.length ? `，不確定 ${unk.length}` : ''}`)),
       h('ul', null, m.items.map((i) => h('li', { dataset: { fit: i.state } }, `${i.state === 'ok' ? '✓' : i.state === 'bad' ? '✗' : '？'} ${i.requirement}：${i.why}`))),
     );
   });
   return card(
     '環境需求',
-    '挑機台用；「不確定」通常是機台頁的「其他軟體」還沒寫',
-    reqs.length ? h('table.kp-table', null, h('tbody', null, rows)) : h('p.kp-muted', null, '沒有偵測到需求。'),
-    fitRows.length ? [h('h3', null, '哪台機台適合'), fitRows] : h('p.kp-muted', null, '還沒有機台；到機台頁新增並按「檢查」。'),
+    `${reqs.length} 項；挑機台用，「不確定」通常是機台頁的「其他軟體」還沒寫`,
+    h('h3', null, '哪台機台適合'),
+    fitRows.length ? fitRows : h('p.kp-muted', null, '還沒有機台；到機台頁新增並按「檢查」。'),
+    h('h3', null, '各模組需要'),
+    reqs.length ? blocks : h('p.kp-muted', null, '沒有偵測到需求。'),
   );
 }
 
 function styleCard(styles, rules) {
-  const one = (s) =>
+  const one = (s, i) =>
     h(
-      'div.kp-style',
-      null,
-      h('h3', null, s.module || '整個 repo', h('span.kp-muted', null, ` · 抽樣 ${s.files_sampled} 檔${s.languages && s.languages.length ? ` · ${s.languages.join('、')}` : ''}`)),
+      'details.kp-style',
+      { open: i === 0 },
+      h('summary', null, h('b', null, s.module || '整個 repo'), h('span.kp-muted', null, ` · 抽樣 ${s.files_sampled} 檔${s.languages && s.languages.length ? ` · ${s.languages.join('、')}` : ''}${s.encoding && s.encoding.dominant && s.encoding.dominant !== 'utf8' ? ` · ${s.encoding.dominant === 'big5' ? 'Big5' : s.encoding.dominant === 'utf8_bom' ? 'UTF-8 BOM' : '編碼混用'}` : ''}`)),
       h(
         'div.kp-facts',
         null,

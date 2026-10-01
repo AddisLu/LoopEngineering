@@ -94,6 +94,8 @@ describe('機況診斷', () => {
     expect(prompts[0]).toContain('## 工程師描述的現象\nIP01 一直判 bad_json');
     expect(prompts[0]).toContain('## 和預設不同的參數');
     expect(prompts[0]).toContain('預設 1 → 機台 2');
+    // the param is read in config_parser.h, not where the incident happened: the model is told so
+    expect(prompts[0]).toContain('程式讀取處：ip/src/config/config_parser.h:178（讀取處和事件無關）');
     // history and reading back
     expect((await app.inject({ method: 'GET', url: '/api/diag' })).json().reports[0].id).toBe(id);
     expect((await app.inject({ method: 'GET', url: `/api/diag/${id}` })).json().report.result.summary).toContain('recipe');

@@ -257,3 +257,5 @@ async function boot(repoId) {
 }
 
 window.addEventListener('loop:diag-show', (e) => void boot(e.detail && e.detail.repoId));
+// opened straight on #diag: the tab was shown before this module loaded
+if (document.body.dataset.ktab === 'diag') void boot(new URLSearchParams(location.hash.replace(/^#[^&]*&?/, '')).get('repo'));
