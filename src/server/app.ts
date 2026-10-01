@@ -59,6 +59,7 @@ import { registerRepoRoutes, type RepoRouteOptions } from './repoRoutes.js';
 import { registerMachineRoutes, type MachineRouteOptions } from './machineRoutes.js';
 import { registerCheckRoutes, type CheckRouteOptions } from './checkRoutes.js';
 import { registerTicketRoutes, type TicketRouteOptions } from './ticketRoutes.js';
+import { registerProfileRoutes, type ProfileRouteOptions } from './profileRoutes.js';
 import { buildMorningReport } from '../report/morning.js';
 import fastifyWebsocket from '@fastify/websocket';
 import { registerTerminalRoutes, type TerminalRouteOptions } from './terminalRoutes.js';
@@ -89,6 +90,8 @@ export interface AppOptions {
   machineRoutes?: MachineRouteOptions;
   checkRoutes?: CheckRouteOptions;
   ticketRoutes?: TicketRouteOptions;
+  /** Repo 檔案 / 機況診斷 (the profile job and the diagnosis model are injectable) */
+  profileRoutes?: ProfileRouteOptions;
   db?: Database.Database;
   apiToken?: string | null;
   /** Second, read-only bearer: GET-only, restricted to the SSoT-read whitelist (see isReadonlyAllowed). */
@@ -648,6 +651,7 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
   registerMachineRoutes(app, db, opts.machineRoutes ?? {});
   registerCheckRoutes(app, db, opts.checkRoutes ?? {});
   registerTicketRoutes(app, db, opts.ticketRoutes ?? {});
+  registerProfileRoutes(app, db, opts.profileRoutes ?? {});
   registerPlanRoutes(app, db, { hostExec: opts.planHostExec, check: opts.planCheck, reviewExec: opts.prdReviewExec });
   registerReviewRoutes(app, db, { sandboxRun: opts.sandboxRun, releaseFetch: opts.releaseFetch, releaseToken: opts.releaseToken, identity: opts.chatIdentity });
   // inside a child plugin so it loads after @fastify/websocket (a `websocket: true` route

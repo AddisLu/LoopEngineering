@@ -131,6 +131,8 @@ describe('the new pages stay textContent-only and offline', () => {
   const files = ['frame.js', 'frame-boot.js', 'inbox.js', 'charts.js', 'flow/layout.js', 'flow/canvas.js', 'flow.js', 'board-flow.js', 'benchmarks.js', 'prd-form.js'];
   // the Repo (檢查, 圖資) and 機台 pages
   files.push('repos.js', 'checks.js', 'checks-api.js', 'repo-ui.js', 'machines.js');
+  // 知識 page: Repo 檔案 and 機況診斷
+  files.push('knowledge-profile.js', 'diag.js', 'fix-handoff.js');
   it.each(files)('%s never builds markup from strings', (f) => {
     const src = fs.readFileSync(path.join(WEB, f), 'utf8');
     for (const bad of ['innerHTML', 'outerHTML', 'insertAdjacentHTML', 'document.write']) expect(src, `${f} uses ${bad}`).not.toContain(bad);

@@ -199,7 +199,7 @@ async function recordCase() {
   if (fix === null) return;
   try {
     current = (await api(`/api/diag/${enc(current.id)}/case`, 'POST', { cause: cause.trim(), resolution: fix.trim() })).report;
-    toast('已記成案例（草稿，核可後相同特徵會直接命中）');
+    toast('已記成案例：之後相同特徵的機況會先找到它');
     paintResult();
   } catch (err) {
     toast(`記不了：${err.message}`, 'bad');
