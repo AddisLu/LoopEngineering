@@ -70,9 +70,9 @@ export function metricsText(rows) {
     .map((r) => `${r.name} ${r.op} ${r.target}`)
     .join('; ');
 }
-/** the numbers a run reported: metrics_json is {values, checks, pass} or the flat values */
+/** the numbers a run reported: `metrics` (the route parses metrics_json) is {values, checks, pass} or the flat values */
 export function runValues(run) {
-  const v = parseJson(run && run.metrics_json);
+  const v = parseJson(run && (run.metrics != null ? run.metrics : run.metrics_json));
   const src = v && typeof v.values === 'object' && v.values ? v.values : v;
   const out = {};
   for (const [k, x] of Object.entries(src || {})) if (typeof x === 'number' && Number.isFinite(x)) out[k] = x;
@@ -147,12 +147,10 @@ export function mountChecks(el, ctx) {
   async function fromDetected(e) {
     const btn = e && e.currentTarget;
     if (btn) btn.disabled = true;
-    const before = checks.length;
     try {
-      await C.checksFromDetected(ctx.repo.id);
+      const r = await C.checksFromDetected(ctx.repo.id);
       await refresh();
-      const n = checks.length - before;
-      toast(n > 0 ? `已用偵測到的指令建立 ${n} 個檢查` : '偵測到的指令都已經有檢查了');
+      toast(r.created.length ? `已建立：${r.created.map((c) => c.name).join('、')}` : `偵測到的指令都已經有檢查了${r.skipped.length ? `（${r.skipped.join('、')}）` : ''}`);
     } catch (err) {
       toast(`建立失敗：${err.message}`, 'bad');
     } finally {
@@ -205,7 +203,7 @@ export function mountChecks(el, ctx) {
     if (c.kind === 'manual') return h('span.rp-muted', null, '—');
     const r = c.last_run;
     if (!r || (r.ok == null && !r.started_at)) return h('span.rp-muted', null, '未跑過');
-    if (r.ok == null) return h('span.rp-last.run', null, icon('spin', { size: 16 }), '執行中');
+    if (r.running || r.ok == null) return h('span.rp-last.run', null, icon('spin', { size: 16 }), '執行中');
     return h(
       `span.rp-last.${r.ok ? 'ok' : 'bad'}`,
       { title: r.started_at ? `${r.ok ? '通過' : '沒過'} · ${ago(r.started_at)}` : null },
@@ -386,7 +384,7 @@ export function openCheckEditor(ctx, check, o = {}) {
   sub.textContent = repo.name;
 
   // ---- fields ----
-  const nameIn = h('input.rp-in', { id: 'ck-name', type: 'text', maxlength: '80', value: (check && check.name) || '', oninput: touch });
+  const nameIn = h('input.rp-in', { id: 'ck-name', type: 'text', maxlength: '60', value: (check && check.name) || '', oninput: touch });
   const kindBtns = KINDS.map(([k, label]) => h(`button${k === 'manual' ? '.manual' : ''}`, { type: 'button', 'data-kind': k, 'aria-pressed': String(k === kind), onclick: () => setKind(k) }, label));
   const whereSel = h('select.rp-in', { id: 'ck-where', onchange: () => (touch(), paintCmdHint()) });
   fillMachineSelect(whereSel, ctx.machines, check ? check.machine : repo.machine);
@@ -746,7 +744,10 @@ export function openCheckEditor(ctx, check, o = {}) {
 
   function problem(b) {
     if (b.kind === 'manual') return b.manual_text ? null : '人工檢查要寫一行清單文字';
-    if (!b.command && b.kind !== 'dataset') return '要填指令';
+    if (b.kind === 'dataset' && !b.command) return '圖資回歸要一行指令範本；這個 repo 還沒有命令列入口的話，先請 Loop 加，或先當人工驗收';
+    if (!b.command) return '要填指令';
+    if (b.kind === 'dataset' && !b.command.includes('{out}')) return '圖資回歸的指令要用 {out} 指定輸出資料夾（Loop 會把它收回來比對），例如 run_inference --in {images} --out {out}';
+    if (b.kind !== 'dataset' && /\{(images|answers|out)\}/.test(b.command)) return '只有圖資回歸可以用 {images} {answers} {out}';
     if (b.kind === 'dataset' && !b.dataset_id) return '選一個圖資（或「＋ 連結圖資 repo…」）';
     if (b.pass_rule === 'metrics') {
       if (!thresholds.length) return '指標門檻至少挑一個：先按「試跑一次」，再從「偵測到的指標」裡挑';
@@ -756,8 +757,14 @@ export function openCheckEditor(ctx, check, o = {}) {
     return null;
   }
 
-  async function persist() {
+  /**
+   * Save the form (create or PATCH) → the row, or null with the reason shown. `provisional`: a
+   * 試跑 picked 指標門檻 before any metric was seen — save as exit 0 for now (what the store asks
+   * for) and keep the form unsaved, so the thresholds picked after the run are saved next.
+   */
+  async function persist(provisional = false) {
     const b = collect();
+    if (provisional) Object.assign(b, { pass_rule: 'exit0', metrics: null });
     const p = problem(b);
     if (p) {
       showErr(p);
@@ -770,7 +777,7 @@ export function openCheckEditor(ctx, check, o = {}) {
       if (row && row.id) saved = { ...(saved || {}), ...row };
       else if (saved) saved = { ...saved, ...b };
       else throw new Error('建立了，但沒有拿到檢查的編號；重新整理再試');
-      dirty = false;
+      dirty = provisional;
       title.textContent = '編輯檢查';
       if (o.onSaved) o.onSaved();
       return saved;
@@ -795,7 +802,7 @@ export function openCheckEditor(ctx, check, o = {}) {
     showErr('');
     if (!cmdIn.value.trim()) return showErr(kind === 'dataset' ? '先填指令範本（這個 repo 要有命令列入口）' : '先填指令');
     trialBtn.disabled = true;
-    const row = await persist();
+    const row = await persist(pass === 'metrics' && !thresholds.length);
     if (!row) return paintFoot();
     running = true;
     runErr = null;
@@ -993,9 +1000,16 @@ export function mountDatasets(el, ctx) {
   return { refresh };
 }
 
+/** "http://gitea:3000/aoi/dataset-2026Q2.git" → "dataset-2026Q2" (a name the 圖資 store accepts: no spaces or separators) */
+export const datasetNameOf = (url) =>
+  (String(url || '').trim().replace(/\/+$/, '').replace(/\.git$/, '').split(/[/:]/).pop() || '')
+    .replace(/[^A-Za-z0-9\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF._-]+/g, '-')
+    .replace(/^[._-]+/, '')
+    .slice(0, 80);
+
 /**
- * 「＋ 連結圖資 repo」: paste the URL (and a name) → the engine clones it and detects the images
- * folder, the answer file and its format → confirm or correct them. With `dataset`, just the edit.
+ * 「＋ 連結圖資 repo」: paste the URL (and a name) → confirm or correct the images folder, the
+ * answer file and its format (the store starts from images / answers.json / auto). With `dataset`, just the edit.
  */
 export function openDatasetDialog({ dataset = null, onDone } = {}) {
   const { dlg, title, sub, body, foot } = dialogShell('dataset-dialog');
@@ -1011,11 +1025,11 @@ export function openDatasetDialog({ dataset = null, onDone } = {}) {
     title.textContent = '連結圖資 repo';
     sub.textContent = '';
     const urlIn = h('input.rp-in.mono', { id: 'ds-url', type: 'text', spellcheck: 'false', autocomplete: 'off', placeholder: 'http://gitea.corp:3000/aoi/dataset-2026Q2' });
-    const nameIn = h('input.rp-in', { id: 'ds-name', type: 'text', maxlength: '60', placeholder: '可留空：用 repo 的名稱' });
+    const nameIn = h('input.rp-in', { id: 'ds-name', type: 'text', maxlength: '80', placeholder: '可留空：用 repo 的名稱' });
     const go = h('button.btn.primary', { type: 'button' }, '連結');
     fill(
       body,
-      h('p.rp-muted', null, '圖資是一個 Gitea repo：放原圖的資料夾＋一個答案檔（json、csv 或標記檔）。貼上網址，Loop 會偵測圖片資料夾、答案檔與格式，你再確認。'),
+      h('p.rp-muted', null, '圖資是一個 Gitea repo：放原圖的資料夾＋一個答案檔（json、csv 或標記檔）。貼上網址，下一步確認圖片資料夾、答案檔與格式。'),
       h('label.rp-f', null, h('span.cap', null, '圖資 repo 網址'), urlIn),
       h('label.rp-f', null, h('span.cap', null, '名稱'), nameIn),
       err,
@@ -1028,7 +1042,7 @@ export function openDatasetDialog({ dataset = null, onDone } = {}) {
       go.disabled = true;
       go.textContent = '偵測中…';
       try {
-        ds = await C.createDataset({ remote_url: url, ...(nameIn.value.trim() ? { name: nameIn.value.trim() } : {}) });
+        ds = await C.createDataset({ remote_url: url, name: nameIn.value.trim() || datasetNameOf(url) });
         if (!ds || !ds.id) throw new Error('沒有拿到圖資的編號');
         confirmStep(true);
       } catch (e) {
@@ -1049,7 +1063,7 @@ export function openDatasetDialog({ dataset = null, onDone } = {}) {
   function confirmStep(fresh) {
     title.textContent = fresh ? '確認圖資' : '編輯圖資';
     sub.textContent = ds.name || '';
-    const nameIn = h('input.rp-in', { id: 'ds-name2', type: 'text', maxlength: '60', value: ds.name || '' });
+    const nameIn = h('input.rp-in', { id: 'ds-name2', type: 'text', maxlength: '80', value: ds.name || '' });
     const imgIn = h('input.rp-in.mono', { id: 'ds-images', type: 'text', value: ds.images_dir || '' });
     const ansIn = h('input.rp-in.mono', { id: 'ds-answers', type: 'text', value: ds.answer_file || '' });
     const fmtSel = h('select.rp-in', { id: 'ds-format' }, Object.entries(FORMAT).map(([v, s]) => h('option', { value: v, selected: v === (ds.answer_format || 'auto') }, s)));
@@ -1061,7 +1075,7 @@ export function openDatasetDialog({ dataset = null, onDone } = {}) {
             'div.rp-callout',
             null,
             icon('okCircle', { size: 20, sw: 2 }),
-            h('div.tx', null, h('b', null, '偵測到'), h('p', null, `${ds.cases != null ? `${Number(ds.cases).toLocaleString('zh-TW')} 張圖` : '張數還不知道'} · 圖片在 ${ds.images_dir || '？'} · 答案檔 ${ds.answer_file || '？'}（${FORMAT[ds.answer_format] || ds.answer_format || '自動判斷'}）；不對的地方直接改。`)),
+            h('div.tx', null, h('b', null, '已連結'), h('p', null, `圖片在 ${ds.images_dir || '？'}、答案檔 ${ds.answer_file || '？'}（${FORMAT[ds.answer_format] || ds.answer_format || '自動判斷'}）${ds.cases != null ? `，${Number(ds.cases).toLocaleString('zh-TW')} 張` : '；張數第一次跑時會算'}。和 repo 裡不一樣就直接改。`)),
           )
         : null,
       h('div.rp-ro', null, ds.remote_url || ''),

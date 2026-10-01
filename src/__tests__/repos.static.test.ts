@@ -9,7 +9,7 @@ import { buildApp } from '../server/app.js';
 import { createRepo } from '../repo/store.js';
 // the page modules are plain ESM that touch no DOM at import time
 import { byName, csv, healthOf, machineLabel, normalizeRepoUrl, osLabel, shortRemote } from '../../web/repo-ui.js';
-import { baselineText, metricsText, parseMetrics, runValues } from '../../web/checks.js';
+import { baselineText, datasetNameOf, metricsText, parseMetrics, runValues } from '../../web/checks.js';
 
 /**
  * The Repo page (/repos.html, its 檢查 tab from checks.js) and the 機台 page (/machines.html): the
@@ -173,6 +173,10 @@ describe('the helpers the pages render with', () => {
     expect(runValues({ metrics_json: JSON.stringify({ values: { correct_rate: 0.987, time_ms: 5100 }, pass: true }) })).toEqual({ correct_rate: 0.987, time_ms: 5100 });
     expect(runValues({ metrics_json: '{"total": 1204, "note": "x"}' })).toEqual({ total: 1204 });
     expect(runValues({ metrics_json: 'not json' })).toEqual({});
+    // GET /api/check-runs/:id sends metrics_json parsed, as `metrics`
+    expect(runValues({ metrics: { values: { correct_rate: 0.99, mismatches: 3 }, pass: true } })).toEqual({ correct_rate: 0.99, mismatches: 3 });
+    expect(datasetNameOf('http://gitea.corp:3000/aoi/dataset-2026Q2.git/')).toBe('dataset-2026Q2');
+    expect(datasetNameOf('ssh://gitea.corp:2222/aoi/圖資 Q3')).toBe('圖資-Q3');
     expect(baselineText({ sha: '3f2a1c9e', values: { correct_rate: 0.987, time_ms: 5100 } })).toBe('基準：正確率 98.7%，5.1 s（@ 3f2a1c9）');
   });
 });
