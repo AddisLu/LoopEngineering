@@ -40,6 +40,12 @@ export const ICONS = {
   flag: ['M5 21V4', 'M5 4h11l-2 4 2 4H5'],
   scale: ['M12 3v18', 'M5 7h14', 'M5 7l-3 7a3.5 3.5 0 0 0 6 0z', 'M19 7l-3 7a3.5 3.5 0 0 0 6 0z'],
   server: ['M4.5 4h15A1.5 1.5 0 0 1 21 5.5v4a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 9.5v-4A1.5 1.5 0 0 1 4.5 4z', 'M4.5 13h15a1.5 1.5 0 0 1 1.5 1.5v4a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5v-4A1.5 1.5 0 0 1 4.5 13z', 'M7 7.5h.01', 'M7 16.5h.01'],
+  // Repo / 機台 pages: the rail's Repo item, check results (✓ / ⚠ / ✗) and the drag handle
+  branch: ['M6 3a2 2 0 1 0 0 4a2 2 0 1 0 0-4', 'M6 17a2 2 0 1 0 0 4a2 2 0 1 0 0-4', 'M18 6a2 2 0 1 0 0 4a2 2 0 1 0 0-4', 'M6 7v10', 'M18 10c0 4-12 3-12 7'],
+  okCircle: ['M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18', 'M8.5 12.5l2.5 2.5 4.5-5'],
+  xCircle: ['M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18', 'M9 9l6 6', 'M15 9l-6 6'],
+  warnTri: ['M12 3.5l9.5 17h-19z', 'M12 10v4.5', 'M12 17.5h.01'],
+  grip: ['M9 6h.01', 'M15 6h.01', 'M9 12h.01', 'M15 12h.01', 'M9 18h.01', 'M15 18h.01'],
   cloud: ['M7 18h10a4 4 0 0 0 .5-8A6 6 0 0 0 6 9.5 4.3 4.3 0 0 0 7 18z'],
   fit: ['M4 9V4h5', 'M20 9V4h-5', 'M4 15v5h5', 'M20 15v5h-5'],
   zin: ['M11 4.5a6.5 6.5 0 1 0 0 13a6.5 6.5 0 1 0 0-13', 'M16 16l4.5 4.5', 'M8.5 11h5', 'M11 8.5v5'],
@@ -170,6 +176,8 @@ export const isLocal = (m) => String(m || '').startsWith('local:');
 const NAV = [
   ['chat', '對話', '/', 'chat'],
   ['board', '總覽', '/board.html', 'overview'],
+  ['repos', 'Repo', '/repos.html', 'branch'],
+  ['machines', '機台', '/machines.html', 'server', 'minor'],
   ['flow', '工作流程', '/flow.html', 'flow'],
   ['bench', '評比', '/benchmarks.html', 'bench'],
   ['plans', '驗證方案', '/plans.html', 'shield', 'minor'],
