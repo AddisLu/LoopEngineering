@@ -658,7 +658,14 @@ export function readAnalysis(json: string | null | undefined): AnalysisView | nu
     const c = obj(raw);
     const file = str(c?.file) ?? str(c?.path);
     if (!c || !file) continue;
-    causes.push({ file, why: str(c.why) ?? str(c.reason) ?? '', line: num(c.line), evidence: str(c.evidence) ?? str(c.snippet) });
+    // the analysis job stores evidence as [{line, text}]; older shapes carried one line and a snippet
+    const ev = Array.isArray(c.evidence) ? obj(c.evidence[0]) : null;
+    causes.push({
+      file,
+      why: str(c.why) ?? str(c.reason) ?? '',
+      line: ev ? num(ev.line) : num(c.line),
+      evidence: ev ? str(ev.text) : (str(c.evidence) ?? str(c.snippet)),
+    });
   }
   const r = obj(a.repro);
   const qs = Array.isArray(a.questions) ? a.questions : Array.isArray(a.uncertain) ? a.uncertain : [];
@@ -667,7 +674,7 @@ export function readAnalysis(json: string | null | undefined): AnalysisView | nu
     kind_label: kind ? (TICKET_KIND_LABELS[kind] ?? kind) : null,
     summary: str(a.summary),
     causes: causes.slice(0, 12),
-    repro: r ? { command: str(r.command), note: str(r.note) ?? str(r.how) ?? str(r.mode) } : null,
+    repro: r ? { command: str(r.command), note: str(r.description) ?? str(r.note) ?? str(r.how) ?? str(r.mode) } : null,
     questions: qs.map((q) => (typeof q === 'string' ? q : str(obj(q)?.q) ?? str(obj(q)?.question) ?? '')).filter(Boolean),
   };
 }

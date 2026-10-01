@@ -8,7 +8,7 @@ import { codeRefFor, fileDiff, readSource } from '../review/code.js';
 import { artifactPath, latestArtifacts } from '../review/artifacts.js';
 import { checkRunFileType, resolveCheckRunFile } from '../review/checkFiles.js';
 import { paths } from '../config.js';
-import { readTaskImages } from '../intake/context.js';
+import { ticketImageFile } from '../intake/ticket.js';
 import {
   approveTask,
   deliveryZip,
@@ -227,11 +227,9 @@ export function registerReviewRoutes(app: FastifyInstance, db: Database.Database
   app.get('/api/tasks/:id/images/:index', async (req, reply) => {
     const p = req.params as { id: string; index: string };
     const task = getTask(db, p.id);
-    const im = task && /^\d{1,2}$/.test(p.index) ? readTaskImages(task)[Number(p.index)] : undefined;
-    const ext = im ? path.extname(im.file).toLowerCase() : '';
-    const type = ({ '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp' } as Record<string, string>)[ext];
-    if (!im || !type || !fs.existsSync(im.file)) return reply.code(404).send({ error: '沒有這張圖' });
-    reply.header('content-type', type).header('x-content-type-options', 'nosniff').header('cache-control', 'private, max-age=300');
+    const im = task && /^\d{1,2}$/.test(p.index) ? ticketImageFile(task, Number(p.index)) : null;
+    if (!im || !/^image\/(png|jpeg|gif|webp)$/.test(im.mime)) return reply.code(404).send({ error: '沒有這張圖' });
+    reply.header('content-type', im.mime).header('x-content-type-options', 'nosniff').header('cache-control', 'private, max-age=300');
     return reply.send(fs.createReadStream(im.file));
   });
 

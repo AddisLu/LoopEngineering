@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type Database from 'better-sqlite3';
+import { reproDryRun } from '../checks/failingFirst.js';
 import { paths } from '../config.js';
 import { getTask, getTaskBySourceRef } from '../tasks.js';
 import { resolveInside } from '../git/worktree.js';
@@ -65,6 +66,8 @@ export function registerTicketRoutes(app: FastifyInstance, db: Database.Database
     ...opts.analyseDeps,
     localChat: opts.analyseDeps?.localChat ?? opts.localChat,
     visionExec: opts.analyseDeps?.visionExec ?? opts.visionExec,
+    // failing_first 試跑 of a repro command the person typed (analyse.ts guards who wrote it)
+    runRepro: opts.analyseDeps?.runRepro ?? ((d, task, repo, r) => reproDryRun(d, task, repo, r)),
     // an injected Gitea (tests) also carries the issue comment-back
     ...(giteaFetch && !opts.analyseDeps?.reportIssue
       ? { reportIssue: (d: Database.Database, id: string, kind: 'analysis') => void postIssueUpdate(d, id, kind, { client: giteaClientFor(d, { fetchImpl: giteaFetch }) }) }

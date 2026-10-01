@@ -57,6 +57,7 @@ import { attachmentsFor, checkLinesFor, repoMapFor, similarFixesFor } from '../i
 import { reportIssue } from '../integrations/giteaIssues.js';
 import { checkStepRunner, hasCheckSteps, pushForMachineChecks, type CheckDeps } from '../checks/runner.js';
 import { verifyKindFor } from '../checks/runs.js';
+import { failingFirst } from '../checks/failingFirst.js';
 
 /**
  * MCP servers a local-model task may use (mcp_servers_json), with the runtime env the chat page
@@ -289,7 +290,7 @@ export async function runTask(
   const taskMcp: TaskMcp | null = isMock || isGeneric ? null : writeTaskMcp(db, run.id, mcpServersForTask(db, run.id));
   const sandbox = sandboxSettings(db);
   const withSandbox = !!taskMcp?.servers.includes(EXEC_SERVER);
-  const taskFilePath = writeTaskFile(worktreePath, task, {
+  const taskFileExtras: Parameters<typeof writeTaskFile>[2] = {
     knowledge: knowledgeContext(db, task),
     rag: await ragTaskContext(db, task, opts.ragEmbedExec),
     discipline: disciplineOn,
@@ -300,7 +301,8 @@ export async function runTask(
     repoMap: repoMapFor(db, task),
     similarFixes: similarFixesFor(db, task),
     checks: checkLinesFor(task),
-  });
+  };
+  const taskFilePath = writeTaskFile(worktreePath, task, taskFileExtras);
   if (!isMock && !isGeneric) {
     // Keep engine-written artifacts out of the task branch/PR: exclude them locally
     // before any commitAll (checkpoint or auto-commit) can `git add -A` them. Generic's
@@ -327,6 +329,28 @@ export async function runTask(
         detail: `setup_cmd failed (exit=${outcome.exitCode}): ${outcome.tail}`,
       });
       return;
+    }
+  }
+  // 先失敗再修: only on the task's first run, while the worktree is still the base
+  if (getBool(db, 'failing_first', false) && !isGeneric && task.checks_json) {
+    const earlier = (db.prepare('SELECT COUNT(*) AS n FROM task_runs WHERE task_id = ? AND id != ?').get(task.id, run.id) as { n: number }).n;
+    if (!earlier) {
+      const ff = await failingFirst(db, task, worktreePath, run.id, opts.checkDeps);
+      if (ff.kind === 'passed') {
+        // Same fail-fast as a broken setup: no adapter, no token spend, worktree kept for triage.
+        finishRun(db, run.id, { error: 'repro passed before the fix' });
+        setStatus(db, task.id, 'attention', {
+          run_id: run.id,
+          detail: `重現指令在修改前就通過了——它重現不了這個問題，請改重現方式再開始：${ff.tail.split('\n').filter(Boolean).slice(-3).join(' / ')}`,
+        });
+        return;
+      }
+      if (ff.kind === 'red') {
+        writeTaskFile(worktreePath, task, { ...taskFileExtras, reproBefore: ff.tail });
+        logEvent(db, { task_id: task.id, run_id: run.id, kind: 'note', detail: '先失敗再修：重現指令在修改前失敗了（正確）' });
+      } else if (ff.kind === 'unknown') {
+        logEvent(db, { task_id: task.id, run_id: run.id, kind: 'note', detail: `先失敗再修沒有結論，照常開始：${ff.reason}` });
+      }
     }
   }
   if (!isMock && !isLocal) writeSettingsLocal(worktreePath, hardLimit);

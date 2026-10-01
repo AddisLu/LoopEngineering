@@ -304,8 +304,10 @@ describe('結果頁: a 問題單 bundle', () => {
   it('reads the frozen checks against check_runs: summaries, 修前, attempts, 自評, issue, screenshots, escalation', async () => {
     const { task, runId } = reviewedTask();
     db.prepare("INSERT INTO repos (id, name, remote_url, local_path) VALUES ('r_page', 'cf-aoi', 'http://gitea.corp/aoi/cf-aoi.git', ?)").run(task.repo_path);
-    const shot = path.join(dir('img'), 'err.png');
+    const shot = path.join(paths.taskImagesDir, task.id, '0.png');
+    fs.mkdirSync(path.dirname(shot), { recursive: true });
     fs.writeFileSync(shot, 'PNG');
+    tmp.push(path.dirname(shot));
     const checks = [
       { id: 'ck_build', name: '建置', kind: 'build', machine: null, command: 'make', required: true },
       { id: 'ck_repro', name: '重現', kind: 'repro', machine: null, command: './repro.sh', required: true },
@@ -316,8 +318,8 @@ describe('結果頁: a 問題單 bundle', () => {
       `UPDATE tasks SET repo_id = 'r_page', checks_json = ?, images_json = ?, analysis_json = ?, review_json = ?, plan_ref = ?, model = 'local:qwen', ladder_step = 0 WHERE id = ?`,
     ).run(
       JSON.stringify(checks),
-      JSON.stringify([{ file: shot, name: 'err.png', text: 'Division by zero' }]),
-      JSON.stringify({ kind: 'bugfix', causes: [{ file: 'arith.cu', why: '沒檢查分母' }], questions: [] }),
+      JSON.stringify([{ file: shot, name: 'err.png', mime: 'image/png', text: 'Division by zero' }]),
+      JSON.stringify({ kind: 'bugfix', causes: [{ file: 'arith.cu', why: '沒檢查分母', evidence: [{ line: 3, text: 'return a / b;' }] }], questions: [] }),
       JSON.stringify({ summary: ['加了分母檢查'], why: '避免除以零', risks: [], out_of_scope: [], confidence: 'high' }),
       plan,
       task.id,
@@ -347,7 +349,7 @@ describe('結果頁: a 問題單 bundle', () => {
     expect(b.review.summary).toEqual(['加了分母檢查']);
     expect(b.issue).toEqual({ number: 12, url: 'http://gitea.corp/aoi/cf-aoi/issues/12', closed: false });
     expect(b.ticket.repo).toBe('cf-aoi');
-    expect(b.ticket.analysis.causes[0].file).toBe('arith.cu');
+    expect(b.ticket.analysis.causes[0]).toEqual({ file: 'arith.cu', why: '沒檢查分母', line: 3, evidence: 'return a / b;' });
     expect(b.ticket.images).toEqual([{ index: 0, name: 'err.png', text: 'Division by zero' }]);
     expect(b.ticket.prd).toContain('修好除以零');
     expect(b.escalation).toEqual({ next: 'local:glm' });
