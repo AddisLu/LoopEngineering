@@ -34,3 +34,24 @@ export function takeHandoff() {
     return null;
   }
 }
+
+/** 機況分析 from the chat: the pasted log / incident text goes to the 知識 page's 機況診斷 tab (once). */
+export const DIAG_KEY = 'loop_diag_handoff';
+export function openDiag(text) {
+  try {
+    sessionStorage.setItem(DIAG_KEY, JSON.stringify({ text: String(text || ''), at: Date.now() }));
+  } catch (e) {
+    /* too big or blocked: the tab opens empty */
+  }
+  window.open('/brain.html#diag', '_blank');
+}
+export function takeDiagHandoff() {
+  try {
+    const raw = sessionStorage.getItem(DIAG_KEY);
+    sessionStorage.removeItem(DIAG_KEY);
+    const v = raw ? JSON.parse(raw) : null;
+    return v && typeof v.text === 'string' && Date.now() - (Number(v.at) || 0) < 600_000 ? v.text : null;
+  } catch (e) {
+    return null;
+  }
+}

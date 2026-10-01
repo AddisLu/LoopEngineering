@@ -1,7 +1,7 @@
 import { $, api, authHeaders, drawer, el, fmtInt, fmtSec, nameHeader, onBoard, phone, rail, setText, store, stored, toast, when } from './shell.js';
 import { renderMarkdown } from './chat-md.js';
 import { mountActions, mountConvMenu, mountHelpMenu } from './chat-actions.js';
-import { openTicket } from './fix-handoff.js';
+import { openDiag, openTicket } from './fix-handoff.js';
 
 /**
  * The conversation itself: streaming answers from the local model, pasted screenshots, and the
@@ -325,8 +325,12 @@ async function addImages(files) {
 // 「轉成問題單」: once the box reads like a problem (≥ 10 characters), hand it and the pasted
 // screenshots to a new 問題單 instead of asking the model
 function paintTicketChip() {
-  $('ticket-chip').hidden = $('prompt').value.trim().length < 10;
+  const v = $('prompt').value.trim();
+  $('ticket-chip').hidden = v.length < 10;
+  // 機況分析: offered when the box holds what a machine produced (log lines, incident / session JSON, ini)
+  $('diag-chip').hidden = !/incident|"type"\s*:|\b(ERROR|FATAL|WARN|Exception)\b|^\s*\[[^\]]+\]\s*$|^\s*\w+\s*=\s*\S+/m.test(v) || v.length < 20;
 }
+$('diag-chip').addEventListener('click', () => openDiag($('prompt').value.trim()));
 $('prompt').addEventListener('input', paintTicketChip);
 $('ticket-chip').addEventListener('click', () => {
   const { dropped } = openTicket({ description: $('prompt').value.trim(), images: pending });

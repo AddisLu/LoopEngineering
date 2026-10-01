@@ -5,7 +5,7 @@
 // 程式 / 圖資 with evidence. Next steps: 開問題單 (code), parameter suggestions (never written to a
 // machine), 記成案例. textContent-only.
 import { $, h, fill, api, toast, tsMs } from './frame.js';
-import { openTicket } from './fix-handoff.js';
+import { openTicket, takeDiagHandoff } from './fix-handoff.js';
 
 const enc = encodeURIComponent;
 const MAX_FILE = 5 * 1024 * 1024;
@@ -252,6 +252,12 @@ async function boot(repoId) {
       repos = [];
     }
     fill($('diag-body'), paintForm(repoId), h('div', { id: 'dg-result' }), h('div', { id: 'dg-history' }));
+    // from the chat's 機況分析 chip
+    const handed = takeDiagHandoff();
+    if (handed) {
+      $('dg-text').value = handed;
+      toast('已帶入對話的內容；確認 repo 後按「分析」');
+    }
   }
   loadHistory();
 }
