@@ -618,7 +618,7 @@ function renderTicketMeta(b) {
   if (b.issue) link(b.issue.url, `issue #${b.issue.number}`);
   const runs = (b.attempts || []).length || b.runs;
   if (runs) meta.appendChild(h('span', null, `第 ${runs} 次嘗試 · ${modelName((b.run && b.run.model) || t.model)}`));
-  if (t.owner) meta.appendChild(h('span', null, `負責：${t.owner}`));
+  if (t.owner) meta.appendChild(h('span', null, `負責：${String(t.owner).replace(/^name:/, '')}`));
   meta.appendChild(h('span.hide-sm', null, t.id));
 }
 
