@@ -8,6 +8,7 @@ import { codeRefFor, fileDiff, readSource } from '../review/code.js';
 import { artifactPath, latestArtifacts } from '../review/artifacts.js';
 import { checkRunFileType, resolveCheckRunFile } from '../review/checkFiles.js';
 import { paths } from '../config.js';
+import { readTaskImages } from '../intake/context.js';
 import {
   approveTask,
   deliveryZip,
@@ -222,11 +223,23 @@ export function registerReviewRoutes(app: FastifyInstance, db: Database.Database
     }
   });
 
+  // ---- 問題單的截圖（需求分頁）: only the files listed in the task's images_json, pictures only ----
+  app.get('/api/tasks/:id/images/:index', async (req, reply) => {
+    const p = req.params as { id: string; index: string };
+    const task = getTask(db, p.id);
+    const im = task && /^\d{1,2}$/.test(p.index) ? readTaskImages(task)[Number(p.index)] : undefined;
+    const ext = im ? path.extname(im.file).toLowerCase() : '';
+    const type = ({ '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp' } as Record<string, string>)[ext];
+    if (!im || !type || !fs.existsSync(im.file)) return reply.code(404).send({ error: '沒有這張圖' });
+    reply.header('content-type', type).header('x-content-type-options', 'nosniff').header('cache-control', 'private, max-age=300');
+    return reply.send(fs.createReadStream(im.file));
+  });
+
   // ---- 檢查帶回來的檔案（圖資回歸的圖、輸出）----
   // only inside <check-runs>/<run id>/ (src/review/checkFiles.ts); pictures and text in place, the rest downloads
   app.get('/api/check-runs/:id/files/*', async (req, reply) => {
     const p = req.params as { id: string; '*'?: string };
-    const abs = resolveCheckRunFile(path.join(paths.dataDir, 'check-runs'), p.id, p['*'] ?? '');
+    const abs = resolveCheckRunFile(paths.checkRunsDir, p.id, p['*'] ?? '');
     if (!abs) return reply.code(404).send({ error: '沒有這個檔案' });
     const t = checkRunFileType(abs);
     reply.header('content-type', t.type).header('x-content-type-options', 'nosniff').header('cache-control', 'private, max-age=300');

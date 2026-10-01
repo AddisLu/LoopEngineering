@@ -21,7 +21,27 @@ import { changedFiles, codeRefFor, readSource, type ChangedFile } from './code.j
 import { latestArtifacts, packageZip, type ArtifactManifest } from './artifacts.js';
 import { parseSteps, type Task, type TaskRun } from '../types.js';
 import { recordFix } from '../repo/ledger.js';
-import { reportIssue } from '../integrations/giteaIssues.js';
+import { getIssueLink, reportIssue } from '../integrations/giteaIssues.js';
+import { readSelfReview, type SelfReview } from './selfReview.js';
+import { readTaskImages } from '../intake/context.js';
+import { listCheckRunFiles } from './checkFiles.js';
+import {
+  buildAttempts,
+  buildChecks,
+  buildDatasetViews,
+  latestPerCheck,
+  nextEscalation,
+  pickBeforeRow,
+  pickShownRun,
+  readAnalysis,
+  readFrozenChecks,
+  ticketHeadline,
+  type AnalysisView,
+  type Attempt,
+  type CheckRunRow,
+  type DatasetView,
+  type ResultCheck,
+} from './result.js';
 
 /**
  * 驗收頁 (web/task.html): everything a person needs to decide whether a task's result is good —
@@ -142,6 +162,73 @@ export interface ReviewBundle {
   /** gitea_url is set: PRs and releases go through a local Gitea (the page words 交付 by it) */
   gitea: boolean;
   log_tail: string[];
+  // ---- 問題單 only (empty / null for any other task) ----
+  checks: ResultCheck[];
+  dataset: DatasetView[];
+  review: SelfReview | null;
+  attempts: Attempt[];
+  issue: { number: number; url: string; closed: boolean } | null;
+  ticket: { repo: string | null; repo_id: string | null; analysis: AnalysisView | null; images: Array<{ index: number; name: string; text: string }>; prd: string | null } | null;
+  escalation: { next: string | null } | null;
+}
+
+const PRD_CAP = 60_000;
+
+function readPrd(task: Task): string | null {
+  if (!task.plan_ref) return null;
+  try {
+    const text = fs.readFileSync(task.plan_ref, 'utf8');
+    return text.length > PRD_CAP ? `${text.slice(0, PRD_CAP)}\n…（其餘省略）` : text;
+  } catch {
+    return null;
+  }
+}
+
+/** The 問題單 parts of the bundle: what the checks engine recorded, read against the frozen checks. */
+function ticketParts(
+  db: Database.Database,
+  task: Task,
+  runs: TaskRun[],
+  inProgress: boolean,
+): Pick<ReviewBundle, 'checks' | 'dataset' | 'review' | 'attempts' | 'issue' | 'ticket' | 'escalation'> {
+  const link = getIssueLink(db, task.id);
+  const issue = link ? { number: link.number, url: link.issue_url, closed: !!link.closed_at } : null;
+  if (!task.repo_id && !task.checks_json) {
+    return { checks: [], dataset: [], review: readSelfReview(task), attempts: [], issue, ticket: null, escalation: null };
+  }
+  const frozen = readFrozenChecks(task.checks_json);
+  const rows = db.prepare('SELECT * FROM check_runs WHERE task_id = ? ORDER BY started_at, rowid').all(task.id) as CheckRunRow[];
+  const shownId = pickShownRun(runs, rows, inProgress);
+  const shown = latestPerCheck(rows, shownId);
+  const shownRun = runs.find((r) => r.id === shownId) ?? null;
+  // 修前: the frozen checks' own baseline / 試跑 rows (they carry no task_id)
+  const ids = frozen.map((c) => c.id);
+  const pre = ids.length
+    ? (db
+        .prepare(`SELECT * FROM check_runs WHERE check_id IN (${ids.map(() => '?').join(',')}) AND kind IN ('baseline', 'trial') ORDER BY started_at, rowid`)
+        .all(...ids) as CheckRunRow[])
+    : [];
+  const before = new Map<string, CheckRunRow>();
+  for (const c of frozen) {
+    const row = pickBeforeRow(c, pre, shownRun?.started_at ?? null);
+    if (row) before.set(c.id, row);
+  }
+  const repo = task.repo_id ? (db.prepare('SELECT name FROM repos WHERE id = ?').get(task.repo_id) as { name: string } | undefined) : undefined;
+  return {
+    checks: buildChecks(frozen, shown, before, readVerify(shownRun)),
+    dataset: buildDatasetViews(frozen, shown, before, (id) => listCheckRunFiles(paths.checkRunsDir, id)),
+    review: readSelfReview(task),
+    attempts: buildAttempts(runs, frozen, rows),
+    issue,
+    ticket: {
+      repo: repo?.name ?? null,
+      repo_id: task.repo_id ?? null,
+      analysis: readAnalysis(task.analysis_json),
+      images: readTaskImages(task).map((im, index) => ({ index, name: im.name ?? `截圖 ${index + 1}`, text: im.text ?? '' })),
+      prd: readPrd(task),
+    },
+    escalation: { next: nextEscalation(getSetting(db, 'fix_escalation'), task.model, task.ladder_step) },
+  };
 }
 
 const ts = (s: string | null) => (s ? new Date(/[TZ]/.test(s) ? s : `${s.replace(' ', 'T')}Z`) : null);
@@ -223,6 +310,8 @@ export function reviewBundle(
     : null;
   const started = ts(run?.started_at ?? null);
   const finished = ts(run?.finished_at ?? null);
+  const ticket = ticketParts(db, task, runs, verdict === 'in_progress');
+  if (ticket.ticket) headline = ticketHeadline(task.status, ticket.checks) ?? headline;
 
   return {
     task: {
@@ -276,6 +365,7 @@ export function reviewBundle(
     },
     gitea: !!(getSetting(db, 'gitea_url') ?? '').trim(),
     log_tail: run && verdict === 'in_progress' ? tailLog(run.log_path, 20) : [],
+    ...ticket,
   };
 }
 

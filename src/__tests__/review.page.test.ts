@@ -300,6 +300,73 @@ describe('結果頁: 交給同事 and a check run\'s files', () => {
   });
 });
 
+describe('結果頁: a 問題單 bundle', () => {
+  it('reads the frozen checks against check_runs: summaries, 修前, attempts, 自評, issue, screenshots, escalation', async () => {
+    const { task, runId } = reviewedTask();
+    db.prepare("INSERT INTO repos (id, name, remote_url, local_path) VALUES ('r_page', 'cf-aoi', 'http://gitea.corp/aoi/cf-aoi.git', ?)").run(task.repo_path);
+    const shot = path.join(dir('img'), 'err.png');
+    fs.writeFileSync(shot, 'PNG');
+    const checks = [
+      { id: 'ck_build', name: '建置', kind: 'build', machine: null, command: 'make', required: true },
+      { id: 'ck_repro', name: '重現', kind: 'repro', machine: null, command: './repro.sh', required: true },
+    ];
+    const plan = path.join(dir('plan'), 'PRD.md');
+    fs.writeFileSync(plan, '# 需求\n修好除以零');
+    db.prepare(
+      `UPDATE tasks SET repo_id = 'r_page', checks_json = ?, images_json = ?, analysis_json = ?, review_json = ?, plan_ref = ?, model = 'local:qwen', ladder_step = 0 WHERE id = ?`,
+    ).run(
+      JSON.stringify(checks),
+      JSON.stringify([{ file: shot, name: 'err.png', text: 'Division by zero' }]),
+      JSON.stringify({ kind: 'bugfix', causes: [{ file: 'arith.cu', why: '沒檢查分母' }], questions: [] }),
+      JSON.stringify({ summary: ['加了分母檢查'], why: '避免除以零', risks: [], out_of_scope: [], confidence: 'high' }),
+      plan,
+      task.id,
+    );
+    setSetting(db, 'fix_escalation', 'local:qwen,local:glm');
+    db.prepare("INSERT INTO issue_links (task_id, repo_id, owner, repo, number, issue_url) VALUES (?, 'r_page', 'aoi', 'cf-aoi', 12, 'http://gitea.corp/aoi/cf-aoi/issues/12')").run(task.id);
+    const row = db.prepare(
+      `INSERT INTO check_runs (id, check_id, task_id, run_id, kind, ok, exit_code, timed_out, ms, result_json, started_at, finished_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, datetime('now'), datetime('now'))`,
+    );
+    row.run('cr_b', 'ck_build', task.id, runId, 'verify', 1, 0, 41_000, null);
+    row.run('cr_r', 'ck_repro', task.id, runId, 'red_green', 1, 0, 900, JSON.stringify({ before: { ok: false, exit_code: 1 }, after: { ok: true, exit_code: 0 } }));
+    db.prepare("UPDATE task_runs SET verify_json = ?, finished_at = datetime('now') WHERE id = ?").run(
+      JSON.stringify([
+        { step: 'check:ck_build', ok: true, exitCode: 0, timedOut: false, tail: '' },
+        { step: 'check:ck_repro', ok: true, exitCode: 0, timedOut: false, tail: '' },
+      ]),
+      runId,
+    );
+
+    const b = (await app.inject({ method: 'GET', url: `/api/tasks/${task.id}/review` })).json();
+    expect(b.headline).toBe('2 項檢查都過，重現測試從紅變綠');
+    expect(b.checks.map((c: { name: string; state: string }) => [c.name, c.state])).toEqual([['建置', 'passed'], ['重現', 'passed']]);
+    expect(b.checks[1].repro).toEqual({ before_ok: false, after_ok: true });
+    expect(b.attempts).toHaveLength(1);
+    expect(b.attempts[0].outcome).toBe('通過');
+    expect(b.review.summary).toEqual(['加了分母檢查']);
+    expect(b.issue).toEqual({ number: 12, url: 'http://gitea.corp/aoi/cf-aoi/issues/12', closed: false });
+    expect(b.ticket.repo).toBe('cf-aoi');
+    expect(b.ticket.analysis.causes[0].file).toBe('arith.cu');
+    expect(b.ticket.images).toEqual([{ index: 0, name: 'err.png', text: 'Division by zero' }]);
+    expect(b.ticket.prd).toContain('修好除以零');
+    expect(b.escalation).toEqual({ next: 'local:glm' });
+    expect(b.dataset).toEqual([]);
+
+    const img = await app.inject({ method: 'GET', url: `/api/tasks/${task.id}/images/0` });
+    expect([img.statusCode, img.headers['content-type'], img.body]).toEqual([200, 'image/png', 'PNG']);
+    for (const bad of ['1', '-1', 'x', '0.0']) expect((await app.inject({ method: 'GET', url: `/api/tasks/${task.id}/images/${bad}` })).statusCode, bad).toBe(404);
+  });
+
+  it('a task that is not a ticket gets none of it', async () => {
+    const { task } = reviewedTask();
+    const b = (await app.inject({ method: 'GET', url: `/api/tasks/${task.id}/review` })).json();
+    expect([b.checks, b.dataset, b.attempts, b.ticket, b.escalation, b.issue, b.review]).toEqual([[], [], [], null, null, null, null]);
+    expect(b.headline).toBe('2 項指標全部達標，1 個驗證步驟都成功');
+    expect((await app.inject({ method: 'GET', url: `/api/tasks/${task.id}/images/0` })).statusCode).toBe(404);
+  });
+});
+
 describe('新工作流程 options', () => {
   it('offers the allow-listed repos with their branches', async () => {
     const repo = dir('jobrepo');
