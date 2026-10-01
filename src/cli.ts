@@ -1022,7 +1022,7 @@ machineCmd
     console.log(`removed ${name}`);
   });
 
-// ---- check commands (src/checks/*): loop check list|trial|baseline ---------------------------
+// ---- check commands (src/checks/*): loop check list|trial|baseline|from-plan ---------------------------
 // (imports are dynamic so this section is the only part of cli.ts the checks link touches)
 const checkCmd = program
   .command('check')
@@ -1080,6 +1080,23 @@ checkCmd
       const c = setBaseline(getDb(), checkId, runId, 'cli');
       const b = parseBaseline(c)!;
       console.log(`${c.name}（${c.id}）基準：${Object.entries(b.values).map(([k, v]) => `${k}=${v}`).join(', ')} @ ${(b.sha ?? '').slice(0, 7)}`);
+    } catch (err) {
+      if (err instanceof CheckError) return fail(err.message);
+      throw err;
+    }
+  });
+
+checkCmd
+  .command('from-plan <planId> <repoId>')
+  .description('驗證方案 → 檢查: turn one old verification plan into checks of a repo (the plan itself stays)')
+  .action(async (planId: string, repoId: string) => {
+    const { checksFromPlan } = await import('./checks/fromPlan.js');
+    const { CheckError } = await import('./checks/store.js');
+    try {
+      const r = checksFromPlan(getDb(), planId, repoId, 'cli');
+      for (const c of r.created) console.log(`+ ${c.id}  ${c.name}  [${c.kind}]  ${c.machine ?? '引擎主機'}  ${c.command ?? c.manual_text ?? ''}`);
+      for (const s of r.skipped) console.log(`- 略過：${s}`);
+      console.log(`建立 ${r.created.length} 項檢查${r.created.some((c) => c.kind !== 'manual') ? `；先試跑一次：loop check trial ${r.created.find((c) => c.kind !== 'manual')!.id}` : ''}`);
     } catch (err) {
       if (err instanceof CheckError) return fail(err.message);
       throw err;

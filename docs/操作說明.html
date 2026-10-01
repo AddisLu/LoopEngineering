@@ -807,6 +807,7 @@ loop machine list             # 每台的設定與上次檢查結果</code></pre
           <tr><td><code>check list &lt;repoId&gt;</code></td><td>這個 repo 的檢查（見第 5b 章），照執行順序：id、名稱、類型、在哪跑（機台或引擎主機）、怎麼算過、必過與否、最近一次，以及指令、門檻、基準、人工項目。</td></tr>
           <tr><td><code>check trial &lt;checkId&gt;</code></td><td>試跑一次：在 repo 的預設分支、問題單會跑的同一個地方跑這項檢查，印出輸出最後 40 行、結果與 run id，以及偵測到的指標；沒過時 exit code 1。</td></tr>
           <tr><td><code>check baseline &lt;checkId&gt; &lt;runId&gt;</code></td><td>設為基準：把一次通過的試跑回報的數值與 commit 記成這項檢查的基準（給「不比基準差」用）。</td></tr>
+          <tr><td><code>check from-plan &lt;planId&gt; &lt;repoId&gt;</code></td><td>舊的驗證方案 → 檢查：方案的每個步驟變成這個 repo 的一項檢查（在原本的 GPU 沙盒或引擎主機上跑；<code>{dataset}</code> 換成方案的預設圖資），驗收門檻放在最後一步，人工驗收清單變成「人工」項目。方案本身不動，舊任務照用；重跑不會重複建立。</td></tr>
           <tr><td><code>verify-plan list [--repo]｜show &lt;id&gt;｜rm &lt;id&gt;</code></td><td>驗證方案（見第 26d 章）：列出、看內容、刪除。刪除不影響已經建立的任務。問題單改用 repo 的檢查（第 5b 章）。</td></tr>
           <tr><td><code>verify-plan add --name* --step* [--repo] [--host] [--dataset-root] [--dataset-default] [--metrics] [--protect] [--artifacts] [--check] [--domain] [--setup] [--desc] [--id]</code></td><td>新增驗證方案，加 <code>--id</code> 則修改。<code>--step</code> 和 <code>--check</code> 可以重複；步驟裡的 <code>{dataset}</code> 會換成人員選的圖資資料夾。</td></tr>
           <tr><td><code>verify-plan datasets &lt;id&gt;</code></td><td>列出這個方案的圖資資料夾和張數（遠端機台用一次 ssh 查）。</td></tr>
