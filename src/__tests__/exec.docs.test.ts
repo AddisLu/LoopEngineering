@@ -172,6 +172,17 @@ describe('the manual documents the 問題單 flow', () => {
   });
 });
 
+describe('3 分鐘上手 walks 從 issue 到 PR', () => {
+  it('has the four steps above the cards and points at chapter 5b', () => {
+    const quick = fs.readFileSync(path.join(__dirname, '..', '..', 'docs', 'demo-guide.html'), 'utf8');
+    const start = quick.indexOf('id="issue-to-pr"');
+    expect(start).toBeGreaterThan(0);
+    expect(start).toBeLessThan(quick.indexOf('<div class="grid">'));
+    const section = quick.slice(start, quick.indexOf('</section>', start));
+    for (const s of ['從 issue 到 PR（3 分鐘）', '請 Loop 分析', '分析卡', '開始修', '結果頁', '合併', '→ 完整說明第 5b 章']) expect(section, s).toContain(s);
+  });
+});
+
 describe('the manual documents the two-Spark weight sync', () => {
   it('a finished download continues with a sync job, and a switch without the weights is refused', () => {
     const m = fs.readFileSync(path.join(__dirname, '..', '..', 'docs', '操作說明.html'), 'utf8');
