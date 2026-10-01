@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="zh-Hant" data-mode="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Repo · Loop Engineering</title>
+    <script src="/theme-boot.js"></script>
+    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/frame.css" />
+    <link rel="stylesheet" href="/repos.css" />
+  </head>
+  <body class="app" data-nav="repos">
+    <nav id="app-rail" class="app-rail"><a href="/">回到對話</a></nav>
+    <div class="app-main">
+      <header class="app-top">
+        <a class="crumb" id="crumb" href="/repos.html" hidden>Repo</a>
+        <svg class="crumb-sep" id="crumb-sep" hidden viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
+        <h1 class="sm" id="page-title">Repo</h1>
+        <span class="rp-pill hide-sm" id="repo-pill" hidden></span>
+        <span class="grow"></span>
+        <span class="top-sub mono hide-md" id="repo-remote" hidden></span>
+        <span class="ops-who hide-sm" id="ops-who"></span>
+        <button class="btn primary" type="button" id="import-btn" hidden>匯入 Repo</button>
+      </header>
+
+      <div class="rp-tabs" role="tablist" aria-label="Repo 分頁" id="repo-tabs" hidden>
+        <button type="button" role="tab" id="tabbtn-settings" data-tab="settings" aria-controls="tab-settings" aria-selected="false">設定</button>
+        <button type="button" role="tab" id="tabbtn-checks" data-tab="checks" aria-controls="tab-checks" aria-selected="false">檢查</button>
+        <button type="button" role="tab" id="tabbtn-datasets" data-tab="datasets" aria-controls="tab-datasets" aria-selected="false">圖資</button>
+        <button type="button" role="tab" id="tabbtn-fixes" data-tab="fixes" aria-controls="tab-fixes" aria-selected="false">過去修法</button>
+      </div>
+
+      <div class="app-scroll">
+        <main class="app-body rp-body">
+          <p class="err-line" id="page-err" hidden></p>
+
+          <!-- ============ every repo ============ -->
+          <section class="rp-tabpane" id="view-list" hidden>
+            <p class="rp-lead" id="list-lead"></p>
+            <div class="rp-cards" id="import-running"></div>
+            <div class="rp-cards" id="repo-list"></div>
+            <div class="rp-empty" id="repo-empty" hidden>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3a2 2 0 1 0 0 4a2 2 0 1 0 0-4" /><path d="M6 17a2 2 0 1 0 0 4a2 2 0 1 0 0-4" /><path d="M18 6a2 2 0 1 0 0 4a2 2 0 1 0 0-4" /><path d="M6 7v10" /><path d="M18 10c0 4-12 3-12 7" /></svg>
+              <p>還沒有 repo。貼上 Gitea 的網址就能開始。</p>
+              <div class="rp-row"><button class="btn primary" type="button" id="empty-import-btn">匯入 Repo</button></div>
+            </div>
+          </section>
+
+          <!-- ============ one repo ============ -->
+          <section id="view-detail" hidden>
+            <!-- 設定 -->
+            <section class="rp-tabpane" id="tab-settings" role="tabpanel" aria-labelledby="tabbtn-settings" hidden>
+              <form class="rp-tabpane" id="settings-form" autocomplete="off">
+                <section class="rp-panel">
+                  <h3>基本</h3>
+                  <div class="rp-grid2">
+                    <label class="rp-f"><span class="cap">名稱</span><input id="set-name" type="text" maxlength="60" required /></label>
+                    <label class="rp-f"><span class="cap">領域 <span class="rp-hint">挑模型、評比時用</span></span>
+                      <select id="set-domain">
+                        <option value="cuda">CUDA／GPU</option>
+                        <option value="cv">影像處理</option>
+                        <option value="cpp">C++</option>
+                        <option value="csharp">C#</option>
+                        <option value="typescript">TypeScript</option>
+                        <option value="python">Python</option>
+                        <option value="other">其他</option>
+                      </select>
+                    </label>
+                  </div>
+                  <div class="rp-f"><span class="cap">網址</span><div class="rp-ro" id="set-remote"></div></div>
+                  <div class="rp-f"><span class="cap">本機路徑 <span class="rp-hint">這台 Spark 上的複本，Loop 的 worktree 從這裡切</span></span><div class="rp-ro" id="set-path"></div></div>
+                  <div class="rp-grid2">
+                    <label class="rp-f"><span class="cap">預設分支</span><input id="set-branch" class="mono" type="text" maxlength="200" spellcheck="false" required /></label>
+                    <label class="rp-f"><span class="cap">PR 目標分支 <span class="rp-hint">留空＝預設分支</span></span><input id="set-prbase" class="mono" type="text" maxlength="200" spellcheck="false" /></label>
+                  </div>
+                  <div class="rp-grid2">
+                    <label class="rp-f"><span class="cap">在哪台機台驗證 <span class="rp-hint">新檢查預設跑在這裡</span></span><select id="set-machine"></select></label>
+                    <div class="rp-f"><span class="cap">模型</span><div class="rp-row"><span class="chip-s" id="set-cloud">–</span><a class="rp-hint" href="/board.html#settings">到設定改</a></div></div>
+                  </div>
+                </section>
+
+                <section class="rp-panel">
+                  <h3>指令 <span class="grow"></span><button class="btn sm" type="button" id="redetect-btn">重新偵測</button></h3>
+                  <p class="rp-muted" id="set-stack"></p>
+                  <label class="rp-f"><span class="cap">建置</span><input id="set-build" class="mono" type="text" spellcheck="false" placeholder="偵測不到：例 cmake -S . -B build &amp;&amp; cmake --build build -j" /></label>
+                  <label class="rp-f"><span class="cap">測試</span><input id="set-test" class="mono" type="text" spellcheck="false" placeholder="偵測不到：例 ctest --test-dir build --output-on-failure" /></label>
+                  <label class="rp-f"><span class="cap">前置 <span class="rp-hint">開工前先跑，失敗就停，不花任何額度</span></span><input id="set-setup" class="mono" type="text" spellcheck="false" placeholder="例 pip install -r requirements.txt" /></label>
+                </section>
+
+                <section class="rp-panel">
+                  <h3>Repo 地圖 <span class="grow"></span><button class="btn sm" type="button" id="map-btn">重新產生</button></h3>
+                  <p class="rp-muted" id="map-status"></p>
+                </section>
+
+                <section class="rp-panel">
+                  <h3>Gitea issue</h3>
+                  <p class="rp-muted" id="gitea-note" hidden>這個 repo 不在公司 Gitea 上，issue 的功能用不到。</p>
+                  <div class="rp-row">
+                    <label class="rp-opt"><input id="set-issue-on" type="checkbox" /><span>從 Gitea issue 自動接單：標籤</span></label>
+                    <input id="set-issue-label" class="rp-in mono" type="text" maxlength="100" spellcheck="false" placeholder="loop" style="width: 160px" aria-label="自動接單的標籤" />
+                  </div>
+                  <label class="rp-opt"><input id="set-issue-comments" type="checkbox" /><span>在 issue 留言回報進度</span><span class="rp-hint">分析好、開始修、檢查結果、PR 連結</span></label>
+                </section>
+
+                <p class="err-line" id="set-err" hidden></p>
+                <div class="rp-form-foot"><button class="btn primary" type="submit" id="save-btn">儲存</button><span class="rp-hint" id="save-note"></span></div>
+              </form>
+
+              <section class="rp-panel danger">
+                <h3>危險區</h3>
+                <p class="rp-muted" id="delete-note"></p>
+                <div class="rp-row"><button class="btn danger-ghost" type="button" id="delete-btn">移除這個 repo</button></div>
+              </section>
+            </section>
+
+            <!-- 檢查 (checks.js) -->
+            <section class="rp-tabpane" id="tab-checks" role="tabpanel" aria-labelledby="tabbtn-checks" hidden></section>
+            <!-- 圖資 (checks.js) -->
+            <section class="rp-tabpane" id="tab-datasets" role="tabpanel" aria-labelledby="tabbtn-datasets" hidden></section>
+            <!-- 過去修法 -->
+            <section class="rp-tabpane" id="tab-fixes" role="tabpanel" aria-labelledby="tabbtn-fixes" hidden></section>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <!-- 匯入 Repo: paste a URL → watch the job → confirm name / branch / machine -->
+    <dialog class="rp-dialog" id="import-dialog" aria-labelledby="imp-title">
+      <form id="import-form" autocomplete="off">
+        <div class="dlg-head">
+          <h2 id="imp-title">匯入 Repo</h2>
+          <span class="grow"></span>
+          <button class="btn icon" type="button" id="imp-close" aria-label="關閉"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12" /><path d="M18 6L6 18" /></svg></button>
+        </div>
+        <div class="dlg-body">
+          <div class="rp-stepper" id="imp-steps">
+            <span class="st" data-step="1"><span class="n">1</span><span>貼上網址</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg></span>
+            <span class="bar" aria-hidden="true"></span>
+            <span class="st" data-step="2"><span class="n">2</span><span>偵測</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg></span>
+            <span class="bar" aria-hidden="true"></span>
+            <span class="st" data-step="3"><span class="n">3</span><span>確認</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg></span>
+            <span class="url" id="imp-url-echo"></span>
+          </div>
+
+          <!-- 1. paste -->
+          <div class="rp-tabpane" id="imp-step1">
+            <label class="rp-f"><span class="cap">Gitea 網址</span><input id="imp-url" class="mono" type="text" spellcheck="false" placeholder="http://gitea.corp:3000/aoi/cf-aoi" /></label>
+            <p class="rp-hint">只接受公司 Gitea 的 repo（http、https 或 ssh）；網址裡不要放帳號或 token。從瀏覽器網址列複製的 issue、分支頁網址也可以，Loop 會取出 repo。</p>
+          </div>
+
+          <!-- 2. progress -->
+          <div class="rp-tabpane" id="imp-step2" hidden>
+            <ul class="rp-progress" id="imp-progress"></ul>
+            <div class="rp-callout bad" id="imp-fail" hidden>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18" /><path d="M9 9l6 6" /><path d="M15 9l-6 6" /></svg>
+              <div class="tx"><b>匯入沒有成功</b><p id="imp-fail-text"></p></div>
+            </div>
+            <p class="rp-hint" id="imp-wait-note">大的 repo 要幾分鐘；可以先關掉這個視窗，匯入會在背景繼續，清單上看得到進度。</p>
+          </div>
+
+          <!-- 3. confirm -->
+          <div class="rp-tabpane" id="imp-step3" hidden>
+            <label class="rp-f"><span class="cap">名稱</span><input id="imp-name" type="text" maxlength="60" /></label>
+            <div class="rp-grid2">
+              <label class="rp-f"><span class="cap">預設分支</span><input id="imp-branch" class="mono" type="text" maxlength="200" spellcheck="false" /></label>
+              <label class="rp-f"><span class="cap">在哪台機台驗證</span><select id="imp-machine"></select></label>
+            </div>
+            <div class="rp-detected" id="imp-detected">
+              <div class="hd"><b>偵測到</b><span class="rp-hint" id="imp-detected-sub"></span></div>
+              <div class="rp-kv" id="imp-detected-kv"></div>
+            </div>
+            <p class="rp-hint">偵測不到的之後可在 Repo 設定補。</p>
+          </div>
+
+          <p class="err-line" id="imp-err" hidden role="alert"></p>
+        </div>
+        <div class="dlg-foot">
+          <span class="grow"></span>
+          <button class="btn" type="button" id="imp-cancel">取消</button>
+          <button class="btn" type="button" id="imp-bg" hidden>在背景繼續</button>
+          <button class="btn primary" type="button" id="imp-retry" hidden>重試</button>
+          <button class="btn primary" type="submit" id="imp-go">匯入</button>
+          <button class="btn primary" type="button" id="imp-done" hidden>完成</button>
+        </div>
+      </form>
+    </dialog>
+
+    <script src="/ops.js"></script>
+    <script type="module" src="/repos.js"></script>
+    <script type="module" src="/frame-boot.js"></script>
+  </body>
+</html>
