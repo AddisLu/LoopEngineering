@@ -104,7 +104,9 @@ export function writeTaskFile(
   const metricsBlock = metricSpecs.length
     ? `\n## 驗收指標（引擎自動檢查，門檻不在 repo 裡）\n` +
       metricSpecs.map((m) => `- \`${m.name} ${m.op} ${m.target}\``).join('\n') +
-      `\n驗證步驟（通常是圖庫評估）必須印出一行 \`LOOP_METRICS {"${metricSpecs[0]!.name}": 數值, …}\`（JSON，放在輸出最後）；引擎據此判定，未達標會把對照表交回給你繼續改。\n`
+      (extras?.checks?.length
+        ? `\n這些指標由驗收檢查回報（圖資回歸由引擎比對答案產生），你不用自己印；未達標時引擎會把對照表交回給你繼續改。\n`
+        : `\n驗證步驟（通常是圖庫評估）必須印出一行 \`LOOP_METRICS {"${metricSpecs[0]!.name}": 數值, …}\`（JSON，放在輸出最後）；引擎據此判定，未達標會把對照表交回給你繼續改。\n`)
     : '';
   const protectedList = parseProtected(task.protected_paths);
   const protectedBlock = protectedList.length

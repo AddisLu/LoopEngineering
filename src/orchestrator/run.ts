@@ -53,7 +53,7 @@ import { evaluateAcceptance, extractMetrics, formatAcceptance, formatSpecs, pars
 import { cloudAllowed, isCloudModel, localFallbackModel } from '../local/backend.js';
 import { benchmarkRecommendations } from '../benchmark/store.js';
 import { runSelfReview } from '../review/selfReview.js';
-import { attachmentsFor, repoMapFor, similarFixesFor } from '../intake/context.js';
+import { attachmentsFor, checkLinesFor, repoMapFor, similarFixesFor } from '../intake/context.js';
 import { reportIssue } from '../integrations/giteaIssues.js';
 import { checkStepRunner, hasCheckSteps, pushForMachineChecks, type CheckDeps } from '../checks/runner.js';
 import { verifyKindFor } from '../checks/runs.js';
@@ -299,6 +299,7 @@ export async function runTask(
     attachments: attachmentsFor(task),
     repoMap: repoMapFor(db, task),
     similarFixes: similarFixesFor(db, task),
+    checks: checkLinesFor(task),
   });
   if (!isMock && !isGeneric) {
     // Keep engine-written artifacts out of the task branch/PR: exclude them locally

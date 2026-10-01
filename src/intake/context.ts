@@ -3,6 +3,7 @@ import type Database from 'better-sqlite3';
 import type { Task } from '../types.js';
 import { getBool, getNum } from '../db/index.js';
 import { renderSimilarFixes, similarFixes } from '../repo/ledger.js';
+import { describeChecks, parseCheckSnapshots } from '../checks/render.js';
 
 /**
  * What a ticket adds to LOOP_TASK.md, read at dispatch. Every helper returns null for a task that is
@@ -57,4 +58,15 @@ export function readTaskImages(task: Pick<Task, 'images_json'>): TaskImage[] {
 export function attachmentsFor(task: Task): Array<{ path: string; text: string }> | null {
   const imgs = readTaskImages(task).filter((i) => fs.existsSync(i.file));
   return imgs.length ? imgs.map((i) => ({ path: i.file, text: i.text ?? '' })) : null;
+}
+
+/** The task's checks in plain words (replaces the raw check:<id> steps in LOOP_TASK.md). */
+export function checkLinesFor(task: Task): string[] | null {
+  if (!task.checks_json) return null;
+  try {
+    const snap = parseCheckSnapshots(task);
+    return snap.length ? describeChecks(snap) : null;
+  } catch {
+    return null;
+  }
 }

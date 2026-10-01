@@ -15,6 +15,7 @@ import { findOutput, listFiles, pulledPath, readAnswers } from './dataset.js';
 import { parseCheckSnapshots, prefixedThresholds, snapshotCheck, targetsMachine, type CheckSnapshot, type DatasetSnapshot } from './render.js';
 import { beginCheckRun, finishCheckRun, newCheckRunId, type CheckRunKind } from './runs.js';
 import { getCheck } from './store.js';
+import { realMachineRunner } from './machineRunner.js';
 
 export { parseCheckStep, type CheckStepRunner } from '../orchestrator/verify.js';
 
@@ -76,8 +77,8 @@ type Deps = ResolvedCheckDeps;
  * runner (src/exec/remote.ts over the `machines` table) here; until then machine checks fail with a
  * clear note and everything else runs.
  */
-function defaultMachineRunner(_db: Database.Database): MachineRunner | null {
-  return null;
+function defaultMachineRunner(db: Database.Database): MachineRunner | null {
+  return realMachineRunner(db);
 }
 
 export function resolveCheckDeps(db: Database.Database, deps: CheckDeps = {}): ResolvedCheckDeps {
