@@ -5,6 +5,7 @@
 // PhoneTicket. Every server call lives in tickets-api.js; rendering is textContent-only (h / fill).
 import { $, h, fill, icon, toast, tsMs, shortTime, dur, modelName } from './frame.js';
 import { tickets, registry, links } from './tickets-api.js';
+import { takeHandoff } from './fix-handoff.js';
 
 const MAX_IMAGES = 6;
 const MAX_EDGE = 1600; // px on the long edge, as the chat shrinks a pasted screenshot
@@ -1498,6 +1499,16 @@ function startNew() {
   if (kept) for (const k of ['title', 'description', 'repo_id', 'branch', 'kind', 'model', 'priority']) if (kept[k] !== undefined && kept[k] !== null) S.f[k] = kept[k];
   const tpl = TEMPLATES[params.get('template') || ''];
   if (tpl) Object.assign(S.f, { description: tpl.description, kind: tpl.kind });
+  // from the chat (「轉成問題單」, 轉成任務 → 開問題單): its text, screenshots and repo hint, once
+  const handoff = params.get('handoff') ? takeHandoff() : null;
+  if (handoff) {
+    Object.assign(S.f, { title: '', description: handoff.description, images: handoff.images || [] });
+    if (handoff.kind) S.f.kind = handoff.kind;
+    const hint = String(handoff.repo_hint || '').replace(/\/+$/, '');
+    const hit = hint && S.repos.find((r) => [r.local_path, r.remote_url, r.name].some((x) => x && (x === hint || String(x).replace(/\.git$/, '').endsWith(hint))));
+    if (hit) Object.assign(S.f, { repo_id: hit.id, branch: '' });
+    history.replaceState(null, '', '/fix.html');
+  }
   const want = params.get('repo');
   if (want) {
     if (repoById(want)) Object.assign(S.f, { repo_id: want, branch: '' });

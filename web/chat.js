@@ -1,6 +1,7 @@
 import { $, api, authHeaders, drawer, el, fmtInt, fmtSec, nameHeader, onBoard, phone, rail, setText, store, stored, toast, when } from './shell.js';
 import { renderMarkdown } from './chat-md.js';
 import { mountActions, mountConvMenu, mountHelpMenu } from './chat-actions.js';
+import { openTicket } from './fix-handoff.js';
 
 /**
  * The conversation itself: streaming answers from the local model, pasted screenshots, and the
@@ -321,6 +322,17 @@ async function addImages(files) {
   }
 }
 
+// 「轉成問題單」: once the box reads like a problem (≥ 10 characters), hand it and the pasted
+// screenshots to a new 問題單 instead of asking the model
+function paintTicketChip() {
+  $('ticket-chip').hidden = $('prompt').value.trim().length < 10;
+}
+$('prompt').addEventListener('input', paintTicketChip);
+$('ticket-chip').addEventListener('click', () => {
+  const { dropped } = openTicket({ description: $('prompt').value.trim(), images: pending });
+  if (dropped) toast('截圖太大帶不過去，請在問題單上再貼一次', 'warn');
+});
+
 document.addEventListener('paste', (e) => {
   const files = [...((e.clipboardData && e.clipboardData.items) || [])]
     .filter((it) => it.kind === 'file' && it.type.startsWith('image/'))
@@ -427,6 +439,7 @@ async function send(raw, opts = {}) {
   if ((!text && pending.length === 0 && !(carried && carried.length)) || controller) return;
   if (!text) text = '請說明這張圖的內容。';
   $('prompt').value = '';
+  paintTicketChip();
   if (samplesOpen) {
     samplesOpen = false;
     store('loop_shell_samples', 'closed');

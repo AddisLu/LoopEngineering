@@ -113,3 +113,21 @@ describe('問題單 page (/fix.html)', () => {
     expect(read('morning.js')).toContain("a.href = '/fix.html';");
   });
 });
+
+describe('from the chat to a 問題單', () => {
+  it('the composer chip and 轉成任務 → 開問題單 hand off through sessionStorage, never the URL', () => {
+    const hand = read('fix-handoff.js');
+    expect(hand).toContain('sessionStorage.setItem(HANDOFF_KEY');
+    expect(hand).toContain("window.open('/fix.html?handoff=1', '_blank')");
+    expect(hand).not.toMatch(/noopener/); // the new tab needs the copy of this tab's sessionStorage
+    expect(hand).not.toMatch(/encodeURIComponent\(\s*description/);
+    expect(read('index.html')).toContain('id="ticket-chip"');
+    expect(read('chat.js')).toContain('openTicket({ description:');
+    const actions = read('chat-actions.js');
+    expect(actions).toContain("['ticket', '開問題單'");
+    expect(actions).not.toContain('開工作流程 ↗');
+    const fix = read('fix.js');
+    expect(fix).toContain("params.get('handoff') ? takeHandoff() : null");
+    expect(fix).not.toMatch(/innerHTML/);
+  });
+});

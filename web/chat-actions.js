@@ -1,4 +1,5 @@
 import { api, authHeaders, el, nameHeader, toast } from './shell.js';
+import { openTicket } from './fix-handoff.js';
 
 /**
  * The per-message action bar.
@@ -71,12 +72,11 @@ async function capture(view, btn) {
 /**
  * 轉成任務: first ask the server what kind of work this answer looks like (local model, keyword
  * fallback), then let the operator confirm in a small dialog. Each choice has its own exit:
- * fix/feature/perf → a pre-filled PRD-wizard draft, spike → a fresh repo + task, todo → the
- * plain draft task. All idempotent on the server (one task or draft per answer).
+ * a fix / feature / perf → a new 問題單 (fix.html, prefilled with the question, the symptom and
+ * the answer), spike → a fresh repo + task, todo → the plain draft task.
  */
 const INTENTS = [
-  ['fix', '軟體修正', '機況／判錯／crash — 帶著症狀與參考資料進工作流程，改現有程式'],
-  ['feature', '功能或效能', '要多一個功能，或要更快 — 進工作流程'],
+  ['ticket', '開問題單', '程式錯誤、要加功能或變快 — 帶著問題與這則回答開一張問題單，Loop 分析後修'],
   ['spike', '驗證新技術／套件', '在 ~/Addis/spikes 開一個新 repo，裝起來跑 demo、寫 REPORT.md'],
   ['todo', '待辦／純紀錄', '只留一張草稿任務，內容就是這則回答'],
 ];
@@ -116,7 +116,7 @@ async function repoOptions(hint) {
     o.value = u;
     sel.append(o);
   }
-  const manual = el('option', null, '（在工作流程裡再選）');
+  const manual = el('option', null, '（在問題單上再選）');
   manual.value = '';
   sel.append(manual);
   sel.value = hint && uris.includes(hint) ? hint : uris[0] || '';
@@ -129,7 +129,7 @@ async function openTaskChooser(view, s) {
   const why = s.model_ready && s.confidence !== 'low' ? `建議：${s.reason}` : `不太確定（${s.reason}），請你選`;
   dlg.append(el('p', 'dialog-hint', why));
 
-  let intent = s.intent === 'perf' ? 'feature' : s.intent;
+  let intent = ['fix', 'feature', 'perf'].includes(s.intent) ? 'ticket' : s.intent;
   const opts = el('div', 'opts');
   const cards = new Map();
   for (const [key, label, blurb] of INTENTS) {
@@ -145,7 +145,7 @@ async function openTaskChooser(view, s) {
   const title = textInput(s.title, '任務標題');
   dlg.append(field('標題', title));
 
-  // fix / feature: PRD wizard prefill
+  // 開問題單: what goes into the ticket's description
   const fixBox = el('div', 'intent-fields');
   const kindSel = el('select');
   for (const [k, l] of KIND_OPTS) {
@@ -158,7 +158,7 @@ async function openTaskChooser(view, s) {
   const symptom = textInput(s.fix ? s.fix.symptom : '', '現況／症狀');
   const expected = textInput(s.fix ? s.fix.expected : '', '期望行為');
   fixBox.append(field('改動類型', kindSel), field('Repo', repoSel), field('現況／症狀', symptom), field('期望行為', expected));
-  if (s.sources && s.sources.length) fixBox.append(el('p', 'dialog-hint', `會帶入 ${Math.min(5, s.sources.length)} 個參考來源到工作流程的範圍段落`));
+  fixBox.append(el('p', 'dialog-hint', '問題單會在新分頁打開，確認 repo 後按「請 Loop 分析」'));
   dlg.append(fixBox);
 
   // spike
@@ -198,38 +198,26 @@ async function openTaskChooser(view, s) {
   menu.append(cancel, go);
   dlg.append(menu);
 
-  const NOTE = { fix: '開工作流程 ↗', feature: '開工作流程 ↗', spike: '建立 spike', todo: '建立待辦' };
+  const NOTE = { ticket: '開問題單 ↗', spike: '建立 spike', todo: '建立待辦' };
   function choose(key) {
     intent = key;
     for (const [k, c] of cards) c.classList.toggle('on', k === key);
-    fixBox.hidden = !(key === 'fix' || key === 'feature');
+    fixBox.hidden = key !== 'ticket';
     spikeBox.hidden = key !== 'spike';
     go.textContent = NOTE[key];
-    if (key === 'fix' && !['algo', 'bugfix'].includes(kindSel.value)) kindSel.value = 'algo';
-    if (key === 'feature' && !['feature', 'perf'].includes(kindSel.value)) kindSel.value = 'feature';
   }
-  choose(intent);
-  if (!s.prd_gate_enabled) {
-    for (const k of ['fix', 'feature']) {
-      cards.get(k).disabled = true;
-      cards.get(k).title = '工作流程未啟用（prd_gate_enabled）';
-    }
-    if (intent === 'fix' || intent === 'feature') choose('todo');
-  }
+  choose(cards.has(intent) ? intent : 'todo');
 
   go.onclick = async () => {
     go.disabled = true;
+    if (intent === 'ticket') {
+      const { dropped } = openTicket({ description: ticketText(view, title.value, symptom.value, expected.value, s.sources), repoHint: repoSel.value, kind: kindSel.value });
+      if (dropped) toast('截圖太大帶不過去，請在問題單上再貼一次', 'warn');
+      dlg.close();
+      return;
+    }
     const body = { intent, title: title.value.trim() };
-    if (intent === 'fix' || intent === 'feature') {
-      Object.assign(body, {
-        intent: kindSel.value === 'perf' ? 'perf' : intent,
-        kind: kindSel.value,
-        repo_path: repoSel.value,
-        symptom: symptom.value.trim(),
-        expected: expected.value.trim(),
-        sources: (s.sources || []).slice(0, 5),
-      });
-    } else if (intent === 'spike') {
+    if (intent === 'spike') {
       body.spike = { name: spName.value.trim(), goal: spGoal.value.trim(), urls: urlChecks.filter((c) => c.checked).map((c) => c.value) };
     }
     try {
@@ -244,6 +232,21 @@ async function openTaskChooser(view, s) {
   dlg.addEventListener('close', () => dlg.remove());
   document.body.append(dlg);
   dlg.showModal();
+}
+
+/** The 問題單 description: the person's question, the symptom and expectation, and the answer (trimmed). */
+function ticketText(view, title, symptom, expected, sources) {
+  let q = view.wrap.previousElementSibling;
+  while (q && !q.classList.contains('user')) q = q.previousElementSibling;
+  const question = q ? (q.querySelector('.body') || q).textContent.trim() : '';
+  const answer = view.entry && typeof view.entry.content === 'string' ? view.entry.content : view.body.textContent;
+  const parts = [title.trim(), question && question !== title.trim() ? question : ''];
+  if (symptom.trim()) parts.push(`現況：${symptom.trim()}`);
+  if (expected.trim()) parts.push(`期望：${expected.trim()}`);
+  parts.push(`（對話裡的回答，供參考）\n${String(answer || '').trim().slice(0, 3000)}`);
+  const refs = (sources || []).slice(0, 5).map((x) => x.url || x.path || x.title).filter(Boolean);
+  if (refs.length) parts.push(`參考：\n${refs.map((r) => `- ${r}`).join('\n')}`);
+  return parts.filter(Boolean).join('\n\n');
 }
 
 function applyTaskResult(view, r) {
@@ -677,7 +680,7 @@ export function mountActions(view, ctx) {
       actionBtn('複製', '複製這個回答的原始文字', (b) => copyText(text(), b)),
       actionBtn('存檔', '把這則回答存成檔案：Markdown、HTML、PDF，或它產生的圖與程式碼', () => openSaveDialog(view)),
       actionBtn('存進知識庫', '把這個回答存成知識庫筆記，之後對話查得到', (b) => capture(view, b)),
-      actionBtn('轉成任務', '先判斷這則回答該變成哪種工作（軟體修正／功能／驗證新技術／待辦），確認後再開', (b) => toTask(view, b)),
+      actionBtn('轉成任務', '先判斷這則回答該變成哪種工作（開問題單／驗證新技術／待辦），確認後再開', (b) => toTask(view, b)),
       actionBtn('請雲端複核', '把這個回答送給雲端高階模型複核（會花訂閱額度，預設關閉）', (b) => escalate(view, b, ctx)),
     );
     const byLabel = (label) => [...bar.children].find((c) => c.textContent === label);
