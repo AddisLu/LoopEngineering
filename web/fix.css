@@ -31,6 +31,7 @@ select.fx-in { height: 40px; padding: 0 10px; }
 textarea.fx-in { line-height: 1.6; resize: vertical; }
 .fx-note { font-size: 12px; line-height: 1.5; color: var(--text-2); }
 .fx-note.warn { color: var(--st-attention); }
+.fx-machine .fx-spec { flex-basis: 100%; }
 .fx-muted { margin: 0; font-size: 13.5px; line-height: 1.6; color: var(--text-2); }
 .fx-sub { font-size: 13px; color: var(--text-2); }
 .fx-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
@@ -236,7 +237,7 @@ code.fx-ck-what { font-family: var(--mono); }
 .fx-segs button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-2); font-weight: 700; }
 .fx-segs button:disabled { cursor: default; }
 .fx-cond-edit .fx-segs { max-width: 240px; }
-.fx-machine { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 14px; }
+.fx-machine { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; font-size: 14px; }
 .fx-machine .fx-side-link { margin-left: auto; font-size: 13px; }
 .fx-mini { display: flex; flex-wrap: wrap; gap: 8px; }
 .fx-mini a { width: 80px; height: 56px; display: block; overflow: hidden; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-sunk); }

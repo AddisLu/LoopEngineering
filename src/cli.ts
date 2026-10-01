@@ -74,6 +74,7 @@ import { parseAcceptance } from './orchestrator/acceptance.js';
 import { ensureWorkspace, execRoot } from './exec/workspace.js';
 import { deleteExecHost, getExecHost, listExecHosts, LOCAL_HOST, realHostExec, resolveExecTarget, setHostIds, sshArgs, upsertExecHost, type ExecHost, type ExecTarget } from './exec/hosts.js';
 import { createMachine, datasetsUsingMachine, deleteMachine, getMachine, listMachines, MachineError, recordCheck, reposUsingMachine, updateMachine, type Machine } from './exec/machines.js';
+import { readSpecs, specsSummary } from './exec/specs.js';
 import { checkMachine, withMachineLock } from './exec/remote.js';
 import { getRepo, listRepos, parseStack, RepoError } from './repo/store.js';
 import { awaitImport, importRepo, removeRepo } from './repo/import.js';
@@ -949,7 +950,8 @@ machineCmd
   .option('--work-root <dir>', 'where repos and 圖資 go on the box: /srv/loop (Linux) or C:\\loop (Windows)')
   .option('--labels <csv>', 'e.g. cuda,aoi-v3,camera')
   .option('--transport <t>', 'auto|gitea|copy — how the box gets the code (auto: the check decides)')
-  .option('--desc <text>', 'for the model: what this box has')
+  .option('--desc <text>', 'for the model: what this box is for')
+  .option('--software <text>', 'software the check cannot see: Halcon 23.11, a camera SDK, a licence…')
   .option('--disabled', 'register it switched off')
   .action((name: string, o) => {
     const db = getDb();
@@ -965,6 +967,7 @@ machineCmd
             labels: o.labels,
             transport: o.transport,
             description: o.desc,
+            software: o.software,
             enabled: o.disabled ? false : undefined,
           })!
         : createMachine(db, {
@@ -977,6 +980,7 @@ machineCmd
             labels: o.labels ?? null,
             transport: o.transport ?? null,
             description: o.desc ?? null,
+            software: o.software ?? null,
             enabled: !o.disabled,
           });
       console.log(`${prev ? 'updated' : 'added'} ${machineLine(m)}`);
@@ -995,7 +999,8 @@ machineCmd
     if (!rows.length) return console.log('還沒有機台。加一台能 SSH 進去、裝了 git 的電腦：loop machine add <name> --ssh user@host --work-root /srv/loop');
     for (const m of rows) {
       const state = m.last_check_ok == null ? '○ 未檢查' : m.last_check_ok ? `● 正常（${m.last_check_at}）` : `● 有問題（${m.last_check_at}）`;
-      console.log(`${machineLine(m)}  ${state}${m.description ? `\n    ${m.description}` : ''}`);
+      const specs = specsSummary(readSpecs(m.specs_json));
+      console.log(`${machineLine(m)}  ${state}${specs ? `\n    規格：${specs}` : ''}${m.software ? `\n    其他軟體：${m.software}` : ''}${m.description ? `\n    ${m.description}` : ''}`);
     }
   });
 

@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { realHostExec, sshArgs, type HostExec } from './hosts.js';
 import { parseProbe, type CheckLine } from './check.js';
+import { linuxSpecsScript, parseSpecs, specsSummary, windowsSpecsScript, type MachineSpecs } from './specs.js';
 import { isWorkRootFor, type Machine, type MachineShell } from './machines.js';
 
 export type { Machine } from './machines.js';
@@ -434,6 +435,8 @@ export interface MachineCheckOptions {
 }
 
 export interface DetectedFromCheck {
+  /** 規格: OS, CPU, RAM, disk, GPU, CUDA, tools (null = the probe did not get that far) */
+  specs: MachineSpecs | null;
   os: RemoteOs | null;
   /** what the wrapper runs the checks in: bash / powershell */
   shell: MachineShell | null;
@@ -493,6 +496,7 @@ function linuxProbe(m: Machine, repos: Array<{ name: string }>, datasets: Array<
     'echo "== gpu"; (nvidia-smi --query-gpu=name --format=csv,noheader 2>&1 || echo "gpu: none")',
     `echo "== repos"${repos.map((r) => `; echo "repo ${safeName(r.name)} $(git -C ${q(repoDirOn(m, r.name))} rev-parse --short HEAD 2>/dev/null || echo missing) $(git -C ${q(repoDirOn(m, r.name))} log -1 --format=%ct 2>/dev/null)"`).join('')}`,
     `echo "== datasets"${datasets.map((d) => `; echo "dataset ${safeName(d.name)} $(test -d ${q(`${datasetDirOn(m, d.name)}/.git`)} && echo present || echo missing)"`).join('')}`,
+    linuxSpecsScript(m.work_root),
   ];
   return parts.join('; ');
 }
@@ -518,6 +522,7 @@ function windowsProbe(m: Machine, repos: Array<{ name: string }>, datasets: Arra
     }),
     '"== datasets"',
     ...datasets.map((d) => `if (Test-Path -LiteralPath ${q(`${datasetDirOn(m, d.name)}\\.git`)}) { "dataset ${safeName(d.name)} present" } else { "dataset ${safeName(d.name)} missing" }`),
+    windowsSpecsScript(root),
   ].join('\n');
 }
 
@@ -528,7 +533,7 @@ function windowsProbe(m: Machine, repos: Array<{ name: string }>, datasets: Arra
  */
 export async function checkMachine(m: Machine, exec: HostExec = realHostExec, opts: MachineCheckOptions = {}): Promise<MachineCheck> {
   const lines: CheckLine[] = [];
-  const detected: DetectedFromCheck = { os: null, shell: null, transport: null };
+  const detected: DetectedFromCheck = { specs: null, os: null, shell: null, transport: null };
   const done = (): MachineCheck => ({ lines, ok: lines.every((l) => l.ok !== false), detected });
   const now = opts.now ?? Date.now;
   const repos = opts.repos ?? [];
@@ -596,6 +601,7 @@ export async function checkMachine(m: Machine, exec: HostExec = realHostExec, op
     return done();
   }
   const p = parseProbe(pr.output);
+  detected.specs = parseSpecs(p.specs);
 
   const gitVersion = /git version (\d+\.\d+(?:\.\d+)?)/.exec(p.git ?? '')?.[1] ?? null;
   lines.push(
@@ -661,6 +667,7 @@ export async function checkMachine(m: Machine, exec: HostExec = realHostExec, op
     .filter(Boolean);
   const gpuOk = gpus.length > 0 && !/gpu: none|not found|not recognized|無法|NVIDIA-SMI has failed|No devices/i.test(gpus.join(' '));
   lines.push(gpuOk ? { ok: true, label: 'GPU', detail: gpus.join('、') } : { ok: null, label: 'GPU', detail: '沒有 nvidia-smi（或沒有 NVIDIA GPU）；只有需要 GPU 的檢查會受影響' });
+  if (detected.specs) lines.push({ ok: true, label: '規格', detail: specsSummary(detected.specs)! });
 
   for (const r of repos) {
     const row = (p.repos ?? '').split('\n').find((l) => l.trim().startsWith(`repo ${safeName(r.name)} `)) ?? '';

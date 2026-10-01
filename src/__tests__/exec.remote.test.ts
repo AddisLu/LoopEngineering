@@ -393,8 +393,10 @@ describe('withMachineLock', () => {
 
 describe('checkMachine', () => {
   const twoHoursAgo = Math.floor(Date.now() / 1000) - 7200;
-  const LINUX_PROBE = ['== git', 'git version 2.45.1', '== work', 'work: writable', 'free_kb:222298112', '== python', 'Python 3.11.4', '== gpu', 'NVIDIA RTX A4000', '== repos', `repo cf-aoi 3f2a1c9 ${twoHoursAgo}`, '== datasets', 'dataset dataset-2026Q2 missing', ''].join('\n');
-  const WIN_PROBE = LINUX_PROBE.replace('git version 2.45.1', 'git version 2.45.1.windows.1').replace('Python 3.11.4', 'python: not found');
+  const LINUX_SPECS = ['== specs', 'os=Ubuntu 22.04.4 LTS', 'kernel=6.5.0-41-generic', 'arch=x86_64', 'cpu=Intel(R) Xeon(R) W-2245 CPU @ 3.90GHz', 'threads=16', 'tpc=2', 'mem_kb=65536000', 'disk_total_kb=976762584', 'disk_free_kb=222298112', 'gpu=NVIDIA RTX A4000, 16376, 550.90.07', 'cuda_driver=12.4', 'cuda_toolkit=12.2', 'python=3.11.4', 'gcc=11.4.0', 'cmake=', 'docker='];
+  const WIN_SPECS = ['== specs', 'os=Microsoft Windows 11 專業版 (10.0.22631)', 'kernel=10.0.22631', 'mem_kb=33554432', 'arch=AMD64', 'cpu=Intel(R) Core(TM) i7-12700', 'cores=12', 'threads=20', 'disk_total_kb=976762584', 'disk_free_kb=222298112', 'gpu=NVIDIA RTX A4000, 16376, 552.22', 'cuda_driver=12.4', 'msvc=Visual Studio Professional 2022'];
+  const LINUX_PROBE = ['== git', 'git version 2.45.1', '== work', 'work: writable', 'free_kb:222298112', '== python', 'Python 3.11.4', '== gpu', 'NVIDIA RTX A4000', '== repos', `repo cf-aoi 3f2a1c9 ${twoHoursAgo}`, '== datasets', 'dataset dataset-2026Q2 missing', ...LINUX_SPECS, ''].join('\n');
+  const WIN_PROBE = LINUX_PROBE.replace('git version 2.45.1', 'git version 2.45.1.windows.1').replace('Python 3.11.4', 'python: not found').replace(LINUX_SPECS.join('\n'), WIN_SPECS.join('\n'));
   const repos = [{ name: 'cf-aoi', remoteUrl: 'http://gitea.corp:3000/aoi/cf-aoi.git' }];
   const datasets = [{ name: 'dataset-2026Q2' }];
 
@@ -412,7 +414,20 @@ describe('checkMachine', () => {
     const f = linuxBox();
     const r = await checkMachine({ ...lin, os: 'auto' }, f.exec, { repos, datasets });
     expect(r.ok).toBe(true);
-    expect(r.detected).toEqual({ os: 'linux', shell: 'bash', transport: 'gitea' });
+    expect(r.detected).toMatchObject({ os: 'linux', shell: 'bash', transport: 'gitea' });
+    expect(r.detected.specs).toMatchObject({
+      os: 'Ubuntu 22.04.4 LTS',
+      arch: 'x86_64',
+      cores: 8,
+      threads: 16,
+      ram_gb: 62.5,
+      disk_total_gb: 931.5,
+      gpus: [{ name: 'NVIDIA RTX A4000', vram_gb: 16 }],
+      driver: '550.90.07',
+      cuda_driver: '12.4',
+      cuda_toolkit: '12.2',
+      tools: { python: '3.11.4', gcc: '11.4.0' },
+    });
     expect(r.lines.map((l) => `${l.ok === true ? '✓' : l.ok === false ? '✗' : '⚠'} ${l.label}  ${l.detail}`)).toEqual([
       '✓ SSH 登入  loop@gpu-1（Linux，bash）',
       '✓ git  2.45.1',
@@ -420,6 +435,7 @@ describe('checkMachine', () => {
       '✓ 工作目錄  /srv/loop 可寫，剩 212 GB',
       '✓ Python  Python 3.11.4',
       '✓ GPU  NVIDIA RTX A4000',
+      '✓ 規格  Ubuntu 22.04.4 LTS（x86_64） · 8 核／16 緒 · RAM 63 GB · NVIDIA RTX A4000 16 GB · CUDA 12.2',
       '✓ repo 複本  cf-aoi @ 3f2a1c9（2 小時前）',
       '⚠ 圖資快取  dataset-2026Q2 還沒抓：第一次跑檢查時會抓',
     ]);
@@ -431,6 +447,8 @@ describe('checkMachine', () => {
     expect(probe).toContain(`touch '/srv/loop/.loop-probe'`);
     expect(probe).toContain(`git -C '/srv/loop/repos/cf-aoi' rev-parse --short HEAD`);
     expect(probe).toContain(`test -d '/srv/loop/datasets/dataset-2026Q2/.git'`);
+    expect(probe).toContain(`df -Pk '/srv/loop'`);
+    expect(probe).toContain('nvidia-smi --query-gpu=name,memory.total,driver_version');
     expect(unwrapLinux(f.remote(2))).toBe(`export GIT_TERMINAL_PROMPT='0'; export GCM_INTERACTIVE='never'; git ls-remote 'http://gitea.corp:3000/aoi/cf-aoi.git' HEAD`);
   });
 
@@ -443,7 +461,7 @@ describe('checkMachine', () => {
     expect(r.lines[0]!.detail).toContain('無法以金鑰登入 loop@gpu-1：loop@gpu-1: Permission denied (publickey).');
     expect(r.lines[0]!.detail).toContain('ssh-copy-id -p 2222 loop@gpu-1');
     expect(r.lines[0]!.detail).toContain('C:\\ProgramData\\ssh\\administrators_authorized_keys');
-    expect(r.detected).toEqual({ os: null, shell: null, transport: null });
+    expect(r.detected).toEqual({ specs: null, os: null, shell: null, transport: null });
     expect(f.calls).toHaveLength(1);
     const hk = await checkMachine(lin, fake(() => ({ code: 255, out: 'Host key verification failed.' })).exec, {});
     expect(hk.lines[0]!.detail).toContain('host key');
@@ -461,7 +479,8 @@ describe('checkMachine', () => {
     });
     const r = await checkMachine({ ...win, os: 'auto', work_root: 'C:\\loop' }, f.exec, { repos, datasets });
     expect(r.ok).toBe(true);
-    expect(r.detected).toEqual({ os: 'windows', shell: 'powershell', transport: 'gitea' });
+    expect(r.detected).toMatchObject({ os: 'windows', shell: 'powershell', transport: 'gitea' });
+    expect(r.detected.specs).toMatchObject({ os: 'Microsoft Windows 11 專業版 (10.0.22631)', cores: 12, threads: 20, ram_gb: 32, cuda_toolkit: null, tools: { msvc: 'Visual Studio Professional 2022' } });
     expect(r.lines.map((l) => l.detail)).toEqual([
       'aoi@aoi-1（Windows 11，PowerShell 5.1）',
       '2.45.1',
@@ -469,6 +488,7 @@ describe('checkMachine', () => {
       'C:\\loop 可寫，剩 212 GB',
       '找不到 python；圖資比對在引擎主機做，不影響',
       'NVIDIA RTX A4000',
+      'Microsoft Windows 11 專業版 (10.0.22631)（AMD64） · 12 核／20 緒 · RAM 32 GB · NVIDIA RTX A4000 16 GB · CUDA（驅動）12.4',
       'cf-aoi @ 3f2a1c9（2 小時前）',
       'dataset-2026Q2 還沒抓：第一次跑檢查時會抓',
     ]);
@@ -478,6 +498,8 @@ describe('checkMachine', () => {
     expect(probe).toContain("Get-PSDrive -Name 'C'");
     expect(probe).toContain("git -C 'C:\\loop\\repos\\cf-aoi' rev-parse --short HEAD");
     expect(probe).toContain("Test-Path -LiteralPath 'C:\\loop\\datasets\\dataset-2026Q2\\.git'");
+    expect(probe).toContain('Get-CimInstance Win32_Processor');
+    expect(probe).toContain('vswhere.exe');
     // Git Bash's uname also means Windows
     const g = fake((_c, remote) => {
       if (remote === 'uname -s') return { code: 0, out: 'MINGW64_NT-10.0-19045\n' };
@@ -513,7 +535,7 @@ describe('checkMachine', () => {
     const none = await checkMachine(lin, linuxBox().exec, {});
     expect(none.lines[2]).toMatchObject({ ok: null, label: 'Gitea' });
     expect(none.detected.transport).toBeNull();
-    expect(none.lines.map((l) => l.label)).toEqual(['SSH 登入', 'git', 'Gitea', '工作目錄', 'Python', 'GPU']);
+    expect(none.lines.map((l) => l.label)).toEqual(['SSH 登入', 'git', 'Gitea', '工作目錄', 'Python', 'GPU', '規格']);
   });
 
   it('a wrong setting is a failed line: the OS the row claims, a work root of the other OS, an unwritable root', async () => {

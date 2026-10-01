@@ -262,6 +262,10 @@ dialog.rp-dialog .dlg-foot .btn { padding: 9px 18px; font-size: 14px; }
 .mc-aside .facts { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 4px 12px; font-size: 13px; }
 .mc-aside .facts .k { color: var(--text-2); }
 .mc-aside .facts .v { overflow-wrap: anywhere; }
+.mc-specs { display: grid; gap: 6px; padding-top: 10px; border-top: 1px solid var(--surface-sunk); }
+.mc-specs h3 { margin: 0; font-size: 13px; font-weight: 700; color: var(--text-2); }
+td.mc-spec { font-size: 12.5px; min-width: 180px; }
+.spec-note { display: block; margin-top: 4px; }
 .mc-name { font-weight: 700; color: var(--text); text-decoration: none; background: none; border: 0; padding: 0; font: inherit; font-weight: 700; cursor: pointer; text-align: left; }
 body.app a.mc-name { color: var(--text); }
 .mc-name:hover { text-decoration: underline; }

@@ -918,6 +918,7 @@ function paintMachine(repo) {
     h('span.fx-dot', { dataset: { ok }, title: ok === 'false' ? '上次檢查連不上' : ok === 'true' ? '上次檢查正常' : null }),
     h('span', null, machineText(name, cm && cm.os)),
     h('a.fx-side-link', { href: links.repoChecks(repo.id) }, '改檢查'),
+    specLine(name) ? h('span.fx-note.fx-spec', null, specLine(name)) : null,
   );
 }
 
@@ -1228,13 +1229,16 @@ function paintChecks() {
   fill($('sec-checks'), secHead('驗收清單', '每一項都綠才算修好', null, manage), checks.length ? h('div.fx-checks', null, checks.map(checkRow)) : h('p.fx-muted', null, empty));
 }
 
+/** what the box is (OS · cores · RAM · GPU · CUDA) — the engine host's is this Spark's */
+const specLine = (name) => (name ? (machineOf(name) || {}).specs_line : S.machines.engine) || '';
+
 // 4. 執行條件
 const tile = (label, value, sub, lead) => h('div.fx-tile', null, h('span.fx-tile-l', null, label), h('span.fx-tile-v', null, lead || null, value), sub ? h('span.fx-tile-s', null, sub) : null);
 function conditionTiles(c) {
   const m = c.machine;
   const machine = m
-    ? tile('機台', machineText(m.name, m.os), m.ok == null ? '還沒檢查過' : `上次檢查 ${m.ok ? '✓' : '✗ 連不上'}${m.last_check_at ? ` ${ago(m.last_check_at)}` : ''}`, h('span.fx-dot', { dataset: { ok: m.ok == null ? 'null' : String(Boolean(m.ok)) } }))
-    : tile('機台', '引擎主機', '就在這台 Spark 上跑', h('span.fx-dot', { dataset: { ok: 'host' } }));
+    ? tile('機台', machineText(m.name, m.os), [m.ok == null ? '還沒檢查過' : `上次檢查 ${m.ok ? '✓' : '✗ 連不上'}${m.last_check_at ? ` ${ago(m.last_check_at)}` : ''}`, specLine(m.name)].filter(Boolean).join('；'), h('span.fx-dot', { dataset: { ok: m.ok == null ? 'null' : String(Boolean(m.ok)) } }))
+    : tile('機台', '引擎主機', ['就在這台 Spark 上跑', specLine(null)].filter(Boolean).join('；'), h('span.fx-dot', { dataset: { ok: 'host' } }));
   const md = c.model;
   const model = tile('模型', (md && (md.label || modelName(md.id))) || (S.t.model ? modelName(S.t.model) : '由 Loop 依領域挑'), (md && md.reason) || null);
   const e = c.estimate;

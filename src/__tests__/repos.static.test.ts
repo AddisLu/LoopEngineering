@@ -10,7 +10,7 @@ import { openTestDb } from '../db/index.js';
 import { buildApp } from '../server/app.js';
 import { createRepo } from '../repo/store.js';
 // the page modules are plain ESM that touch no DOM at import time
-import { byName, csv, healthOf, machineLabel, normalizeRepoUrl, osLabel, shortRemote } from '../../web/repo-ui.js';
+import { byName, csv, healthOf, machineLabel, normalizeRepoUrl, osLabel, shortRemote, specFacts, specShort } from '../../web/repo-ui.js';
 import { baselineText, datasetNameOf, metricsText, parseMetrics, runValues } from '../../web/checks.js';
 
 /**
@@ -95,11 +95,11 @@ describe('Repo and 機台 pages: static structure', () => {
     const p = read('machines.html');
     for (const id of [
       'machine-table', 'machine-rows', 'machine-empty', 'add-btn', 'empty-add-btn', 'machine-detail', 'sandbox-box', 'sandbox-list', 'sandbox-count',
-      'machine-dialog', 'machine-form', 'md-name', 'md-ssh', 'md-port', 'md-os', 'md-shell', 'md-root', 'md-labels', 'md-desc', 'md-lines', 'md-check', 'md-save',
+      'machine-dialog', 'machine-form', 'md-name', 'md-ssh', 'md-port', 'md-os', 'md-shell', 'md-root', 'md-labels', 'md-desc', 'md-soft', 'md-lines', 'md-check', 'md-save',
     ]) {
       expect(p, `missing id="${id}"`).toContain(`id="${id}"`);
     }
-    expect([...p.matchAll(/<th scope="col"[^>]*>([^<]*)</g)].map((m) => m[1]).slice(0, 6)).toEqual(['名稱', 'SSH', '作業系統', '標籤', '狀態', '用它的 repo']);
+    expect([...p.matchAll(/<th scope="col"[^>]*>([^<]*)</g)].map((m) => m[1]).slice(0, 7)).toEqual(['名稱', 'SSH', '作業系統', '規格', '標籤', '狀態', '用它的 repo']);
     expect(p).toContain('還沒有機台。加一台能 SSH 進去、裝了 git 的電腦。');
     expect(p).toContain('GPU 沙盒主機（進階）');
     expect(p).toContain('<details class="mc-sandbox" id="sandbox-box">'); // collapsed until opened
@@ -261,5 +261,26 @@ describe('POST /api/repos/:id/map (重新產生)', () => {
       db.close();
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('規格 on the pages', () => {
+  const spark = { os: 'Ubuntu 24.04.3 LTS', arch: 'aarch64', kernel: '6.14.0-1013-nvidia', cpu: 'Cortex-A725/Cortex-X925', cores: 20, threads: 20, ram_gb: 119.7, disk_total_gb: 3755, disk_free_gb: 2547.4, gpus: [{ name: 'NVIDIA GB10', vram_gb: null }], driver: '580.95.05', cuda_driver: '13.0', cuda_toolkit: '13.0', tools: { python: '3.12.3', docker: '28.5.1' }, at: new Date().toISOString() };
+  it('one short line for the table, and the VM-listing facts for the panel', () => {
+    expect(specShort(spark)).toBe('20 核 · RAM 120 GB · NVIDIA GB10 · CUDA 13.0');
+    expect(specShort({ ...spark, gpus: [], cuda_driver: null, cuda_toolkit: null })).toBe('20 核 · RAM 120 GB · 無 NVIDIA GPU');
+    const facts = Object.fromEntries(specFacts(spark, 'Halcon 23.11'));
+    expect(facts).toMatchObject({
+      作業系統: 'Ubuntu 24.04.3 LTS・aarch64',
+      CPU: 'Cortex-A725/Cortex-X925 · 20 核',
+      記憶體: '120 GB',
+      磁碟: '可用 2547 GB / 共 3755 GB',
+      GPU: 'NVIDIA GB10（VRAM 未回報，可能與系統共用記憶體）',
+      CUDA: 'Toolkit 13.0 · 驅動支援到 13.0 · 驅動 580.95.05',
+      工具: 'Python 3.12.3 · Docker 28.5.1',
+      其他軟體: 'Halcon 23.11',
+    });
+    // before the first check only the person's own line is there, with what to write
+    expect(specFacts(null, null)).toEqual([['其他軟體', '（使用者補充：例如 Halcon、OpenCV、相機 SDK、授權）']]);
   });
 });

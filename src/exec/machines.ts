@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import type { MachineSpecs } from './specs.js';
 import type { CheckLine } from './check.js';
 
 /**
@@ -16,7 +17,7 @@ export type MachineShell = (typeof MACHINE_SHELLS)[number];
 export type MachineTransport = (typeof MACHINE_TRANSPORTS)[number];
 
 /** A check's `machine` can never mean one of these: 'local' is the sandbox on this host, 'engine' the engine host itself. */
-export const RESERVED_MACHINE_NAMES: readonly string[] = ['local', 'engine'];
+export const RESERVED_MACHINE_NAMES: readonly string[] = ['local', 'engine', 'sandbox'];
 const NAME_RE = /^[a-z0-9][a-z0-9_-]{0,39}$/;
 /** user@host or host (an ~/.ssh/config alias works too) — never anything ssh could read as an option */
 const SSH_TARGET_RE = /^(?:[A-Za-z0-9][A-Za-z0-9_.-]*@)?[A-Za-z0-9][A-Za-z0-9_.-]*$/;
@@ -49,6 +50,10 @@ export interface Machine {
   last_check_json: string | null;
   last_check_at: string | null;
   last_check_ok: number | null;
+  /** 規格 the last health check found (src/exec/specs.ts MachineSpecs as JSON) */
+  specs_json: string | null;
+  /** software the probe cannot see, as the person wrote it (Halcon 23.11, 相機 SDK, 授權…) */
+  software: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -63,11 +68,12 @@ export interface MachineInput {
   work_root: string;
   labels?: string | string[] | null;
   description?: string | null;
+  software?: string | null;
   transport?: string | null;
   enabled?: boolean | number | null;
 }
 
-export type MachineFields = Pick<Machine, 'name' | 'ssh_target' | 'ssh_port' | 'os' | 'shell' | 'work_root' | 'labels' | 'description' | 'transport' | 'enabled'>;
+export type MachineFields = Pick<Machine, 'name' | 'ssh_target' | 'ssh_port' | 'os' | 'shell' | 'work_root' | 'labels' | 'description' | 'software' | 'transport' | 'enabled'>;
 
 /** Is `root` an absolute path for that OS? 'auto' accepts either form. */
 export function isWorkRootFor(os: MachineOs, root: string): boolean {
@@ -138,17 +144,19 @@ export function normalizeMachine(input: MachineInput): MachineFields {
   const labels = normalizeLabels(input.labels);
   const description = input.description == null ? null : String(input.description).trim() || null;
   if (description && description.length > MAX_DESCRIPTION) throw new MachineError(`說明太長（上限 ${MAX_DESCRIPTION} 字）`);
+  const software = input.software == null ? null : String(input.software).trim() || null;
+  if (software && software.length > MAX_DESCRIPTION) throw new MachineError(`其他軟體太長（上限 ${MAX_DESCRIPTION} 字）`);
   const transport = enumOf('transport', MACHINE_TRANSPORTS, input.transport, 'auto');
   const enabled = input.enabled === false || input.enabled === 0 ? 0 : 1;
-  return { name, ssh_target, ssh_port, os, shell, work_root, labels, description, transport, enabled };
+  return { name, ssh_target, ssh_port, os, shell, work_root, labels, description, software, transport, enabled };
 }
 
-const COLS = 'name, ssh_target, ssh_port, os, shell, work_root, labels, description, transport, enabled';
+const COLS = 'name, ssh_target, ssh_port, os, shell, work_root, labels, description, software, transport, enabled';
 
 export function createMachine(db: Database.Database, input: MachineInput): Machine {
   const f = normalizeMachine(input);
   if (getMachine(db, f.name)) throw new MachineError(`已經有這台機台：${f.name}`);
-  db.prepare(`INSERT INTO machines (${COLS}) VALUES (@name, @ssh_target, @ssh_port, @os, @shell, @work_root, @labels, @description, @transport, @enabled)`).run(f);
+  db.prepare(`INSERT INTO machines (${COLS}) VALUES (@name, @ssh_target, @ssh_port, @os, @shell, @work_root, @labels, @description, @software, @transport, @enabled)`).run(f);
   return getMachine(db, f.name)!;
 }
 
@@ -177,12 +185,13 @@ export function updateMachine(db: Database.Database, name: string, patch: Partia
     work_root: patch.work_root ?? prev.work_root,
     labels: patch.labels ?? prev.labels,
     description: patch.description === undefined ? prev.description : patch.description,
+    software: patch.software === undefined ? prev.software : patch.software,
     transport: patch.transport ?? prev.transport,
     enabled: patch.enabled === undefined || patch.enabled === null ? prev.enabled : patch.enabled,
   });
   db.prepare(
     `UPDATE machines SET ssh_target = @ssh_target, ssh_port = @ssh_port, os = @os, shell = @shell, work_root = @work_root,
-       labels = @labels, description = @description, transport = @transport, enabled = @enabled, updated_at = datetime('now')
+       labels = @labels, description = @description, software = @software, transport = @transport, enabled = @enabled, updated_at = datetime('now')
      WHERE name = @name`,
   ).run(f);
   return getMachine(db, name);
@@ -194,6 +203,8 @@ export function deleteMachine(db: Database.Database, name: string): boolean {
 
 /** What the health check found out beyond pass/fail; only ever fills a column that still says 'auto'. */
 export interface DetectedMachine {
+  /** the 規格 probe's result; null/undefined keeps the stored one (a check that never got that far) */
+  specs?: MachineSpecs | null;
   os?: MachineOs | null;
   shell?: MachineShell | null;
   transport?: MachineTransport | null;
@@ -208,6 +219,7 @@ export function recordCheck(db: Database.Database, name: string, lines: CheckLin
        os = CASE WHEN os = 'auto' AND @os IS NOT NULL THEN @os ELSE os END,
        shell = CASE WHEN shell = 'auto' AND @shell IS NOT NULL THEN @shell ELSE shell END,
        transport = CASE WHEN transport = 'auto' AND @transport IS NOT NULL THEN @transport ELSE transport END,
+       specs_json = COALESCE(@specs, specs_json),
        updated_at = datetime('now')
      WHERE name = @name`,
   ).run({
@@ -217,6 +229,7 @@ export function recordCheck(db: Database.Database, name: string, lines: CheckLin
     os: pick(MACHINE_OS, detected.os),
     shell: pick(MACHINE_SHELLS, detected.shell),
     transport: pick(MACHINE_TRANSPORTS, detected.transport),
+    specs: detected.specs ? JSON.stringify(detected.specs) : null,
   });
   return getMachine(db, name);
 }

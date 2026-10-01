@@ -68,10 +68,15 @@ export const tickets = {
 export const registry = {
   /** imported repos (with the detected stack) for the Repo select */
   repos: () => api('/api/repos').then((r) => arr(r && r.repos)),
-  /** machines for the OS and the health dot; the page works without them */
+  /** machines for the OS, the health dot and the 規格 line; `.engine` = this Spark's 規格 line. The page works without them */
   machines: () =>
     api('/api/machines')
-      .then((r) => arr(r && r.machines))
+      .then((r) => {
+        const list = arr(r && r.machines);
+        const local = arr(r && r.sandbox_hosts).find((x) => x && x.name === 'local');
+        list.engine = (local && local.specs_line) || '';
+        return list;
+      })
       .catch(() => []),
   /** enabled local models for the 模型 select; null = none to offer (the select hides) */
   localModels: () =>

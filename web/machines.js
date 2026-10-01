@@ -3,13 +3,15 @@
 // run). The GPU 沙盒 hosts (exec_hosts) sit underneath, collapsed and read-only. #<name> selects
 // a machine, so other pages can link to one. textContent-only.
 import { $, h, fill, api, toast, icon, popMenu } from './frame.js';
-import { ago, osLabel, healthOf, healthDot, checkLine, linesOf, SHELL_LABEL, TRANSPORT_LABEL } from './repo-ui.js';
+import { ago, osLabel, healthOf, healthDot, checkLine, linesOf, specFacts, specShort, SHELL_LABEL, TRANSPORT_LABEL } from './repo-ui.js';
 
 const enc = encodeURIComponent;
 let machines = []; // GET /api/machines rows (+ labels_list, last_check)
 let repos = []; // GET /api/repos rows: which repo verifies on which machine
 let sandbox = []; // GET /api/machines sandbox_hosts
 let selected = null;
+let selectedSandbox = null; // a GPU 沙盒 host shown in the side panel instead of a machine
+const probing = new Set(); // 沙盒 hosts whose 規格 are being read
 let editing = null; // the row the dialog edits; null = a new machine
 const checking = new Set();
 
@@ -41,6 +43,7 @@ async function load() {
   const want = fromHash();
   if (want && machines.some((x) => x.name === want)) selected = want;
   if (!machines.some((x) => x.name === selected)) selected = machines[0] ? machines[0].name : null;
+  if (!selected && !selectedSandbox && sandbox[0]) selectedSandbox = sandbox[0].name; // no machines yet: show this Spark
   paint();
 }
 
@@ -54,6 +57,7 @@ function upsert(row) {
 
 function select(name) {
   selected = name;
+  selectedSandbox = null;
   history.replaceState(null, '', `${location.pathname}${location.search}#${enc(name)}`);
   paint();
 }
@@ -87,6 +91,7 @@ function row(m) {
     h('td.nowrap', null, h('a.mc-name', { href: `#${enc(m.name)}`, onclick: (e) => (e.preventDefault(), select(m.name)) }, m.name)),
     h('td.mono', null, sshText(m)),
     h('td.nowrap', null, osLabel(m) || '—'),
+    h('td.mc-spec', null, m.specs ? specShort(m.specs) : h('span.rp-muted', null, '檢查後顯示')),
     h('td', null, (m.labels_list || []).length ? h('span.rp-tags', null, m.labels_list.map((l) => h('span.rp-tag', null, l))) : h('span.rp-muted', null, '—')),
     h('td', null, statusCell(m)),
     h('td', null, used.length ? h('span.rp-tags', null, used.map((r) => h('a', { href: `/repos.html?id=${enc(r.id)}` }, r.name))) : h('span.rp-muted', null, '—')),
@@ -107,6 +112,7 @@ function menu(anchor, m) {
 // ---- the selected machine: its last health check ----
 function paintDetail() {
   const box = $('machine-detail');
+  if (selectedSandbox) return paintSandboxDetail(box);
   const m = machines.find((x) => x.name === selected);
   box.hidden = !m;
   if (!m) return fill(box);
@@ -139,6 +145,7 @@ function paintDetail() {
         h('span.v', null, TRANSPORT_LABEL[m.transport] || m.transport),
         m.description ? [h('span.k', null, '說明'), h('span.v', null, m.description)] : null,
       ),
+      specBlock(m.specs, m.software, m.specs ? null : '按「檢查」會一併讀出作業系統、CPU、記憶體、磁碟、GPU 與 CUDA 版本。'),
       busy
         ? h('p.rp-muted', null, '檢查中…（SSH 登入、git、能不能讀 Gitea、工作目錄、Python、GPU，約 10–60 秒）')
         : lines.length
@@ -153,6 +160,17 @@ function paintDetail() {
         h('span.rp-hint', null, '失敗會直接給你指令照著做'),
       ),
     ),
+  );
+}
+
+/** 規格: what the box is, like a VM listing — OS, CPU, RAM, disk, GPU, CUDA, tools — and the software the person added */
+function specBlock(specs, software, empty) {
+  return h(
+    'div.mc-specs',
+    null,
+    h('h3', null, '規格'),
+    empty ? h('p.rp-hint', null, empty) : null,
+    h('div.facts', null, specFacts(specs, software).map(([k, v]) => [h('span.k', null, k), h(`span.v${k === '其他軟體' && !software ? '.rp-muted' : ''}`, null, v)])),
   );
 }
 
@@ -204,9 +222,9 @@ async function remove(m) {
   }
 }
 
-// ---- GPU 沙盒主機（進階）: read-only ----
+// ---- GPU 沙盒主機（進階）: its 規格 and other software; the host itself is set with `loop exec host` ----
 function paintSandbox() {
-  $('sandbox-count').textContent = `· ${sandbox.length} 台 · 唯讀`;
+  $('sandbox-count').textContent = `· ${sandbox.length} 台`;
   if (!sandbox.length) return fill($('sandbox-list'), h('p.rp-muted', null, '沒有沙盒主機。'));
   fill(
     $('sandbox-list'),
@@ -216,16 +234,18 @@ function paintSandbox() {
       h(
         'table.rp-table',
         { id: 'sandbox-table' },
-        h('thead', null, h('tr', null, ['名稱', '說明', '資料掛載（唯讀）'].map((t) => h('th', { scope: 'col' }, t)))),
+        h('thead', null, h('tr', null, ['名稱', '說明', '規格', '其他軟體', '資料掛載（唯讀）'].map((t) => h('th', { scope: 'col' }, t)))),
         h(
           'tbody',
           null,
           sandbox.map((s) =>
             h(
-              'tr',
-              null,
+              'tr.link',
+              { 'aria-selected': String(s.name === selectedSandbox), onclick: () => selectSandbox(s.name) },
               h('td.nowrap', null, h('b', null, s.name), s.default ? h('span.chip-s.info', { style: { marginLeft: '8px' } }, '預設') : null),
               h('td', null, s.description || '—'),
+              h('td.mc-spec', null, probing.has(s.name) ? '讀取中…' : s.specs_line || h('span.rp-muted', null, '還沒讀：點這一列，按「讀取規格」')),
+              h('td', null, s.software || h('span.rp-muted', null, '—')),
               h('td.mono', null, (s.data || []).length ? (s.data || []).map((d) => h('div', null, `${d.source} → ${d.target}`)) : '—'),
             ),
           ),
@@ -233,6 +253,70 @@ function paintSandbox() {
       ),
     ),
   );
+}
+
+function selectSandbox(name) {
+  selectedSandbox = name;
+  selected = null;
+  paint();
+}
+
+function paintSandboxDetail(box) {
+  const s = sandbox.find((x) => x.name === selectedSandbox);
+  box.hidden = !s;
+  if (!s) return fill(box);
+  const busy = probing.has(s.name);
+  const soft = h('textarea.rp-in', { id: 'sb-soft', rows: 3, maxlength: 2000, placeholder: '例：Halcon 23.11、OpenCV 4.10、相機 SDK、授權在哪台' });
+  soft.value = s.software || '';
+  fill(
+    box,
+    h(
+      'section.rp-panel',
+      null,
+      h('div.hd', null, h('h2', null, s.name), h('span.rp-sep', null, '·'), h('span', null, 'GPU 沙盒主機'), s.specs_at ? [h('span.rp-sep', null, '·'), h('span.rp-hint', null, ago(s.specs_at))] : null),
+      h('p.rp-hint', null, s.description || ''),
+      specBlock(s.specs, s.software, s.specs ? null : '還沒讀過規格：按「讀取規格」。'),
+      h('label.rp-f', null, h('span.cap', null, '其他軟體 ', h('span.rp-hint', null, '偵測不到的請自己補，工程師挑機台時會看到')), soft),
+      h(
+        'div.rp-row',
+        null,
+        h('button.btn.primary', { type: 'button', disabled: busy, onclick: () => probeSandbox(s.name) }, icon('retry', { size: 15 }), h('span', null, busy ? '讀取中…' : s.specs ? '重新讀取規格' : '讀取規格')),
+        h('button.btn', { type: 'button', onclick: () => saveSandboxSoftware(s.name, soft.value) }, '儲存其他軟體'),
+      ),
+    ),
+  );
+}
+
+function upsertSandbox(row) {
+  const i = sandbox.findIndex((x) => x.name === row.name);
+  if (i >= 0) sandbox[i] = row;
+}
+
+async function probeSandbox(name) {
+  if (probing.has(name)) return;
+  probing.add(name);
+  paint();
+  try {
+    const r = await api(`/api/machines/sandbox/${enc(name)}/specs`, 'POST', {});
+    upsertSandbox(r.host);
+    toast(`已讀取 ${name} 的規格`);
+  } catch (err) {
+    toast(`讀不到規格：${err.message}`, 'bad');
+  } finally {
+    probing.delete(name);
+    paint();
+  }
+}
+
+async function saveSandboxSoftware(name, text) {
+  try {
+    const r = await api(`/api/machines/sandbox/${enc(name)}`, 'PATCH', { software: text.trim() || null });
+    upsertSandbox(r.host);
+    toast('已儲存');
+    paint();
+  } catch (err) {
+    toast(`存不了：${err.message}`, 'bad');
+  }
 }
 
 // ---- 新增／編輯 ----
@@ -262,6 +346,7 @@ function openDialog(m) {
   $('md-root').value = m ? m.work_root : '';
   $('md-labels').value = m ? (m.labels_list || []).join(', ') : '';
   $('md-desc').value = m ? m.description || '' : '';
+  $('md-soft').value = m ? m.software || '' : '';
   const lines = m ? linesOf(m) : [];
   fill($('md-lines'), lines.map(checkLine));
   $('md-lines').hidden = !lines.length;
@@ -283,6 +368,7 @@ async function saveDialog() {
     work_root: $('md-root').value.trim(),
     labels: $('md-labels').value,
     description: $('md-desc').value.trim() || null,
+    software: $('md-soft').value.trim() || null,
   };
   $('md-save').disabled = true;
   $('md-check').disabled = true;

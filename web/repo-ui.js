@@ -155,3 +155,71 @@ export function dialogShell(id, { wide = false } = {}) {
   fill(dlg, h('div.dlg-head', null, title, sub, h('span.grow'), close), body, foot);
   return { dlg, title, sub, body, foot };
 }
+
+// ---- 規格 (src/exec/specs.ts MachineSpecs): what a box is, the way a VM listing says it ----
+
+const gbText = (g) => (g >= 10 ? `${Math.round(g)} GB` : `${g} GB`);
+const gpuText = (g) => `${g.name}${g.vram_gb ? `（${g.vram_gb} GB）` : ''}`;
+
+/** "20 核 · RAM 120 GB · NVIDIA GB10 · CUDA 13.0" — the table cell (the OS has its own column) */
+export function specShort(s) {
+  if (!s) return '';
+  return [
+    s.cores || s.threads ? `${s.cores || s.threads} 核` : null,
+    s.ram_gb ? `RAM ${gbText(s.ram_gb)}` : null,
+    s.gpus && s.gpus.length ? s.gpus.map(gpuText).join('、') : '無 NVIDIA GPU',
+    s.cuda_toolkit ? `CUDA ${s.cuda_toolkit}` : s.cuda_driver ? `CUDA ${s.cuda_driver}（驅動）` : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+}
+
+const TOOL_LABEL = { python: 'Python', gcc: 'GCC', msvc: 'Visual Studio', cmake: 'CMake', docker: 'Docker' };
+
+/** [label, value] rows for a 規格 block; `software` is what the person added */
+export function specFacts(s, software) {
+  const rows = [];
+  if (s) {
+    rows.push(['作業系統', [s.os, s.arch].filter(Boolean).join('・') || '—']);
+    if (s.kernel) rows.push(['版本', s.kernel]);
+    rows.push(['CPU', [s.cpu, s.cores || s.threads ? `${s.cores || s.threads} 核${s.threads && s.cores && s.threads !== s.cores ? `／${s.threads} 緒` : ''}` : null].filter(Boolean).join(' · ') || '—']);
+    rows.push(['記憶體', s.ram_gb ? gbText(s.ram_gb) : '—']);
+    rows.push(['磁碟', s.disk_total_gb ? `${s.disk_free_gb ? `可用 ${gbText(s.disk_free_gb)} / ` : ''}共 ${gbText(s.disk_total_gb)}` : '—']);
+    rows.push(['GPU', s.gpus && s.gpus.length ? s.gpus.map((g) => `${g.name}（${g.vram_gb ? `${g.vram_gb} GB` : 'VRAM 未回報，可能與系統共用記憶體'}）`).join('、') : '沒有 NVIDIA GPU']);
+    rows.push([
+      'CUDA',
+      s.cuda_toolkit || s.cuda_driver || s.driver
+        ? [s.cuda_toolkit ? `Toolkit ${s.cuda_toolkit}` : '沒有 Toolkit（nvcc）', s.cuda_driver ? `驅動支援到 ${s.cuda_driver}` : null, s.driver ? `驅動 ${s.driver}` : null].filter(Boolean).join(' · ')
+        : '—',
+    ]);
+    const tools = Object.entries(s.tools || {}).map(([k, v]) => (k === 'msvc' && /^Visual Studio/.test(v) ? v : `${TOOL_LABEL[k] || k} ${v}`));
+    rows.push(['工具', tools.length ? tools.join(' · ') : '—']);
+  }
+  rows.push(['其他軟體', software || '（使用者補充：例如 Halcon、OpenCV、相機 SDK、授權）']);
+  if (s && s.at) rows.push(['規格更新', ago(s.at)]);
+  return rows;
+}
+
+/**
+ * A line under a machine picker saying what the chosen box is, so the choice can be judged on the
+ * spot. `engineLine` is the engine host's (this Spark's) spec line, when known.
+ */
+const specNotes = new WeakMap(); // select → its listener, so re-opening a form adds no second one
+export function attachSpecNote(sel, machines, engineLine) {
+  let note = sel.nextElementSibling && sel.nextElementSibling.classList.contains('spec-note') ? sel.nextElementSibling : null;
+  if (!note) {
+    note = h('span.rp-hint.spec-note');
+    if (sel.parentNode) sel.after(note); // a select not on the page yet: the caller places the note
+  }
+  const paint = () => {
+    const m = sel.value ? machines.get(sel.value) : null;
+    note.textContent = sel.value ? (m && m.specs_line) || (m ? '還沒有規格：到機台頁按「檢查」' : '') : engineLine || '';
+    note.hidden = !note.textContent;
+  };
+  const prev = specNotes.get(sel);
+  if (prev) sel.removeEventListener('change', prev);
+  specNotes.set(sel, paint);
+  sel.addEventListener('change', paint);
+  paint();
+  return note;
+}

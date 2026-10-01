@@ -104,7 +104,7 @@ describe('machine routes', () => {
     expect(r.statusCode).toBe(200);
     const body = r.json();
     expect(body.ok).toBe(true);
-    expect(body.detected).toEqual({ os: 'linux', shell: 'bash', transport: 'gitea' });
+    expect(body.detected).toMatchObject({ os: 'linux', shell: 'bash', transport: 'gitea' });
     expect(body.lines.map((l: { label: string }) => l.label)).toEqual(['SSH 登入', 'git', 'Gitea', '工作目錄', 'Python', 'GPU', 'repo 複本']);
     expect(body.machine).toMatchObject({ os: 'linux', shell: 'bash', transport: 'gitea', last_check_ok: 1 });
     expect(box.seen[0]).toBe('uname -s');
@@ -144,5 +144,62 @@ describe('machine routes', () => {
     expect(copy.ok).toBe(true);
     expect(copy.detected.transport).toBe('copy');
     expect(getMachine(db, 'gpu-1')).toMatchObject({ os: 'linux', transport: 'copy', last_check_ok: 1 });
+  });
+});
+
+describe('規格: what a box is, and the software a person adds', () => {
+  const SPECS = ['== specs', 'os=Ubuntu 22.04.4 LTS', 'arch=x86_64', 'cpu=AMD Ryzen 9 7950X', 'threads=32', 'tpc=2', 'mem_kb=131072000', 'disk_total_kb=1953514584', 'disk_free_kb=976762584', 'gpu=NVIDIA GeForce RTX 4090, 24564, 550.90.07', 'cuda_driver=12.4', 'cuda_toolkit=12.4', 'python=3.10.12'].join('\n');
+
+  it('a machine check stores its 規格; the list shows them with the software line', async () => {
+    const withSpecs: HostExec = async (cmd, args) => {
+      const r = await box.exec(cmd, args, 1000);
+      return r.out === PROBE ? { code: 0, out: `${PROBE}\n${SPECS}\n` } : r;
+    };
+    await app.close();
+    app = buildApp({ db, apiToken: null, machineRoutes: { hostExec: withSpecs } });
+    await app.ready();
+    await call('POST', '/api/machines', { name: 'gpu-1', ssh_target: 'loop@gpu-1', work_root: '/srv/loop', software: 'Halcon 23.11、Basler pylon 7' });
+    const r = (await call('POST', '/api/machines/gpu-1/check', { repos: [], datasets: [] })).json();
+    expect(r.lines.find((l: { label: string }) => l.label === '規格').detail).toBe('Ubuntu 22.04.4 LTS（x86_64） · 16 核／32 緒 · RAM 125 GB · NVIDIA GeForce RTX 4090 24 GB · CUDA 12.4');
+    const m = (await call('GET', '/api/machines')).json().machines[0];
+    expect(m.specs).toMatchObject({ cpu: 'AMD Ryzen 9 7950X', cores: 16, gpus: [{ name: 'NVIDIA GeForce RTX 4090', vram_gb: 24 }], cuda_toolkit: '12.4' });
+    expect(m.specs_line).toContain('RTX 4090');
+    expect(m.software).toBe('Halcon 23.11、Basler pylon 7');
+    // a later check that never reached the probe keeps the stored 規格
+    box = linuxBox({ sshCode: 255 });
+    await app.close();
+    app = buildApp({ db, apiToken: null, machineRoutes: { hostExec: (...a) => box.exec(...a) } });
+    await app.ready();
+    await call('POST', '/api/machines/gpu-1/check', { repos: [], datasets: [] });
+    expect((await call('GET', '/api/machines/gpu-1')).json().specs.cpu).toBe('AMD Ryzen 9 7950X');
+    expect((await call('PATCH', '/api/machines/gpu-1', { software: '' })).json().software).toBeNull();
+  });
+
+  it('GPU 沙盒 hosts: 讀取規格 runs the probe (this Spark locally), 其他軟體 is kept per host', async () => {
+    const seen: string[][] = [];
+    await app.close();
+    app = buildApp({
+      db,
+      apiToken: null,
+      machineRoutes: {
+        hostExec: async (cmd, args) => {
+          seen.push([cmd, ...args]);
+          return { code: 0, out: SPECS };
+        },
+      },
+    });
+    await app.ready();
+    expect((await call('GET', '/api/machines')).json().sandbox_hosts[0]).toMatchObject({ name: 'local', specs: null, software: null });
+    const r = await call('POST', '/api/machines/sandbox/local/specs');
+    expect(r.statusCode).toBe(200);
+    expect(r.json().host).toMatchObject({ name: 'local', specs: { cpu: 'AMD Ryzen 9 7950X' }, specs_line: expect.stringContaining('16 核') });
+    expect(seen[0]![0]).toBe('bash'); // this Spark: no ssh
+    expect(seen[0]![2]).toContain('== specs');
+    const p = await call('PATCH', '/api/machines/sandbox/local', { software: ' TensorRT 10.3 ' });
+    expect(p.json().host).toMatchObject({ software: 'TensorRT 10.3', specs: { cores: 16 } });
+    expect((await call('GET', '/api/machines')).json().sandbox_hosts[0].software).toBe('TensorRT 10.3');
+    expect((await call('PATCH', '/api/machines/sandbox/local', { software: 3 })).statusCode).toBe(400);
+    expect((await call('POST', '/api/machines/sandbox/nope/specs')).statusCode).toBe(404);
+    expect((await call('POST', '/api/machines', { name: 'sandbox', ssh_target: 'x@y', work_root: '/srv/loop' })).statusCode).toBe(400);
   });
 });

@@ -42,10 +42,11 @@ describe('normalizeMachine', () => {
       work_root: '/srv/loop',
       labels: '',
       description: null,
+      software: null,
       transport: 'auto',
       enabled: 1,
     });
-    expect(normalizeMachine({ ...windows, ssh_port: '2222', shell: 'CMD', transport: 'copy', description: '  RTX A4000  ', enabled: false })).toEqual({
+    expect(normalizeMachine({ ...windows, ssh_port: '2222', shell: 'CMD', transport: 'copy', description: '  RTX A4000  ', software: ' Halcon 23.11 ', enabled: false })).toEqual({
       name: 'aoi-1',
       ssh_target: 'aoi@aoi-1',
       ssh_port: 2222,
@@ -54,6 +55,7 @@ describe('normalizeMachine', () => {
       work_root: 'C:\\loop',
       labels: 'cuda,aoi-v3',
       description: 'RTX A4000',
+      software: 'Halcon 23.11',
       transport: 'copy',
       enabled: 0,
     });
@@ -99,7 +101,7 @@ describe('normalizeMachine', () => {
   });
 
   it('exposes the root and label rules', () => {
-    expect(RESERVED_MACHINE_NAMES).toEqual(['local', 'engine']);
+    expect(RESERVED_MACHINE_NAMES).toEqual(['local', 'engine', 'sandbox']); // 'sandbox' is a route segment
     expect(isWorkRootFor('linux', '/srv/loop')).toBe(true);
     expect(isWorkRootFor('windows', 'C:\\loop')).toBe(true);
     expect(isWorkRootFor('auto', 'C:\\loop')).toBe(true);

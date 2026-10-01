@@ -271,6 +271,12 @@ function migrate(db: Database.Database): void {
   db.exec('CREATE INDEX IF NOT EXISTS idx_tasks_repo ON tasks(repo_id)');
   // a served model that accepts image_url parts (screenshots at intake go to it directly)
   add('local_models', [['vision', 'INTEGER NOT NULL DEFAULT 0']]);
+  // 機台 規格: what the health check's probe found (OS, CPU, RAM, disk, GPU, CUDA, tools), and the
+  // software a person lists that the probe cannot see
+  add('machines', [
+    ['specs_json', 'TEXT'],
+    ['software', 'TEXT'],
+  ]);
 
 }
 

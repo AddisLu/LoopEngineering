@@ -4,7 +4,7 @@
 // 設定 · 檢查 · 圖資 · 過去修法 (?tab= remembers which). textContent-only: every string reaches the
 // page through h() / fill() / textContent.
 import { $, h, fill, api, toast, icon, modelName, tsMs } from './frame.js';
-import { ago, byName, healthOf, healthDot, fillMachineSelect, shortRemote, normalizeRepoUrl } from './repo-ui.js';
+import { ago, byName, healthOf, healthDot, fillMachineSelect, attachSpecNote, shortRemote, normalizeRepoUrl } from './repo-ui.js';
 import { listChecks } from './checks-api.js';
 import { mountChecks, mountDatasets } from './checks.js';
 
@@ -22,7 +22,8 @@ const IMPORT_STEPS = ['複製中', '偵測建置與測試指令', '完成'];
 
 const params = new URLSearchParams(location.search);
 const repoId = params.get('id');
-let machines = new Map(); // name → GET /api/machines row (OS tag, health)
+let machines = new Map(); // name → GET /api/machines row (OS tag, health, 規格)
+let engineSpecs = ''; // this Spark's 規格 line (the GPU 沙盒 host 'local'), for 引擎主機 in the pickers
 
 function pageError(msg, link) {
   const box = $('page-err');
@@ -34,6 +35,8 @@ async function loadMachines() {
   try {
     const r = await api('/api/machines');
     machines = byName(r.machines);
+    const local = (r.sandbox_hosts || []).find((x) => x.name === 'local');
+    engineSpecs = local && local.specs_line ? `這台 Spark：${local.specs_line}` : '';
   } catch {
     machines = new Map(); // the pickers still offer the engine host
   }
@@ -256,6 +259,7 @@ async function toConfirm(seq) {
   $('imp-name').value = repo.name;
   $('imp-branch').value = repo.default_branch;
   fillMachineSelect($('imp-machine'), machines, repo.machine);
+  attachSpecNote($('imp-machine'), machines, engineSpecs);
   paintDetected(repo);
   setImpStep(3);
   showList(); // the new card is there even if the dialog is cancelled now
@@ -381,6 +385,9 @@ const CTX = {
   get machines() {
     return machines;
   },
+  get engineSpecs() {
+    return engineSpecs;
+  },
   openTab: (name) => openTab(name),
 };
 
@@ -409,6 +416,7 @@ function paintSettings() {
   $('set-prbase').value = r.pr_base || '';
   $('set-prbase').placeholder = r.default_branch;
   fillMachineSelect($('set-machine'), machines, r.machine);
+  attachSpecNote($('set-machine'), machines, engineSpecs);
   const localOnly = String(settings.cloud_llm_allowed ?? 'true') === 'false';
   const cloud = $('set-cloud');
   cloud.className = `chip-s ${localOnly ? 'local' : 'cloud'}`;

@@ -5,11 +5,11 @@
 //                          runs; how it passes — and a threshold's metric can only be picked from what
 //                          the last 試跑 printed (LOOP_METRICS), never typed; the 試跑 log polls the run.
 //   mountDatasets(el, ctx) and openDatasetDialog(): the linked 圖資 repos.
-// ctx = { repo, machines: Map name → GET /api/machines row, openTab?(name) }.
+// ctx = { repo, machines: Map name → GET /api/machines row, engineSpecs?: this Spark's spec line, openTab?(name) }.
 // Every request goes through checks-api.js. textContent-only.
 import { h, fill, icon, toast, popMenu } from './frame.js';
 import * as C from './checks-api.js';
-import { ago, secs, csv, csvShow, healthOf, healthDot, machineLabel, fillMachineSelect, linesOf, dialogShell } from './repo-ui.js';
+import { ago, secs, csv, csvShow, healthOf, healthDot, machineLabel, fillMachineSelect, attachSpecNote, linesOf, dialogShell } from './repo-ui.js';
 
 export const KINDS = [
   ['build', '建置'],
@@ -388,6 +388,7 @@ export function openCheckEditor(ctx, check, o = {}) {
   const kindBtns = KINDS.map(([k, label]) => h(`button${k === 'manual' ? '.manual' : ''}`, { type: 'button', 'data-kind': k, 'aria-pressed': String(k === kind), onclick: () => setKind(k) }, label));
   const whereSel = h('select.rp-in', { id: 'ck-where', onchange: () => (touch(), paintCmdHint()) });
   fillMachineSelect(whereSel, ctx.machines, check ? check.machine : repo.machine);
+  const whereNote = attachSpecNote(whereSel, ctx.machines, ctx.engineSpecs);
   const dsSel = h('select.rp-in', { id: 'ck-dataset', onchange: onDataset });
   const dsField = h('label.rp-f', null, h('span.cap', null, '圖資'), dsSel);
   const cmdCap = h('span', null, '指令');
@@ -421,7 +422,7 @@ export function openCheckEditor(ctx, check, o = {}) {
   };
 
   const S = {
-    where: h('div.rp-grid2', null, h('label.rp-f', null, h('span.cap', null, '在哪裡跑'), whereSel), dsField),
+    where: h('div.rp-grid2', null, h('label.rp-f', null, h('span.cap', null, '在哪裡跑'), whereSel, whereNote), dsField),
     cmd: h('label.rp-f', null, h('span.cap', null, cmdCap), cmdIn, cmdHint),
     repro: h(
       'div.rp-grid2',

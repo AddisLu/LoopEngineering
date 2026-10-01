@@ -32,6 +32,7 @@
                       <th scope="col">名稱</th>
                       <th scope="col">SSH</th>
                       <th scope="col">作業系統</th>
+                      <th scope="col">規格</th>
                       <th scope="col">標籤</th>
                       <th scope="col">狀態</th>
                       <th scope="col">用它的 repo</th>
@@ -52,10 +53,10 @@
                 <summary>
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
                   <b>GPU 沙盒主機（進階）</b>
-                  <span id="sandbox-count">· 唯讀</span>
+                  <span id="sandbox-count"></span>
                 </summary>
                 <div class="body">
-                  <p class="rp-hint">Docker GPU 沙盒（exec_hosts）：對話頁的 sandbox 工具與 <code>sandbox:</code> 驗證步驟用的，和上面的機台是兩回事。這裡只顯示；要改用 <code>loop exec host</code>。</p>
+                  <p class="rp-hint">Docker GPU 沙盒（exec_hosts）：對話頁的 sandbox 工具與 <code>sandbox:</code> 驗證步驟用的，和上面的機台是兩回事。點一列看規格、補其他軟體；主機本身要改用 <code>loop exec host</code>。</p>
                   <div id="sandbox-list"></div>
                 </div>
               </details>
@@ -100,7 +101,8 @@
           </div>
           <label class="rp-f"><span class="cap">工作目錄 <span class="rp-hint">repo 複本與圖資快取放這裡</span></span><input id="md-root" class="mono" type="text" maxlength="200" spellcheck="false" placeholder="/srv/loop" required /></label>
           <label class="rp-f"><span class="cap">標籤 <span class="rp-hint">逗號分隔：cuda、aoi-v3、camera…</span></span><input id="md-labels" class="mono" type="text" maxlength="400" spellcheck="false" placeholder="cuda, gpu" /></label>
-          <label class="rp-f"><span class="cap">說明 <span class="rp-hint">給模型看：這台有什麼（相機、授權、特殊驅動）</span></span><textarea id="md-desc" rows="3" maxlength="2000"></textarea></label>
+          <label class="rp-f"><span class="cap">說明 <span class="rp-hint">給模型看：這台做什麼用（產線、相機、特殊驅動）</span></span><textarea id="md-desc" rows="2" maxlength="2000"></textarea></label>
+          <label class="rp-f"><span class="cap">其他軟體 <span class="rp-hint">作業系統、CPU、記憶體、GPU、CUDA 由「檢查」自動讀；讀不到的軟體請補（Halcon 23.11、OpenCV 4.10、相機 SDK、授權…）</span></span><textarea id="md-soft" rows="2" maxlength="2000"></textarea></label>
           <div class="rp-lines" id="md-lines" hidden></div>
           <p class="err-line" id="md-err" hidden role="alert"></p>
         </div>

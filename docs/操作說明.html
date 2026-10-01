@@ -522,17 +522,18 @@ loop repo list
 loop repo rm r_…                                          # 只移除登錄，clone 留著</code></pre>
 
       <h3>機台</h3>
-      <p>機台是一台能用 SSH 登入、裝了 git 的電腦（Linux 或 Windows），repo 的檢查在上面跑，不需要 Docker。它和第 26b／26c 章的 GPU 沙盒主機（<code>exec_hosts</code>）是兩回事：沙盒主機照舊，在機台頁最下面摺疊的「GPU 沙盒主機（進階）」唯讀列出。</p>
-      <p>機台頁（<code>/machines.html</code>）是一張表：名稱 · SSH · 作業系統 · 標籤 · 狀態（● 正常 10 分鐘前／● 連不上／○ 未檢查）· 用它的 repo · ⋯。還沒有時寫「還沒有機台。加一台能 SSH 進去、裝了 git 的電腦。」</p>
+      <p>機台是一台能用 SSH 登入、裝了 git 的電腦（Linux 或 Windows），repo 的檢查在上面跑，不需要 Docker。它和第 26b／26c 章的 GPU 沙盒主機（<code>exec_hosts</code>）是兩回事：沙盒主機照舊，在機台頁最下面摺疊的「GPU 沙盒主機（進階）」列出：點一列可以讀它的規格、補其他軟體；主機本身仍用 <code>loop exec host</code> 設定。</p>
+      <p>機台頁（<code>/machines.html</code>）是一張表：名稱 · SSH · 作業系統 · 規格 · 標籤 · 狀態（● 正常 10 分鐘前／● 連不上／○ 未檢查）· 用它的 repo · ⋯。還沒有時寫「還沒有機台。加一台能 SSH 進去、裝了 git 的電腦。」</p>
       <div class="tbl-wrap"><table>
         <thead><tr><th>新增／編輯的欄位</th><th>說明</th></tr></thead>
         <tbody>
-          <tr><td>名稱</td><td>小寫英數、<code>_</code>、<code>-</code>，最多 40 字，不能叫 <code>local</code> 或 <code>engine</code>。之後不能改名（檢查用名稱指到它）。</td></tr>
+          <tr><td>名稱</td><td>小寫英數、<code>_</code>、<code>-</code>，最多 40 字，不能叫 <code>local</code>、<code>engine</code> 或 <code>sandbox</code>。之後不能改名（檢查用名稱指到它）。</td></tr>
           <tr><td>SSH 目標、埠</td><td><code>user@host</code>，或 <code>~/.ssh/config</code> 裡的別名。只用金鑰登入，引擎不會問密碼。</td></tr>
           <tr><td>作業系統</td><td>Linux／Windows。不確定就留「自動」，第一次檢查時會記住。</td></tr>
           <tr><td>Shell</td><td>檢查指令用哪種語法：自動（Linux＝bash、Windows＝PowerShell）／bash／PowerShell／cmd。</td></tr>
           <tr><td>工作目錄</td><td>repo 複本與圖資放這裡：Linux 例 <code>/srv/loop</code>、Windows 例 <code>C:\loop</code>。只能用英數、<code>_</code>、<code>.</code>、<code>-</code>，不能有空白。</td></tr>
-          <tr><td>標籤、說明</td><td>標籤例 <code>cuda</code>、<code>aoi-v3</code>、<code>camera</code>；說明是給模型看的：這台有什麼。</td></tr>
+          <tr><td>標籤、說明</td><td>標籤例 <code>cuda</code>、<code>aoi-v3</code>、<code>camera</code>；說明是給模型看的：這台做什麼用（產線、相機、特殊驅動）。</td></tr>
+          <tr><td>其他軟體</td><td>檢查讀不到的軟體由你補：Halcon 23.11、OpenCV 4.10、相機 SDK、授權在哪台…。和自動讀到的規格一起顯示在機台頁。</td></tr>
           <tr><td>取碼方式</td><td>自動（由檢查決定）／Gitea／由 Spark 傳檔，見下面。</td></tr>
         </tbody>
       </table></div>
@@ -546,6 +547,16 @@ loop repo rm r_…                                          # 只移除登錄，
           一樣從 Spark 手動 <code>ssh</code> 一次，接受 host key。</li>
       </ol>
 
+      <p><b>規格</b>：像租一台 VM 時看的那張表，讓工程師一眼判斷能不能拿這台來重現問題。健康檢查會一併讀出，不用自己填：</p>
+      <ul>
+        <li>作業系統與架構（例：Ubuntu 22.04・x86_64、Windows 11 專業版・AMD64、Ubuntu 24.04・aarch64）、核心版本</li>
+        <li>CPU 型號、核心數／執行緒數；記憶體；工作目錄所在磁碟的可用／總容量</li>
+        <li>GPU 型號與 VRAM（沒有 NVIDIA GPU 會直接寫出來；GB10 這類與系統共用記憶體的顯示「VRAM 未回報」）</li>
+        <li>NVIDIA 驅動版本、驅動支援的 CUDA 版本、已安裝的 CUDA Toolkit（nvcc）版本</li>
+        <li>工具：Python、GCC、Visual Studio（Windows）、CMake、Docker</li>
+      </ul>
+      <p>表格的「規格」欄是一行摘要（例：<code>12 核 · RAM 32 GB · NVIDIA RTX A4000（16 GB）· CUDA 12.2</code>），右側面板是完整清單加「其他軟體」。Repo 設定、檢查編輯器的「在哪裡跑」與問題單的「機台」下面也會顯示選中那台的摘要；選「引擎主機」時顯示這台 Spark 的規格（先在 GPU 沙盒主機的 <code>local</code> 那列按「讀取規格」）。檢查沒跑到那一步（例如連不上）時，保留上次讀到的規格。</p>
+
       <p><b>健康檢查</b>：機台頁的「檢查」，或 <code>loop machine check aoi-1</code>。每一行是 ✓ 正常、✗ 要處理，或 ⚠ 知道就好。結果存在機台上（機台頁的狀態欄）；作業系統、Shell、取碼方式還是「自動」的，會記住這次偵測到的值。</p>
       <div class="tbl-wrap"><table>
         <thead><tr><th>行</th><th>在看什麼</th><th>沒過時怎麼辦</th></tr></thead>
@@ -556,6 +567,7 @@ loop repo rm r_…                                          # 只移除登錄，
           <tr><td>工作目錄</td><td>可不可寫、還剩多少空間，例「C:\loop 可寫，剩 212 GB」。</td><td>Linux：<code>sudo mkdir -p /srv/loop &amp;&amp; sudo chown &lt;帳號&gt; /srv/loop</code>；Windows：建立 <code>C:\loop</code>，並給登入帳號寫入權限。</td></tr>
           <tr><td>Python</td><td>版本。</td><td>⚠ 找不到也沒關係：圖資比對在引擎主機做。</td></tr>
           <tr><td>GPU</td><td><code>nvidia-smi</code> 看到的 GPU。</td><td>⚠ 沒有的話，只有需要 GPU 的檢查會受影響。</td></tr>
+          <tr><td>規格</td><td>一行摘要：作業系統（架構）· 核心數 · 記憶體 · GPU · CUDA；完整清單在右側面板。</td><td>永遠是 ✓；讀不到的欄位留空。</td></tr>
           <tr><td>repo 複本</td><td>每個用這台的 repo 在機台上的 commit 與時間，例「cf-aoi @ 3f2a1c（2 小時前）」。</td><td>還沒有：第一次跑檢查時會 clone。</td></tr>
           <tr><td>圖資快取</td><td>圖資 repo 有沒有抓到這台。</td><td>還沒抓：第一次跑檢查時會抓。</td></tr>
         </tbody>
@@ -801,8 +813,8 @@ loop machine list             # 每台的設定與上次檢查結果</code></pre
           <tr><td><code>exec host list｜rm &lt;名&gt;｜prune &lt;名&gt; [--days 7]</code></td><td>列出主機（* ＝ <code>exec_default_host</code>）、移除登記、刪掉那台上超過 N 天沒動的工作區。</td></tr>
           <tr><td><code>repo import &lt;url&gt; [--name &lt;名稱&gt;] [--domain &lt;領域&gt;]</code></td><td>匯入 repo（見第 5b 章）：clone 到 <code>git_clone_root</code>（Gitea 的 token 經 <code>GIT_ASKPASS</code>，不進指令列）、偵測預設分支、建置／測試／前置指令與語言比例，登錄並加進 <code>prd_repo_allowlist</code>；<code>repo_auto_ingest</code> 開著時也加進知識庫（背景讀取）。印出每一步與 repo id。</td></tr>
           <tr><td><code>repo list｜rm &lt;id&gt;</code></td><td>列出已登錄的 repo（id、名稱、預設分支、領域、本機路徑、語言比例）；移除登錄與 repo 選單的項目，clone 留在磁碟上。</td></tr>
-          <tr><td><code>machine add &lt;名&gt; --ssh &lt;user@host&gt; [--work-root &lt;dir&gt;]</code></td><td>登記（或更新）機台（見第 5b 章）。選填：<code>--port</code> <code>--os auto|linux|windows</code> <code>--shell auto|bash|powershell|cmd</code> <code>--labels &lt;csv&gt;</code> <code>--transport auto|gitea|copy</code> <code>--desc</code> <code>--disabled</code>。沒給 <code>--work-root</code> 時，Linux 用 <code>/srv/loop</code>，<code>--os windows</code> 用 <code>C:\loop</code>。</td></tr>
-          <tr><td><code>machine check &lt;名&gt;</code></td><td>機台健康檢查：SSH 登入與作業系統、git、能不能讀 Gitea、工作目錄、Python、GPU、repo 複本、圖資快取。結果存在機台上，還是 auto 的作業系統／shell／取碼方式會記住偵測結果；有 ❌ 時 exit code 1。</td></tr>
+          <tr><td><code>machine add &lt;名&gt; --ssh &lt;user@host&gt; [--work-root &lt;dir&gt;]</code></td><td>登記（或更新）機台（見第 5b 章）。選填：<code>--port</code> <code>--os auto|linux|windows</code> <code>--shell auto|bash|powershell|cmd</code> <code>--labels &lt;csv&gt;</code> <code>--transport auto|gitea|copy</code> <code>--desc</code> <code>--software</code> <code>--disabled</code>。沒給 <code>--work-root</code> 時，Linux 用 <code>/srv/loop</code>，<code>--os windows</code> 用 <code>C:\loop</code>。</td></tr>
+          <tr><td><code>machine check &lt;名&gt;</code></td><td>機台健康檢查：SSH 登入與作業系統、git、能不能讀 Gitea、工作目錄、Python、GPU、規格（作業系統、CPU、記憶體、磁碟、GPU、CUDA、工具）、repo 複本、圖資快取。結果存在機台上，還是 auto 的作業系統／shell／取碼方式會記住偵測結果；有 ❌ 時 exit code 1。</td></tr>
           <tr><td><code>machine list｜rm &lt;名&gt;</code></td><td>列出機台與上次檢查（● 正常／● 有問題／○ 未檢查）；刪除登記（機台上的複本留著）。</td></tr>
           <tr><td><code>check list &lt;repoId&gt;</code></td><td>這個 repo 的檢查（見第 5b 章），照執行順序：id、名稱、類型、在哪跑（機台或引擎主機）、怎麼算過、必過與否、最近一次，以及指令、門檻、基準、人工項目。</td></tr>
           <tr><td><code>check trial &lt;checkId&gt;</code></td><td>試跑一次：在 repo 的預設分支、問題單會跑的同一個地方跑這項檢查，印出輸出最後 40 行、結果與 run id，以及偵測到的指標；沒過時 exit code 1。</td></tr>
@@ -2492,7 +2504,9 @@ loop config set ops_allowed_users ts:&lt;你的 Tailscale 帳號&gt;</code></pre
           <tr><td>GET/POST</td><td><code>/api/datasets</code></td><td>圖資登錄（另有 <code>PATCH/DELETE /api/datasets/:id</code>）</td></tr>
           <tr><td>GET/POST</td><td><code>/api/machines</code></td><td>機台清單（另附唯讀的 GPU 沙盒主機 <code>sandbox_hosts</code>）；新增機台</td></tr>
           <tr><td>GET/PATCH/DELETE</td><td><code>/api/machines/:name</code></td><td>單一機台</td></tr>
-          <tr><td>POST</td><td><code>/api/machines/:name/check</code></td><td>機台健康檢查，結果存在機台上</td></tr>
+          <tr><td>POST</td><td><code>/api/machines/:name/check</code></td><td>機台健康檢查（含規格），結果存在機台上</td></tr>
+          <tr><td>POST</td><td><code>/api/machines/sandbox/:name/specs</code></td><td>讀取 GPU 沙盒主機的規格（<code>local</code>＝這台 Spark）</td></tr>
+          <tr><td>PATCH</td><td><code>/api/machines/sandbox/:name</code></td><td><code>{software}</code>：沙盒主機的其他軟體</td></tr>
           <tr><td>GET</td><td><code>/api/whoami</code></td><td>引擎認定的你是誰：Tailscale 登入優先，其次是頁面填的名字，都沒有就是 <code>local</code></td></tr>
           <tr><td>GET</td><td><code>/api/tasks/:id/result</code></td><td>PR 連結、gap-review、失敗原因、log 尾巴</td></tr>
           <tr><td>DELETE</td><td><code>/api/tasks/:id</code></td><td>永久刪除任務＋磁碟產物（<code>?force=1</code>）</td></tr>

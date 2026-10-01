@@ -656,6 +656,15 @@ CREATE TABLE IF NOT EXISTS machines (
   updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- 規格 of the GPU 沙盒 hosts ('local' = this Spark, else an exec_hosts name): what the spec probe
+-- found (src/exec/specs.ts) and the software a person added that the probe cannot see.
+CREATE TABLE IF NOT EXISTS host_specs (
+  name            TEXT PRIMARY KEY,
+  specs_json      TEXT,
+  software        TEXT,
+  checked_at      TEXT
+);
+
 -- 圖資: a Gitea repo holding an images folder + an answer file (ground truth).
 CREATE TABLE IF NOT EXISTS datasets (
   id              TEXT PRIMARY KEY,               -- ds_<nanoid(8)>

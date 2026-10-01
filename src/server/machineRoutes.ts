@@ -19,6 +19,7 @@ import {
   type MachineInput,
 } from '../exec/machines.js';
 import { checkMachine, withMachineLock } from '../exec/remote.js';
+import { getHostSpecs, probeHostSpecs, readSpecs, setHostSoftware, specsSummary } from '../exec/specs.js';
 
 /**
  * 機台 registry + health check (src/exec/{machines,remote}.ts) for the 機台 page and the CLI:
@@ -31,7 +32,7 @@ export interface MachineRouteOptions {
   hostExec?: HostExec;
 }
 
-const FIELDS = ['name', 'ssh_target', 'ssh_port', 'os', 'shell', 'work_root', 'labels', 'description', 'transport', 'enabled'] as const;
+const FIELDS = ['name', 'ssh_target', 'ssh_port', 'os', 'shell', 'work_root', 'labels', 'description', 'software', 'transport', 'enabled'] as const;
 
 /** Only the keys the body names, so a PATCH leaves the rest alone. */
 function patchOf(body: unknown): Partial<MachineInput> {
@@ -43,7 +44,15 @@ function patchOf(body: unknown): Partial<MachineInput> {
 }
 
 function view(m: Machine) {
-  return { ...m, labels_list: labelsOf(m), last_check: lastCheckOf(m) };
+  const specs = readSpecs(m.specs_json);
+  return { ...m, labels_list: labelsOf(m), last_check: lastCheckOf(m), specs, specs_line: specsSummary(specs) };
+}
+
+/** a GPU 沙盒 host (describeExecHosts) with its 規格 and the software a person added */
+function sandboxView(db: Database.Database, h: ReturnType<typeof describeExecHosts>[number]) {
+  const row = getHostSpecs(db, h.name);
+  const specs = readSpecs(row?.specs_json);
+  return { ...h, specs, specs_line: specsSummary(specs), specs_at: row?.checked_at ?? null, software: row?.software ?? null };
 }
 
 const str = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
@@ -63,7 +72,28 @@ export function registerMachineRoutes(app: FastifyInstance, db: Database.Databas
   };
   const nameOf = (req: FastifyRequest): string => (req.params as { name: string }).name;
 
-  app.get('/api/machines', async () => ({ machines: listMachines(db).map(view), sandbox_hosts: describeExecHosts(db) }));
+  app.get('/api/machines', async () => ({ machines: listMachines(db).map(view), sandbox_hosts: describeExecHosts(db).map((h) => sandboxView(db, h)) }));
+
+  // GPU 沙盒 hosts: 檢查規格 (this Spark locally, an exec host over ssh) and 其他軟體 (the person's text)
+  const sandboxOf = (req: FastifyRequest) => describeExecHosts(db).find((h) => h.name === (req.params as { name: string }).name) ?? null;
+  app.post('/api/machines/sandbox/:name/specs', async (req, reply) => {
+    const h = sandboxOf(req);
+    if (!h) return reply.code(404).send({ error: '沒有這台沙盒主機' });
+    const r = await probeHostSpecs(db, h.name, opts.hostExec ?? realHostExec);
+    if (r.error) return reply.code(502).send({ error: r.error });
+    return { host: sandboxView(db, h) };
+  });
+  app.patch('/api/machines/sandbox/:name', async (req, reply) => {
+    const h = sandboxOf(req);
+    if (!h) return reply.code(404).send({ error: '沒有這台沙盒主機' });
+    const raw = ((req.body ?? {}) as { software?: unknown }).software;
+    if (raw !== null && typeof raw !== 'string') return reply.code(400).send({ error: 'software 要是文字' });
+    const software = typeof raw === 'string' ? raw.trim() || null : null;
+    if (software && software.length > 2000) return reply.code(400).send({ error: '其他軟體太長（上限 2000 字）' });
+    setHostSoftware(db, h.name, software);
+    logEvent(db, { kind: 'note', detail: `沙盒主機 ${h.name} 的其他軟體已更新 by ${who(req)}` });
+    return { host: sandboxView(db, h) };
+  });
 
   app.get('/api/machines/:name', async (req, reply) => {
     const m = getMachine(db, nameOf(req));
