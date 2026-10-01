@@ -14,6 +14,9 @@ import { checkBenchmarks } from './benchmark/complete.js';
 import { bridgeEdgesCached } from './knowledge/bridge.js';
 import { pumpMorningReport } from './report/morning.js';
 import { markInterrupted } from './chatops/actions.js';
+import { pumpGiteaIssues } from './integrations/giteaIssues.js';
+import { ticketFromIssue } from './intake/ticket.js';
+import { analyseTicket } from './intake/analyse.js';
 
 /** Production entry: runs the scheduling loop AND serves the API/board. systemd runs this. */
 export async function main(): Promise<void> {
@@ -60,6 +63,15 @@ export async function main(): Promise<void> {
     void pumpPushback(db, lastPushbackId).then((id) => {
       lastPushbackId = id;
     });
+    // 問題單 from Gitea: repos with an issue_label get their labelled issues as tickets (self-throttled
+    // to gitea_poll_interval_min; does nothing without gitea_url + GITEA_TOKEN + a labelled repo)
+    void pumpGiteaIssues(db, {
+      createFromIssue: async (d, ref) => {
+        const r = await ticketFromIssue(d, ref, { user_key: 'gitea', label: 'Gitea issue' });
+        if (r.created) void analyseTicket(d, r.task.id);
+        return r.created ? r.task : null;
+      },
+    }).catch((err) => console.error('[gitea] issue poller:', err));
     // 晨報: once a day at morning_report_time, push what ran overnight (src/report/morning.ts)
     void pumpMorningReport(db, new Date(), (p) => notify(db, p)).catch((err) => console.error('[morning] error:', err));
     // benchmark mode: judge benchmarks whose arms are all terminal, fire-and-forget (src/benchmark/complete.ts)

@@ -25,6 +25,8 @@ import {
   withdrawStart,
 } from '../intake/ticket.js';
 import { identityOf, IdentityError, type ChatIdentity } from './identity.js';
+import { giteaClientFor } from '../git/gitea.js';
+import { postIssueUpdate } from '../integrations/giteaIssues.js';
 
 /**
  * 問題單 (src/intake/*) — the API the 問題單 page reads (contract: ticket-api.md):
@@ -58,10 +60,15 @@ const CREATE_BODY_LIMIT = 40 * 1024 * 1024;
 
 // Registered from app.ts before the static handler (the auth hook covers /api/*).
 export function registerTicketRoutes(app: FastifyInstance, db: Database.Database, opts: TicketRouteOptions = {}): void {
+  const giteaFetch = opts.giteaFetch;
   const deps: AnalyseDeps = {
     ...opts.analyseDeps,
     localChat: opts.analyseDeps?.localChat ?? opts.localChat,
     visionExec: opts.analyseDeps?.visionExec ?? opts.visionExec,
+    // an injected Gitea (tests) also carries the issue comment-back
+    ...(giteaFetch && !opts.analyseDeps?.reportIssue
+      ? { reportIssue: (d: Database.Database, id: string, kind: 'analysis') => void postIssueUpdate(d, id, kind, { client: giteaClientFor(d, { fetchImpl: giteaFetch }) }) }
+      : {}),
   };
   const gitea = opts.giteaFetch ? { fetchImpl: opts.giteaFetch } : {};
   const idOf = (req: FastifyRequest): string => (req.params as { id: string }).id;

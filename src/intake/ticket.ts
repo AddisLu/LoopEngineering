@@ -17,6 +17,7 @@ import { isModelValue, LOCAL_MODEL_RE } from '../settings.js';
 import { getLocalModel, isLocalModel, localId } from '../local/models.js';
 import { cloudAllowed } from '../local/backend.js';
 import { notify } from '../notify.js';
+import { linkIssue, reportIssue } from '../integrations/giteaIssues.js';
 import { readTaskImages } from './context.js';
 import { approvalMode, isManager, type ApprovalMode } from './roles.js';
 import {
@@ -331,6 +332,7 @@ export function createTicket(db: Database.Database, input: NewTicketInput, who: 
       throw new TicketError(`截圖存不下來：${String((err as Error)?.message ?? err).slice(0, 200)}`, 500);
     }
   }
+  if (intake.issue) linkIssue(db, task.id, { repoId: repo.id, owner: intake.issue.owner, repo: intake.issue.repo, number: intake.issue.number, url: intake.issue.url });
   logEvent(db, { task_id: task.id, kind: 'note', detail: `問題單：${who.label} 開單（${intake.from === 'issue' ? 'Gitea issue' : intake.from === 'chat' ? '對話' : '問題單頁'}）` });
   return getTask(db, task.id)!;
 }
@@ -502,6 +504,7 @@ export function startTicket(db: Database.Database, taskId: string, who: TicketAc
     db.prepare('UPDATE tasks SET approval_state = NULL WHERE id = ?').run(taskId);
   }
   logEvent(db, { task_id: taskId, kind: 'note', detail: `開始修：${who.label}` });
+  reportIssue(db, taskId, 'started');
   return getTask(db, taskId)!;
 }
 
@@ -518,6 +521,7 @@ export function approveStart(db: Database.Database, taskId: string, who: TicketA
   queueThroughGate(db, taskId);
   db.prepare("UPDATE tasks SET approval_state = 'approved', start_approved_by = ?, start_approved_at = datetime('now') WHERE id = ?").run(who.label, taskId);
   logEvent(db, { task_id: taskId, kind: 'note', detail: `開工核可：${who.label}` });
+  reportIssue(db, taskId, 'started');
   return getTask(db, taskId)!;
 }
 
