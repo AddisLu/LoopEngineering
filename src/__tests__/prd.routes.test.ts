@@ -119,6 +119,8 @@ describe('PRD pages: static assets', () => {
   it('/prd.html forwards to 工作流程 (linked from the chat), and the shared helpers never use innerHTML', () => {
     expect(fs.readFileSync(path.join(WEB, 'prd.html'), 'utf8')).toContain("location.replace('/flow.html'");
     for (const f of ['prd-compose.js', 'prd-kinds.js']) expect(fs.readFileSync(path.join(WEB, f), 'utf8'), f).not.toMatch(/innerHTML/);
-    expect(fs.readFileSync(path.join(WEB, 'frame.js'), 'utf8')).toContain("'/flow.html'"); // the app rail
+    // the rail's entry is 問題單 now; /flow.html stays reachable (prd.html above, older links)
+    expect(fs.readFileSync(path.join(WEB, 'frame.js'), 'utf8')).toContain("'/fix.html'");
+    expect(fs.existsSync(path.join(WEB, 'flow.html'))).toBe(true);
   });
 });
