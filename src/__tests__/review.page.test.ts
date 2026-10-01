@@ -12,6 +12,7 @@ import { buildApp } from '../server/app.js';
 import { verifiedShas } from '../review/code.js';
 import { collectArtifacts } from '../review/artifacts.js';
 import { removeTrialWorkspace } from '../review/review.js';
+import { paths } from '../config.js';
 import type { SandboxResult } from '../exec/sandbox.js';
 
 let db: Database.Database;
@@ -231,6 +232,71 @@ describe('驗收頁', () => {
     const ok = await app.inject({ method: 'POST', url: `/api/tasks/${task.id}/release`, headers: as('呂侑儒'), payload: { tag: 'v1.0.0' } });
     expect(ok.json()).toEqual({ url: 'http://gitea.corp:3000/aoi/cf-aoi/releases/tag/v1.0.0', asset_url: 'http://gitea.corp:3000/attachments/z' });
     expect(getTask(db, task.id)!.release_url).toBe('http://gitea.corp:3000/aoi/cf-aoi/releases/tag/v1.0.0');
+  });
+});
+
+describe('結果頁: 交給同事 and a check run\'s files', () => {
+  it('交給同事 records who follows the task up, and the page shows it', async () => {
+    const { task } = reviewedTask();
+    const r = await app.inject({ method: 'POST', url: `/api/tasks/${task.id}/owner`, headers: as('呂侑儒'), payload: { owner: ' 王小明 ' } });
+    expect(r.json()).toEqual({ ok: true, owner: '王小明' });
+    expect(getTask(db, task.id)!.owner).toBe('王小明');
+    expect(getTask(db, task.id)!.status).toBe('review'); // nothing else about the task changes
+    const notes = (db.prepare("SELECT detail FROM task_events WHERE task_id = ? AND kind = 'note'").all(task.id) as { detail: string }[]).map((e) => e.detail);
+    expect(notes).toContain('交給 王小明（呂侑儒）');
+    expect((await app.inject({ method: 'GET', url: `/api/tasks/${task.id}/review` })).json().task.owner).toBe('王小明');
+
+    for (const payload of [{}, { owner: 3 }, { owner: 'x'.repeat(41) }, { owner: 'a\u0007b' }]) {
+      expect((await app.inject({ method: 'POST', url: `/api/tasks/${task.id}/owner`, payload })).statusCode, JSON.stringify(payload)).toBe(400);
+    }
+    expect((await app.inject({ method: 'POST', url: '/api/tasks/t_nope/owner', payload: { owner: '王小明' } })).statusCode).toBe(404);
+    const back = await app.inject({ method: 'POST', url: `/api/tasks/${task.id}/owner`, headers: as('王小明'), payload: { owner: '' } });
+    expect(back.json()).toEqual({ ok: true, owner: null });
+    expect(getTask(db, task.id)!.owner).toBeNull();
+  });
+
+  it('serves the pictures a check run pulled back, and nothing outside that run', async () => {
+    const root = path.join(paths.dataDir, 'check-runs');
+    const run = path.join(root, 'cr_page1');
+    fs.mkdirSync(path.join(run, 'out', 'overlays'), { recursive: true });
+    fs.mkdirSync(path.join(root, 'cr_page2'), { recursive: true });
+    fs.writeFileSync(path.join(run, 'out', 'overlays', 'IMG_0412.png'), 'PNG');
+    fs.writeFileSync(path.join(run, 'out', 'results.json'), '{"IMG_0412":"OK"}');
+    fs.writeFileSync(path.join(run, 'page.svg'), '<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"/>');
+    fs.writeFileSync(path.join(root, 'cr_page2', 'secret.txt'), 'another run');
+    fs.writeFileSync(path.join(root, 'top.txt'), 'the folder of every run');
+    try {
+      const img = await app.inject({ method: 'GET', url: '/api/check-runs/cr_page1/files/out/overlays/IMG_0412.png' });
+      expect(img.statusCode).toBe(200);
+      expect(img.headers['content-type']).toBe('image/png');
+      expect(img.headers['x-content-type-options']).toBe('nosniff');
+      expect(img.body).toBe('PNG');
+      const json = await app.inject({ method: 'GET', url: '/api/check-runs/cr_page1/files/out/results.json' });
+      expect([json.headers['content-type'], json.headers['content-disposition']]).toEqual(['text/plain; charset=utf-8', undefined]);
+      // markup never renders in the page's origin: it only downloads
+      const svg = await app.inject({ method: 'GET', url: '/api/check-runs/cr_page1/files/page.svg' });
+      expect(svg.headers['content-type']).toBe('application/octet-stream');
+      expect(svg.headers['content-disposition']).toContain('attachment');
+      for (const bad of [
+        '/api/check-runs/cr_page1/files/../cr_page2/secret.txt',
+        '/api/check-runs/cr_page1/files/out/../../cr_page2/secret.txt',
+        '/api/check-runs/cr_page1/files/out%2F..%2F..%2Fcr_page2%2Fsecret.txt',
+        '/api/check-runs/cr_page1/files/%2E%2E/top.txt',
+        '/api/check-runs/cr_page1/files/..%2Ftop.txt',
+        '/api/check-runs/..%2Fcr_page2/files/secret.txt',
+        '/api/check-runs/cr_page1/files/%2Fetc%2Fpasswd',
+        '/api/check-runs/cr_page1/files/out%5C..%5C..%5Ctop.txt',
+        '/api/check-runs/cr_page1/files/',
+        '/api/check-runs/cr_page1/files/out',
+        '/api/check-runs/cr_page9/files/secret.txt',
+      ]) {
+        const r = await app.inject({ method: 'GET', url: bad });
+        expect(r.statusCode, bad).toBe(404);
+        expect(r.body, bad).not.toMatch(/another run|every run|root:/);
+      }
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 

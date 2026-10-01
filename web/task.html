@@ -36,14 +36,30 @@
 
           <!-- 結果 -->
           <section class="tab-pane" id="pane-result" role="tabpanel" aria-labelledby="tab-result">
-            <div class="cols">
-              <div class="stack">
+            <div class="cols" id="result-cols">
+              <div class="stack" id="result-main">
+                <!-- 問題單（結果頁）: these render only with their data; a task that is not a ticket has none -->
+                <section class="panel" id="review-card" hidden>
+                  <h2>Loop 的自評 <span class="sub" id="review-sub"></span><span class="grow"></span><button type="button" class="linkish" id="review-more" hidden>看完整（為什麼、風險）</button></h2>
+                  <div class="rv" id="review-body"></div>
+                </section>
+                <section class="panel" id="checks-card" hidden>
+                  <h2>檢查 <span class="sub" id="checks-sub"></span><span class="grow"></span><a id="checks-manage" hidden>管理這個 repo 的檢查</a></h2>
+                  <div class="cklist" id="check-list"></div>
+                </section>
+                <section class="panel" id="dataset-card" hidden>
+                  <div class="stack" id="datasets"></div>
+                </section>
+                <section class="panel" id="attempts-card" hidden>
+                  <h2>嘗試記錄 <span class="sub">同一條分支，修不好就換下一個本地模型接著改</span></h2>
+                  <div class="attempts" id="attempts"></div>
+                </section>
                 <section class="panel" id="metrics-card" hidden>
                   <h2>驗收指標 <span class="sub">由引擎量測，不是模型自己說的</span></h2>
                   <div class="scroll-x"><table class="mtable" id="metrics-table"></table></div>
                   <p class="hint" id="metrics-extra" hidden></p>
                 </section>
-                <section class="panel">
+                <section class="panel" id="steps-card">
                   <h2>驗證步驟 <span class="sub" id="steps-sub"></span></h2>
                   <div class="steps" id="steps"></div>
                 </section>
@@ -61,11 +77,11 @@
               </div>
 
               <aside class="stack" id="deliver">
-                <section class="panel">
+                <section class="panel" id="checklist-panel">
                   <h2>人工驗收清單</h2>
                   <div class="checklist" id="checks"></div>
                 </section>
-                <section class="panel">
+                <section class="panel" id="deliver-panel">
                   <h2>交付</h2>
                   <div class="stack" id="deliver-body"></div>
                 </section>
@@ -119,6 +135,14 @@
 
           <!-- 需求 -->
           <section class="tab-pane" id="pane-ask" role="tabpanel" aria-labelledby="tab-ask" hidden>
+            <section class="panel" id="analysis-card" hidden>
+              <h2>Loop 的分析 <span class="sub" id="analysis-sub"></span><span class="grow"></span><button type="button" class="btn" id="prd-btn" hidden>看需求文件</button></h2>
+              <div class="stack" id="analysis-body"></div>
+            </section>
+            <section class="panel" id="images-card" hidden>
+              <h2>截圖 <span class="sub">開單時附的圖，和 Loop 從圖上讀到的字</span></h2>
+              <div class="shots" id="images"></div>
+            </section>
             <section class="panel">
               <h2>當初要求的</h2>
               <div id="goal" style="white-space: pre-wrap; line-height: 1.7"></div>
@@ -129,6 +153,14 @@
             </section>
           </section>
         </main>
+        <!-- 問題單: the PR-style action bar (stays at the bottom while the page scrolls) -->
+        <div class="action-bar" id="action-bar" hidden>
+          <button type="button" class="btn big primary" id="act-merge">合併</button>
+          <button type="button" class="btn big" id="act-changes">退回修改…</button>
+          <button type="button" class="btn big hide-sm" id="act-owner">交給同事…</button>
+          <button type="button" class="btn big" id="act-escalate" hidden>再試一次（換模型）</button>
+          <span class="hint grow" id="act-hint"></span>
+        </div>
       </div>
     </div>
 
@@ -145,6 +177,47 @@
       </form>
     </dialog>
 
+    <dialog class="ops-dialog" id="merge-dialog">
+      <form method="dialog" id="merge-form" class="stack">
+        <h3>合併</h3>
+        <p class="hint" id="merge-hint"></p>
+        <label class="check-line" id="close-issue-row" hidden><input type="checkbox" id="close-issue" checked /><span id="close-issue-label">在 Gitea 留言並關閉 issue</span></label>
+        <div class="row">
+          <span class="grow"></span>
+          <button class="btn" value="cancel" type="submit" formnovalidate>取消</button>
+          <button class="btn primary" value="send" type="submit">合併</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog class="ops-dialog" id="owner-dialog">
+      <form method="dialog" id="owner-form" class="stack">
+        <h3>交給同事</h3>
+        <p class="hint">寫下誰要接手跟進這張單。只記下名字，Loop 的進度和分支都不受影響；留空就是不指定。</p>
+        <label class="field">同事的名字<input id="owner-name" maxlength="40" autocomplete="off" /></label>
+        <div class="row">
+          <span class="grow"></span>
+          <button class="btn" value="cancel" type="submit" formnovalidate>取消</button>
+          <button class="btn primary" value="send" type="submit">交給他</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog class="drawer" id="log-drawer" aria-labelledby="log-title">
+      <div class="drawer-head"><h3 id="log-title">紀錄</h3><span class="grow"></span><button type="button" class="btn" id="log-close">關閉</button></div>
+      <div class="drawer-body stack" id="log-body"></div>
+    </dialog>
+
+    <dialog class="drawer wide" id="case-drawer" aria-labelledby="case-title">
+      <div class="drawer-head"><h3 id="case-title">案例</h3><span id="case-pill"></span><span class="grow"></span><button type="button" class="btn" id="case-close">關閉</button></div>
+      <div class="drawer-body stack" id="case-body"></div>
+    </dialog>
+
+    <dialog class="drawer" id="prd-drawer" aria-labelledby="prd-title">
+      <div class="drawer-head"><h3 id="prd-title">需求文件</h3><span class="grow"></span><button type="button" class="btn" id="prd-close">關閉</button></div>
+      <div class="drawer-body"><pre class="prd" id="prd-text"></pre></div>
+    </dialog>
+
     <dialog class="ops-dialog" id="release-dialog">
       <form method="dialog" id="release-form" class="stack">
         <h3>發佈到 Gitea</h3>
@@ -159,7 +232,7 @@
     </dialog>
 
     <script src="/ops.js"></script>
-    <script src="/task.js"></script>
+    <script type="module" src="/task.js"></script>
     <script type="module" src="/frame-boot.js"></script>
   </body>
 </html>

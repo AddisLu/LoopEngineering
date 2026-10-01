@@ -1,14 +1,18 @@
 import fs from 'node:fs';
+import path from 'node:path';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type Database from 'better-sqlite3';
 import { getTask } from '../tasks.js';
 import { identityOf, IdentityError, type ChatIdentity } from './identity.js';
 import { codeRefFor, fileDiff, readSource } from '../review/code.js';
 import { artifactPath, latestArtifacts } from '../review/artifacts.js';
+import { checkRunFileType, resolveCheckRunFile } from '../review/checkFiles.js';
+import { paths } from '../config.js';
 import {
   approveTask,
   deliveryZip,
   getTrial,
+  handOver,
   listTrials,
   releaseTask,
   requestChanges,
@@ -202,5 +206,31 @@ export function registerReviewRoutes(app: FastifyInstance, db: Database.Database
     } catch (err) {
       return fail(reply, err);
     }
+  });
+
+  // ---- 交給同事 ----
+  app.post('/api/tasks/:id/owner', async (req, reply) => {
+    const c = ctx(req, reply);
+    if (!c) return;
+    const owner = ((req.body ?? {}) as { owner?: unknown }).owner;
+    if (typeof owner !== 'string') return reply.code(400).send({ error: '請寫要交給誰' });
+    try {
+      const t = handOver(db, c.task, owner, c.who.label);
+      return { ok: true, owner: t.owner ?? null };
+    } catch (err) {
+      return fail(reply, err);
+    }
+  });
+
+  // ---- 檢查帶回來的檔案（圖資回歸的圖、輸出）----
+  // only inside <check-runs>/<run id>/ (src/review/checkFiles.ts); pictures and text in place, the rest downloads
+  app.get('/api/check-runs/:id/files/*', async (req, reply) => {
+    const p = req.params as { id: string; '*'?: string };
+    const abs = resolveCheckRunFile(path.join(paths.dataDir, 'check-runs'), p.id, p['*'] ?? '');
+    if (!abs) return reply.code(404).send({ error: '沒有這個檔案' });
+    const t = checkRunFileType(abs);
+    reply.header('content-type', t.type).header('x-content-type-options', 'nosniff').header('cache-control', 'private, max-age=300');
+    if (!t.inline) reply.header('content-disposition', attachment(path.basename(abs)));
+    return reply.send(fs.createReadStream(abs));
   });
 }
