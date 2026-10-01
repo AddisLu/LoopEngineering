@@ -4,6 +4,7 @@ import type { Task } from '../types.js';
 import { getRun } from '../tasks.js';
 import { readVerify } from '../orchestrator/runSummary.js';
 import { chatLocal } from '../local/chat.js';
+import { profileSectionFor } from '../repo/profileContext.js';
 
 /**
  * 本地自評 (`local_self_review`): after verification passes, the served local model reads the diff
@@ -84,6 +85,11 @@ export async function runSelfReview(
     `## 任務\n${task.title}\n\n${task.goal.slice(0, 3000)}`,
     `## 檢查結果\n${checks}`,
     task.protected_paths ? `## 保護路徑（不應修改）\n${task.protected_paths}` : '',
+    // 這個 repo 的規範與經驗 (repo_profile_inject): check the diff against the style and the known pitfalls
+    (() => {
+      const k = profileSectionFor(db, task);
+      return k ? `## 這個 repo 的規範與陷阱（檢查差異有沒有違反；違反的寫進 risks）\n${k.text}` : '';
+    })(),
     `## 差異\n\`\`\`diff\n${diff}\n\`\`\``,
   ]
     .filter(Boolean)

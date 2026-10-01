@@ -274,6 +274,12 @@
         <label>給實作模型的規範與經驗最多幾個字
           <input name="repo_profile_budget_chars" type="number" min="800" max="20000" autocomplete="off" />
         </label>
+        <label>機況監看的資料夾（每行一個：<code>repo 名稱=資料夾</code>；機台把 _diag 輸出放這裡，或 Loop 會 pull 的 Gitea 複本；留空＝不監看）
+          <textarea name="diag_watch_dirs" rows="2" placeholder="cf-aoi=/mnt/aoi-share/IP01/_diag" autocomplete="off" data-clearable></textarea>
+        </label>
+        <label>機況監看每幾分鐘看一次
+          <input name="diag_watch_interval_min" type="number" min="1" max="1440" autocomplete="off" />
+        </label>
 
         <div class="settings-group">晨報</div>
         <label>每天推送晨報的時間（HH:MM，經 ntfy；留空＝不推送，晨報頁照常可看）
