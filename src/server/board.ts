@@ -56,6 +56,22 @@ export interface BoardCard {
   repo?: string | null; // the repo's folder name (the list view's 工作流程 column)
   benchmark_id?: string | null; // benchmark mode: the benchmark this task is one arm of (總覽 groups them)
   parent_task_id?: string | null; // an auto merge-conflict task: the task whose conflict it resolves
+  // 問題單 start approval (approval_mode=manager): 'awaiting' | 'approved' | 'rejected', and who
+  // asked Loop to start it (the 待核可（開工）inbox item). Absent on every task without one.
+  approval_state?: string | null;
+  requested_by?: string | null;
+}
+
+/** Who pressed 開始修 on a ticket (intake_json.start_requested_by), else who opened it. */
+function requesterOf(t: Task): string | null {
+  try {
+    const intake = t.intake_json ? (JSON.parse(t.intake_json) as { start_requested_by?: { label?: unknown } | null; created_label?: unknown }) : null;
+    const label = intake?.start_requested_by?.label ?? intake?.created_label;
+    if (typeof label === 'string' && label) return label;
+  } catch {
+    /* unreadable intake: fall back to the key */
+  }
+  return t.created_by ?? null;
 }
 
 export interface EpicRollup {
@@ -424,6 +440,10 @@ export function boardState(db: Database.Database): BoardState {
       card.stage_name = t.stage_name;
     }
     if (t.source_ref) card.source_ref = t.source_ref;
+    if (t.approval_state) {
+      card.approval_state = t.approval_state;
+      card.requested_by = requesterOf(t);
+    }
     const kids = childrenByParent.get(t.id);
     if (kids) {
       card.children = {
