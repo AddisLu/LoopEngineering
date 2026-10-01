@@ -3,8 +3,12 @@
 // task reads the same wherever you meet it. textContent-only (frame.js h()).
 import { fill, h, icon, modelName } from './frame.js';
 
-export const needsYou = (c) => c.status === 'attention' || (c.status === 'draft' && c.gate && !c.gate.ok) || (c.status === 'review' && c.merge_status === 'conflict');
-export const awaiting = (c) => c.status === 'review' && c.merge_status !== 'conflict';
+// a 問題單 draft is the engineer's own page (fix.html) until it is started, so it is never 草稿缺資料
+const gapDraft = (c) => c.status === 'draft' && !c.ticket && c.gate && !c.gate.ok;
+/** a 問題單 waiting for a manager to let Loop start it (approval_mode=manager) */
+export const startAwaiting = (c) => c.status === 'draft' && c.approval_state === 'awaiting';
+export const needsYou = (c) => c.status === 'attention' || gapDraft(c) || (c.status === 'review' && c.merge_status === 'conflict');
+export const awaiting = (c) => (c.status === 'review' && c.merge_status !== 'conflict') || startAwaiting(c);
 export const manualMode = (c) => String(c.verify_mode || '').split(',').map((m) => m.trim()).includes('manual');
 
 /** why a task stopped, in a few words */
@@ -46,8 +50,22 @@ export function paintInbox(box, snap, o = {}) {
       items.push({ order: 0, wait: false, el: h('article.need', { onclick: () => open(c) }, h('div.kind', null, icon('bang', { sw: 2.4 }), '需要處理'), h('div.ttl', null, nodeTitle(c)), h('div.why', null, why(c) || '執行出了問題，worktree 還在，等你決定'), h('div.acts', null, h('button.btn.primary.sm', { type: 'button', onclick: (e) => { e.stopPropagation(); act(`/api/tasks/${c.id}/resume`); } }, '續跑'), h('button.btn.sm', { type: 'button', onclick: (e) => { e.stopPropagation(); open(c); } }, '看原因'), focusBtn(c))) });
     } else if (c.status === 'review' && c.merge_status === 'conflict') {
       items.push({ order: 1, wait: false, el: h('article.need.bad', { onclick: () => open(c) }, h('div.kind', null, icon('merge'), '合併衝突'), h('div.ttl', null, nodeTitle(c)), h('div.why', null, '已建一張解衝突任務；它結案後再合併'), h('div.acts', null, h('a.btn.primary.sm', { href: `/task.html?id=${encodeURIComponent(c.id)}`, onclick: (e) => e.stopPropagation() }, '去驗收'), focusBtn(c))) });
-    } else if (c.status === 'draft' && c.gate && !c.gate.ok) {
+    } else if (gapDraft(c)) {
       items.push({ order: 2, wait: false, el: h('article.need', { onclick: () => open(c) }, h('div.kind', null, icon('doc'), '草稿缺資料'), h('div.ttl', null, nodeTitle(c)), h('div.why', null, `缺：${(c.gate.missing || []).map((m) => String(m).split(/[ (]/)[0]).join('、')}`), h('div.acts', null, h('a.btn.primary.sm', { href: `/flow.html#new?title=${encodeURIComponent(c.title || '')}&expected=${encodeURIComponent(c.goal || '')}`, onclick: (e) => e.stopPropagation() }, '用工作流程補齊'), focusBtn(c))) });
+    } else if (startAwaiting(c)) {
+      const href = `/fix.html?id=${encodeURIComponent(c.id)}`;
+      items.push({
+        order: 3,
+        wait: true,
+        el: h(
+          'article',
+          { onclick: () => (location.href = href) },
+          h('div.kind', null, icon('eye'), '待核可（開工）'),
+          h('div.ttl', null, nodeTitle(c)),
+          h('div.why', null, `${c.requested_by || '有人'} 想請 Loop 修這個；看分析卡再核可`),
+          h('div.acts', null, h('a.btn.primary.sm', { href, onclick: (e) => e.stopPropagation() }, '看分析卡'), focusBtn(c)),
+        ),
+      });
     } else if (awaiting(c)) {
       const merged = c.merge_status === 'merged';
       const manual = c.merge_status === 'pending' && manualMode(c);

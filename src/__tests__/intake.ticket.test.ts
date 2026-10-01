@@ -175,7 +175,7 @@ describe('roles', () => {
     expect(ticketView(db, t, eng).can_approve).toBe(false);
     expect(ticketView(db, t, boss).can_approve).toBe(true);
     // the inbox gets 待核可（開工）: who asked
-    expect(boardState(db).cards.find((c) => c.id === id)).toMatchObject({ approval_state: 'awaiting', requested_by: 'Eng' });
+    expect(boardState(db).cards.find((c) => c.id === id)).toMatchObject({ approval_state: 'awaiting', requested_by: 'Eng', ticket: true });
 
     let err: unknown;
     try {

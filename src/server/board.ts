@@ -60,6 +60,8 @@ export interface BoardCard {
   // asked Loop to start it (the 待核可（開工）inbox item). Absent on every task without one.
   approval_state?: string | null;
   requested_by?: string | null;
+  /** a 問題單 (intake_json set): its draft is finished on /fix.html, not the 工作流程 */
+  ticket?: boolean;
 }
 
 /** Who pressed 開始修 on a ticket (intake_json.start_requested_by), else who opened it. */
@@ -440,6 +442,7 @@ export function boardState(db: Database.Database): BoardState {
       card.stage_name = t.stage_name;
     }
     if (t.source_ref) card.source_ref = t.source_ref;
+    if (t.intake_json) card.ticket = true;
     if (t.approval_state) {
       card.approval_state = t.approval_state;
       card.requested_by = requesterOf(t);
