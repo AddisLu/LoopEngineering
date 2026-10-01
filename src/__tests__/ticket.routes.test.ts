@@ -123,6 +123,19 @@ describe('/api/tickets', () => {
     expect((await app.inject({ method: 'GET', url: '/api/tickets/t_nope' })).statusCode).toBe(404);
   });
 
+  it('先存草稿 (analyse: false) saves without analysing, and editing it stays quiet until 請 Loop 分析', async () => {
+    const res = await app.inject({ method: 'POST', url: '/api/tickets', headers: as('eng'), payload: { description: DESC, repo_id: repo.id, analyse: false } });
+    expect(res.statusCode).toBe(201);
+    const id = res.json().ticket.id as string;
+    expect(res.json().ticket).toMatchObject({ analysis_status: null, is_manager: false });
+    const edited = await app.inject({ method: 'PATCH', url: `/api/tickets/${id}`, headers: as('eng'), payload: { description: `${DESC}（補充）` } });
+    expect(edited.json().ticket.analysis_status).toBeNull();
+    const go = await app.inject({ method: 'POST', url: `/api/tickets/${id}/analyse`, headers: as('eng') });
+    expect(go.statusCode).toBe(202);
+    await awaitAnalysis(id);
+    expect((await app.inject({ method: 'GET', url: `/api/tickets/${id}`, headers: as('eng') })).json().ticket.analysis_status).toBe('ready');
+  });
+
   it('retry, and cancel before it started', async () => {
     const id = await open();
     const retry = await app.inject({ method: 'POST', url: `/api/tickets/${id}/analyse` });

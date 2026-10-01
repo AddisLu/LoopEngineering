@@ -97,6 +97,8 @@ export interface TicketView {
   start_approved_by: string | null;
   /** the caller is a manager and the ticket awaits their 核可 */
   can_approve: boolean;
+  /** the caller may start without approval (the page says 開始修, not 送出核可) */
+  is_manager: boolean;
 }
 
 export interface TicketSummary {
@@ -264,6 +266,8 @@ export interface NewTicketInput {
   title?: unknown;
   description: unknown;
   repo_id: unknown;
+  /** false = 先存草稿: save it as typed, no analysis yet */
+  analyse?: boolean;
   branch?: unknown;
   priority?: unknown;
   model?: unknown;
@@ -315,10 +319,13 @@ export function createTicket(db: Database.Database, input: NewTicketInput, who: 
       source_ref: input.source_ref ?? null,
       domain: repo.domain,
     });
-    db.prepare("UPDATE tasks SET repo_id = ?, intake_json = ?, analysis_status = 'pending', analysis_json = ? WHERE id = ?").run(
+    // a draft saved with 先存草稿 (analyse: false) has no analysis until 請 Loop 分析
+    const analyse = input.analyse !== false;
+    db.prepare('UPDATE tasks SET repo_id = ?, intake_json = ?, analysis_status = ?, analysis_json = ? WHERE id = ?').run(
       repo.id,
       JSON.stringify(intake),
-      JSON.stringify(freshAnalysis()),
+      analyse ? 'pending' : null,
+      analyse ? JSON.stringify(freshAnalysis()) : null,
       t.id,
     );
     return t;
@@ -402,6 +409,7 @@ export function ticketView(db: Database.Database, task: Task, who?: TicketActor 
     approval_state: approval,
     start_approved_by: task.start_approved_by ?? null,
     can_approve: Boolean(who && task.status === 'draft' && approval === 'awaiting' && isManager(db, who.user_key)),
+    is_manager: Boolean(who && isManager(db, who.user_key)),
   };
 }
 

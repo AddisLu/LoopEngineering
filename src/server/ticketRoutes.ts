@@ -125,10 +125,11 @@ export function registerTicketRoutes(app: FastifyInstance, db: Database.Database
       }
       const t = createTicket(
         db,
-        { title: b.title, description: b.description, repo_id: repoId, branch: b.branch, priority: b.priority, model: b.model, kind: b.kind, images: b.images, from: 'ui', issue, source_ref: sourceRef },
+        { title: b.title, description: b.description, repo_id: repoId, branch: b.branch, priority: b.priority, model: b.model, kind: b.kind, images: b.images, from: 'ui', issue, source_ref: sourceRef, analyse: b.analyse !== false },
         who,
       );
-      void analyseTicket(db, t.id, deps);
+      // 先存草稿 (analyse: false) keeps the draft as typed; 請 Loop 分析 starts the analysis
+      if (b.analyse !== false) void analyseTicket(db, t.id, deps);
       return reply.code(201).send({ ticket: view(t.id, who) });
     } catch (err) {
       return fail(reply, err);
@@ -166,8 +167,10 @@ export function registerTicketRoutes(app: FastifyInstance, db: Database.Database
     const id = idOf(req);
     const b = req.body && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : {};
     try {
+      const before = getTask(db, id);
       const r = patchTicket(db, id, b, who);
-      if (r.next === 'analyse') void analyseTicket(db, id, deps);
+      // a saved draft that was never analysed stays a draft until 請 Loop 分析
+      if (r.next === 'analyse' && before?.analysis_status) void analyseTicket(db, id, deps);
       else if (r.next === 'render') await renderTicket(db, id, deps);
       return { ticket: view(id, who) };
     } catch (err) {
