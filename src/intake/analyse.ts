@@ -28,6 +28,8 @@ import { benchmarkRecommendations } from '../benchmark/store.js';
 import { timeoutMinFor } from '../scheduler/timeout.js';
 import { getMachine } from '../exec/machines.js';
 import { resolveInside } from '../git/worktree.js';
+import { repoTicketChecks } from './checks.js';
+import { reportIssue } from '../integrations/giteaIssues.js';
 
 /**
  * 分析 — what turns a 問題單 (a draft task carrying intake_json) into its 分析卡 (analysis_json)
@@ -211,11 +213,14 @@ export interface AnalyseDeps {
   lintDeps?: LintDeps;
   /** git for the map / locate / log reads (default: execFileSync with a timeout) */
   git?: GitExec;
+  /** the check selection (default: the repo's 檢查, src/intake/checks.ts); null = detected commands only */
   checks?: TicketChecks | null;
   /** failing_first dry run on the base; absent = the step is skipped */
   runRepro?: (db: Database.Database, task: Task, repo: Repo, repro: Repro) => Promise<ReproRun>;
   /** called once the card is ready (Gitea comment-back hooks in here) */
   onTicketReady?: (db: Database.Database, task: Task) => void;
+  /** the 「Loop 的分析」 comment on an issue-sourced ticket (default: giteaIssues.reportIssue) */
+  reportIssue?: (db: Database.Database, taskId: string, kind: 'analysis') => void;
 }
 
 const STEP_LABELS: Record<StepKey, string> = {
@@ -767,9 +772,11 @@ export function fallbackChecks(repo: Repo, repro: Repro | null): { fields: Ticke
 
 function selectChecks(db: Database.Database, repo: Repo, state: AnalysisState, deps: AnalyseDeps): Selected & { note: string | null } {
   let note: string | null = null;
-  if (deps.checks) {
+  // default: the repo's 檢查 (src/intake/checks.ts); null = only the repo's detected commands
+  const checks = deps.checks === undefined ? repoTicketChecks : deps.checks;
+  if (checks) {
     try {
-      const got = deps.checks.select(db, repo, { kind: state.kind ?? 'bugfix', repro: state.repro, off: state.checks_off });
+      const got = checks.select(db, repo, { kind: state.kind ?? 'bugfix', repro: state.repro, off: state.checks_off });
       if (got) {
         state.checks = got.view;
         return { fields: got.fields, snapshot: got.snapshot, fromChecks: true, note: null };
@@ -1121,6 +1128,8 @@ async function runAnalysis(db: Database.Database, taskId: string, deps: AnalyseD
       kind: 'note',
       detail: `分析完成（${state.model_used ? `本地模型 ${state.model_used}` : '規則分析'}）：${state.causes.length} 個可能位置、${state.checks.length} 項檢查${state.questions.length ? `、${state.questions.length} 個待確認` : ''}`,
     });
+    // an issue-sourced ticket tells its issue what Loop found (no-op without an issue link)
+    (deps.reportIssue ?? reportIssue)(db, taskId, 'analysis');
     if (deps.onTicketReady) {
       try {
         const ready = getTask(db, taskId);
