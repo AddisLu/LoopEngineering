@@ -84,6 +84,28 @@ describe('operator pages: 驗收 / 驗證方案 / 晨報', () => {
     expect(read('task.js')).toContain("withToken(`/api/tasks/${encodeURIComponent(id)}/artifacts.zip`)");
   });
 
+  it('結果頁: a 問題單 reads like a PR, built with frame.js h()/fill(), and everything else renders as before', () => {
+    const html = read('task.html');
+    for (const id of ['review-card', 'checks-card', 'check-list', 'dataset-card', 'datasets', 'attempts-card', 'action-bar', 'act-merge', 'act-changes', 'act-owner', 'act-escalate', 'merge-dialog', 'close-issue', 'owner-dialog', 'log-drawer', 'case-drawer', 'analysis-card', 'images-card', 'prd-drawer']) {
+      expect(html, id).toContain(`id="${id}"`);
+    }
+    // the new sections start hidden: a task without their data shows today's page
+    for (const id of ['review-card', 'checks-card', 'dataset-card', 'attempts-card', 'action-bar', 'analysis-card', 'images-card']) {
+      expect(html, id).toMatch(new RegExp(`id="${id}"[^>]*hidden`));
+    }
+    expect(html).toContain('<script type="module" src="/task.js"></script>');
+    for (const copy of ['嘗試記錄', 'Loop 的自評', '交給同事…', '再試一次（換模型）', '退回修改…']) expect(html, copy).toContain(copy);
+    const js = read('task.js');
+    expect(js).toContain("import { h, fill } from './frame.js';");
+    expect(js).toContain('if (!ticket) return; // anything else keeps today\'s layout exactly');
+    // 看紀錄 reads the check run in one place; pictures come from the run's own files route
+    expect(js.match(/\/api\/check-runs\/\$\{encodeURIComponent\(runId\)\}`/g)).toHaveLength(1);
+    expect(js).toContain('/files/${ref.path.split(\'/\').map(encodeURIComponent).join(\'/\')}');
+    for (const route of ['/approve', '/owner', '/escalate', '/request-changes']) expect(js, route).toContain(route);
+    expect(js).toContain('close_issue');
+    for (const copy of ['只看變化', '看紀錄', '看每張', '變好', '變差', '沒輸出', '在 Gitea 留言並關閉 issue #']) expect(js, copy).toContain(copy);
+  });
+
   it('a hidden panel stays hidden even though panels set display (frame.css)', () => {
     expect(read('frame.css')).toMatch(/body\.app \[hidden\] \{ display: none !important; \}/);
     for (const [html] of pages) expect(read(html), html).toMatch(/<body class="app"/);

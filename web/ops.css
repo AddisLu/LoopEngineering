@@ -129,9 +129,100 @@ dialog.ops-dialog { border: 0; border-radius: var(--r-lg); padding: 22px; width:
 dialog.ops-dialog::backdrop { background: rgba(20, 16, 10, 0.35); }
 dialog.ops-dialog h3 { margin: 0 0 12px; }
 
+/* ---- 結果頁 of a 問題單 (task.html with bundle.ticket): one column, PR-style ---- */
+.cols.single { grid-template-columns: minmax(0, 1fr); }
+.linkish { font: inherit; font-size: 13px; padding: 0; border: 0; background: none; color: var(--accent-2); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+.panel h2 a { font-size: 13px; font-weight: 400; }
+.panel h4 { margin: 4px 0 0; font-size: 14px; }
+/* Loop 的自評 */
+.rv { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 10px 16px; font-size: 14px; line-height: 1.7; }
+.rv ul { margin: 0; padding-left: 18px; }
+.rv p { margin: 0; }
+.rv-k { color: var(--text-2); font-weight: 700; }
+#review-more { display: none; }
+/* 檢查 (GitHub checks style) */
+.cklist { display: flex; flex-direction: column; gap: 6px; }
+.ck { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 10px; background: var(--surface-sunk); font-size: 14px; flex-wrap: wrap; min-width: 0; }
+.ck svg { width: 18px; height: 18px; flex: 0 0 auto; }
+.ck .ok-i, .ck-ok { color: var(--ok); }
+.ck .bad-i { color: var(--danger); }
+.ck .run-i { color: var(--accent-2); }
+.ck .wait-i { color: var(--text-3); }
+.ck-name { font-weight: 700; min-width: 96px; }
+.ck-where, .ck-sum { color: var(--text-2); }
+.ck[data-state="failed"] .ck-sum { color: var(--danger); font-weight: 600; }
+.ck-cmd { color: var(--text-2); overflow-wrap: anywhere; }
+/* 圖資回歸 */
+.ds { display: flex; flex-direction: column; gap: 12px; }
+.ds > h2 { margin: 0; font-size: 16px; font-weight: 700; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.ds-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.ds-bar .chip-s { font-size: 13px; padding: 4px 10px; }
+.ds-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.ds-table th { text-align: left; font-size: 13px; font-weight: 500; color: var(--text-2); padding: 6px 10px 6px 0; border-bottom: 1px solid var(--border); }
+.ds-table td { padding: 8px 10px 8px 0; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.ds-table tbody tr { cursor: pointer; }
+.ds-table tbody tr:hover td, .ds-table tbody tr:focus-visible td { background: var(--surface-sunk); }
+.ds-table td.case .linkish { font-family: var(--mono); }
+.ds-table td.val { font-family: var(--mono); font-size: 13px; }
+.ds-table td.val.good, .case-val.good, .at-out.good { color: var(--ok); font-weight: 700; }
+.ds-table td.val.bad, .case-val.bad, .at-out.bad { color: var(--danger); font-weight: 700; }
+.ds-table td.vals { display: none; }
+.ds-img { width: 88px; height: 60px; object-fit: cover; border-radius: 6px; display: block; background: var(--surface-sunk); }
+.noimg { display: inline-flex; align-items: center; justify-content: center; font-size: 11px; color: var(--text-3); background: var(--surface-sunk); border-radius: 6px; }
+span.ds-img { width: 88px; height: 60px; }
+/* 嘗試記錄 */
+.attempts { display: flex; flex-direction: column; gap: 8px; font-size: 14px; }
+.at { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.at-n { font-weight: 700; min-width: 64px; }
+/* the action bar stays at the bottom of the scrolling page */
+.action-bar { position: sticky; bottom: 0; z-index: 5; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px 24px; background: var(--surface-2); border-top: 1px solid var(--border); box-shadow: 0 -4px 14px rgba(40, 33, 22, 0.06); }
+.action-bar .btn.big { padding: 11px 20px; font-size: 15px; }
+.check-line { display: flex; align-items: center; gap: 10px; font-size: 14px; color: var(--text); flex-direction: row !important; }
+.check-line input { width: 18px; height: 18px; accent-color: var(--accent); }
+/* drawers (看紀錄, a case side by side, 需求文件) */
+dialog.drawer { margin: 0 0 0 auto; height: 100vh; height: 100dvh; max-height: none; width: min(760px, 100vw); border-radius: 0; padding: 0; border: 0; border-left: 1px solid var(--border); display: none; flex-direction: column; }
+dialog.drawer[open] { display: flex; }
+dialog.drawer.wide { width: min(1100px, 100vw); }
+.drawer-head { display: flex; align-items: center; gap: 10px; padding: 14px 18px; border-bottom: 1px solid var(--border); }
+.drawer-head h3 { margin: 0; font-size: 16px; }
+.drawer-body { padding: 16px 18px; overflow-y: auto; flex: 1 1 auto; min-height: 0; }
+.drawer-body .console { max-height: none; }
+.case-cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.case-side, .case-input { display: flex; flex-direction: column; gap: 8px; }
+.case-img { width: 100%; max-height: 60vh; object-fit: contain; border-radius: 8px; background: var(--surface-sunk); }
+span.case-img { height: 160px; }
+.case-val { font-family: var(--mono); font-size: 15px; }
+pre.prd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--mono); font-size: 13px; line-height: 1.6; }
+/* 需求: the analysis card and the screenshots */
+.causes { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
+code.block { display: block; padding: 8px 10px; border-radius: 8px; background: var(--surface-sunk); overflow-wrap: anywhere; }
+.shots { display: flex; flex-wrap: wrap; gap: 12px; }
+.shot { margin: 0; width: 220px; display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; color: var(--text-2); }
+.shot img { width: 100%; height: 150px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border); }
+
 @media (max-width: 960px) {
   .cols, .code-layout, .plans-layout, .grid2 { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 820px) {
   .tabs button { padding: 10px 12px; font-size: 14px; }
+  /* 手機 · 結果: 自評 shows 改了什麼, the rest on demand; cases become cards; two buttons in the bar */
+  .rv { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+  #review-more { display: inline; }
+  #review-card:not(.open) .rv-more { display: none; }
+  .ck { padding: 9px 12px; font-size: 13px; gap: 8px; }
+  .ck-name { min-width: 0; }
+  .ds-table thead { display: none; }
+  .ds-table, .ds-table tbody { display: block; }
+  .ds-table tr { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; grid-template-areas: "thumb case res" "thumb vals res"; gap: 2px 10px; padding: 8px; margin-bottom: 8px; border: 1px solid var(--border); border-radius: 12px; }
+  .ds-table td { padding: 0; border: 0; }
+  .ds-table td.case { grid-area: case; }
+  .ds-table td.thumb { grid-area: thumb; }
+  .ds-table td.res { grid-area: res; align-self: center; }
+  .ds-table td.val { display: none; }
+  .ds-table td.vals { display: block; grid-area: vals; font-size: 12px; color: var(--text-2); }
+  .ds-img, span.ds-img { width: 64px; height: 44px; }
+  .action-bar { padding: 10px 12px; }
+  .action-bar .hint { display: none; }
+  .action-bar .btn.big { flex: 1 1 0; }
+  .case-cols { grid-template-columns: minmax(0, 1fr); }
 }
