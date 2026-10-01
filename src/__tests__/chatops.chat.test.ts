@@ -1,4 +1,6 @@
 import fs from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { createRepo } from '../repo/store.js';
 import os from 'node:os';
 import path from 'node:path';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -236,5 +238,52 @@ describe('two turns: prepare, then the person confirms', () => {
     expect(a.status).toBe('failed');
     expect(JSON.parse(a.result_json).detail).toContain('權重');
     expect(loaded).toEqual([]);
+  });
+});
+
+describe('ops_prepare_fix: a 問題單 from the chat', () => {
+  it('opens the ticket and analyses it; 「確認」 starts it; a repro the model wrote is never run', async () => {
+    enable();
+    const repoDir = dir('repo');
+    const git = (...a: string[]) => execFileSync('git', ['-C', repoDir, '-c', 'user.email=t@t', '-c', 'user.name=t', ...a]);
+    git('init', '-q', '-b', 'main');
+    fs.mkdirSync(path.join(repoDir, 'aoi'));
+    fs.writeFileSync(path.join(repoDir, 'aoi', 'measure.py'), 'def ratio(defects, total):\n    return defects / total\n');
+    git('add', '-A');
+    git('commit', '-qm', 'init');
+    const repo = createRepo(db, { name: 'aoi', remote_url: 'http://gitea.corp:3000/qa/aoi', local_path: repoDir });
+    setSetting(db, 'failing_first', 'true');
+    await build({ opsDeps: { exec: { waitMs: 3000 }, view: { usage: usage as never }, prep: { usage: usage as never }, fix: { waitMs: 10_000 } } });
+    const conv = conversation();
+    const marker = path.join(repoDir, 'ran');
+    script = [
+      call('ops_prepare_fix', { description: `空面板時 ratio 除以零當掉：ZeroDivisionError，在 aoi/measure.py。\n重現：touch ${marker}`, repo: 'qa/aoi' }),
+      say('分析好了，請回覆「確認」開始修。'),
+    ];
+    const t1 = await ask(conv, '空面板會當掉，幫我修 qa/aoi');
+    const call1 = t1.rounds[0]!.calls[0]!;
+    expect(call1).toMatchObject({ name: 'ops_prepare_fix', ok: true, action: { status: 'pending' } });
+    const task = db.prepare('SELECT id, status, intake_json, analysis_status FROM tasks WHERE repo_id = ?').get(repo.id) as { id: string; status: string; intake_json: string; analysis_status: string };
+    expect([task.status, task.analysis_status, JSON.parse(task.intake_json).from]).toEqual(['draft', 'ready', 'chat']);
+    const summary = (db.prepare('SELECT summary FROM ops_actions').get() as { summary: string }).summary;
+    expect(summary).toContain(`開始修 ${task.id}`);
+    expect(summary).toContain('aoi/measure.py');
+    expect(fs.existsSync(marker)).toBe(false); // the model's 「重現：」 line is not the person's
+
+    script = [call('ops_confirm', {}), say('已排入。')];
+    const t2 = await ask(conv, '確認');
+    expect(t2.rounds[0]!.calls[0]).toMatchObject({ name: 'ops_confirm', ok: true });
+    expect(getTask(db, task.id)!.status).toBe('queued');
+  });
+
+  it('asks which repo when it cannot tell, and points at the Repo page for one not imported', async () => {
+    enable();
+    const conv = conversation();
+    script = [call('ops_prepare_fix', { description: '面板量測時程式當掉，錯誤是除以零', repo: 'qa/unknown' }), say('還沒匯入。')];
+    const t1 = await ask(conv, '修一下 qa/unknown');
+    expect(t1.rounds[0]!.calls[0]).toMatchObject({ name: 'ops_prepare_fix', ok: true });
+    const toolMsg = (bodies.at(-1)!.messages as Msg[]).at(-1)!;
+    expect(toolMsg.content).toContain('還沒匯入 Loop');
+    expect(db.prepare('SELECT COUNT(*) AS n FROM tasks').get()).toEqual({ n: 0 });
   });
 });

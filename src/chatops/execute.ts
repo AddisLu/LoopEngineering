@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { startTicket, TicketError } from '../intake/ticket.js';
 import type Database from 'better-sqlite3';
 import { logEvent } from '../db/index.js';
 import { getTask } from '../tasks.js';
@@ -171,9 +172,20 @@ async function runTaskAction(db: Database.Database, a: OpsAction, deps: ExecDeps
   const who = a.user_label ?? a.user_key;
   const done = (detail: string): ActionResult => ({ ok: true, detail, links: [link.task(p.id), link.review(p.id)] });
   switch (a.op) {
-    case 'queue':
+    case 'queue': {
+      // a 問題單 starts the way its page starts it: the gate, and a manager's 核可 in manager mode
+      if (t?.intake_json) {
+        try {
+          const s = startTicket(db, p.id, { user_key: a.user_key, label: who });
+          return s.approval_state === 'awaiting' ? done(`${p.id} 已送出核可，主管核可後 Loop 才開始`) : done(`${p.id} 已排入，Loop 有額度就開始修`);
+        } catch (err) {
+          if (err instanceof TicketError) return { ok: false, detail: err.message, links: [{ title: `${p.id} 分析卡`, url: `/fix.html?id=${encodeURIComponent(p.id)}` }] };
+          throw err;
+        }
+      }
       queueTask(db, p.id);
       return done(`${p.id} 已排入`);
+    }
     case 'abort':
       abortTask(db, p.id);
       return done(`${p.id} 已中止（標成失敗）`);
