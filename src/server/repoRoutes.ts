@@ -5,6 +5,7 @@ import { identityOf, IdentityError } from './identity.js';
 import { getRepo, listRepos, parseStack, RepoError, updateRepo, type Repo, type RepoPatch } from '../repo/store.js';
 import { getImportJob, importRepo, listImportJobs, redetectRepo, removeRepo, type ImportDeps } from '../repo/import.js';
 import { listFixes } from '../repo/ledger.js';
+import { refreshRepoMap } from '../intake/analyse.js';
 
 /**
  * Repo registry + import (src/repo/*) for the Repo page (/repos.html, its own link):
@@ -15,6 +16,7 @@ import { listFixes } from '../repo/ledger.js';
  *   PATCH  /api/repos/:id             the editable columns (store.ts RepoPatch)
  *   DELETE /api/repos/:id             row + allowlist entry; the clone stays on disk
  *   POST   /api/repos/:id/redetect    re-run the branch / command / stack detection
+ *   POST   /api/repos/:id/map         重新產生 the repo map (src/repo/map.ts) now
  *   GET    /api/repos/:id/fixes       過去修法 (src/repo/ledger.ts), newest first; ?limit= 1–200 (default 50)
  */
 export interface RepoRouteOptions {
@@ -111,6 +113,18 @@ export function registerRepoRoutes(app: FastifyInstance, db: Database.Database, 
       return r ? { repo: view(r) } : reply.code(404).send({ error: '沒有這個 repo' });
     } catch (err) {
       return repoError(reply, err);
+    }
+  });
+
+  // 重新產生 the repo map now (an analysis rebuilds it on its own when HEAD moved)
+  app.post('/api/repos/:id/map', async (req, reply) => {
+    const repo = getRepo(db, (req.params as { id: string }).id);
+    if (!repo) return reply.code(404).send({ error: '沒有這個 repo' });
+    try {
+      const info = refreshRepoMap(db, { ...repo, map_sha: null });
+      return { repo: view(getRepo(db, repo.id)!), sha: info.sha };
+    } catch (err) {
+      return reply.code(500).send({ error: `產生 repo 地圖失敗：${(err as Error).message}` });
     }
   });
 }

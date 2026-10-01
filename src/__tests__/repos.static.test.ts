@@ -1,4 +1,6 @@
 import fs from 'node:fs';
+import os from 'node:os';
+import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -230,5 +232,34 @@ describe('GET /api/repos/:id/fixes (the 過去修法 tab)', () => {
     const res = await app.inject({ method: 'GET', url: '/api/repos/r_nope/fixes' });
     expect(res.statusCode).toBe(404);
     expect(res.json().error).toBe('沒有這個 repo');
+  });
+});
+
+describe('POST /api/repos/:id/map (重新產生)', () => {
+  it('rebuilds the map from the clone even when HEAD has not moved', async () => {
+    const db = openTestDb();
+    const app = buildApp({ db, apiToken: null });
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'loop-map-'));
+    try {
+      const git = (...a: string[]) => execFileSync('git', ['-C', dir, '-c', 'user.email=t@t', '-c', 'user.name=t', ...a]);
+      git('init', '-q', '-b', 'main');
+      fs.writeFileSync(path.join(dir, 'measure.py'), 'def ratio(a, b):\n    return a / b\n');
+      git('add', '-A');
+      git('commit', '-qm', 'init');
+      const repo = createRepo(db, { name: 'aoi', remote_url: 'http://gitea.corp:3000/aoi/aoi', local_path: dir });
+      const first = await app.inject({ method: 'POST', url: `/api/repos/${repo.id}/map` });
+      expect(first.statusCode).toBe(200);
+      const at = first.json().repo.map_at;
+      expect(first.json().repo.map_sha).toBeTruthy();
+      db.prepare("UPDATE repos SET map_at = '2000-01-01 00:00:00' WHERE id = ?").run(repo.id);
+      const again = (await app.inject({ method: 'POST', url: `/api/repos/${repo.id}/map` })).json();
+      expect(again.repo.map_at).not.toBe('2000-01-01 00:00:00');
+      expect(at).toBeTruthy();
+      expect((await app.inject({ method: 'POST', url: '/api/repos/r_nope/map' })).statusCode).toBe(404);
+    } finally {
+      await app.close();
+      db.close();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

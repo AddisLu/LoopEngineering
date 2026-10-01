@@ -498,7 +498,7 @@ function wireSettings() {
       btn.textContent = '重新偵測';
     }
   };
-  // the repo map is built by its own link (src/repo/map.ts); until its route exists this says so
+  // 重新產生: POST /api/repos/:id/map rebuilds the map from the clone's HEAD
   $('map-btn').onclick = async () => {
     const btn = $('map-btn');
     btn.disabled = true;
@@ -508,7 +508,7 @@ function wireSettings() {
       paintSettings();
       toast('已重新產生 repo 地圖');
     } catch (err) {
-      toast(err.status === 404 ? '這個版本還不能從這裡重新產生 repo 地圖（地圖在之後的版本加入）' : `產生失敗：${err.message}`, err.status === 404 ? undefined : 'bad');
+      toast(`產生失敗：${err.message}`, 'bad');
     } finally {
       btn.disabled = false;
     }
