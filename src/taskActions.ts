@@ -10,6 +10,7 @@ import { removeTrialWorkspace } from './review/review.js';
 import { collectDistillMaterial, runDistiller, type DistillExec } from './knowledge/distill.js';
 import type { Task } from './types.js';
 import { recordFix } from './repo/ledger.js';
+import { reportIssue } from './integrations/giteaIssues.js';
 
 /**
  * The task transitions the REST routes (board, CLI, MCP) and 對話操作 (src/chatops) share. Each
@@ -136,11 +137,42 @@ export function closeTask(db: Database.Database, id: string, o: { distillExec?: 
   const material = collectDistillMaterial(db, t);
   // 過去修法: a ticket's outcome, while its shas still resolve (only tasks of an imported repo)
   recordFix(db, t, t.merge_status === 'merged' ? 'merged' : 'abandoned');
+  if (t.merge_status === 'merged') reportIssue(db, t.id, 'done');
   setStatus(db, id, 'closed', { detail: 'closed via api' });
   cleanupWorktree(db, t);
   removeTrialWorkspace(t);
   // fire-and-forget: never delays the caller (see knowledge/distill.ts)
   void runDistiller(db, t, material, o.distillExec).catch(() => {});
+  return getTask(db, id)!;
+}
+
+/**
+ * 再試一次（換模型）: hand a finished-but-failed task to another model on the same branch — the next
+ * one on the escalation ladder (fix_escalation), or the one the person picked. Queued as a cold
+ * start; addWorktree reuses loop/<id>, so the new model continues from the branch as it stands.
+ */
+export function escalateTask(db: Database.Database, id: string, o: { model?: string | null; by?: string } = {}): Task {
+  const t = need(db, id);
+  if (!['attention', 'review', 'failed', 'blocked'].includes(t.status)) {
+    throw new TaskActionError('只有停下來或失敗的任務可以換模型重試', 409, { status: t.status });
+  }
+  const ladder = (getSetting(db, 'fix_escalation') ?? '').split(',').map((m) => m.trim()).filter(Boolean);
+  const current = (t.model ?? '').trim();
+  let next = (o.model ?? '').trim() || null;
+  let step = t.ladder_step ?? 0;
+  if (!next) {
+    while (step < ladder.length) {
+      const cand = ladder[step]!;
+      step += 1;
+      if (cand !== current) {
+        next = cand;
+        break;
+      }
+    }
+  }
+  if (!next) throw new TaskActionError('沒有下一個模型可以換（請在設定的「修不好時換模型」加上本地模型）', 409);
+  db.prepare('UPDATE tasks SET model = ?, ladder_step = ?, fix_attempts = 0, resume_count = 0, merge_status = NULL WHERE id = ?').run(next, step, id);
+  setStatus(db, id, 'queued', { detail: `換模型重試：${next}${o.by ? `（${o.by}）` : ''}` });
   return getTask(db, id)!;
 }
 

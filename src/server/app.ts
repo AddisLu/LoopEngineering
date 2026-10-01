@@ -13,7 +13,7 @@ import { readUsage } from '../token/usage.js';
 import { resolvePolicy } from '../scheduler/policy.js';
 import { killRun } from '../orchestrator/kill.js';
 import { pruneTaskArtifacts } from '../git/worktree.js';
-import { TaskActionError, abandonTask, abortTask, closeTask, deleteTaskSafe, holdTask, killTaskRuns, queueTask, restartTask, resumeTask } from '../taskActions.js';
+import { TaskActionError, abandonTask, abortTask, closeTask, deleteTaskSafe, escalateTask, holdTask, killTaskRuns, queueTask, restartTask, resumeTask } from '../taskActions.js';
 import { mergeBlocker, mergeReviewedTask, MergeInProgressError } from '../orchestrator/mergeFlow.js';
 import { updateVerification, TaskEditError, type VerificationPatch } from '../taskEdit.js';
 import { identityOf, IdentityError } from './identity.js';
@@ -434,6 +434,17 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
     try {
       restartTask(db, (req.params as any).id);
       return { ok: true };
+    } catch (err) {
+      return actionError(reply, err);
+    }
+  });
+
+  // 再試一次（換模型）: the same branch, the next model on the escalation ladder (or the one picked)
+  app.post('/api/tasks/:id/escalate', async (req, reply) => {
+    const model = ((req.body ?? {}) as { model?: unknown }).model;
+    try {
+      const t = escalateTask(db, (req.params as any).id, { model: typeof model === 'string' ? model : null, by: identityOf(req).label });
+      return { ok: true, model: t.model, status: t.status };
     } catch (err) {
       return actionError(reply, err);
     }
