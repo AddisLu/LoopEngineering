@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="zh-Hant" data-mode="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>問題單 · Loop Engineering</title>
+    <script src="/theme-boot.js"></script>
+    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/frame.css" />
+    <link rel="stylesheet" href="/fix.css" />
+  </head>
+  <body class="app fix" data-nav="fix">
+    <nav id="app-rail" class="app-rail"><a href="/">回到對話</a></nav>
+    <div class="app-main">
+      <header class="app-top">
+        <a class="fx-back" id="back-sm" href="/fix.html" aria-label="回到新問題單" hidden>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6" /></svg>
+        </a>
+        <a class="crumb hide-sm" href="/fix.html">問題單</a>
+        <svg class="crumb-sep hide-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
+        <h1 class="sm" id="title">新問題單</h1>
+        <span class="fx-pill" id="status-pill" data-tone="draft" aria-live="polite">草稿</span>
+        <span class="grow"></span>
+        <span class="ops-who" id="ops-who"></span>
+      </header>
+
+      <div class="app-scroll" id="fix-scroll">
+        <main class="fx-page">
+          <p class="err-line" id="page-err" role="alert" hidden></p>
+          <div class="fx-cols" id="fix-cols">
+            <div class="fx-main" id="fix-main">
+              <!-- a ticket's description, folded into one line once Loop has it -->
+              <div class="fx-summary" id="summary" hidden></div>
+
+              <article class="fx-card fx-form" id="form-card" aria-label="問題描述">
+                <div class="fx-field">
+                  <label for="t-title">標題</label>
+                  <input id="t-title" class="fx-in fx-title-in" type="text" maxlength="120" autocomplete="off" placeholder="一句話（可留空，Loop 會取）" />
+                </div>
+                <div class="fx-field">
+                  <label for="t-desc">描述</label>
+                  <textarea id="t-desc" class="fx-in fx-desc" rows="7" placeholder="發生什麼事、在哪裡、期望應該怎樣。可以直接貼：錯誤訊息、螢幕截圖（Ctrl+V）、Gitea 的 issue 或 repo 連結。"></textarea>
+                </div>
+                <div class="fx-links" id="link-row" hidden></div>
+                <div class="fx-import" id="import-card" hidden></div>
+                <div class="fx-field" id="shots-field">
+                  <span class="fx-lbl">附件</span>
+                  <div class="fx-thumbs" id="thumbs" hidden></div>
+                  <button type="button" class="fx-drop" id="drop">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" /><path d="M9 8.5a1.5 1.5 0 1 0 0 3a1.5 1.5 0 1 0 0-3" /><path d="M21 16l-5-5-8 8" /></svg>
+                    <span class="fx-drop-t" id="drop-title">貼上或拖進截圖</span>
+                    <span class="fx-drop-s">最多 6 張 · Ctrl+V 直接貼 · 會先縮到 1600px</span>
+                  </button>
+                  <input type="file" id="file-input" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden />
+                </div>
+                <div class="fx-row" id="form-foot" hidden></div>
+              </article>
+
+              <article class="fx-card fx-progress" id="progress-card" aria-live="polite" hidden></article>
+              <article class="fx-card fx-failed" id="failed-card" role="alert" hidden></article>
+              <div class="fx-banner" id="approval-banner" hidden></div>
+
+              <section class="fx-analysis" id="card" aria-label="分析卡" hidden>
+                <div class="fx-card-head" id="card-head"></div>
+                <article class="fx-card fx-sec" id="sec-causes"></article>
+                <article class="fx-card fx-sec" id="sec-repro"></article>
+                <article class="fx-card fx-sec" id="sec-checks"></article>
+                <article class="fx-card fx-sec" id="sec-cond"></article>
+                <article class="fx-card fx-sec fx-unsure" id="sec-questions" hidden></article>
+              </section>
+
+              <div class="fx-foot" id="foot"></div>
+
+              <section class="fx-card fx-recent" id="recent" aria-labelledby="recent-h" hidden>
+                <h2 id="recent-h">最近的問題單</h2>
+                <div class="fx-recent-list" id="recent-list"></div>
+              </section>
+            </div>
+
+            <!-- 屬性: a right rail on a desktop; on a phone fix.js moves it under the description, folded -->
+            <aside class="fx-props" id="props" aria-label="屬性">
+              <h2 class="fx-props-h">
+                <button type="button" id="props-toggle" aria-expanded="true" aria-controls="props-body">
+                  <span>屬性</span>
+                  <span class="fx-props-sum" id="props-sum"></span>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
+                </button>
+              </h2>
+              <div class="fx-props-body" id="props-body">
+                <div class="fx-prop">
+                  <label for="p-repo">Repo</label>
+                  <select class="fx-in" id="p-repo"></select>
+                  <span class="fx-note" id="p-repo-note" hidden></span>
+                </div>
+                <div class="fx-prop">
+                  <label for="p-branch">分支</label>
+                  <select class="fx-in" id="p-branch"></select>
+                </div>
+                <div class="fx-prop">
+                  <span class="fx-lbl" id="p-kind-l">類型</span>
+                  <div class="fx-chips" id="p-kind" role="group" aria-labelledby="p-kind-l"></div>
+                  <span class="fx-note" id="p-kind-note">分析後 Loop 會自動選，可再改</span>
+                </div>
+                <div class="fx-prop">
+                  <span class="fx-lbl">機台</span>
+                  <div class="fx-machine" id="p-machine"></div>
+                </div>
+                <div class="fx-prop" id="p-model-row" hidden>
+                  <label for="p-model">模型</label>
+                  <select class="fx-in" id="p-model"></select>
+                </div>
+                <div class="fx-prop">
+                  <span class="fx-lbl" id="p-priority-l">優先</span>
+                  <div class="fx-segs" id="p-priority" role="group" aria-labelledby="p-priority-l"></div>
+                </div>
+                <div class="fx-prop">
+                  <span class="fx-lbl">來源</span>
+                  <div id="p-source"></div>
+                </div>
+                <div class="fx-prop">
+                  <span class="fx-lbl">截圖</span>
+                  <div id="p-shots"></div>
+                </div>
+              </div>
+            </aside>
+          </div>
+        </main>
+      </div>
+    </div>
+
+    <!-- 看需求文件: the composed PRD, read-only, as plain text -->
+    <div class="drawer-scrim" id="plan-scrim" hidden></div>
+    <aside class="fx-drawer" id="plan-drawer" role="dialog" aria-modal="true" aria-labelledby="plan-h" hidden>
+      <div class="drawer-head">
+        <strong id="plan-h">需求文件</strong>
+        <span class="fx-sub">唯讀 · Loop 照分析卡寫給自己看的</span>
+        <button type="button" class="fx-icon-btn" id="plan-close" aria-label="關閉">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12" /><path d="M18 6L6 18" /></svg>
+        </button>
+      </div>
+      <pre class="fx-plan" id="plan-md"></pre>
+    </aside>
+
+    <script src="/ops.js"></script>
+    <script type="module" src="/fix.js"></script>
+    <script type="module" src="/frame-boot.js"></script>
+  </body>
+</html>
