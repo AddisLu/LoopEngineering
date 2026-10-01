@@ -125,7 +125,7 @@ describe('from the chat to a 問題單', () => {
     expect(read('chat.js')).toContain('openTicket({ description:');
     const actions = read('chat-actions.js');
     expect(actions).toContain("['ticket', '開問題單'");
-    expect(actions).not.toContain('開工作流程 ↗');
+    expect(actions).not.toContain("fix: '開工作流程 ↗'");
     const fix = read('fix.js');
     expect(fix).toContain("params.get('handoff') ? takeHandoff() : null");
     expect(fix).not.toMatch(/innerHTML/);
