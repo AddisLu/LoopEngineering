@@ -10,7 +10,7 @@ import {
   setStatus,
 } from '../tasks.js';
 import { validateTask } from '../gate/validateTask.js';
-import { readUsage } from '../token/usage.js';
+import { readUsage, usageAuthExpired } from '../token/usage.js';
 import { estimatePct, estimateWeeklyPct } from '../token/accounting.js';
 import { resolveModel } from '../orchestrator/run.js';
 import { isLocalModel, localId } from '../local/models.js';
@@ -34,6 +34,8 @@ export interface TickDeps {
   // 對話操作 (src/chatops/execute.ts): a confirmed chat action still running — a self-update
   // restart would cut it off, so the rebuild waits like it does for task runs.
   opsBusy?(): boolean;
+  // the host's Claude login has expired (src/token/usage.ts); tests inject
+  authExpired?(): boolean;
   now?: Date;
 }
 
@@ -149,6 +151,10 @@ export function tick(db: Database.Database, deps: TickDeps): TickInfo {
   const localInflight = localEnabled ? activeLocalRunCount(db) : 0;
   let cap = getNum(db, 'max_concurrency', 1) - Math.max(0, deps.inflightCount() - localInflight);
   if (cap <= 0) return info(false, 'at concurrency');
+
+  // 5b. this host's Claude login has expired: a cloud run would fail at once (and usage cannot be
+  // read), so cloud tasks wait in the queue — local-model tasks above are unaffected
+  if ((deps.authExpired ?? usageAuthExpired)()) return info(false, 'auth expired: Claude Code login on this host');
 
   // 6. task-independent safe-to-run gates
   if (reading.session.percent >= policy.sessionMax) return info(false, `session ${reading.session.percent}% >= ${policy.sessionMax}%`);

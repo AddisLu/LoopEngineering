@@ -3,7 +3,7 @@
 // a list view, the KPI strip, the "需要你處理" inbox and the change log. app.js still owns the live
 // stream, the dialogs and the classic columns (看板); it hands every snapshot over as a
 // 'board:snapshot' event and its actions as window.Board. textContent-only.
-import { $, fill, h, icon, dur, hhmm, tsMs, modelName, isLocal, popMenu } from './frame.js';
+import { $, fill, h, icon, dur, hhmm, tsMs, modelName, isLocal, popMenu, loginExpired } from './frame.js';
 import { createCanvas } from './flow/canvas.js';
 import { layered, grid, stackGroups } from './flow/layout.js';
 import { awaiting, manualMode, needsYou, paintInbox as paintInboxInto, why } from './inbox.js';
@@ -524,8 +524,7 @@ function paintKpis() {
   const usageTile = h(
     'div.kpi.usage-tile',
     { title: fc ? `待處理任務預計再吃本週 ${Math.round(fc.weekly_backlog_pct)}%，跑完後距上限還剩 ${Math.round(fc.weekly_headroom)}%，約可再加 ${fc.capacity_more_M} 個 M 任務${u.error ? `\n用量讀數非即時：${u.error}` : ''}` : '' },
-    bar('5 小時', u.session, snap.policy?.sessionMax),
-    bar('本週', u.weekly, snap.policy?.weeklyMax),
+    loginExpired(u) ? h('div.usage-warn', null, 'Claude 登入過期：讀不到用量，雲端任務暫停派工。在 Spark 上執行 claude 重新登入。') : [bar('5 小時', u.session, snap.policy?.sessionMax), bar('本週', u.weekly, snap.policy?.weeklyMax)],
   );
   fill($('kpis'), 
     tile('running', '執行中', count((c) => RUNNING.has(c.status)), 'running'),

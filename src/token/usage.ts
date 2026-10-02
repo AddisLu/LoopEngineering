@@ -124,7 +124,7 @@ export function readUsage(opts: { force?: boolean; refreshMs?: number } = {}): U
   const cache = readCache();
   const fresh = cache?.reading && Date.now() - cache.ts < refreshMs;
   if (cache && fresh && !opts.force) {
-    return { ...cache.reading, source: 'cache' };
+    return rollOver({ ...cache.reading, source: 'cache' });
   }
 
   // A cooldown published by TokenBar (or by our own last failure) means: make no request — and
@@ -132,13 +132,15 @@ export function readUsage(opts: { force?: boolean; refreshMs?: number } = {}): U
   // task; letting those through a cooldown is what kept the account's usage endpoint locked.
   const wait = waitFor(cache?.blockedUntil);
   if (wait > 0) {
-    const msg = `cooldown ${Math.ceil(wait / 1000)}s (shared backoff)`;
-    return cache?.reading ? { ...cache.reading, source: 'cache', error: msg } : degraded(msg);
+    // say WHY there is a cooldown (an expired login reads very differently from a 429)
+    const msg = `cooldown ${Math.ceil(wait / 1000)}s (shared backoff)${lastFailure ? `: ${lastFailure.message.slice(0, 160)}` : ''}`;
+    return cache?.reading ? rollOver({ ...cache.reading, source: 'cache', error: msg }) : degraded(msg);
   }
 
   try {
     const live = fetchLive();
     storeReading(live);
+    lastFailure = null;
     // say so in the journal when this ends an outage, not on every routine refresh
     if (live.reading.source === 'api' && (!cache || Date.now() - cache.ts > refreshMs * 2)) {
       console.log(`[usage] live reading: session ${live.reading.session.percent}% weekly ${live.reading.weekly.percent}% (first in ${cache ? Math.round((Date.now() - cache.ts) / 60000) : 0} min)`);
@@ -146,6 +148,7 @@ export function readUsage(opts: { force?: boolean; refreshMs?: number } = {}): U
     return live.reading;
   } catch (err) {
     const message = String((err as Error).message);
+    lastFailure = { message, at: Date.now() };
     const cooldownMs = err instanceof UsageFetchError && err.cooldownMs ? err.cooldownMs : COOLDOWN_MIN_MS;
     // Re-read: TokenBar's usage-core may have just written this file itself. Draw from whichever
     // reading is newer — ours, or the one TokenBar served alongside the failure — at its real age.
@@ -155,7 +158,7 @@ export function readUsage(opts: { force?: boolean; refreshMs?: number } = {}): U
     const until = publishCooldown(base, cooldownMs);
     console.warn(`[usage] live read failed: ${message.slice(0, 200)} — pausing ${Math.ceil((until - Date.now()) / 1000)}s (shared cooldown)`);
     if (base?.reading) {
-      return { ...base.reading, source: 'cache', error: `stale: ${message}` };
+      return rollOver({ ...base.reading, source: 'cache', error: `stale: ${message}` });
     }
     return degraded(message);
   }
@@ -395,6 +398,29 @@ function normalize(r: LooseReading, source: UsageReading['source']): UsageReadin
     source,
     ...(r.error ? { error: r.error } : {}),
   };
+}
+
+/**
+ * A cached reading answers for its own time: a window whose reset time has passed since is over —
+ * its percent no longer applies (0, severity unknown) — and the minutes to a reset still ahead are
+ * counted from now, not from when the reading was taken. Without this an old reading (the login
+ * expired two days ago) kept a long-gone 88% on the board and held every dispatch.
+ */
+export function rollOver(r: UsageReading, now = Date.now()): UsageReading {
+  const lim = (l: UsageLimit): UsageLimit => {
+    const at = l.resetsAt ? Date.parse(l.resetsAt) : NaN;
+    if (Number.isFinite(at) && at <= now) return { percent: 0, resetsAt: null, resetsInMinutes: null, severity: 'unknown' };
+    return { ...l, resetsInMinutes: Number.isFinite(at) ? Math.max(0, Math.round((at - now) / 60_000)) : l.resetsInMinutes };
+  };
+  return { ...r, session: lim(r.session), weekly: lim(r.weekly) };
+}
+
+/** The last failed live read in this process (cleared by a good one): why the reading is stale. */
+let lastFailure: { message: string; at: number } | null = null;
+
+/** The live read fails because this host's Claude Code login has expired (cloud runs would fail too). */
+export function usageAuthExpired(): boolean {
+  return !!lastFailure && lastFailure.message.startsWith(AUTH_EXPIRED);
 }
 
 function degraded(msg: string): UsageReading {

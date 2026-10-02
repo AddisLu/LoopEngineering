@@ -194,6 +194,9 @@ const NAV = [
 
 const RING_C = 2 * Math.PI * 14;
 
+/** A usage answer whose live read failed because the engine host's Claude Code login expired. */
+export const loginExpired = (u) => /login expired/i.test(String((u && u.error) || ''));
+
 /** Build the left rail into <nav id="app-rail"> (or `o.el`) and keep its usage ring fresh. */
 export function mountRail(active, o = {}) {
   const nav = o.el || document.getElementById('app-rail');
@@ -264,6 +267,12 @@ export function mountRail(active, o = {}) {
     usage.dataset.state = p >= 90 ? 'danger' : p >= 70 ? 'warn' : 'ok';
     usageLabel.textContent = `5h ${Math.round(p)}%`;
     usage.title = `5 小時視窗 ${Math.round(p)}% · 本週 ${Math.round(Number(u.weekly) || 0)}%${u.error ? '（讀數非即時）' : ''}`;
+    // this host's Claude login has expired: the number is not real — say so instead of showing it
+    if (loginExpired(u)) {
+      usage.dataset.state = 'warn';
+      usageLabel.textContent = '5h 讀不到';
+      usage.title = 'Claude 登入過期：讀不到用量，雲端任務暫停派工（本地模型照常）。在 Spark 上執行 claude 重新登入。';
+    }
   };
   const poll = () => api('/api/usage').then(paintUsage).catch(() => {});
   poll();

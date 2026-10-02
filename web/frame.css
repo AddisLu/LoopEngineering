@@ -132,6 +132,7 @@ body.app .btn.big { padding: 10px 18px; font-size: 14px; }
 .kpi.need { border: 1.5px solid var(--st-attention); background: var(--warn-soft); }
 .kpi.need .k { color: var(--st-attention); font-weight: 600; }
 .kpi.usage-tile { cursor: default; gap: 6px; }
+.kpi.usage-tile .usage-warn { font-size: 12.5px; line-height: 1.45; color: var(--st-attention); font-weight: 600; }
 .kpi .bar-row { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-2); }
 .kpi .bar-row .lbl { width: 44px; }
 .kpi .bar-row .track { flex: 1 1 auto; height: 6px; border-radius: 3px; background: var(--surface-sunk); overflow: hidden; }

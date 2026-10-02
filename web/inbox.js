@@ -109,6 +109,7 @@ export function paintInbox(box, snap, o = {}) {
 
 /** the scheduler's last reason ("session 82% >= 65%", …) in words */
 export function schedWhy(r, snap) {
+  if (/^auth expired/.test(r)) return 'Claude 登入過期：雲端任務先不派工（本地模型照常）。在 Spark 上執行 claude 重新登入';
   let m = /session (\d+)% >= (\d+)%/.exec(r);
   if (m) return `5 小時用量 ${m[1]}% 已到門檻 ${m[2]}%，等額度回補再派工`;
   m = /weekly (\d+)% >= (\d+)%/.exec(r);
