@@ -10,7 +10,7 @@ import {
   setStatus,
 } from '../tasks.js';
 import { validateTask } from '../gate/validateTask.js';
-import { readUsage, usageAuthExpired } from '../token/usage.js';
+import { readUsage, claudeLoginExpired } from '../token/usage.js';
 import { estimatePct, estimateWeeklyPct } from '../token/accounting.js';
 import { resolveModel } from '../orchestrator/run.js';
 import { isLocalModel, localId } from '../local/models.js';
@@ -154,7 +154,7 @@ export function tick(db: Database.Database, deps: TickDeps): TickInfo {
 
   // 5b. this host's Claude login has expired: a cloud run would fail at once (and usage cannot be
   // read), so cloud tasks wait in the queue — local-model tasks above are unaffected
-  if ((deps.authExpired ?? usageAuthExpired)()) return info(false, 'auth expired: Claude Code login on this host');
+  if ((deps.authExpired ?? claudeLoginExpired)()) return info(false, 'auth expired: Claude Code login on this host');
 
   // 6. task-independent safe-to-run gates
   if (reading.session.percent >= policy.sessionMax) return info(false, `session ${reading.session.percent}% >= ${policy.sessionMax}%`);

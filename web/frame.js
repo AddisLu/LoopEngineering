@@ -194,8 +194,10 @@ const NAV = [
 
 const RING_C = 2 * Math.PI * 14;
 
-/** A usage answer whose live read failed because the engine host's Claude Code login expired. */
-export const loginExpired = (u) => /login expired/i.test(String((u && u.error) || ''));
+/** A usage answer whose read failed because the engine host's Claude Code login expired: no numbers. */
+export const usageUnreadable = (u) => /login expired/i.test(String((u && u.error) || ''));
+/** The engine host's Claude Code login has expired (cloud tasks are held), numbers or not. */
+export const loginExpired = (u) => !!(u && u.loginExpired) || usageUnreadable(u);
 
 /** Build the left rail into <nav id="app-rail"> (or `o.el`) and keep its usage ring fresh. */
 export function mountRail(active, o = {}) {
@@ -268,10 +270,14 @@ export function mountRail(active, o = {}) {
     usageLabel.textContent = `5h ${Math.round(p)}%`;
     usage.title = `5 小時視窗 ${Math.round(p)}% · 本週 ${Math.round(Number(u.weekly) || 0)}%${u.error ? '（讀數非即時）' : ''}`;
     // this host's Claude login has expired: the number is not real — say so instead of showing it
-    if (loginExpired(u)) {
+    if (usageUnreadable(u)) {
       usage.dataset.state = 'warn';
       usageLabel.textContent = '5h 讀不到';
       usage.title = 'Claude 登入過期：讀不到用量，雲端任務暫停派工（本地模型照常）。在 Spark 上執行 claude 重新登入。';
+    } else if (loginExpired(u)) {
+      // the numbers are real (another machine reads them), but cloud runs here would fail
+      usage.dataset.state = 'warn';
+      usage.title += '\nSpark 的 Claude 登入過期：雲端任務暫停派工（本地模型照常）。在 Spark 上執行 claude 重新登入。';
     }
   };
   const poll = () => api('/api/usage').then(paintUsage).catch(() => {});

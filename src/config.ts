@@ -52,6 +52,11 @@ export const paths = {
   tokenCache: expand(
     process.env.TOKENBAR_TOKEN_CACHE ?? path.join(os.homedir(), '.config', 'claude-usage-bar', 'token'),
   ),
+  // where TokenBar keeps the shared-cache location; an http(s) URL in it is a hub (another machine
+  // that reads usage for the account) — $TOKENBAR_SHARED_CACHE wins, as in usage-core
+  tokenbarSharedPathFile: expand(
+    process.env.TOKENBAR_SHARED_PATH_FILE ?? path.join(os.homedir(), '.config', 'claude-usage-bar', 'shared-cache-path'),
+  ),
   tokenHistory: expand(
     process.env.TOKENBAR_HISTORY ??
       path.join(os.homedir(), '.local', 'share', 'claude-usage-mcp', 'history.jsonl'),

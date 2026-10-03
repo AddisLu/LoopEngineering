@@ -54,7 +54,7 @@ const waitFor = (until?: number) => {
  */
 const TOKENBAR_SHARED_TTL_MS = 240_000;
 
-const AUTH_EXPIRED = 'Claude Code login expired on this host — run `claude` here once (or `claude setup-token`) to refresh it';
+const AUTH_EXPIRED = 'Claude Code login expired on this host — run `claude` here once to refresh it';
 
 /** A reading plus the time it was really taken from oauth/usage (not when we last looked at it). */
 interface Served {
@@ -125,6 +125,16 @@ export function readUsage(opts: { force?: boolean; refreshMs?: number } = {}): U
   const fresh = cache?.reading && Date.now() - cache.ts < refreshMs;
   if (cache && fresh && !opts.force) {
     return rollOver({ ...cache.reading, source: 'cache' });
+  }
+
+  // A TokenBar hub (another machine that keeps its own login and reads for the account) answers
+  // without a request to the usage endpoint — so neither a cooldown nor this host's expired login
+  // stands in its way. Before this, an expired login here hid the hub's live numbers for good.
+  const hub = hubReading();
+  if (hub) {
+    storeReading(hub);
+    lastFailure = null;
+    return rollOver(hub.reading);
   }
 
   // A cooldown published by TokenBar (or by our own last failure) means: make no request — and
@@ -342,7 +352,7 @@ function defaultReadLongLived(): string | null {
 }
 
 /** Injection points for tests, which must never read this host's real credentials. */
-export const _deps = { readCreds: defaultReadCreds, readLongLived: defaultReadLongLived };
+export const _deps = { readCreds: defaultReadCreds, readLongLived: defaultReadLongLived, readHub: defaultReadHub };
 
 interface Token {
   tok: string;
@@ -418,9 +428,74 @@ export function rollOver(r: UsageReading, now = Date.now()): UsageReading {
 /** The last failed live read in this process (cleared by a good one): why the reading is stale. */
 let lastFailure: { message: string; at: number } | null = null;
 
-/** The live read fails because this host's Claude Code login has expired (cloud runs would fail too). */
-export function usageAuthExpired(): boolean {
-  return !!lastFailure && lastFailure.message.startsWith(AUTH_EXPIRED);
+/**
+ * This host's Claude Code login has expired: cloud runs would fail. Asked of the login itself, not
+ * of the last usage read — with a hub the numbers stay live while the login here is long gone.
+ */
+export function claudeLoginExpired(): boolean {
+  return pickToken()?.kind === 'session-stale';
+}
+
+// ---- TokenBar hub ----
+
+/** usage-core's HUB_TTL: a hub reading younger than this is used as is. */
+const HUB_TTL_MS = 600_000;
+/** Ask the hub at most this often — the board reads usage every second. */
+const HUB_POLL_MS = 60_000;
+let hubMemo: { at: number; served: Served | null } | null = null;
+
+/** Test helper: forget the last hub answer. */
+export function _resetHub(): void {
+  hubMemo = null;
+}
+
+/** The hub URL, when TokenBar's shared-cache location is one ($TOKENBAR_SHARED_CACHE, else the file). */
+function hubUrl(): string | null {
+  let p = (process.env.TOKENBAR_SHARED_CACHE ?? '').trim();
+  if (!p) {
+    try {
+      p = fs.readFileSync(paths.tokenbarSharedPathFile, 'utf8').trim();
+    } catch {
+      return null;
+    }
+  }
+  return /^https?:\/\//i.test(p) ? p : null;
+}
+
+/** GET the hub's usage.json (3s); null when it is unreachable or not JSON. */
+function defaultReadHub(url: string): unknown {
+  const script = `const r = await fetch(process.env.__HUB, { signal: AbortSignal.timeout(3000) });
+    process.stdout.write(r.ok ? await r.text() : 'null');`;
+  try {
+    return JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', script], { encoding: 'utf8', timeout: 6000, env: { ...process.env, __HUB: url } }));
+  } catch {
+    return null;
+  }
+}
+
+interface SharedLimit {
+  percent?: number;
+  resets_at?: string | null;
+  severity?: string;
+}
+
+/** TokenBar's shared format v1 ({v, ts, sub, S, W}) as a reading taken at `ts`. */
+function fromHub(o: unknown, now: number): Served | null {
+  const h = o as { v?: number; ts?: number; sub?: string | null; S?: SharedLimit; W?: SharedLimit } | null;
+  if (!h || h.v !== 1 || typeof h.ts !== 'number' || !(h.S || h.W)) return null;
+  const ts = Math.min(h.ts, now);
+  const lim = (l?: SharedLimit): Partial<UsageLimit> => ({ percent: Number(l?.percent ?? 0), resetsAt: l?.resets_at ?? null, severity: l?.severity ?? 'normal' });
+  return { reading: normalize({ ok: true, subscription: h.sub ?? null, fetchedAt: new Date(ts).toISOString(), session: lim(h.S), weekly: lim(h.W) }, 'cache'), ts };
+}
+
+/** The hub's reading while it is fresh; null without a hub, or when it is down or has gone quiet. */
+function hubReading(): Served | null {
+  const url = hubUrl();
+  if (!url) return null;
+  const now = Date.now();
+  if (!hubMemo || now - hubMemo.at >= HUB_POLL_MS) hubMemo = { at: now, served: fromHub(_deps.readHub(url), now) };
+  const s = hubMemo.served;
+  return s && now - s.ts < HUB_TTL_MS ? s : null;
 }
 
 function degraded(msg: string): UsageReading {

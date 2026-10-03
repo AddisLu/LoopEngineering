@@ -3,7 +3,7 @@ import path from 'node:path';
 import type Database from 'better-sqlite3';
 import { getBool, getSetting } from '../db/index.js';
 import { listTasks, countByStatus, activeRuns, getTask, latestRun, dependencyState, activeLocalRunCount } from '../tasks.js';
-import { readUsage } from '../token/usage.js';
+import { readUsage, claudeLoginExpired } from '../token/usage.js';
 import { resolvePolicy } from '../scheduler/policy.js';
 import { validateTask } from '../gate/validateTask.js';
 import { estimatePct, forecastBacklog } from '../token/accounting.js';
@@ -109,6 +109,8 @@ export interface BoardState {
     // Why the numbers are not a live reading (login expired, shared 429 cooldown, network) —
     // null when they are. The topbar shows it; otherwise five stale days look like 58%.
     error: string | null;
+    // this host's Claude login has expired: cloud tasks are held (the numbers may still be live, from a hub)
+    loginExpired: boolean;
   };
   policy: { window: string; sessionMax: number; weeklyMax: number };
   // Why the scheduler last held / dispatched (e.g. "session 82% >= 65%"), so the board
@@ -524,6 +526,7 @@ export function boardState(db: Database.Database): BoardState {
       weeklyResetsInMin: usage.weekly.resetsInMinutes,
       source: usage.source,
       error: usage.error ?? null,
+      loginExpired: claudeLoginExpired(),
     },
     policy: { window: policy.window, sessionMax: policy.sessionMax, weeklyMax: policy.weeklyMax },
     reason: schedRow?.detail ?? null,

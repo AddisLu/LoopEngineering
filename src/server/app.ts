@@ -9,7 +9,7 @@ import { getDb, getSetting, setSetting, getBool, getNum } from '../db/index.js';
 import { validateSetting, TUNABLE_KEYS } from '../settings.js';
 import { createTask, getTask, setStatus, activeRuns, deleteTask, tasksForPrune } from '../tasks.js';
 import { validateTask } from '../gate/validateTask.js';
-import { readUsage } from '../token/usage.js';
+import { readUsage, claudeLoginExpired } from '../token/usage.js';
 import { resolvePolicy } from '../scheduler/policy.js';
 import { killRun } from '../orchestrator/kill.js';
 import { pruneTaskArtifacts } from '../git/worktree.js';
@@ -258,6 +258,7 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
       sessionResetsInMin: u.session.resetsInMinutes,
       weeklyResetsInMin: u.weekly.resetsInMinutes,
       error: u.error ?? null,
+      loginExpired: claudeLoginExpired(),
       policy: { window: p.window, sessionMax: p.sessionMax, weeklyMax: p.weeklyMax },
       paused: getBool(db, 'scheduler_paused'),
     };
