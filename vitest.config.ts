@@ -13,6 +13,9 @@ export default defineConfig({
       // Neutralize any ambient API token so buildApp({ apiToken: null }) really
       // means "no auth" — keeps the REST tests hermetic across dev shells.
       LOOP_API_TOKEN: '',
+      // Never hit the real oauth/usage endpoint: its budget is per account and shared
+      // with TokenBar and Claude Code itself.
+      LOOP_USAGE_NO_FETCH: '1',
     },
     testTimeout: 20_000,
     hookTimeout: 20_000,

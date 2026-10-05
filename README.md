@@ -65,8 +65,9 @@ integration come from env (see `.env.example`).
 Single Node process + SQLite (WAL). No Redis/queue — an in-process 60s tick with a
 mutex and `max_concurrency`.
 
-- `src/token/` — usage via TokenBar's oauth/usage contract (session/weekly %), shared
-  cache, 180s cadence, ledger fallback; session %-points estimator.
+- `src/token/` — usage via TokenBar's oauth/usage contract (session/weekly %); shares
+  TokenBar's cross-machine cache + 429 cooldown, 10-min freshness, ledger fallback;
+  session %-points estimator.
 - `src/gate/` — required-fields checklist (goal, plan, tool, verification, repo/branch).
 - `src/scheduler/` — `tick` (snapshot → breaker → watchdog → safe-to-run → resume →
   dispatch), day/night `policy`, `breaker`, `watchdog`, `power` (Linux systemd-inhibit).

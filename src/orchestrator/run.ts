@@ -140,8 +140,9 @@ export async function runTask(
   const isGeneric = task.coding_tool === 'generic';
   const hardLimit = getNum(db, 'hard_limit_pct', 95);
   // Bill the run against a fresh reading at both boundaries. A cached reading (TTL
-  // 180s) can make a short run look like ~0% delta and bias the estimator toward
-  // zero. Mock runs stay on the cache (zero-token / deterministic tests).
+  // 10 min) can make a short run look like ~0% delta and bias the estimator toward
+  // zero. `force` still reuses a reading under a minute old and never overrides a 429
+  // cooldown. Mock runs stay on the cache (zero-token / deterministic tests).
   const beforeReading = readUsage({ force: !isMock });
   const before = beforeReading.session.percent;
   const weeklyBefore = beforeReading.weekly.percent;

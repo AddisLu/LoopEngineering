@@ -230,7 +230,7 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   request_window_hours: '5', // window length (mirrors the 5h session mental model)
 
   // usage-fetch cadence + ledger fallback
-  usage_refresh_sec: '180',
+  usage_refresh_sec: '600',
   ledger_fallback_after_min: '10',
 
   // --- Git close-out (all default ON; all-off restores the pre-close-out behavior) ---
@@ -415,7 +415,9 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   report_pptx_explain_agent: 'false',
 };
 
-export const TOKEN_REFRESH_MS = 180_000; // TokenBar cadence
+// TokenBar's freshness window: a reading younger than this is reused, not re-fetched.
+// The oauth/usage budget is per account and small (Claude Code draws on it too).
+export const TOKEN_REFRESH_MS = 600_000;
 
 // Cross-tool shared usage cache: this engine, claude-usage-mcp and any other local
 // tool read+write the SAME file, so at most one of them hits oauth/usage per TTL
