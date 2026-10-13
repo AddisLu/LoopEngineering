@@ -1810,7 +1810,7 @@ loop bench recommend                                  # 各類工作建議的本
         <li><b>SSH</b>：這台能免密碼 SSH 到 spark-02（<code>ssh-copy-id</code>）。</li>
         <li><b>vLLM repo 的 <code>.env</code></b>：<code>CLUSTER_NODES=192.168.177.11,192.168.177.12</code>、<code>ETH_IF</code>、<code>IB_IF</code> 填 200G 介面與 RoCE 裝置名稱；<code>launch-cluster.sh --check-config</code> 要找到兩個節點。</li>
         <li><b>映像與權重</b>：spark-02 也要有同一個容器映像與模型權重（同樣的 HF 快取路徑）。模型分頁的「下載」下載到這台；需要兩台的模型下載完成後，會自動接著跑一個<b>同步</b>工作（<code>sync</code>，<code>scripts/sync-weights.sh</code>），把這個模型的 HF 快取資料夾複製到 <code>.env</code> 的 <code>CLUSTER_NODES</code> 裡的其他台（權重檔本體一起複製，不是只複製連結；走 200G 約十幾分鐘）。取消的下載不會接著同步；取消同步時，已複製的檔案留著，再按一次會接著同步。切換到兩台的模型之前，Loop 會先問另一台有沒有權重；沒有就拒絕切換並說「另一台 Spark 還沒有這個模型的權重」，模型分頁會問「現在同步到另一台嗎？」，按下去就開始同步（API：<code>POST /api/local/jobs</code>，<code>{kind: 'sync', recipe}</code>）。</li>
-        <li><b>告訴 Loop</b>：<code>loop config set local_spark_nodes 2</code>，然後在「模型」分頁切到一個兩台的模型；切回單機模型時，確認兩台的容器都停了。</li>
+        <li><b>告訴 Loop</b>：「模型」分頁「使用中」下方的 <b>Spark 台數</b> 按「雙台」（等同 <code>loop config set local_spark_nodes 2</code>），然後切到一個兩台的模型；切回單機模型時，確認兩台的容器都停了。要改回「單台」，先切到單台模型——兩台的模型還載入時，按「單台」會被擋下（單台時停止模型不會去停另一台的容器）。「使用中」旁邊顯示的是目前模型實際跑在幾台上，不是這個設定。</li>
       </ol>
       <p>這台（head）另外跑著桌面、Loop 與 vLLM 的 API 伺服器，可用記憶體比 spark-02 少約 6–7 GiB，而且沒有 swap；容器裡的 earlyoom 在可用記憶體低於 512 MiB 時會砍掉 vLLM。知識庫檢索用的 embedding 模型（bge-m3）也跑在這台，第一次查知識庫時啟動，約佔 2.4 GB GPU 記憶體加 1.5 GB，閒置 10 分鐘才結束。所以剛好塞滿兩台的模型不適合當日常對話模型：例如 GLM-5.3 Flash 照原配方載入就失敗；縮小 KV 快取與上下文的「GLM-5.3-Flash-NVFP4-Spark (精簡版・限純問答)」（vLLM repo 的 <code>recipes/glm-5.3-flash-kv4g.yaml</code>：KV 2G、上下文 128K、最多同時 2 個請求）能載入、也答得比 Qwen3.8 準，但一用「引用知識庫」或「上網／工具」（GPU 沙盒）就會記憶體不足而停掉，只適合把這兩個都關掉做純問答測試。挑兩台的模型時，這台要留約 4 GB 給 embedding。</p>
 

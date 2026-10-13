@@ -232,7 +232,11 @@ function paintCatalog(data) {
   catalogData = data;
   const st = data.state;
   const cur = data.entries.find((e) => e.loaded);
-  setText('spark-count', `· ${data.sparks} 台 Spark`);
+  // where the loaded model actually runs — not the deployment's size (that is the 單台/雙台 switch)
+  setText('spark-count', cur ? `· ${cur.nodes > 1 ? `${cur.nodes} 台 Spark` : '單台 Spark'}` : '');
+  for (const b of document.querySelectorAll('.spark-mode [data-sparks]')) {
+    b.setAttribute('aria-pressed', String(Number(b.dataset.sparks) === data.sparks));
+  }
   const note = $('switch-state');
   note.classList.toggle('busy', st.status !== 'ready' && st.status !== 'idle');
   note.classList.toggle('bad', st.status === 'error');
@@ -374,6 +378,30 @@ $('model-job-cancel').onclick = async () => {
     toast(`取消失敗：${err.message}`, 'bad');
   }
 };
+
+// 單台 / 雙台: the local_spark_nodes setting. Going down to one while a two-Spark model is loaded
+// is refused — at one Spark a stop no longer runs launch-cluster.sh stop, so the other Spark's
+// container would keep its memory.
+for (const b of document.querySelectorAll('.spark-mode [data-sparks]')) {
+  b.onclick = async () => {
+    const n = Number(b.dataset.sparks);
+    if (!catalogData || n === catalogData.sparks) return;
+    const cur = catalogData.entries.find((e) => e.loaded);
+    if (cur && cur.nodes > n) return toast(`「${cur.name}」正跑在 ${cur.nodes} 台 Spark 上，先切到單台模型再改成單台`, 'warn');
+    const msg =
+      n === 1
+        ? '改成單台？需要兩台的模型會灰掉，切換或停止模型時也不會再碰另一台 Spark。'
+        : '改成雙台？需要兩台的模型會用叢集模式啟動，另一台由 vLLM repo 的 .env（CLUSTER_NODES）決定。';
+    if (!window.confirm(msg)) return;
+    try {
+      await api('/api/settings', { method: 'POST', body: JSON.stringify({ key: 'local_spark_nodes', value: String(n) }) });
+      toast(n === 1 ? '已改成單台 Spark' : '已改成雙台 Spark', 'ok');
+    } catch (err) {
+      toast(`改不了：${err.message}`, 'bad');
+    }
+    loadModels();
+  };
+}
 
 async function switchModel(e) {
   if (switching) return;

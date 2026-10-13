@@ -514,6 +514,8 @@ a.menu-item { display: block; text-decoration: none; color: inherit; }
 #switch-state.busy { color: var(--warn); }
 #switch-state.bad { color: var(--danger); }
 #switch-bench { margin-top: 6px; }
+.spark-mode { display: flex; align-items: center; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+.spark-mode .hint { margin-right: 2px; }
 #switch-bench.busy { color: var(--warn); }
 
 /* 推薦 cards: one tag, one name, one button */
